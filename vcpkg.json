@@ -1,0 +1,25 @@
+{
+  "name": "kalman-flter",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    {
+      "name": "xxhash",
+      "version>=": "0.8.3"
+    }, 
+    {
+      "name": "aklomp-base64",
+      "version>=": "0.5.2"
+    }, 
+    {
+      "name": "stc",
+      "version>=": "5.0"
+    },
+    {
+      "name": "pkgconf"
+    }, 
+    {
+      "name": "simde"
+    } 
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}
