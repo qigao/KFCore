@@ -22,8 +22,8 @@
  *
  * @return 0 on success, non-zero on error.
  */
-typedef int (*kalman_ekf_transition_fn)(float* x_pred, float* Phi,
-                                        const float* x, int n, void* user);
+typedef int (*kalman_ekf_transition_fn)(float* x_pred, float* Phi, const float* x, int n,
+                                        void* user);
 
 /** @brief Nonlinear measurement callback for EKF correction.
  *
@@ -36,8 +36,7 @@ typedef int (*kalman_ekf_transition_fn)(float* x_pred, float* Phi,
  *
  * @return 0 on success, non-zero on error.
  */
-typedef int (*kalman_ekf_measurement_fn)(float* z_pred, float* Ht,
-                                         const float* x, int n, int m,
+typedef int (*kalman_ekf_measurement_fn)(float* z_pred, float* Ht, const float* x, int n, int m,
                                          void* user);
 
 /******************************************************************************
@@ -60,10 +59,8 @@ typedef int (*kalman_ekf_measurement_fn)(float* z_pred, float* Ht,
  *
  * @return 0 on success, -1 on invalid input or callback failure.
  */
-int kalman_ekf_takasu_predict(float* x, float* P,
-                              kalman_ekf_transition_fn transition,
-                              const float* G, const float* Q, int n, int r,
-                              void* user);
+int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn transition,
+                              const float* G, const float* Q, int n, int r, void* user);
 
 /** @brief EKF correction using the Takasu update.
  *
@@ -83,11 +80,9 @@ int kalman_ekf_takasu_predict(float* x, float* P,
  *
  * @return 0 on success, -1 on error, -2 if measurement is rejected as outlier.
  */
-int kalman_ekf_takasu_update(float* x, float* P, const float* z,
-                             const float* R,
-                             kalman_ekf_measurement_fn measurement,
-                             int n, int m, float chi2_threshold, float* chi2,
-                             void* user);
+int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
+                             kalman_ekf_measurement_fn measurement, int n, int m,
+                             float chi2_threshold, float* chi2, void* user);
 
 /** @brief EKF prediction using UDU covariance factors.
  *
@@ -96,10 +91,8 @@ int kalman_ekf_takasu_update(float* x, float* P, const float* z,
  *
  * @return 0 on success, -1 on invalid input or callback failure.
  */
-int kalman_ekf_udu_predict(float* x, float* U, float* d,
-                           kalman_ekf_transition_fn transition,
-                           const float* G, const float* Q, int n, int r,
-                           void* user);
+int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_fn transition,
+                           const float* G, const float* Q, int n, int r, void* user);
 
 /** @brief EKF correction using UDU covariance factors.
  *
@@ -109,10 +102,8 @@ int kalman_ekf_udu_predict(float* x, float* U, float* d,
  *
  * @return 0 on success, -1 on error.
  */
-int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z,
-                          const float* R,
-                          kalman_ekf_measurement_fn measurement,
-                          int n, int m, float chi2_threshold,
+int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const float* R,
+                          kalman_ekf_measurement_fn measurement, int n, int m, float chi2_threshold,
                           int downweight_outlier, void* user);
 
 #endif /* KALMAN_EKF_H */

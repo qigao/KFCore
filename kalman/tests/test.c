@@ -32,7 +32,7 @@
     do                                                                                             \
     {                                                                                              \
         (void)(message);                                                                           \
-        check_float_within_abs((actual), (expected), (delta));                                      \
+        check_float_within_abs((actual), (expected), (delta));                                     \
     } while (0)
 
 /******************************************************************************
@@ -64,7 +64,8 @@ static void matprint(const float* R, const int n, const int m, const char* fmt, 
 
 static int ekf_test_transition(float* x_pred, float* Phi, const float* x, int n, void* user);
 static int ekf_test_measurement(float* z_pred, float* Ht, const float* x, int n, int m, void* user);
-static int ekf_benchmark_measurement(float* z_pred, float* Ht, const float* x, int n, int m, void* user);
+static int ekf_benchmark_measurement(float* z_pred, float* Ht, const float* x, int n, int m,
+                                     void* user);
 static int ukf_square_transition(float* x_pred, const float* x, int n, void* user);
 static int ukf_square_measurement(float* z_pred, const float* x, int n, int m, void* user);
 static int ukf_benchmark_measurement(float* z_pred, const float* x, int n, int m, void* user);
@@ -234,11 +235,12 @@ static void testlinalg(void)
         const float roll_rad         = DEG2RAD(45.0f);
         const float pitch_rad        = DEG2RAD(70.0f);
         const float yaw_expected_rad = DEG2RAD(170.0f);
-        const float mb[3]     = { 40.2481f, -27.63536f, -22.7238f };
-        const float yaw_rad = nav_mag_heading(mb, roll_rad, pitch_rad);
-        const float threshold = 0.001f;
+        const float mb[3]            = { 40.2481f, -27.63536f, -22.7238f };
+        const float yaw_rad          = nav_mag_heading(mb, roll_rad, pitch_rad);
+        const float threshold        = 0.001f;
 
-        TEST_FLOAT_WITHIN(threshold, yaw_rad, yaw_expected_rad, "Magnetometer heading test failed (nav_mag_heading)");
+        TEST_FLOAT_WITHIN(threshold, yaw_rad, yaw_expected_rad,
+                          "Magnetometer heading test failed (nav_mag_heading)");
         printf("[x] Yaw from magnetometer (nav_mag_heading)\n");
     }
 }
@@ -308,23 +310,22 @@ static void testnavtoolbox(void)
     }
     // Test same kalman filter but now with an outlier
     {
-        const float R[3 * 3]  = { 0.25f, 0, 0, 0, 0.25f, 0, 0, 0, 0.25f };
-        const float dz[3]     = { 0.2688f, 0.9169f, -100.1294f }; // adding outlier to 3rd measurement
+        const float R[3 * 3] = { 0.25f, 0, 0, 0, 0.25f, 0, 0, 0, 0.25f };
+        const float dz[3] = { 0.2688f, 0.9169f, -100.1294f }; // adding outlier to 3rd measurement
         const float Ht[4 * 3] = { 8, 1, 6, 1, 3, 5, 7, 2, 4, 9, 2, 3 };
         float       x[4]      = { 1, 1, 1, 1 };
         float       P[4 * 4]  = { 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f };
         float       chi2;
-        int         result    = kalman_takasu(x, P, dz, R, Ht, 4, 3, 7.8147f, &chi2);
+        int         result = kalman_takasu(x, P, dz, R, Ht, 4, 3, 7.8147f, &chi2);
         check_int_eq(result, -2);
-        const float xexp[4]     = { 1, 1, 1, 1 };
-        float       Pexp[4 * 4] = { 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f };
-        const float threshold   = 1.0e-04f;
-        const float chi2exp     = 1622.8f; // from testcasegen.m kalman_takasu_robust()
+        const float xexp[4]   = { 1, 1, 1, 1 };
+        float Pexp[4 * 4]     = { 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f, 0, 0, 0, 0, 0.04f };
+        const float threshold = 1.0e-04f;
+        const float chi2exp   = 1622.8f; // from testcasegen.m kalman_takasu_robust()
         TEST_FLOAT_WITHIN(0.1f, chi2, chi2exp, "outlier test chi2 result incorrect");
         for (int i = 0; i < 4; i++)
         {
-            TEST_FLOAT_WITHIN(threshold, x[i], xexp[i],
-                              "nav_kalman failed to reject outlier");
+            TEST_FLOAT_WITHIN(threshold, x[i], xexp[i], "nav_kalman failed to reject outlier");
         }
         for (int i = 0; i < 4 * 4; i++)
         {
@@ -379,41 +380,31 @@ static void testnavtoolbox(void)
         }
         for (int i = 0; i < 4 * 4; i++)
         {
-            TEST_FLOAT_WITHIN(threshold, U[i], Uexp[i],
-                              "kalman_udu U matrix calculation failed");
+            TEST_FLOAT_WITHIN(threshold, U[i], Uexp[i], "kalman_udu U matrix calculation failed");
         }
         printf("[x] Kalman Filter Update (kalman_udu)\n");
     }
     // Temporal Update Test (source: predict_test())
     {
-        const float Q[] = {0.1f, 0.2f};
-        const float G[] = {1, 0, 0.5f, 0, 1, 0.5f};
-        float x[] = {1, 2, 3};
-        const float Phi[] = { 1, 0, 0, 0.5, 1, 0, 0.25, 0.1, 1 };
-        float P[3*3] = {
-            1.050000f,  0.170000f, -0.180000f,
-            0.170000f,  1.260000f,  0.420000f,
-            -0.180000f,  0.420000f,  1.040000f
-        };
-        int n=3;
-        int r=2;
+        const float Q[]      = { 0.1f, 0.2f };
+        const float G[]      = { 1, 0, 0.5f, 0, 1, 0.5f };
+        float       x[]      = { 1, 2, 3 };
+        const float Phi[]    = { 1, 0, 0, 0.5, 1, 0, 0.25, 0.1, 1 };
+        float       P[3 * 3] = { 1.050000f, 0.170000f,  -0.180000f, 0.170000f, 1.260000f,
+                                 0.420000f, -0.180000f, 0.420000f,  1.040000f };
+        int         n        = 3;
+        int         r        = 2;
 
         kalman_predict(x, P, Phi, G, Q, n, r);
 
-        float x_exp[3*1] = {
-            2.750000f,  2.300000f,  3.000000f
-        };
-        float P_exp[3*3] = {
-            1.715000f,  0.934000f,  0.340000f,
-            0.934000f,  1.554400f,  0.624000f,
-            0.340000f,  0.624000f,  1.115000f
-        };
+        float x_exp[3 * 1] = { 2.750000f, 2.300000f, 3.000000f };
+        float P_exp[3 * 3] = { 1.715000f, 0.934000f, 0.340000f, 0.934000f, 1.554400f,
+                               0.624000f, 0.340000f, 0.624000f, 1.115000f };
 
         const float threshold = 0.001f;
         for (int i = 0; i < n; i++)
         {
-            TEST_FLOAT_WITHIN(threshold, x[i], x_exp[i],
-                              "kalman_predict x calculation failed");
+            TEST_FLOAT_WITHIN(threshold, x[i], x_exp[i], "kalman_predict x calculation failed");
         }
         for (int i = 0; i < n * n; i++)
         {
@@ -490,17 +481,17 @@ static void testnavtoolbox(void)
     }
     // UDU Temporal Update Test (source: thornton_test())
     {
-        const float Q[] = {0.1f, 0.2f};
-        const float G[] = {1, 0, 0.5f, 0, 1, 0.5f};
-        float x[] = {1, 2, 3};
+        const float Q[]   = { 0.1f, 0.2f };
+        const float G[]   = { 1, 0, 0.5f, 0, 1, 0.5f };
+        float       x[]   = { 1, 2, 3 };
         const float Phi[] = { 1, 0, 0, 0.5, 1, 0, 0.25, 0.1, 1 };
-        float U[] = {1, 0, 0, 0.2226f, 1, 0, -0.1731f, 0.4038f, 1};
-        float d[] = { 0.9648f, 1.0904f, 1.0400f };
-        int n=3;
-        int r=2;
+        float       U[]   = { 1, 0, 0, 0.2226f, 1, 0, -0.1731f, 0.4038f, 1 };
+        float       d[]   = { 0.9648f, 1.0904f, 1.0400f };
+        int         n     = 3;
+        int         r     = 2;
 
         const float x_exp[] = { 2.7500f, 2.3000f, 3.0000 };
-        const float U_exp[] = {1, 0, 0, 0.6171f, 1, 0, 0.3049, 0.5596, 1};
+        const float U_exp[] = { 1, 0, 0, 0.6171f, 1, 0, 0.3049, 0.5596, 1 };
         const float d_exp[] = { 1.1524f, 1.2052f, 1.1150f };
 
         kalman_udu_predict(x, U, d, Phi, G, Q, n, r);
@@ -508,10 +499,8 @@ static void testnavtoolbox(void)
         const float threshold = 0.001f;
         for (int i = 0; i < n; i++)
         {
-            TEST_FLOAT_WITHIN(threshold, x[i], x_exp[i],
-                              "kalman_udu_predict x calculation failed");
-            TEST_FLOAT_WITHIN(threshold, d[i], d_exp[i],
-                              "kalman_udu_predict d calculation failed");
+            TEST_FLOAT_WITHIN(threshold, x[i], x_exp[i], "kalman_udu_predict x calculation failed");
+            TEST_FLOAT_WITHIN(threshold, d[i], d_exp[i], "kalman_udu_predict d calculation failed");
         }
         for (int i = 0; i < n * n; i++)
         {
@@ -550,14 +539,15 @@ static int ekf_test_measurement(float* z_pred, float* Ht, const float* x, int n,
     return 0;
 }
 
-static int ekf_benchmark_measurement(float* z_pred, float* Ht, const float* x, int n, int m, void* user)
+static int ekf_benchmark_measurement(float* z_pred, float* Ht, const float* x, int n, int m,
+                                     void* user)
 {
     (void)user;
 
     memset(Ht, 0, sizeof(Ht[0]) * n * m);
     for (int i = 0; i < m; ++i)
     {
-        z_pred[i] = x[i] * x[i];
+        z_pred[i]                = x[i] * x[i];
         MAT_ELEM(Ht, i, i, n, m) = 2.0f * x[i];
     }
 
@@ -571,15 +561,19 @@ static void testekf(void)
         float       P[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
         const float dt   = 0.1f;
 
-        check_int_eq(kalman_ekf_takasu_predict(x, P, ekf_test_transition, NULL, NULL, 2, 0, (void*)&dt),
-                     0);
+        check_int_eq(
+            kalman_ekf_takasu_predict(x, P, ekf_test_transition, NULL, NULL, 2, 0, (void*)&dt), 0);
 
         TEST_FLOAT_WITHIN(1.0e-06f, 1.4f, x[0], "EKF Takasu prediction x[0] failed");
         TEST_FLOAT_WITHIN(1.0e-06f, 2.0f, x[1], "EKF Takasu prediction x[1] failed");
-        TEST_FLOAT_WITHIN(1.0e-06f, 1.16f, MAT_ELEM(P, 0, 0, 2, 2), "EKF Takasu prediction P00 failed");
-        TEST_FLOAT_WITHIN(1.0e-06f, 0.4f, MAT_ELEM(P, 0, 1, 2, 2), "EKF Takasu prediction P01 failed");
-        TEST_FLOAT_WITHIN(1.0e-06f, 0.4f, MAT_ELEM(P, 1, 0, 2, 2), "EKF Takasu prediction P10 failed");
-        TEST_FLOAT_WITHIN(1.0e-06f, 1.0f, MAT_ELEM(P, 1, 1, 2, 2), "EKF Takasu prediction P11 failed");
+        TEST_FLOAT_WITHIN(1.0e-06f, 1.16f, MAT_ELEM(P, 0, 0, 2, 2),
+                          "EKF Takasu prediction P00 failed");
+        TEST_FLOAT_WITHIN(1.0e-06f, 0.4f, MAT_ELEM(P, 0, 1, 2, 2),
+                          "EKF Takasu prediction P01 failed");
+        TEST_FLOAT_WITHIN(1.0e-06f, 0.4f, MAT_ELEM(P, 1, 0, 2, 2),
+                          "EKF Takasu prediction P10 failed");
+        TEST_FLOAT_WITHIN(1.0e-06f, 1.0f, MAT_ELEM(P, 1, 1, 2, 2),
+                          "EKF Takasu prediction P11 failed");
     }
     {
         float       x[2] = { 1.0f, 2.0f };
@@ -589,8 +583,8 @@ static void testekf(void)
         const float dt   = 0.1f;
 
         check_int_eq(udu(P, U, d, 2), 0);
-        check_int_eq(kalman_ekf_udu_predict(x, U, d, ekf_test_transition, NULL, NULL, 2, 0, (void*)&dt),
-                     0);
+        check_int_eq(
+            kalman_ekf_udu_predict(x, U, d, ekf_test_transition, NULL, NULL, 2, 0, (void*)&dt), 0);
 
         TEST_FLOAT_WITHIN(1.0e-06f, 1.4f, x[0], "EKF UDU prediction x[0] failed");
         TEST_FLOAT_WITHIN(1.0e-06f, 2.0f, x[1], "EKF UDU prediction x[1] failed");
@@ -606,8 +600,8 @@ static void testekf(void)
         const float z[1] = { 4.4f };
         const float R[1] = { 0.16f };
 
-        check_int_eq(kalman_ekf_takasu_update(x, P, z, R, ekf_test_measurement, 1, 1, 0.0f, NULL, NULL),
-                     0);
+        check_int_eq(
+            kalman_ekf_takasu_update(x, P, z, R, ekf_test_measurement, 1, 1, 0.0f, NULL, NULL), 0);
 
         TEST_FLOAT_WITHIN(1.0e-06f, 2.0961538f, x[0], "EKF Takasu update x failed");
         TEST_FLOAT_WITHIN(1.0e-06f, 0.0096154f, P[0], "EKF Takasu update P failed");
@@ -619,7 +613,8 @@ static void testekf(void)
         const float z[1] = { 4.4f };
         const float R[1] = { 0.16f };
 
-        check_int_eq(kalman_ekf_udu_update(x, U, d, z, R, ekf_test_measurement, 1, 1, 0.0f, 0, NULL), 0);
+        check_int_eq(
+            kalman_ekf_udu_update(x, U, d, z, R, ekf_test_measurement, 1, 1, 0.0f, 0, NULL), 0);
 
         TEST_FLOAT_WITHIN(1.0e-06f, 2.0961538f, x[0], "EKF UDU update x failed");
         TEST_FLOAT_WITHIN(1.0e-06f, 0.0096154f, d[0], "EKF UDU update d failed");
@@ -680,9 +675,9 @@ static void testukf(void)
         const float z[1] = { 4.4f };
         const float R[1] = { 0.16f };
 
-        check_int_eq(kalman_ukf_update(x, P, z, R, ukf_square_measurement, 1, 1,
-                                       &params, 0.0f, NULL, NULL),
-                     0);
+        check_int_eq(
+            kalman_ukf_update(x, P, z, R, ukf_square_measurement, 1, 1, &params, 0.0f, NULL, NULL),
+            0);
 
         TEST_FLOAT_WITHIN(1.0e-05f, 2.0350058f, x[0], "UKF update x failed");
         TEST_FLOAT_WITHIN(1.0e-05f, 0.0166278f, P[0], "UKF update P failed");
@@ -693,18 +688,19 @@ static void benchmark_core_routines(void)
 {
     enum
     {
-        n = 15,
-        m = 3,
+        n           = 15,
+        m           = 3,
         bench_batch = 32
     };
-    const float x0[15] = { 1024.0f, 508.0f, 20.0f };
-    const float R[3 * 3] = { 2.902f, 1.395f, 0.900f, 1.395f, 2.295f,
-                             0.698f, 0.900f, 0.698f, 2.362f };
+    const float x0[15]   = { 1024.0f, 508.0f, 20.0f };
+    const float R[3 * 3] = {
+        2.902f, 1.395f, 0.900f, 1.395f, 2.295f, 0.698f, 0.900f, 0.698f, 2.362f
+    };
     const float R_diag[3 * 3] = { 2.902f, 0.0f, 0.0f, 0.0f, 2.295f, 0.0f, 0.0f, 0.0f, 2.362f };
-    const float dz[3] = { 0.25f, -0.15f, 0.10f };
-    const float z[3]  = { 1024.25f, 507.85f, 20.10f };
-    const float ekf_x0[15] = { 1.2f, -0.8f, 0.5f };
-    const float ekf_z[3]   = { 1.54f, 0.58f, 0.31f };
+    const float dz[3]         = { 0.25f, -0.15f, 0.10f };
+    const float z[3]          = { 1024.25f, 507.85f, 20.10f };
+    const float ekf_x0[15]    = { 1.2f, -0.8f, 0.5f };
+    const float ekf_z[3]      = { 1.54f, 0.58f, 0.31f };
     float       P0[15 * 15];
     float       Ht[15 * 3];
 
@@ -754,7 +750,7 @@ static void benchmark_core_routines(void)
             memcpy(x, x0, sizeof(x));
             memcpy(P, P0, sizeof(P));
             const int result = udu(P, U, d, n) || kalman_udu(x, U, d, z, R_diag, Ht, n, m, 0.0f, 0);
-            benchmark_sink = x[0] + U[0] + d[0] + (float)result;
+            benchmark_sink   = x[0] + U[0] + d[0] + (float)result;
         }
     }
 
@@ -779,8 +775,8 @@ static void benchmark_core_routines(void)
 
             memcpy(x, ekf_x0, sizeof(x));
             memcpy(P, P0, sizeof(P));
-            const int result =
-                kalman_ekf_takasu_update(x, P, ekf_z, R_diag, ekf_benchmark_measurement, n, m, 0.0f, NULL, NULL);
+            const int result = kalman_ekf_takasu_update(
+                x, P, ekf_z, R_diag, ekf_benchmark_measurement, n, m, 0.0f, NULL, NULL);
 
             benchmark_sink = x[0] + P[0] + (float)result;
         }
@@ -792,8 +788,8 @@ static void benchmark_core_routines(void)
 
         memcpy(x, ekf_x0, sizeof(x));
         memcpy(P, P0, sizeof(P));
-        check_int_eq(kalman_ekf_takasu_update(x, P, ekf_z, R_diag, ekf_benchmark_measurement,
-                                              n, m, 0.0f, NULL, NULL),
+        check_int_eq(kalman_ekf_takasu_update(x, P, ekf_z, R_diag, ekf_benchmark_measurement, n, m,
+                                              0.0f, NULL, NULL),
                      0);
     }
 
@@ -808,10 +804,10 @@ static void benchmark_core_routines(void)
 
             memcpy(x, ekf_x0, sizeof(x));
             memcpy(P, P0, sizeof(P));
-            const int result = udu(P, U, d, n) ||
-                               kalman_ekf_udu_update(x, U, d, ekf_z, R_diag,
-                                                     ekf_benchmark_measurement, n, m, 0.0f, 0, NULL);
-            benchmark_sink = x[0] + U[0] + d[0] + (float)result;
+            const int result = udu(P, U, d, n) || kalman_ekf_udu_update(x, U, d, ekf_z, R_diag,
+                                                                        ekf_benchmark_measurement,
+                                                                        n, m, 0.0f, 0, NULL);
+            benchmark_sink   = x[0] + U[0] + d[0] + (float)result;
         }
     }
 
@@ -824,8 +820,8 @@ static void benchmark_core_routines(void)
         memcpy(x, ekf_x0, sizeof(x));
         memcpy(P, P0, sizeof(P));
         check_int_eq(udu(P, U, d, n), 0);
-        check_int_eq(kalman_ekf_udu_update(x, U, d, ekf_z, R_diag, ekf_benchmark_measurement,
-                                           n, m, 0.0f, 0, NULL),
+        check_int_eq(kalman_ekf_udu_update(x, U, d, ekf_z, R_diag, ekf_benchmark_measurement, n, m,
+                                           0.0f, 0, NULL),
                      0);
     }
 
@@ -833,28 +829,28 @@ static void benchmark_core_routines(void)
     {
         for (int b = 0; b < bench_batch; ++b)
         {
-            float x[15];
-            float P[15 * 15];
+            float                   x[15];
+            float                   P[15 * 15];
             const kalman_ukf_params params = { 1.0f, 2.0f, 0.0f };
 
             memcpy(x, ekf_x0, sizeof(x));
             memcpy(P, P0, sizeof(P));
-            const int result =
-                kalman_ukf_update(x, P, ekf_z, R_diag, ukf_benchmark_measurement, n, m, &params, 0.0f, NULL, NULL);
+            const int result = kalman_ukf_update(x, P, ekf_z, R_diag, ukf_benchmark_measurement, n,
+                                                 m, &params, 0.0f, NULL, NULL);
 
             benchmark_sink = x[0] + P[0] + (float)result;
         }
     }
 
     {
-        float x[15];
-        float P[15 * 15];
+        float                   x[15];
+        float                   P[15 * 15];
         const kalman_ukf_params params = { 1.0f, 2.0f, 0.0f };
 
         memcpy(x, ekf_x0, sizeof(x));
         memcpy(P, P0, sizeof(P));
-        check_int_eq(kalman_ukf_update(x, P, ekf_z, R_diag, ukf_benchmark_measurement,
-                                       n, m, &params, 0.0f, NULL, NULL),
+        check_int_eq(kalman_ukf_update(x, P, ekf_z, R_diag, ukf_benchmark_measurement, n, m,
+                                       &params, 0.0f, NULL, NULL),
                      0);
     }
 }
@@ -935,4 +931,3 @@ static void matprint(const float* R, const int n, const int m, const char* fmt, 
 }
 
 /* @} */
-

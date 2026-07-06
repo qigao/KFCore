@@ -37,10 +37,8 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-int kalman_ekf_takasu_predict(float* x, float* P,
-                              kalman_ekf_transition_fn transition,
-                              const float* G, const float* Q, int n, int r,
-                              void* user)
+int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn transition,
+                              const float* G, const float* Q, int n, int r, void* user)
 {
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
@@ -64,11 +62,9 @@ int kalman_ekf_takasu_predict(float* x, float* P,
     return 0;
 }
 
-int kalman_ekf_takasu_update(float* x, float* P, const float* z,
-                             const float* R,
-                             kalman_ekf_measurement_fn measurement,
-                             int n, int m, float chi2_threshold, float* chi2,
-                             void* user)
+int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
+                             kalman_ekf_measurement_fn measurement, int n, int m,
+                             float chi2_threshold, float* chi2, void* user)
 {
     float z_pred[KALMAN_MAX_MEASUREMENTS];
     float dz[KALMAN_MAX_MEASUREMENTS];
@@ -95,10 +91,8 @@ int kalman_ekf_takasu_update(float* x, float* P, const float* z,
     return kalman_takasu(x, P, dz, R, Ht, n, m, chi2_threshold, chi2);
 }
 
-int kalman_ekf_udu_predict(float* x, float* U, float* d,
-                           kalman_ekf_transition_fn transition,
-                           const float* G, const float* Q, int n, int r,
-                           void* user)
+int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_fn transition,
+                           const float* G, const float* Q, int n, int r, void* user)
 {
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
@@ -122,13 +116,11 @@ int kalman_ekf_udu_predict(float* x, float* U, float* d,
     return 0;
 }
 
-int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z,
-                          const float* R,
-                          kalman_ekf_measurement_fn measurement,
-                          int n, int m, float chi2_threshold,
+int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const float* R,
+                          kalman_ekf_measurement_fn measurement, int n, int m, float chi2_threshold,
                           int downweight_outlier, void* user)
 {
-    int retcode = 0;
+    int   retcode = 0;
     float z_pred[KALMAN_MAX_MEASUREMENTS];
     float dz[KALMAN_MAX_MEASUREMENTS];
     float Ht[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
@@ -162,7 +154,7 @@ int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z,
 
     for (int i = 0; i < m; ++i)
     {
-        float Rv = MAT_ELEM(Reye, i, i, m, m);
+        float        Rv     = MAT_ELEM(Reye, i, i, m, m);
         const float* H_line = Ht + i * n;
 
         if (chi2_threshold > 0.0f)
@@ -175,7 +167,7 @@ int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z,
                 HPHT += tmp[j] * tmp[j] * d[j];
             }
 
-            const float s = HPHT + Rv;
+            const float s                   = HPHT + Rv;
             const float mahalanobis_dist_sq = dz[i] * dz[i] / s;
             if (mahalanobis_dist_sq > chi2_threshold)
             {

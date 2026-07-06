@@ -76,9 +76,8 @@ extern "C"
      *
      * @return 0 on success, -1 on error, -2 if measurement is rejected as outlier.
      */
-    int kalman_takasu(float* x, float* P, const float* dz, const float* R,
-                      const float* Ht, int n, int m,
-                      float chi2_threshold, float* chi2);
+    int kalman_takasu(float* x, float* P, const float* dz, const float* R, const float* Ht, int n,
+                      int m, float chi2_threshold, float* chi2);
 
     /** @brief Kalman Temporal / Prediction Step
      *
@@ -99,8 +98,8 @@ extern "C"
      *      x^{-} = Phi*x^{+}
      *      P^{+} = Phi*P^{-}*Phi' + G*diag(Q)*G'
      */
-    void kalman_predict(float* x, float* P, const float* Phi,
-                        const float* G, const float* Q, int n, int r);
+    void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
+                        int r);
 
 #ifdef __cplusplus
 }

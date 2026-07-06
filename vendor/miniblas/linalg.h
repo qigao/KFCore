@@ -1,5 +1,5 @@
 /** @file linalg.h
- * KFCore
+ * Embedded linear algebra backend
  * @author Jan Zwiener (jan@zwiener.org)
  *
  * @brief Embedded linear algebra math library

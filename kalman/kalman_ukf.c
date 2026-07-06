@@ -38,17 +38,17 @@
  * LOCAL FUNCTION PROTOTYPES
  ******************************************************************************/
 
-static int ukf_weights(int n, const kalman_ukf_params* params,
-                       float* wm0, float* wc0, float* wi, float* gamma);
-static int ukf_scaled_cholesky(float* S, const float* P, int n, float gamma);
+static int  ukf_weights(int n, const kalman_ukf_params* params, float* wm0, float* wc0, float* wi,
+                        float* gamma);
+static int  ukf_scaled_cholesky(float* S, const float* P, int n, float gamma);
 static void symmetrize_from_upper(float* P, int n);
 
 /******************************************************************************
  * FUNCTION BODIES
  ******************************************************************************/
 
-static int ukf_weights(int n, const kalman_ukf_params* params,
-                       float* wm0, float* wc0, float* wi, float* gamma)
+static int ukf_weights(int n, const kalman_ukf_params* params, float* wm0, float* wc0, float* wi,
+                       float* gamma)
 {
     const float alpha = params ? params->alpha : 1.0f;
     const float beta  = params ? params->beta : 2.0f;
@@ -63,10 +63,10 @@ static int ukf_weights(int n, const kalman_ukf_params* params,
 
     {
         const float lambda = c - nf;
-        *wm0              = lambda / c;
-        *wc0              = *wm0 + (1.0f - alpha * alpha + beta);
-        *wi               = 0.5f / c;
-        *gamma            = SQRTF(c);
+        *wm0               = lambda / c;
+        *wc0               = *wm0 + (1.0f - alpha * alpha + beta);
+        *wi                = 0.5f / c;
+        *gamma             = SQRTF(c);
     }
 
     return 0;
@@ -78,8 +78,7 @@ static int ukf_scaled_cholesky(float* S, const float* P, int n, float gamma)
     {
         for (int row = 0; row < n; ++row)
         {
-            MAT_ELEM(S, row, col, n, n) =
-                (row >= col) ? MAT_ELEM(P, col, row, n, n) : 0.0f;
+            MAT_ELEM(S, row, col, n, n) = (row >= col) ? MAT_ELEM(P, col, row, n, n) : 0.0f;
         }
     }
 
@@ -110,17 +109,16 @@ static void symmetrize_from_upper(float* P, int n)
     }
 }
 
-int kalman_ukf_predict(float* x, float* P, const float* Q,
-                       kalman_ukf_transition_fn transition, int n,
-                       const kalman_ukf_params* params, void* user)
+int kalman_ukf_predict(float* x, float* P, const float* Q, kalman_ukf_transition_fn transition,
+                       int n, const kalman_ukf_params* params, void* user)
 {
-    float Sx[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-    float sigma_point[KALMAN_MAX_STATE_SIZE];
-    float propagated[KALMAN_MAX_SIGMA_POINTS * KALMAN_MAX_STATE_SIZE];
-    float wm0;
-    float wc0;
-    float wi;
-    float gamma;
+    float     Sx[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+    float     sigma_point[KALMAN_MAX_STATE_SIZE];
+    float     propagated[KALMAN_MAX_SIGMA_POINTS * KALMAN_MAX_STATE_SIZE];
+    float     wm0;
+    float     wc0;
+    float     wi;
+    float     gamma;
     const int sigma_count = 2 * n + 1;
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
@@ -186,8 +184,8 @@ int kalman_ukf_predict(float* x, float* P, const float* Q,
 
     for (int k = 0; k < sigma_count; ++k)
     {
-        const float weight = (k == 0) ? wc0 : wi;
-        const float* y    = propagated + k * n;
+        const float  weight = (k == 0) ? wc0 : wi;
+        const float* y      = propagated + k * n;
 
         for (int col = 0; col < n; ++col)
         {
@@ -205,20 +203,20 @@ int kalman_ukf_predict(float* x, float* P, const float* Q,
 
 int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
                       kalman_ukf_measurement_fn measurement, int n, int m,
-                      const kalman_ukf_params* params, float chi2_threshold,
-                      float* chi2, void* user)
+                      const kalman_ukf_params* params, float chi2_threshold, float* chi2,
+                      void* user)
 {
-    float Sx[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-    float sigma_point[KALMAN_MAX_STATE_SIZE];
-    float z_sigma[KALMAN_MAX_SIGMA_POINTS * KALMAN_MAX_MEASUREMENTS];
-    float z_pred[KALMAN_MAX_MEASUREMENTS];
-    float dz[KALMAN_MAX_MEASUREMENTS];
-    float S[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
-    float Pxz[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
-    float wm0;
-    float wc0;
-    float wi;
-    float gamma;
+    float     Sx[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+    float     sigma_point[KALMAN_MAX_STATE_SIZE];
+    float     z_sigma[KALMAN_MAX_SIGMA_POINTS * KALMAN_MAX_MEASUREMENTS];
+    float     z_pred[KALMAN_MAX_MEASUREMENTS];
+    float     dz[KALMAN_MAX_MEASUREMENTS];
+    float     S[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
+    float     Pxz[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
+    float     wm0;
+    float     wc0;
+    float     wi;
+    float     gamma;
     const int sigma_count = 2 * n + 1;
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
@@ -283,8 +281,8 @@ int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
 
     for (int k = 0; k < sigma_count; ++k)
     {
-        const float weight = (k == 0) ? wc0 : wi;
-        const float* zs    = z_sigma + k * m;
+        const float  weight = (k == 0) ? wc0 : wi;
+        const float* zs     = z_sigma + k * m;
 
         for (int col = 0; col < m; ++col)
         {
@@ -295,9 +293,9 @@ int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
             }
             if (k > 0)
             {
-                const int sigma_index = k - 1;
-                const int chol_col    = sigma_index % n;
-                const float sign      = (sigma_index < n) ? 1.0f : -1.0f;
+                const int   sigma_index = k - 1;
+                const int   chol_col    = sigma_index % n;
+                const float sign        = (sigma_index < n) ? 1.0f : -1.0f;
 
                 for (int row = chol_col; row < n; ++row)
                 {

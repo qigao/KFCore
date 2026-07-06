@@ -1,5 +1,5 @@
 /** @file miniblas.c
- * KFCore
+ * Minimal BLAS backend
  * @author Jan Zwiener (jan@zwiener.org)
  *
  * @brief Minimal generic BLAS implementation
@@ -11,7 +11,7 @@
 
 #include <ctype.h> /* tolower() */
 
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
 #include <simde/x86/sse.h>
 #endif
 
@@ -43,7 +43,7 @@ static int mb_max(int a, int b)
     return a > b ? a : b;
 }
 
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
 static void vec_zero(float* x, int n)
 {
     int          i = 0;
@@ -877,7 +877,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
             {
                 if (*beta == 0.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_zero(&c__[1 + j * c_dim1], *m);
 #else
                     i__2 = *m;
@@ -889,7 +889,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_scale(&c__[1 + j * c_dim1], *m, *beta);
 #else
                     i__2 = *m;
@@ -905,7 +905,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                     if (b[l + j * b_dim1] != 0.f)
                     {
                         temp = *alpha * b[l + j * b_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], *m, temp);
 #else
                         i__3 = *m;
@@ -929,7 +929,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 i__2 = *m;
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     temp = vec_dot(&a[1 + i__ * a_dim1], &b[1 + j * b_dim1], *k);
 #else
                     temp = 0.f;
@@ -961,7 +961,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
             {
                 if (*beta == 0.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_zero(&c__[1 + j * c_dim1], *m);
 #else
                     i__2 = *m;
@@ -973,7 +973,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_scale(&c__[1 + j * c_dim1], *m, *beta);
 #else
                     i__2 = *m;
@@ -989,7 +989,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                     if (b[j + l * b_dim1] != 0.f)
                     {
                         temp = *alpha * b[j + l * b_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], *m, temp);
 #else
                         i__3 = *m;
@@ -1045,7 +1045,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
     float temp;
     int   nrowa;
     int   upper;
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
     (void)i__3;
 #endif
 
@@ -1288,7 +1288,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
             {
                 if (*beta == 0.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_zero(&c__[1 + j * c_dim1], j);
 #else
                     i__2 = j;
@@ -1300,7 +1300,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_scale(&c__[1 + j * c_dim1], j, *beta);
 #else
                     i__2 = j;
@@ -1316,7 +1316,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                     if (a[j + l * a_dim1] != 0.f)
                     {
                         temp = *alpha * a[j + l * a_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], j, temp);
 #else
                         i__3 = j;
@@ -1336,7 +1336,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
             {
                 if (*beta == 0.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_zero(&c__[j + j * c_dim1], *n - j + 1);
 #else
                     i__2 = *n;
@@ -1348,7 +1348,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     vec_scale(&c__[j + j * c_dim1], *n - j + 1, *beta);
 #else
                     i__2 = *n;
@@ -1364,7 +1364,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                     if (a[j + l * a_dim1] != 0.f)
                     {
                         temp = *alpha * a[j + l * a_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                         vec_axpy(&c__[j + j * c_dim1], &a[j + l * a_dim1], *n - j + 1, temp);
 #else
                         i__3 = *n;
@@ -1391,7 +1391,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 i__2 = j;
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     temp = vec_dot(&a[1 + i__ * a_dim1], &a[1 + j * a_dim1], *k);
 #else
                     temp = 0.f;
@@ -1420,7 +1420,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 i__2 = *n;
                 for (i__ = j; i__ <= i__2; ++i__)
                 {
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     temp = vec_dot(&a[1 + i__ * a_dim1], &a[1 + j * a_dim1], *k);
 #else
                     temp = 0.f;
@@ -1455,7 +1455,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
     float temp1, temp2;
     int   nrowa;
     int   upper;
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
     (void)i__3;
 #endif
 
@@ -1695,7 +1695,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
                     temp1 = *alpha * b[i__ + j * b_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     temp2 = vec_dot(&b[1 + j * b_dim1], &a[1 + i__ * a_dim1], i__ - 1);
                     vec_axpy(&c__[1 + j * c_dim1], &a[1 + i__ * a_dim1], i__ - 1, temp1);
 #else
@@ -1727,7 +1727,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 for (i__ = *m; i__ >= 1; --i__)
                 {
                     temp1 = *alpha * b[i__ + j * b_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                     temp2 = vec_dot(&b[i__ + 1 + j * b_dim1], &a[i__ + 1 + i__ * a_dim1], *m - i__);
                     vec_axpy(&c__[i__ + 1 + j * c_dim1], &a[i__ + 1 + i__ * a_dim1], *m - i__, temp1);
 #else
@@ -1759,7 +1759,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
         for (j = 1; j <= i__1; ++j)
         {
             temp1 = *alpha * a[j + j * a_dim1];
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
             vec_axpby(&c__[1 + j * c_dim1], &b[1 + j * b_dim1], *m, temp1, *beta);
 #else
             if (*beta == 0.f)
@@ -1791,7 +1791,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 {
                     temp1 = *alpha * a[j + k * a_dim1];
                 }
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                 vec_axpy(&c__[1 + j * c_dim1], &b[1 + k * b_dim1], *m, temp1);
 #else
                 i__3 = *m;
@@ -1812,7 +1812,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 {
                     temp1 = *alpha * a[k + j * a_dim1];
                 }
-#if defined(KFCORE_USE_SIMDE)
+#if defined(MINIBLAS_USE_SIMDE)
                 vec_axpy(&c__[1 + j * c_dim1], &b[1 + k * b_dim1], *m, temp1);
 #else
                 i__3 = *m;
