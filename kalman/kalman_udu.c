@@ -93,8 +93,8 @@ int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float 
     return 0;
 }
 
-int kalman_udu(float* x, float* U, float* d, const float* z, const float* R, const float* Ht,
-               int n, int m, float chi2_threshold, int downweight_outlier)
+int kalman_udu(float* x, float* U, float* d, const float* z, const float* R, const float* Ht, int n,
+               int m, float chi2_threshold, int downweight_outlier)
 {
     assert(n <= KALMAN_MAX_STATE_SIZE);
 
@@ -170,8 +170,8 @@ int decorrelate(float* z, float* Ht, float* R, int n, int m)
     return 0;
 }
 
-void kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
-                        const float* G, const float* Q, int n, int r)
+void kalman_udu_predict(float* x, float* U, float* d, const float* Phi, const float* G,
+                        const float* Q, int n, int r)
 {
     assert(n <= KALMAN_MAX_STATE_SIZE);
     assert(r <= KALMAN_MAX_STATE_SIZE);
@@ -179,62 +179,58 @@ void kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
     if (x) //  if prediction of state vector is requested: x = Phi*x;
     {
         float tmp[KALMAN_MAX_STATE_SIZE];
-        memcpy(tmp, x, sizeof(x[0])*n);
+        memcpy(tmp, x, sizeof(x[0]) * n);
         matmul("N", "N", n, 1, n, 1.0f, Phi, tmp, 0.0f, x);
     }
 
     // G_tmp = G; // move to internal array for destructive updates
-    float G_tmp[KALMAN_MAX_STATE_SIZE*KALMAN_MAX_STATE_SIZE];
-    memcpy(G_tmp, G, sizeof(G_tmp[0])*n*r);
+    float G_tmp[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+    memcpy(G_tmp, G, sizeof(G_tmp[0]) * n * r);
 
     // PhiU  = Phi*U; // rows of [PhiU,G] are to be orthogonalized
-    float PhiU[KALMAN_MAX_STATE_SIZE*KALMAN_MAX_STATE_SIZE];
+    float PhiU[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
     float tmpalpha = 1.0f;
-    memcpy(PhiU, Phi, sizeof(Phi[0])*n*n);
+    memcpy(PhiU, Phi, sizeof(Phi[0]) * n * n);
     strmm_("R", "U", "N", "U", &n, &n, &tmpalpha, U, &n, PhiU, &n);
 
     mateye(U, n); // U = eye(n)
 
     // save origin input d vector
     float din[KALMAN_MAX_STATE_SIZE];
-    memcpy(din, d, sizeof(d[0])*n); // din = d
+    memcpy(din, d, sizeof(d[0]) * n); // din = d
 
-    for (int i = n-1; i >= 0; i--)
+    for (int i = n - 1; i >= 0; i--)
     {
         float sigma = 0.0f;
-        for (int j=0;j<n;j++)
+        for (int j = 0; j < n; j++)
         {
-            sigma += MAT_ELEM(PhiU, i, j, n, n) *
-                     MAT_ELEM(PhiU, i, j, n, n) * din[j];
+            sigma += MAT_ELEM(PhiU, i, j, n, n) * MAT_ELEM(PhiU, i, j, n, n) * din[j];
             if (j < r)
             {
-                sigma += MAT_ELEM(G_tmp, i, j, n, r) *
-                         MAT_ELEM(G_tmp, i, j, n, r) * Q[j];
+                sigma += MAT_ELEM(G_tmp, i, j, n, r) * MAT_ELEM(G_tmp, i, j, n, r) * Q[j];
             }
         }
         d[i] = sigma;
-        for (int j=0;j<i;j++)
+        for (int j = 0; j < i; j++)
         {
             sigma = 0.0f;
-            for (int k=0;k<n;k++)
+            for (int k = 0; k < n; k++)
             {
-                sigma += MAT_ELEM(PhiU, i, k, n, n) * din[k] *
-                         MAT_ELEM(PhiU, j, k, n, n);
+                sigma += MAT_ELEM(PhiU, i, k, n, n) * din[k] * MAT_ELEM(PhiU, j, k, n, n);
             }
-            for (int k=0;k<r;k++)
+            for (int k = 0; k < r; k++)
             {
-                sigma += MAT_ELEM(G_tmp, i, k, n, r) *
-                         Q[k] *
-                         MAT_ELEM(G_tmp, j, k, n, r);
+                sigma += MAT_ELEM(G_tmp, i, k, n, r) * Q[k] * MAT_ELEM(G_tmp, j, k, n, r);
             }
             MAT_ELEM(U, j, i, n, n) = sigma / d[i];
-            for (int k=0;k<n;k++)
+            for (int k = 0; k < n; k++)
             {
-                MAT_ELEM(PhiU, j, k, n, n) -= MAT_ELEM(U, j, i, n, n)*MAT_ELEM(PhiU, i, k, n, n);
+                MAT_ELEM(PhiU, j, k, n, n) -= MAT_ELEM(U, j, i, n, n) * MAT_ELEM(PhiU, i, k, n, n);
             }
-            for (int k=0;k<r;k++)
+            for (int k = 0; k < r; k++)
             {
-                MAT_ELEM(G_tmp, j, k, n, r) -= MAT_ELEM(U, j, i, n, n)*MAT_ELEM(G_tmp, i, k, n, r);
+                MAT_ELEM(G_tmp, j, k, n, r) -=
+                    MAT_ELEM(U, j, i, n, n) * MAT_ELEM(G_tmp, i, k, n, r);
             }
         }
     }

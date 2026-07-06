@@ -9,6 +9,7 @@
             "hidden": true,
             "cacheVariables": { 
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
+                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
             },

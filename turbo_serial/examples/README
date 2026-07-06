@@ -1,0 +1,42 @@
+TurboScript serial examples
+===========================
+
+These examples use the public TurboSerial ABI from `turbo_serial.h`.
+They do not include `libserialport.h` or call `sp_*` APIs directly.
+
+Examples
+--------
+
+- `list_ports.c` - creates a port-list snapshot and prints visible port names.
+- `port_info.c` - reads metadata for one named port.
+- `port_config.c` - configures and opens one serial handle.
+- `send_receive.c` - performs blocking write/read on one open handle.
+- `await_events.c` - waits for readiness through a TurboSerial event set.
+- `handle_errors.c` - handles `turbo_serial_result_t` at the application boundary.
+
+Build
+-----
+
+Examples are not part of the default build because most need real serial
+hardware or a configured virtual port to run. They can be compiled from the
+repository root with:
+
+```text
+cmake --build build/Msvc --target turbo_serial_examples --config Debug
+```
+
+Run a specific example with the port name used by the current system:
+
+```text
+build/Msvc/bin/example_port_info.exe COM1
+```
+
+Validation
+----------
+
+The examples are compile-checked through the `turbo_serial_examples` target.
+The public ABI itself is covered by:
+
+```text
+ctest --test-dir build/Msvc -C Debug -R test_turbo_serial_public_abi --output-on-failure
+```

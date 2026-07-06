@@ -1,5 +1,5 @@
 /** @file miniblas.h
- * KFCore
+ * Minimal BLAS backend
  * @author Jan Zwiener (jan@zwiener.org)
  *
  * @brief Minimal generic BLAS implementation

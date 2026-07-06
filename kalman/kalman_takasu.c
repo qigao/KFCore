@@ -47,9 +47,8 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-int kalman_takasu(float* x, float* P, const float* dz, const float* R,
-                  const float* Ht, int n, int m,
-                  float chi2_threshold, float* chi2)
+int kalman_takasu(float* x, float* P, const float* dz, const float* R, const float* Ht, int n,
+                  int m, float chi2_threshold, float* chi2)
 {
     float D[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
     float L[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
@@ -131,8 +130,8 @@ int kalman_takasu(float* x, float* P, const float* dz, const float* R,
     return 0;
 }
 
-void kalman_predict(float* x, float* P, const float* Phi,
-                    const float* G, const float* Q, int n, int r)
+void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
+                    int r)
 {
     assert(r <= KALMAN_MAX_STATE_SIZE);
     float alpha, beta;
@@ -140,16 +139,16 @@ void kalman_predict(float* x, float* P, const float* Phi,
     if (x) //  if prediction of state vector is requested: x = Phi*x;
     {
         float tmp[KALMAN_MAX_STATE_SIZE];
-        memcpy(tmp, x, sizeof(x[0])*n);
+        memcpy(tmp, x, sizeof(x[0]) * n);
         matmul("N", "N", n, 1, n, 1.0f, Phi, tmp, 0.0f, x);
     }
 
     if (P && Phi)
     {
         // (1) Phi*P (n x n)
-        float Phi_x_P[KALMAN_MAX_STATE_SIZE*KALMAN_MAX_STATE_SIZE];
+        float Phi_x_P[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
         alpha = 1.0f;
-        beta = 0.0f;
+        beta  = 0.0f;
         ssymm_("R" /* calculate  C = B*A = Phi_x_P = Phi*P */,
                "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
                &n,                                                 /* cols of B / C */
@@ -158,12 +157,12 @@ void kalman_predict(float* x, float* P, const float* Phi,
         if (G && Q) // P = Phi*P*Phi' + G*Q*G';
         {
             // (2) GQ = G*Q (n x r)
-            float GQ[KALMAN_MAX_STATE_SIZE*KALMAN_MAX_STATE_SIZE];
+            float GQ[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
             for (int j = 0; j < r; j++) // for each  column in G
             {
                 for (int i = 0; i < n; i++) // scale the rows with Q(j)
                 {
-                    MAT_ELEM(GQ, i, j, n, r) = Q[j]*MAT_ELEM(G, i, j, n, r);
+                    MAT_ELEM(GQ, i, j, n, r) = Q[j] * MAT_ELEM(G, i, j, n, r);
                 }
             }
 

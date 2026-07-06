@@ -32,8 +32,7 @@ typedef struct kalman_ukf_params
  *
  * @return 0 on success, non-zero on error.
  */
-typedef int (*kalman_ukf_transition_fn)(float* x_pred, const float* x,
-                                        int n, void* user);
+typedef int (*kalman_ukf_transition_fn)(float* x_pred, const float* x, int n, void* user);
 
 /** @brief Nonlinear measurement callback for UKF correction.
  *
@@ -45,8 +44,7 @@ typedef int (*kalman_ukf_transition_fn)(float* x_pred, const float* x,
  *
  * @return 0 on success, non-zero on error.
  */
-typedef int (*kalman_ukf_measurement_fn)(float* z_pred, const float* x,
-                                         int n, int m, void* user);
+typedef int (*kalman_ukf_measurement_fn)(float* z_pred, const float* x, int n, int m, void* user);
 
 /******************************************************************************
  * FUNCTION PROTOTYPES
@@ -64,9 +62,8 @@ typedef int (*kalman_ukf_measurement_fn)(float* z_pred, const float* x,
  *
  * @return 0 on success, -1 on error.
  */
-int kalman_ukf_predict(float* x, float* P, const float* Q,
-                       kalman_ukf_transition_fn transition, int n,
-                       const kalman_ukf_params* params, void* user);
+int kalman_ukf_predict(float* x, float* P, const float* Q, kalman_ukf_transition_fn transition,
+                       int n, const kalman_ukf_params* params, void* user);
 
 /** @brief UKF correction with additive measurement noise.
  *
@@ -86,8 +83,8 @@ int kalman_ukf_predict(float* x, float* P, const float* Q,
  */
 int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
                       kalman_ukf_measurement_fn measurement, int n, int m,
-                      const kalman_ukf_params* params, float chi2_threshold,
-                      float* chi2, void* user);
+                      const kalman_ukf_params* params, float chi2_threshold, float* chi2,
+                      void* user);
 
 #endif /* KALMAN_UKF_H */
 
