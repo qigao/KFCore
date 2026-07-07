@@ -16,6 +16,10 @@ if(BUILD_TESTING)
     # vendored miniblas headers reachable as well.
     target_link_libraries(kfcore_kalman_tests PRIVATE miniblas)
 
+    if(TARGET apriltag)
+        target_link_libraries(kfcore_kalman_tests PRIVATE apriltag)
+    endif()
+
     add_test(NAME kfcore_kalman_tests COMMAND kfcore_kalman_tests)
 
     set_target_properties(kfcore_kalman_tests PROPERTIES

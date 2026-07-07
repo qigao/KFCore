@@ -61,6 +61,21 @@ void matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
     assert(result == 0);
 }
 
+void matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
+            float beta, float* y)
+{
+    int       inc    = 1;
+    const int result = sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc);
+    assert(result == 0);
+}
+
+void rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
+{
+    int       inc    = 1;
+    const int result = sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows);
+    assert(result == 0);
+}
+
 void mateye(float* A, int n)
 {
     memset(A, 0, sizeof(float) * n * n);
@@ -110,6 +125,116 @@ int cholesky(float* A, const int n, int onlyWriteLowerPart)
         }
     }
     return 0;
+}
+
+float vecdot(const float* x, const float* y, int n)
+{
+    int inc = 1;
+
+    return sdot_(&n, x, &inc, y, &inc);
+}
+
+float vecnorm(const float* x, int n)
+{
+    int inc = 1;
+
+    return snrm2_(&n, x, &inc);
+}
+
+float vecmean(const float* x, int n)
+{
+    int   inc = 1;
+    float mean;
+    int   result = svec_mean_(&n, x, &inc, &mean);
+
+    assert(result == 0);
+
+    return mean;
+}
+
+float vecvariance(const float* x, int n, int ddof)
+{
+    int   inc = 1;
+    float variance;
+    int   result = svec_variance_(&n, x, &inc, &ddof, &variance);
+
+    assert(result == 0);
+
+    return variance;
+}
+
+float vecrms(const float* x, int n)
+{
+    int   inc = 1;
+    float rms;
+    int   result = svec_rms_(&n, x, &inc, &rms);
+
+    assert(result == 0);
+
+    return rms;
+}
+
+int vecnormalize(float* x, int n, float eps, float* norm)
+{
+    int   inc = 1;
+    float norm_local;
+    int   result = svec_normalize_(&n, x, &inc, &eps, &norm_local);
+
+    if (norm)
+    {
+        *norm = norm_local;
+    }
+
+    return result;
+}
+
+float vecdist_l1(const float* x, const float* y, int n)
+{
+    int   inc = 1;
+    float distance;
+    int   result = svec_l1_distance_(&n, x, &inc, y, &inc, &distance);
+
+    assert(result == 0);
+
+    return distance;
+}
+
+float vecdist_linf(const float* x, const float* y, int n)
+{
+    int   inc = 1;
+    float distance;
+    int   result = svec_linf_distance_(&n, x, &inc, y, &inc, &distance);
+
+    assert(result == 0);
+
+    return distance;
+}
+
+int veccosine(const float* x, const float* y, int n, float* cosine)
+{
+    int inc = 1;
+
+    return svec_cosine_similarity_(&n, x, &inc, y, &inc, cosine);
+}
+
+float mat2det(const float* A)
+{
+    return smat2_det_(A);
+}
+
+int mat2inv(const float* A, float* Ainv, float eps)
+{
+    return smat2_inv_(A, Ainv, &eps);
+}
+
+float mat3det(const float* A)
+{
+    return smat3_det_(A);
+}
+
+int mat3inv(const float* A, float* Ainv, float eps)
+{
+    return smat3_inv_(A, Ainv, &eps);
 }
 
 void trisolve(const float* A, float* B, int n, int m, const char* tp)

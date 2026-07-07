@@ -22,7 +22,9 @@ enum sp_return {
   /** A memory allocation failed while executing the operation. */
   SP_ERR_MEM = -3,
   /** The requested operation is not supported by this system or device. */
-  SP_ERR_SUPP = -4
+  SP_ERR_SUPP = -4,
+  /** The operation timed out before an event became ready. */
+  SP_ERR_TIMEOUT = -5
 };
 
 /** Port access modes. */
@@ -1255,7 +1257,8 @@ enum sp_return sp_add_port_events(struct sp_event_set *event_set, const struct s
  * @param[in] event_set Event set to wait on. Must not be NULL.
  * @param[in] timeout_ms Timeout in milliseconds, or zero to wait indefinitely.
  *
- * @return SP_OK upon success, a negative error code otherwise.
+ * @return SP_OK when an event is ready, SP_ERR_TIMEOUT if timeout_ms elapsed,
+ *         or another negative error code otherwise.
  *
  * @since 0.1.0
  */
@@ -1716,6 +1719,7 @@ static inline enum sp_return sp_normalize_return(enum sp_return value) {
 	case SP_ERR_FAIL:
 	case SP_ERR_MEM:
 	case SP_ERR_SUPP:
+	case SP_ERR_TIMEOUT:
 		return value;
 	default:
 		return SP_ERR_FAIL;

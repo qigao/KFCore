@@ -43,6 +43,49 @@ extern "C"
 
     int lsame_(const char* a, const char* b);
 
+    int scopy_(int* n, const float* sx, int* incx, float* sy, int* incy);
+
+    int sswap_(int* n, float* sx, int* incx, float* sy, int* incy);
+
+    int sscal_(int* n, float* sa, float* sx, int* incx);
+
+    int saxpy_(int* n, float* sa, const float* sx, int* incx, float* sy, int* incy);
+
+    float sdot_(int* n, const float* sx, int* incx, const float* sy, int* incy);
+
+    float snrm2_(int* n, const float* sx, int* incx);
+
+    int sgemv_(const char* trans, int* m, int* n, float* alpha, const float* a, int* lda,
+               const float* x, int* incx, float* beta, float* y, int* incy);
+
+    int sger_(int* m, int* n, float* alpha, const float* x, int* incx, const float* y, int* incy,
+              float* a, int* lda);
+
+    int svec_mean_(int* n, const float* sx, int* incx, float* mean);
+
+    int svec_variance_(int* n, const float* sx, int* incx, int* ddof, float* variance);
+
+    int svec_rms_(int* n, const float* sx, int* incx, float* rms);
+
+    int svec_normalize_(int* n, float* sx, int* incx, float* eps, float* norm);
+
+    int svec_l1_distance_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                          float* distance);
+
+    int svec_linf_distance_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                            float* distance);
+
+    int svec_cosine_similarity_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                                float* cosine);
+
+    float smat2_det_(const float* a);
+
+    int smat2_inv_(const float* a, float* inv_a, float* eps);
+
+    float smat3_det_(const float* a);
+
+    int smat3_inv_(const float* a, float* inv_a, float* eps);
+
     int strsm_(const char* side, const char* uplo, const char* transa, const char* diag, int* m,
               int* n, float* alpha, const float* a, int* lda, float* b, int* ldb);
 

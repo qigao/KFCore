@@ -10,10 +10,9 @@
  ******************************************************************************/
 
 #include <ctype.h> /* tolower() */
+#include <math.h>  /* sqrtf() */
 
-#if defined(MINIBLAS_USE_SIMDE)
 #include <simde/x86/sse.h>
-#endif
 
 /******************************************************************************
  * PROJECT INCLUDE FILES
@@ -43,7 +42,12 @@ static int mb_max(int a, int b)
     return a > b ? a : b;
 }
 
-#if defined(MINIBLAS_USE_SIMDE)
+static int vec_start(int n, int inc)
+{
+    return (inc > 0) ? 0 : (1 - n) * inc;
+}
+
+#if 1
 static void vec_zero(float* x, int n)
 {
     int          i = 0;
@@ -157,6 +161,590 @@ static float vec_dot(const float* x, const float* y, int n)
 int lsame_(const char* a, const char* b)
 {
     return (tolower(*a) == tolower(*b));
+}
+
+int scopy_(int* n, const float* sx, int* incx, float* sy, int* incy)
+{
+    int ix;
+    int iy;
+
+    if (!n || !sx || !incx || !sy || !incy || *incx == 0 || *incy == 0)
+    {
+        return -1;
+    }
+    if (*n <= 0)
+    {
+        return 0;
+    }
+
+    ix = (*incx > 0) ? 0 : (1 - *n) * *incx;
+    iy = (*incy > 0) ? 0 : (1 - *n) * *incy;
+
+    for (int i = 0; i < *n; ++i)
+    {
+        sy[iy] = sx[ix];
+        ix += *incx;
+        iy += *incy;
+    }
+
+    return 0;
+}
+
+int sswap_(int* n, float* sx, int* incx, float* sy, int* incy)
+{
+    int ix;
+    int iy;
+
+    if (!n || !sx || !incx || !sy || !incy || *incx == 0 || *incy == 0)
+    {
+        return -1;
+    }
+    if (*n <= 0)
+    {
+        return 0;
+    }
+
+    ix = (*incx > 0) ? 0 : (1 - *n) * *incx;
+    iy = (*incy > 0) ? 0 : (1 - *n) * *incy;
+
+    for (int i = 0; i < *n; ++i)
+    {
+        const float tmp = sx[ix];
+        sx[ix]          = sy[iy];
+        sy[iy]          = tmp;
+        ix += *incx;
+        iy += *incy;
+    }
+
+    return 0;
+}
+
+int sscal_(int* n, float* sa, float* sx, int* incx)
+{
+    int ix;
+
+    if (!n || !sa || !sx || !incx || *incx == 0)
+    {
+        return -1;
+    }
+    if (*n <= 0)
+    {
+        return 0;
+    }
+
+#if 1
+    if (*incx == 1)
+    {
+        vec_scale(sx, *n, *sa);
+        return 0;
+    }
+#endif
+
+    ix = (*incx > 0) ? 0 : (1 - *n) * *incx;
+    for (int i = 0; i < *n; ++i)
+    {
+        sx[ix] *= *sa;
+        ix += *incx;
+    }
+
+    return 0;
+}
+
+int saxpy_(int* n, float* sa, const float* sx, int* incx, float* sy, int* incy)
+{
+    int ix;
+    int iy;
+
+    if (!n || !sa || !sx || !incx || !sy || !incy || *incx == 0 || *incy == 0)
+    {
+        return -1;
+    }
+    if (*n <= 0 || *sa == 0.0f)
+    {
+        return 0;
+    }
+
+#if 1
+    if (*incx == 1 && *incy == 1)
+    {
+        vec_axpy(sy, sx, *n, *sa);
+        return 0;
+    }
+#endif
+
+    ix = (*incx > 0) ? 0 : (1 - *n) * *incx;
+    iy = (*incy > 0) ? 0 : (1 - *n) * *incy;
+    for (int i = 0; i < *n; ++i)
+    {
+        sy[iy] += *sa * sx[ix];
+        ix += *incx;
+        iy += *incy;
+    }
+
+    return 0;
+}
+
+float sdot_(int* n, const float* sx, int* incx, const float* sy, int* incy)
+{
+    int   ix;
+    int   iy;
+    float sum = 0.0f;
+
+    if (!n || !sx || !incx || !sy || !incy || *incx == 0 || *incy == 0 || *n <= 0)
+    {
+        return 0.0f;
+    }
+
+#if 1
+    if (*incx == 1 && *incy == 1)
+    {
+        return vec_dot(sx, sy, *n);
+    }
+#endif
+
+    ix = (*incx > 0) ? 0 : (1 - *n) * *incx;
+    iy = (*incy > 0) ? 0 : (1 - *n) * *incy;
+    for (int i = 0; i < *n; ++i)
+    {
+        sum += sx[ix] * sy[iy];
+        ix += *incx;
+        iy += *incy;
+    }
+
+    return sum;
+}
+
+float snrm2_(int* n, const float* sx, int* incx)
+{
+    return sqrtf(sdot_(n, sx, incx, sx, incx));
+}
+
+int sgemv_(const char* trans, int* m, int* n, float* alpha, const float* a, int* lda,
+           const float* x, int* incx, float* beta, float* y, int* incy)
+{
+    int lenx;
+    int leny;
+    int kx;
+    int ky;
+
+    if (!trans || !m || !n || !alpha || !a || !lda || !x || !incx || !beta || !y || !incy ||
+        *incx == 0 || *incy == 0)
+    {
+        return -1;
+    }
+
+    if (lsame_(trans, "N"))
+    {
+        lenx = *n;
+        leny = *m;
+    }
+    else if (lsame_(trans, "T") || lsame_(trans, "C"))
+    {
+        lenx = *m;
+        leny = *n;
+    }
+    else
+    {
+        return -1;
+    }
+
+    if (*m < 0 || *n < 0 || *lda < mb_max(1, *m))
+    {
+        return -1;
+    }
+    if (*m == 0 || *n == 0)
+    {
+        return 0;
+    }
+
+    ky = vec_start(leny, *incy);
+    if (*beta == 0.0f)
+    {
+        int iy = ky;
+        for (int i = 0; i < leny; ++i)
+        {
+            y[iy] = 0.0f;
+            iy += *incy;
+        }
+    }
+    else if (*beta != 1.0f)
+    {
+        int iy = ky;
+        for (int i = 0; i < leny; ++i)
+        {
+            y[iy] *= *beta;
+            iy += *incy;
+        }
+    }
+
+    if (*alpha == 0.0f)
+    {
+        return 0;
+    }
+
+    kx = vec_start(lenx, *incx);
+    if (lsame_(trans, "N"))
+    {
+        int jx = kx;
+        for (int j = 0; j < *n; ++j)
+        {
+            const float xj = x[jx];
+            if (xj != 0.0f)
+            {
+                const float temp = *alpha * xj;
+                int         iy   = ky;
+                for (int i = 0; i < *m; ++i)
+                {
+                    y[iy] += temp * a[i + j * *lda];
+                    iy += *incy;
+                }
+            }
+            jx += *incx;
+        }
+    }
+    else
+    {
+        int jy = ky;
+        for (int j = 0; j < *n; ++j)
+        {
+            float sum = 0.0f;
+
+#if 1
+            if (*incx == 1)
+            {
+                sum = vec_dot(&a[j * *lda], &x[kx], *m);
+            }
+            else
+#endif
+            {
+                int ix = kx;
+                for (int i = 0; i < *m; ++i)
+                {
+                    sum += a[i + j * *lda] * x[ix];
+                    ix += *incx;
+                }
+            }
+            y[jy] += *alpha * sum;
+            jy += *incy;
+        }
+    }
+
+    return 0;
+}
+
+int sger_(int* m, int* n, float* alpha, const float* x, int* incx, const float* y, int* incy,
+          float* a, int* lda)
+{
+    int jy;
+    int kx;
+    int ky;
+
+    if (!m || !n || !alpha || !x || !incx || !y || !incy || !a || !lda || *incx == 0 ||
+        *incy == 0)
+    {
+        return -1;
+    }
+    if (*m < 0 || *n < 0 || *lda < mb_max(1, *m))
+    {
+        return -1;
+    }
+    if (*m == 0 || *n == 0 || *alpha == 0.0f)
+    {
+        return 0;
+    }
+
+    kx = vec_start(*m, *incx);
+    ky = vec_start(*n, *incy);
+    jy = ky;
+    for (int j = 0; j < *n; ++j)
+    {
+        const float temp = *alpha * y[jy];
+        if (temp != 0.0f)
+        {
+            int ix = kx;
+            for (int i = 0; i < *m; ++i)
+            {
+                a[i + j * *lda] += x[ix] * temp;
+                ix += *incx;
+            }
+        }
+        jy += *incy;
+    }
+
+    return 0;
+}
+
+int svec_mean_(int* n, const float* sx, int* incx, float* mean)
+{
+    int   ix;
+    float sum = 0.0f;
+
+    if (!n || !sx || !incx || !mean || *incx == 0 || *n <= 0)
+    {
+        return -1;
+    }
+
+    ix = vec_start(*n, *incx);
+    for (int i = 0; i < *n; ++i)
+    {
+        sum += sx[ix];
+        ix += *incx;
+    }
+
+    *mean = sum / (float)*n;
+
+    return 0;
+}
+
+int svec_variance_(int* n, const float* sx, int* incx, int* ddof, float* variance)
+{
+    int   ix;
+    float mean;
+    float sum = 0.0f;
+
+    if (!n || !sx || !incx || !ddof || !variance || *incx == 0 || *ddof < 0 || *n <= *ddof)
+    {
+        return -1;
+    }
+
+    if (svec_mean_(n, sx, incx, &mean) != 0)
+    {
+        return -1;
+    }
+
+    ix = vec_start(*n, *incx);
+    for (int i = 0; i < *n; ++i)
+    {
+        const float diff = sx[ix] - mean;
+        sum += diff * diff;
+        ix += *incx;
+    }
+
+    *variance = sum / (float)(*n - *ddof);
+
+    return 0;
+}
+
+int svec_rms_(int* n, const float* sx, int* incx, float* rms)
+{
+    float norm;
+
+    if (!n || !sx || !incx || !rms || *incx == 0 || *n <= 0)
+    {
+        return -1;
+    }
+
+    norm = snrm2_(n, sx, incx);
+    *rms = norm / sqrtf((float)*n);
+
+    return 0;
+}
+
+int svec_normalize_(int* n, float* sx, int* incx, float* eps, float* norm)
+{
+    float scale;
+
+    if (!n || !sx || !incx || !eps || !norm || *incx == 0 || *n <= 0 || *eps < 0.0f)
+    {
+        return -1;
+    }
+
+    *norm = snrm2_(n, sx, incx);
+    if (*norm <= *eps)
+    {
+        return -1;
+    }
+
+    scale = 1.0f / *norm;
+    return sscal_(n, &scale, sx, incx);
+}
+
+int svec_l1_distance_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                      float* distance)
+{
+    int   ix;
+    int   iy;
+    float sum = 0.0f;
+
+    if (!n || !sx || !incx || !sy || !incy || !distance || *incx == 0 || *incy == 0 || *n <= 0)
+    {
+        return -1;
+    }
+
+    ix = vec_start(*n, *incx);
+    iy = vec_start(*n, *incy);
+    for (int i = 0; i < *n; ++i)
+    {
+        sum += fabsf(sx[ix] - sy[iy]);
+        ix += *incx;
+        iy += *incy;
+    }
+
+    *distance = sum;
+
+    return 0;
+}
+
+int svec_linf_distance_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                        float* distance)
+{
+    int   ix;
+    int   iy;
+    float max_dist = 0.0f;
+
+    if (!n || !sx || !incx || !sy || !incy || !distance || *incx == 0 || *incy == 0 || *n <= 0)
+    {
+        return -1;
+    }
+
+    ix = vec_start(*n, *incx);
+    iy = vec_start(*n, *incy);
+    for (int i = 0; i < *n; ++i)
+    {
+        const float dist = fabsf(sx[ix] - sy[iy]);
+        if (dist > max_dist)
+        {
+            max_dist = dist;
+        }
+        ix += *incx;
+        iy += *incy;
+    }
+
+    *distance = max_dist;
+
+    return 0;
+}
+
+int svec_cosine_similarity_(int* n, const float* sx, int* incx, const float* sy, int* incy,
+                            float* cosine)
+{
+    float dot;
+    float nx;
+    float ny;
+    float denom;
+
+    if (!n || !sx || !incx || !sy || !incy || !cosine || *incx == 0 || *incy == 0 || *n <= 0)
+    {
+        return -1;
+    }
+
+    dot   = sdot_(n, sx, incx, sy, incy);
+    nx    = snrm2_(n, sx, incx);
+    ny    = snrm2_(n, sy, incy);
+    denom = nx * ny;
+    if (denom <= 0.0f)
+    {
+        return -1;
+    }
+
+    *cosine = dot / denom;
+
+    return 0;
+}
+
+float smat2_det_(const float* a)
+{
+    if (!a)
+    {
+        return 0.0f;
+    }
+
+    return a[0] * a[3] - a[2] * a[1];
+}
+
+int smat2_inv_(const float* a, float* inv_a, float* eps)
+{
+    const float det = smat2_det_(a);
+
+    if (!a || !inv_a || !eps || *eps < 0.0f || fabsf(det) <= *eps)
+    {
+        return -1;
+    }
+
+    inv_a[0] = a[3] / det;
+    inv_a[1] = -a[1] / det;
+    inv_a[2] = -a[2] / det;
+    inv_a[3] = a[0] / det;
+
+    return 0;
+}
+
+float smat3_det_(const float* a)
+{
+    float a00;
+    float a01;
+    float a02;
+    float a10;
+    float a11;
+    float a12;
+    float a20;
+    float a21;
+    float a22;
+
+    if (!a)
+    {
+        return 0.0f;
+    }
+
+    a00 = a[0];
+    a10 = a[1];
+    a20 = a[2];
+    a01 = a[3];
+    a11 = a[4];
+    a21 = a[5];
+    a02 = a[6];
+    a12 = a[7];
+    a22 = a[8];
+
+    return a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) +
+           a02 * (a10 * a21 - a11 * a20);
+}
+
+int smat3_inv_(const float* a, float* inv_a, float* eps)
+{
+    float a00;
+    float a01;
+    float a02;
+    float a10;
+    float a11;
+    float a12;
+    float a20;
+    float a21;
+    float a22;
+    float det;
+
+    if (!a || !inv_a || !eps || *eps < 0.0f)
+    {
+        return -1;
+    }
+
+    det = smat3_det_(a);
+    if (fabsf(det) <= *eps)
+    {
+        return -1;
+    }
+
+    a00 = a[0];
+    a10 = a[1];
+    a20 = a[2];
+    a01 = a[3];
+    a11 = a[4];
+    a21 = a[5];
+    a02 = a[6];
+    a12 = a[7];
+    a22 = a[8];
+
+    inv_a[0] = (a11 * a22 - a12 * a21) / det;
+    inv_a[1] = (a12 * a20 - a10 * a22) / det;
+    inv_a[2] = (a10 * a21 - a11 * a20) / det;
+    inv_a[3] = (a02 * a21 - a01 * a22) / det;
+    inv_a[4] = (a00 * a22 - a02 * a20) / det;
+    inv_a[5] = (a01 * a20 - a00 * a21) / det;
+    inv_a[6] = (a01 * a12 - a02 * a11) / det;
+    inv_a[7] = (a02 * a10 - a00 * a12) / det;
+    inv_a[8] = (a00 * a11 - a01 * a10) / det;
+
+    return 0;
 }
 
 int strsm_(const char* side, const char* uplo, const char* transa, const char* diag, int* m, int* n,
@@ -877,7 +1465,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
             {
                 if (*beta == 0.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_zero(&c__[1 + j * c_dim1], *m);
 #else
                     i__2 = *m;
@@ -889,7 +1477,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_scale(&c__[1 + j * c_dim1], *m, *beta);
 #else
                     i__2 = *m;
@@ -905,7 +1493,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                     if (b[l + j * b_dim1] != 0.f)
                     {
                         temp = *alpha * b[l + j * b_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], *m, temp);
 #else
                         i__3 = *m;
@@ -929,7 +1517,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 i__2 = *m;
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     temp = vec_dot(&a[1 + i__ * a_dim1], &b[1 + j * b_dim1], *k);
 #else
                     temp = 0.f;
@@ -961,7 +1549,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
             {
                 if (*beta == 0.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_zero(&c__[1 + j * c_dim1], *m);
 #else
                     i__2 = *m;
@@ -973,7 +1561,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_scale(&c__[1 + j * c_dim1], *m, *beta);
 #else
                     i__2 = *m;
@@ -989,7 +1577,7 @@ int sgemm_(char* transa, char* transb, int* m, int* n, int* k, float* alpha, flo
                     if (b[j + l * b_dim1] != 0.f)
                     {
                         temp = *alpha * b[j + l * b_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], *m, temp);
 #else
                         i__3 = *m;
@@ -1045,7 +1633,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
     float temp;
     int   nrowa;
     int   upper;
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
     (void)i__3;
 #endif
 
@@ -1288,7 +1876,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
             {
                 if (*beta == 0.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_zero(&c__[1 + j * c_dim1], j);
 #else
                     i__2 = j;
@@ -1300,7 +1888,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_scale(&c__[1 + j * c_dim1], j, *beta);
 #else
                     i__2 = j;
@@ -1316,7 +1904,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                     if (a[j + l * a_dim1] != 0.f)
                     {
                         temp = *alpha * a[j + l * a_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                         vec_axpy(&c__[1 + j * c_dim1], &a[1 + l * a_dim1], j, temp);
 #else
                         i__3 = j;
@@ -1336,7 +1924,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
             {
                 if (*beta == 0.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_zero(&c__[j + j * c_dim1], *n - j + 1);
 #else
                     i__2 = *n;
@@ -1348,7 +1936,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 }
                 else if (*beta != 1.f)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     vec_scale(&c__[j + j * c_dim1], *n - j + 1, *beta);
 #else
                     i__2 = *n;
@@ -1364,7 +1952,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                     if (a[j + l * a_dim1] != 0.f)
                     {
                         temp = *alpha * a[j + l * a_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                         vec_axpy(&c__[j + j * c_dim1], &a[j + l * a_dim1], *n - j + 1, temp);
 #else
                         i__3 = *n;
@@ -1391,7 +1979,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 i__2 = j;
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     temp = vec_dot(&a[1 + i__ * a_dim1], &a[1 + j * a_dim1], *k);
 #else
                     temp = 0.f;
@@ -1420,7 +2008,7 @@ int ssyrk_(char* uplo, char* trans, int* n, int* k, float* alpha, float* a, int*
                 i__2 = *n;
                 for (i__ = j; i__ <= i__2; ++i__)
                 {
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     temp = vec_dot(&a[1 + i__ * a_dim1], &a[1 + j * a_dim1], *k);
 #else
                     temp = 0.f;
@@ -1455,7 +2043,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
     float temp1, temp2;
     int   nrowa;
     int   upper;
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
     (void)i__3;
 #endif
 
@@ -1695,7 +2283,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 for (i__ = 1; i__ <= i__2; ++i__)
                 {
                     temp1 = *alpha * b[i__ + j * b_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     temp2 = vec_dot(&b[1 + j * b_dim1], &a[1 + i__ * a_dim1], i__ - 1);
                     vec_axpy(&c__[1 + j * c_dim1], &a[1 + i__ * a_dim1], i__ - 1, temp1);
 #else
@@ -1727,7 +2315,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 for (i__ = *m; i__ >= 1; --i__)
                 {
                     temp1 = *alpha * b[i__ + j * b_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                     temp2 = vec_dot(&b[i__ + 1 + j * b_dim1], &a[i__ + 1 + i__ * a_dim1], *m - i__);
                     vec_axpy(&c__[i__ + 1 + j * c_dim1], &a[i__ + 1 + i__ * a_dim1], *m - i__, temp1);
 #else
@@ -1759,7 +2347,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
         for (j = 1; j <= i__1; ++j)
         {
             temp1 = *alpha * a[j + j * a_dim1];
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
             vec_axpby(&c__[1 + j * c_dim1], &b[1 + j * b_dim1], *m, temp1, *beta);
 #else
             if (*beta == 0.f)
@@ -1791,7 +2379,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 {
                     temp1 = *alpha * a[j + k * a_dim1];
                 }
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                 vec_axpy(&c__[1 + j * c_dim1], &b[1 + k * b_dim1], *m, temp1);
 #else
                 i__3 = *m;
@@ -1812,7 +2400,7 @@ int ssymm_(char* side, char* uplo, int* m, int* n, float* alpha, float* a, int* 
                 {
                     temp1 = *alpha * a[k + j * a_dim1];
                 }
-#if defined(MINIBLAS_USE_SIMDE)
+#if 1
                 vec_axpy(&c__[1 + j * c_dim1], &b[1 + k * b_dim1], *m, temp1);
 #else
                 i__3 = *m;

@@ -81,6 +81,145 @@ extern "C"
      * Note: This is not the geodetic heading, no declination correction is applied. */
     float nav_mag_heading(const float mb[3], float roll_rad, float pitch_rad);
 
+    /** @brief Wrap angle to [-pi, pi). */
+    float nav_wrap_pi(float angle_rad);
+
+    /** @brief Set quaternion to identity [w, x, y, z]. */
+    void nav_quat_identity(float q[4]);
+
+    /** @brief Normalize quaternion [w, x, y, z].
+     *
+     * @return 0 on success, -1 on invalid input or near-zero norm.
+     */
+    int nav_quat_normalize(float q[4]);
+
+    /** @brief Quaternion multiplication out = a * b, [w, x, y, z]. */
+    void nav_quat_multiply(const float a[4], const float b[4], float out[4]);
+
+    /** @brief Conjugate quaternion [w, x, y, z]. */
+    void nav_quat_conjugate(const float q[4], float out[4]);
+
+    /** @brief Convert roll/pitch/yaw to quaternion [w, x, y, z]. */
+    int nav_quat_from_euler(float roll_rad, float pitch_rad, float yaw_rad, float q[4]);
+
+    /** @brief Convert quaternion [w, x, y, z] to roll/pitch/yaw.
+     *
+     * Any output pointer can be NULL.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_quat_to_euler(const float q[4], float* roll_rad, float* pitch_rad, float* yaw_rad);
+
+    /** @brief Convert body-to-navigation rotation matrix to quaternion [w, x, y, z].
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_quat_from_matrix_body2nav(const float R[9], float q[4]);
+
+    /** @brief Convert quaternion [w, x, y, z] to body-to-navigation matrix. */
+    int nav_quat_to_matrix_body2nav(const float q[4], float R[9]);
+
+    /** @brief Rotate a body-frame vector to navigation-frame using quaternion. */
+    int nav_quat_rotate_body_to_nav(const float q_body2nav[4], const float v_body[3],
+                                    float v_nav[3]);
+
+    /** @brief Rotate a navigation-frame vector to body-frame using quaternion. */
+    int nav_quat_rotate_nav_to_body(const float q_body2nav[4], const float v_nav[3],
+                                    float v_body[3]);
+
+    /** @brief Integrate quaternion with body-frame gyro rates.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_quat_integrate_gyro(float q_body2nav[4], const float gyro_rad_s[3], float dt_s);
+
+    /** @brief Quaternion IMU complementary update using gyro and accelerometer.
+     *
+     * The accelerometer is used only as a gravity direction observation. Set
+     * accel_gain to 0 for gyro-only propagation.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_quat_complementary_imu(float q_body2nav[4], const float gyro_rad_s[3],
+                                   const float accel_body_m_s2[3], float dt_s,
+                                   float accel_gain);
+
+    /** @brief Quaternion MARG complementary update using gyro, accelerometer, and magnetometer.
+     *
+     * mag_ref_nav is the expected magnetic field direction in navigation frame.
+     * Both accel and mag measurements are treated as direction observations.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_quat_complementary_marg(float q_body2nav[4], const float gyro_rad_s[3],
+                                    const float accel_body_m_s2[3], const float mag_body[3],
+                                    const float mag_ref_nav[3], float dt_s, float accel_gain,
+                                    float mag_gain);
+
+    /** @brief Remove gravity from a body-frame accelerometer sample using quaternion attitude.
+     *
+     * Output is linear acceleration in body frame.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_remove_gravity_body_quat(const float accel_body_m_s2[3],
+                                     const float q_body2nav[4],
+                                     float linear_accel_body_m_s2[3]);
+
+    /** @brief Integrate Euler angles with body-frame gyro rates.
+     *
+     * Compatibility helper. Quaternion propagation is preferred for navigation
+     * computation; Euler angles should normally be used only as input/output.
+     *
+     * Uses the standard 3-2-1 Euler angle rate equations.
+     *
+     * @return 0 on success, -1 on invalid input or near singular pitch.
+     */
+    int nav_euler_integrate_gyro(float* roll_rad, float* pitch_rad, float* yaw_rad,
+                                 const float gyro_rad_s[3], float dt_s);
+
+    /** @brief Complementary roll/pitch update from gyro and accelerometer.
+     *
+     * alpha blends gyro prediction with accelerometer tilt: 1 keeps gyro only,
+     * 0 uses accelerometer tilt only.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_complementary_roll_pitch(float* roll_rad, float* pitch_rad, const float gyro_rad_s[3],
+                                     const float accel_m_s2[3], float dt_s, float alpha);
+
+    /** @brief Complementary yaw update from gyro z-rate and magnetometer heading.
+     *
+     * @return 0 on success, -1 on invalid input.
+     */
+    int nav_complementary_yaw(float* yaw_rad, float gyro_z_rad_s, const float mag_body[3],
+                              float roll_rad, float pitch_rad, float dt_s, float alpha);
+
+    /** @brief Compute accelerometer magnitude. */
+    float nav_accel_norm(const float accel_m_s2[3]);
+
+    /** @brief Gate accelerometer samples by closeness to gravity.
+     *
+     * @return 1 if accepted, 0 if rejected, -1 on invalid input.
+     */
+    int nav_accel_gravity_gate(const float accel_m_s2[3], float tolerance_m_s2,
+                               float* norm_m_s2);
+
+    /** @brief Remove gravity from a body-frame accelerometer sample.
+     *
+     * Output is linear acceleration in body frame.
+     */
+    void nav_remove_gravity_body(const float accel_body_m_s2[3], float roll_rad, float pitch_rad,
+                                 float yaw_rad, float linear_accel_body_m_s2[3]);
+
+    /** @brief Static/ZUPT detector using gyro norm and acceleration norm.
+     *
+     * @return 1 if static, 0 if moving, -1 on invalid input.
+     */
+    int nav_zupt_static_gate(const float accel_m_s2[3], const float gyro_rad_s[3],
+                             float accel_tolerance_m_s2, float gyro_threshold_rad_s,
+                             float* accel_norm_m_s2, float* gyro_norm_rad_s);
+
 #ifdef __cplusplus
 }
 #endif
