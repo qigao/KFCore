@@ -767,13 +767,13 @@ enum sp_return sp_blocking_write(struct sp_port *port, const void *buf, size_t c
 
   timeout_start(&timeout, timeout_ms);
 
-  FD_ZERO(&fds);
-  FD_SET(port->fd, &fds);
-
   /* Loop until we have written the requested number of bytes. */
   while (bytes_written < count) {
 
     if (timeout_check(&timeout)) break;
+
+    FD_ZERO(&fds);
+    FD_SET(port->fd, &fds);
 
     result = select(port->fd + 1, NULL, &fds, NULL, timeout_timeval(&timeout));
 
@@ -943,14 +943,14 @@ enum sp_return sp_blocking_read(struct sp_port *port, void *buf, size_t count,
 
   timeout_start(&timeout, timeout_ms);
 
-  FD_ZERO(&fds);
-  FD_SET(port->fd, &fds);
-
   /* Loop until we have the requested number of bytes. */
   while (bytes_read < count) {
 
     if (timeout_check(&timeout)) /* Timeout has expired. */
       break;
+
+    FD_ZERO(&fds);
+    FD_SET(port->fd, &fds);
 
     result = select(port->fd + 1, &fds, NULL, NULL, timeout_timeval(&timeout));
 
@@ -1045,14 +1045,14 @@ enum sp_return sp_blocking_read_next(struct sp_port *port, void *buf, size_t cou
 
   timeout_start(&timeout, timeout_ms);
 
-  FD_ZERO(&fds);
-  FD_SET(port->fd, &fds);
-
   /* Loop until we have at least one byte, or timeout is reached. */
   while (bytes_read == 0) {
 
     if (timeout_check(&timeout)) /* Timeout has expired. */
       break;
+
+    FD_ZERO(&fds);
+    FD_SET(port->fd, &fds);
 
     result = select(port->fd + 1, &fds, NULL, NULL, timeout_timeval(&timeout));
 
@@ -1096,7 +1096,11 @@ enum sp_return sp_nonblocking_read(struct sp_port *port, void *buf, size_t count
   if (!buf) return sp_error_return(__func__, SP_ERR_ARG, "SP_ERR_ARG", "Null buffer");
 
 #ifdef _WIN32
-  DWORD bytes_read;
+  DWORD bytes_read = 0;
+  DWORD read_size;
+  DWORD errors;
+  COMSTAT comstat;
+  BOOL read_started;
 
   /* Set timeout. */
   if (port->timeouts.ReadIntervalTimeout != MAXDWORD ||
@@ -1108,13 +1112,39 @@ enum sp_return sp_nonblocking_read(struct sp_port *port, void *buf, size_t count
     if (SetCommTimeouts(port->hdl, &port->timeouts) == 0) return sp_fail_return(__func__, "SetCommTimeouts() failed");
   }
 
+  if (count == 0) return 0;
+
+  if (ClearCommError(port->hdl, &errors, &comstat) == 0)
+    return sp_fail_return(__func__, "ClearCommError() failed");
+
+  if (comstat.cbInQue == 0) {
+    enum sp_return ret = restart_wait_if_needed(port, 0);
+    if (ret != SP_OK) return sp_normalize_return(ret);
+    return 0;
+  }
+
+  read_size = (count > (size_t)comstat.cbInQue) ? comstat.cbInQue : (DWORD)count;
+
   /* Do read. */
-  if (ReadFile(port->hdl, buf, (DWORD)count, NULL, &port->read_ovl) == 0)
-    if (GetLastError() != ERROR_IO_PENDING) return sp_fail_return(__func__, "ReadFile() failed");
+  read_started = ReadFile(port->hdl, buf, read_size, NULL, &port->read_ovl);
+  if (!read_started && GetLastError() != ERROR_IO_PENDING)
+    return sp_fail_return(__func__, "ReadFile() failed");
 
   /* Get number of bytes read. */
-  if (GetOverlappedResult(port->hdl, &port->read_ovl, &bytes_read, FALSE) == 0)
-    return sp_fail_return(__func__, "GetOverlappedResult() failed");
+  if (GetOverlappedResult(port->hdl, &port->read_ovl, &bytes_read, FALSE) == 0) {
+    DWORD error = GetLastError();
+    if (error == ERROR_IO_INCOMPLETE) {
+      if (CancelIoEx(port->hdl, &port->read_ovl) == 0 && GetLastError() != ERROR_NOT_FOUND)
+        return sp_fail_return(__func__, "CancelIoEx() failed");
+      if (GetOverlappedResult(port->hdl, &port->read_ovl, &bytes_read, TRUE) == 0) {
+        error = GetLastError();
+        if (error == ERROR_OPERATION_ABORTED || error == ERROR_NOT_FOUND) bytes_read = 0;
+        else return sp_fail_return(__func__, "GetOverlappedResult() failed");
+      }
+    } else {
+      return sp_fail_return(__func__, "GetOverlappedResult() failed");
+    }
+  }
 
   {
     enum sp_return ret = restart_wait_if_needed(port, bytes_read);
@@ -1274,8 +1304,10 @@ enum sp_return sp_wait(struct sp_event_set *event_set, unsigned int timeout_ms) 
   if (!event_set) return sp_error_return(__func__, SP_ERR_ARG, "SP_ERR_ARG", "Null event set");
 
 #ifdef _WIN32
-  if (WaitForMultipleObjects(event_set->count, event_set->handles, FALSE,
-                             timeout_ms ? timeout_ms : INFINITE) == WAIT_FAILED)
+  DWORD wait_result = WaitForMultipleObjects(event_set->count, event_set->handles, FALSE,
+                                            timeout_ms ? timeout_ms : INFINITE);
+  if (wait_result == WAIT_TIMEOUT) return SP_ERR_TIMEOUT;
+  if (wait_result == WAIT_FAILED)
     return sp_fail_return(__func__, "WaitForMultipleObjects() failed");
 
   return SP_OK;
@@ -1306,11 +1338,16 @@ enum sp_return sp_wait(struct sp_event_set *event_set, unsigned int timeout_ms) 
 
     if (timeout_check(&timeout)) {
       TLOG_DEBUG("Wait timed out");
-      break;
+      free(pollfds);
+      return SP_ERR_TIMEOUT;
     }
 
-    poll_timeout = (int)timeout_remaining_ms(&timeout);
-    if (poll_timeout == 0) poll_timeout = -1;
+    if (timeout_ms == 0) {
+      poll_timeout = -1;
+    } else {
+      poll_timeout = (int)timeout_remaining_ms(&timeout);
+      if (poll_timeout == 0) poll_timeout = 1;
+    }
 
     result = poll(pollfds, event_set->count, poll_timeout);
 
@@ -1326,7 +1363,10 @@ enum sp_return sp_wait(struct sp_event_set *event_set, unsigned int timeout_ms) 
       }
     } else if (result == 0) {
       TLOG_DEBUG("poll() timed out");
-      if (!timeout.overflow) break;
+      if (!timeout.overflow) {
+        free(pollfds);
+        return SP_ERR_TIMEOUT;
+      }
     } else {
       TLOG_DEBUG("poll() completed");
       break;

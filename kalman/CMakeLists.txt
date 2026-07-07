@@ -10,13 +10,15 @@ set(KFCORE_SOURCES
     kalman_takasu.c
     kalman_udu.c
     kalman_ekf.c
-    kalman_ukf.c)
+    kalman_ukf.c
+    signal_filters.c)
 
 set(KFCORE_PUBLIC_HEADERS
     kalman_takasu.h
     kalman_udu.h
     kalman_ekf.h
-    kalman_ukf.h)
+    kalman_ukf.h
+    signal_filters.h)
 
 add_library(kfcore SHARED)
 add_library(KFCore::kfcore ALIAS kfcore)
@@ -38,19 +40,22 @@ target_compile_features(kfcore PUBLIC c_std_11)
 # miniblas archive or target.
 target_link_libraries(kfcore PRIVATE miniblas)
 
-# Optional SIMDe acceleration for selected mini-BLAS kernels.
-if(KFCORE_USE_SIMDE)
-    find_path(SIMDE_INCLUDE_DIR NAMES simde/x86/sse.h REQUIRED)
-    target_include_directories(kfcore PRIVATE "${SIMDE_INCLUDE_DIR}")
-    target_compile_definitions(kfcore PRIVATE KFCORE_USE_SIMDE=1)
-endif()
-
 # Optional navigation helper functions.
 if(KFCORE_BUILD_NAVIGATION_TOOLS)
-    list(APPEND KFCORE_PUBLIC_HEADERS navigation_tools/navtoolbox.h)
+    list(APPEND KFCORE_PUBLIC_HEADERS
+        navigation_tools/frame_transform.h
+        navigation_tools/navtoolbox.h
+        navigation_tools/nav_fusion2d.h
+        navigation_tools/nav_fusion3d.h)
     target_sources(kfcore
-        PRIVATE navigation_tools/navtoolbox.c
-                navigation_tools/navtoolbox.h)
+        PRIVATE navigation_tools/frame_transform.c
+                navigation_tools/frame_transform.h
+                navigation_tools/navtoolbox.c
+                navigation_tools/navtoolbox.h
+                navigation_tools/nav_fusion2d.c
+                navigation_tools/nav_fusion2d.h
+                navigation_tools/nav_fusion3d.c
+                navigation_tools/nav_fusion3d.h)
     target_include_directories(kfcore
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/navigation_tools>

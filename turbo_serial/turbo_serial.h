@@ -155,7 +155,9 @@ TURBO_SERIAL_API turbo_serial_result_t turbo_serial_open(turbo_serial_t *serial,
 /* Stop async I/O if needed and close the current port. */
 TURBO_SERIAL_API turbo_serial_result_t turbo_serial_close(turbo_serial_t *serial);
 
-/* Blocking read/write calls are valid only while the async pump is stopped. */
+/* Blocking read/write calls use the OS serial handle directly. They are valid
+ * only while the async pump is stopped.
+ */
 TURBO_SERIAL_API turbo_serial_result_t turbo_serial_read(turbo_serial_t *serial, void *buf,
                                                         size_t count, unsigned int timeout_ms,
                                                         size_t *bytes_read);
@@ -172,7 +174,9 @@ TURBO_SERIAL_API turbo_serial_result_t turbo_serial_stop_async(turbo_serial_t *s
 TURBO_SERIAL_API int turbo_serial_async_running(const turbo_serial_t *serial);
 TURBO_SERIAL_API turbo_serial_result_t turbo_serial_last_error(const turbo_serial_t *serial);
 
-/* Event sets wait on currently opened TurboSerial handles. */
+/* Event sets wait on currently opened TurboSerial handles.
+ * A timeout is reported as TURBO_SERIAL_WOULD_BLOCK.
+ */
 TURBO_SERIAL_API turbo_serial_result_t
 turbo_serial_event_set_create(turbo_serial_event_set_t **event_set);
 TURBO_SERIAL_API void turbo_serial_event_set_destroy(turbo_serial_event_set_t *event_set);
@@ -188,7 +192,14 @@ TURBO_SERIAL_API size_t turbo_serial_tx_available(const turbo_serial_t *serial);
 TURBO_SERIAL_API size_t turbo_serial_rx_capacity(const turbo_serial_t *serial);
 TURBO_SERIAL_API size_t turbo_serial_tx_capacity(const turbo_serial_t *serial);
 
-/* Buffered APIs operate on the handle-owned SPSC queues.
+/* Buffered APIs operate on the handle-owned SPSC queues and are the async data
+ * path used with turbo_serial_start_async().
+ *
+ * Threading contract per handle:
+ * - RX ring: one producer is the async pump, one consumer calls read_buffered.
+ * - TX ring: one producer calls write_buffered, one consumer is the async pump.
+ * Multiple application readers or multiple application writers require
+ * external synchronization.
  *
  * turbo_serial_buffer_rx() and turbo_serial_drain_tx_buffer() are intended for
  * tests and adapters and require the async pump to be stopped.

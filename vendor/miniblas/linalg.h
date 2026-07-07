@@ -71,6 +71,29 @@ extern "C"
      */
     void matmulsym(const float* A_sym, const float* B, int n, int m, float* C);
 
+    /** @brief Matrix-vector multiply y = alpha*op(A)*x + beta*y.
+     * @param[in] trans Supply "T" for transpose(A) or "N" for A.
+     * @param[in] rows Rows of A.
+     * @param[in] cols Columns of A.
+     * @param[in] alpha Factor alpha.
+     * @param[in] A Input matrix A (rows x cols), column-major.
+     * @param[in] x Input vector, length cols for "N" or rows for "T".
+     * @param[in] beta Factor beta.
+     * @param[in,out] y Output vector, length rows for "N" or cols for "T".
+     */
+    void matvec(const char* trans, int rows, int cols, float alpha, const float* A,
+                const float* x, float beta, float* y);
+
+    /** @brief Rank-1 matrix update A = A + alpha*x*y'.
+     * @param[in,out] A Matrix A (rows x cols), column-major.
+     * @param[in] x Input vector with rows elements.
+     * @param[in] y Input vector with cols elements.
+     * @param[in] rows Rows of A.
+     * @param[in] cols Columns of A.
+     * @param[in] alpha Factor alpha.
+     */
+    void rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha);
+
     /** @brief Fill array with an identity matrix.
      * @param[out] A To be filled (n x n).
      * @param[in] n Dimension of A. */
@@ -140,6 +163,59 @@ extern "C"
      *
      */
     int udu(const float* A, float* U, float* d, const int n);
+
+    /** @brief Dot product of two contiguous vectors. */
+    float vecdot(const float* x, const float* y, int n);
+
+    /** @brief Euclidean norm of a contiguous vector. */
+    float vecnorm(const float* x, int n);
+
+    /** @brief Mean of a contiguous vector. */
+    float vecmean(const float* x, int n);
+
+    /** @brief Variance of a contiguous vector.
+     * @param[in] ddof Delta degrees of freedom, usually 0 for population or 1 for sample.
+     */
+    float vecvariance(const float* x, int n, int ddof);
+
+    /** @brief Root mean square of a contiguous vector. */
+    float vecrms(const float* x, int n);
+
+    /** @brief Normalize a contiguous vector in place.
+     * @param[in,out] x Vector to normalize.
+     * @param[in] n Number of elements.
+     * @param[in] eps Minimum accepted norm.
+     * @param[out] norm Optional original norm output.
+     * @return 0 on success, -1 on invalid input or near-zero norm.
+     */
+    int vecnormalize(float* x, int n, float eps, float* norm);
+
+    /** @brief L1 distance between two contiguous vectors. */
+    float vecdist_l1(const float* x, const float* y, int n);
+
+    /** @brief L-infinity distance between two contiguous vectors. */
+    float vecdist_linf(const float* x, const float* y, int n);
+
+    /** @brief Cosine similarity between two contiguous vectors.
+     * @return 0 on success, -1 on invalid input or zero norm.
+     */
+    int veccosine(const float* x, const float* y, int n, float* cosine);
+
+    /** @brief Determinant of a 2x2 matrix, column-major. */
+    float mat2det(const float* A);
+
+    /** @brief Inverse of a 2x2 matrix, column-major.
+     * @return 0 on success, -1 on singular/invalid input.
+     */
+    int mat2inv(const float* A, float* Ainv, float eps);
+
+    /** @brief Determinant of a 3x3 matrix, column-major. */
+    float mat3det(const float* A);
+
+    /** @brief Inverse of a 3x3 matrix, column-major.
+     * @return 0 on success, -1 on singular/invalid input.
+     */
+    int mat3inv(const float* A, float* Ainv, float eps);
 
 #ifdef __cplusplus
 }

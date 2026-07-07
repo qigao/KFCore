@@ -34,6 +34,18 @@ find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 include(CTest)
 
 add_subdirectory(vendor)
+add_subdirectory(trackers)
+
+if(KFCORE_BUILD_APRILTAG)
+  set(APRILTAG_BUILD_EXAMPLES "${KFCORE_BUILD_APRILTAG_EXAMPLES}" CACHE BOOL
+      "Build AprilTag example executables" FORCE)
+  set(APRILTAG_BUILD_PYTHON_WRAPPER "${KFCORE_BUILD_APRILTAG_PYTHON}" CACHE BOOL
+      "Build AprilTag Python wrapper" FORCE)
+  set(APRILTAG_BUILD_TESTS "${KFCORE_BUILD_APRILTAG_TESTS}" CACHE BOOL
+      "Build AprilTag upstream tests" FORCE)
+  set(APRILTAG_INSTALL OFF CACHE BOOL "Install AprilTag from the vendored subproject" FORCE)
+  add_subdirectory(apriltag)
+endif()
 add_subdirectory(kalman)
 add_subdirectory(turbo_serial)
 
@@ -48,11 +60,14 @@ if(KFCORE_INSTALL)
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 
   install(FILES kalman/kalman_takasu.h kalman/kalman_udu.h kalman/kalman_ekf.h
-                kalman/kalman_ukf.h
+                kalman/kalman_ukf.h kalman/signal_filters.h
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
 
   if(KFCORE_BUILD_NAVIGATION_TOOLS)
-    install(FILES kalman/navigation_tools/navtoolbox.h
+    install(FILES kalman/navigation_tools/frame_transform.h
+                  kalman/navigation_tools/navtoolbox.h
+                  kalman/navigation_tools/nav_fusion2d.h
+                  kalman/navigation_tools/nav_fusion3d.h
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
   endif()
 

@@ -262,6 +262,8 @@ static turbo_serial_result_t result_from_sp(enum sp_return result) {
     return TURBO_SERIAL_NO_MEMORY;
   case SP_ERR_SUPP:
     return TURBO_SERIAL_NOT_SUPPORTED;
+  case SP_ERR_TIMEOUT:
+    return TURBO_SERIAL_WOULD_BLOCK;
   default:
     return TURBO_SERIAL_IO_FAILED;
   }
