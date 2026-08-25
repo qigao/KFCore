@@ -29,7 +29,7 @@ install(FILES uuid.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 if(BUILD_TESTING)
     add_executable(uuid_test tests/uuid_test.c)
-    target_link_libraries(uuid_test PRIVATE uuid TurboNet::TinyTest)
+    target_link_libraries(uuid_test PRIVATE uuid TurboUtils::TinyTest)
     add_test(NAME uuid_test COMMAND uuid_test)
     set_target_properties(uuid_test PROPERTIES FOLDER "vendor/uuid/tests")
 endif()
