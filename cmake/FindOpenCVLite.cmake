@@ -45,9 +45,9 @@ set(_OpenCVLite_discovered_include_dir "_OpenCVLite_discovered_include_dir-NOTFO
 find_path(_OpenCVLite_discovered_include_dir
   NAMES opencv2/core.hpp
   PATHS "${_OpenCVLite_root}/include"
-  NO_DEFAULT_PATH
-  NO_CACHE)
+  NO_DEFAULT_PATH)
 set(OpenCVLite_INCLUDE_DIR "${_OpenCVLite_discovered_include_dir}")
+unset(_OpenCVLite_discovered_include_dir CACHE)
 if(NOT OpenCVLite_INCLUDE_DIR)
   message(FATAL_ERROR "OPENCV_LITE_ROOT does not contain opencv2/core.hpp: ${_OpenCVLite_root}")
 endif()
@@ -89,10 +89,10 @@ function(_opencv_lite_find_component component)
   find_library(_OpenCVLite_discovered_release_library
     NAMES ${_OpenCVLite_release_names}
     PATHS ${_OpenCVLite_library_paths}
-    NO_DEFAULT_PATH
-    NO_CACHE)
+    NO_DEFAULT_PATH)
   set(OpenCVLite_${_OpenCVLite_upper}_RELEASE_LIBRARY
     "${_OpenCVLite_discovered_release_library}")
+  unset(_OpenCVLite_discovered_release_library CACHE)
   unset(_OpenCVLite_discovered_debug_library)
   unset(_OpenCVLite_discovered_debug_library CACHE)
   set(_OpenCVLite_discovered_debug_library
@@ -100,10 +100,10 @@ function(_opencv_lite_find_component component)
   find_library(_OpenCVLite_discovered_debug_library
     NAMES ${_OpenCVLite_debug_names}
     PATHS ${_OpenCVLite_library_paths}
-    NO_DEFAULT_PATH
-    NO_CACHE)
+    NO_DEFAULT_PATH)
   set(OpenCVLite_${_OpenCVLite_upper}_DEBUG_LIBRARY
     "${_OpenCVLite_discovered_debug_library}")
+  unset(_OpenCVLite_discovered_debug_library CACHE)
 
   if(NOT OpenCVLite_${_OpenCVLite_upper}_RELEASE_LIBRARY AND
      NOT OpenCVLite_${_OpenCVLite_upper}_DEBUG_LIBRARY)
@@ -131,10 +131,10 @@ function(_opencv_lite_find_component component)
     find_file(_OpenCVLite_discovered_release_runtime
       NAMES "opencv_${component}${_OpenCVLite_version_suffix}.dll" "opencv_${component}.dll"
       PATHS "${_OpenCVLite_root}/bin"
-      NO_DEFAULT_PATH
-      NO_CACHE)
+      NO_DEFAULT_PATH)
     set(_OpenCVLite_${_OpenCVLite_upper}_RELEASE_RUNTIME
       "${_OpenCVLite_discovered_release_runtime}")
+    unset(_OpenCVLite_discovered_release_runtime CACHE)
     unset(_OpenCVLite_discovered_debug_runtime)
     unset(_OpenCVLite_discovered_debug_runtime CACHE)
     set(_OpenCVLite_discovered_debug_runtime
@@ -142,10 +142,10 @@ function(_opencv_lite_find_component component)
     find_file(_OpenCVLite_discovered_debug_runtime
       NAMES "opencv_${component}${_OpenCVLite_version_suffix}d.dll" "opencv_${component}d.dll"
       PATHS "${_OpenCVLite_root}/bin"
-      NO_DEFAULT_PATH
-      NO_CACHE)
+      NO_DEFAULT_PATH)
     set(_OpenCVLite_${_OpenCVLite_upper}_DEBUG_RUNTIME
       "${_OpenCVLite_discovered_debug_runtime}")
+    unset(_OpenCVLite_discovered_debug_runtime CACHE)
 
     set(_OpenCVLite_imported_configurations)
     if(OpenCVLite_${_OpenCVLite_upper}_RELEASE_LIBRARY)

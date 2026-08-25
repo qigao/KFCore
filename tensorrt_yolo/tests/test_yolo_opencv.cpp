@@ -9,6 +9,22 @@
 
 using namespace kfcore::yolo;
 
+namespace {
+
+cv::Mat ink_mask_above_box(const cv::Mat& image, int box_top) {
+    cv::Mat mask(box_top, image.cols, CV_8UC1, cv::Scalar::all(0));
+    for (int y = 0; y < box_top; ++y) {
+        for (int x = 0; x < image.cols; ++x) {
+            const cv::Vec3b pixel = image.at<cv::Vec3b>(y, x);
+            mask.at<unsigned char>(y, x) =
+                pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0 ? 255 : 0;
+        }
+    }
+    return mask;
+}
+
+}  // namespace
+
 spec("YOLO OpenCV adapter") {
     it("borrows a strided CV_8UC3 ROI without flattening it") {
         cv::Mat parent(20, 30, CV_8UC3, cv::Scalar::all(0));
@@ -121,6 +137,48 @@ spec("YOLO OpenCV adapter") {
         check(cv::norm(first, different_score, cv::NORM_INF) > 0.0);
     }
 
+    it("uses a deterministic ID-derived color at the rectangle boundary") {
+        cv::Mat first(128, 192, CV_8UC3, cv::Scalar::all(0));
+        cv::Mat repeat = first.clone();
+        cv::Mat different_id = first.clone();
+        TrackFrame first_track{192, 128,
+                               {{{{100.0f, 60.0f, 150.0f, 110.0f}, 0.5f, 3},
+                                 std::uint64_t{101}}}};
+        TrackFrame second_track{192, 128,
+                                {{{{100.0f, 60.0f, 150.0f, 110.0f}, 0.5f, 3},
+                                  std::uint64_t{202}}}};
+
+        draw_tracks(first, first_track);
+        draw_tracks(repeat, first_track);
+        draw_tracks(different_id, second_track);
+
+        const cv::Vec3b first_color = first.at<cv::Vec3b>(80, 100);
+        const cv::Vec3b repeat_color = repeat.at<cv::Vec3b>(80, 100);
+        const cv::Vec3b second_color = different_id.at<cv::Vec3b>(80, 100);
+        check(first_color == repeat_color);
+        check(first_color != second_color);
+    }
+
+    it("includes confirmed IDs in the label independently of their color") {
+        constexpr int box_top = 55;
+        cv::Mat first(96, 512, CV_8UC3, cv::Scalar::all(0));
+        cv::Mat second = first.clone();
+        TrackFrame first_track{512, 96,
+                               {{{{4.0f, static_cast<float>(box_top), 400.0f, 85.0f},
+                                  0.25f, 3},
+                                 std::uint64_t{101}}}};
+        TrackFrame second_track{512, 96,
+                                {{{{4.0f, static_cast<float>(box_top), 400.0f, 85.0f},
+                                   0.25f, 3},
+                                  std::uint64_t{202}}}};
+
+        draw_tracks(first, first_track);
+        draw_tracks(second, second_track);
+
+        check(cv::norm(ink_mask_above_box(first, box_top),
+                       ink_mask_above_box(second, box_top), cv::NORM_INF) > 0.0);
+    }
+
     it("labels explicitly drawn unconfirmed tracks") {
         cv::Mat low_score(32, 256, CV_8UC3, cv::Scalar::all(0));
         cv::Mat high_score = low_score.clone();
@@ -174,5 +232,39 @@ spec("YOLO OpenCV adapter") {
         check_throws_as(draw_tracks(image, reversed), YoloError);
         draw_tracks(image, clipped);
         check(cv::norm(image, cv::NORM_INF) > 0.0);
+    }
+
+    it("rejects invalid scores and font scales without partial rendering") {
+        cv::Mat image(48, 96, CV_8UC3, cv::Scalar::all(0));
+        const cv::Mat before = image.clone();
+        TrackFrame below_range{96, 48,
+                               {
+                                   {{{4.0f, 20.0f, 40.0f, 42.0f}, 0.5f, 3},
+                                    std::uint64_t{1}},
+                                   {{{44.0f, 20.0f, 80.0f, 42.0f}, -0.01f, 3},
+                                    std::uint64_t{2}},
+                               }};
+        TrackFrame above_range{96, 48,
+                               {
+                                   {{{4.0f, 20.0f, 40.0f, 42.0f}, 0.5f, 3},
+                                    std::uint64_t{1}},
+                                   {{{44.0f, 20.0f, 80.0f, 42.0f}, 1.01f, 3},
+                                    std::uint64_t{2}},
+                               }};
+        TrackFrame valid{96, 48,
+                         {{{{4.0f, 20.0f, 40.0f, 42.0f}, 0.5f, 3}, std::uint64_t{1}}}};
+        DrawOptions zero_font;
+        zero_font.font_scale = 0.0;
+        DrawOptions nan_font;
+        nan_font.font_scale = (std::numeric_limits<double>::quiet_NaN)();
+
+        check_throws_as(draw_tracks(image, below_range), YoloError);
+        check(cv::norm(image, before, cv::NORM_INF) == 0.0);
+        check_throws_as(draw_tracks(image, above_range), YoloError);
+        check(cv::norm(image, before, cv::NORM_INF) == 0.0);
+        check_throws_as(draw_tracks(image, valid, zero_font), YoloError);
+        check(cv::norm(image, before, cv::NORM_INF) == 0.0);
+        check_throws_as(draw_tracks(image, valid, nan_font), YoloError);
+        check(cv::norm(image, before, cv::NORM_INF) == 0.0);
     }
 }
