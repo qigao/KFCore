@@ -1,7 +1,14 @@
 if(NOT DEFINED KFCORE_BINARY_DIR OR NOT DEFINED KFCORE_CONSUMER_SOURCE_DIR OR
    NOT DEFINED KFCORE_CONSUMER_BINARY_DIR OR NOT DEFINED KFCORE_CONSUMER_INSTALL_PREFIX OR
-   NOT DEFINED KFCORE_CONSUMER_KFCORE_DIR OR NOT DEFINED KFCORE_CONSUMER_TRACKERS_DIR)
+   NOT DEFINED KFCORE_CONSUMER_KFCORE_DIR OR NOT DEFINED KFCORE_CONSUMER_TRACKERS_DIR OR
+   NOT DEFINED KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS OR
+   NOT DEFINED KFCORE_CONSUMER_BUILD_CONFIG)
   message(FATAL_ERROR "Installed-consumer test paths are required")
+endif()
+if(NOT "${KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS}" STREQUAL "ON" AND
+   NOT "${KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS}" STREQUAL "OFF")
+  message(FATAL_ERROR
+    "KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS must be an explicit ON or OFF value")
 endif()
 
 file(REMOVE_RECURSE "${KFCORE_CONSUMER_BINARY_DIR}" "${KFCORE_CONSUMER_INSTALL_PREFIX}")
@@ -23,7 +30,7 @@ execute_process(
     "-Dtrackers_DIR=${KFCORE_CONSUMER_TRACKERS_DIR}"
     "-DKFCORE_EXPECTED_KFCORE_DIR=${KFCORE_CONSUMER_KFCORE_DIR}"
     "-DKFCORE_EXPECTED_TRACKERS_DIR=${KFCORE_CONSUMER_TRACKERS_DIR}"
-    -DCMAKE_BUILD_TYPE=Debug
+    "-DCMAKE_BUILD_TYPE=${KFCORE_CONSUMER_BUILD_CONFIG}"
     -DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=TRUE
@@ -35,7 +42,8 @@ if(NOT _configure_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" --build "${KFCORE_CONSUMER_BINARY_DIR}" --config Debug
+  COMMAND "${CMAKE_COMMAND}" --build "${KFCORE_CONSUMER_BINARY_DIR}"
+    --config "${KFCORE_CONSUMER_BUILD_CONFIG}"
   RESULT_VARIABLE _build_result
   OUTPUT_VARIABLE _build_output
   ERROR_VARIABLE _build_error)
@@ -43,7 +51,8 @@ if(NOT _build_result EQUAL 0)
   message(FATAL_ERROR "Installed consumer build failed:\n${_build_output}\n${_build_error}")
 endif()
 
-set(_consumer_target_file "${KFCORE_CONSUMER_BINARY_DIR}/consumer-target-file-Debug.txt")
+set(_consumer_target_file
+  "${KFCORE_CONSUMER_BINARY_DIR}/consumer-target-file-${KFCORE_CONSUMER_BUILD_CONFIG}.txt")
 if(NOT EXISTS "${_consumer_target_file}")
   message(FATAL_ERROR "Consumer did not generate its target file path")
 endif()
@@ -56,17 +65,21 @@ endif()
 file(REAL_PATH "${KFCORE_BINARY_DIR}" _kfcore_binary_dir)
 file(REAL_PATH "${KFCORE_CONSUMER_INSTALL_PREFIX}" _consumer_install_prefix)
 if(WIN32)
-  unset(_asan_runtime CACHE)
-  find_file(_asan_runtime
-    NAMES clang_rt.asan_dynamic-x86_64.dll
-    PATHS $ENV{PATH}
-    NO_DEFAULT_PATH)
-  if(NOT _asan_runtime)
-    message(FATAL_ERROR "The Visual Studio AddressSanitizer runtime is required for this consumer test")
-  endif()
-  get_filename_component(_asan_runtime_dir "${_asan_runtime}" DIRECTORY)
   set(_consumer_runtime_path
-    "${_consumer_install_prefix}/bin;${_asan_runtime_dir};$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
+    "${_consumer_install_prefix}/bin;$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
+  if("${KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS}" STREQUAL "ON")
+    unset(_asan_runtime CACHE)
+    find_file(_asan_runtime
+      NAMES clang_rt.asan_dynamic-x86_64.dll
+      PATHS $ENV{PATH}
+      NO_DEFAULT_PATH)
+    if(NOT _asan_runtime)
+      message(FATAL_ERROR "The Visual Studio AddressSanitizer runtime is required when ENABLE_SANITIZER_ADDRESS is ON")
+    endif()
+    get_filename_component(_asan_runtime_dir "${_asan_runtime}" DIRECTORY)
+    set(_consumer_runtime_path
+      "${_consumer_install_prefix}/bin;${_asan_runtime_dir};$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
+  endif()
   set(_runtime_environment "PATH=${_consumer_runtime_path}")
 else()
   set(_consumer_runtime_path "${_consumer_install_prefix}/lib")
