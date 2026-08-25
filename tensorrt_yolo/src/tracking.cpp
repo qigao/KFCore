@@ -50,10 +50,11 @@ void validate_options(const ByteTrackOptions& options) {
     if (!std::isfinite(options.frame_rate) || options.frame_rate <= 0.0f) {
         throw_invalid_argument("frame_rate must be finite and positive");
     }
-    const long double scaled_lost_buffer =
-        static_cast<long double>(options.frame_rate) / 30.0L *
-        static_cast<long double>(options.lost_track_buffer);
-    if (!std::isfinite(scaled_lost_buffer) || scaled_lost_buffer > INT_MAX) {
+    const float scaled_lost_buffer =
+        options.frame_rate / 30.0f * static_cast<float>(options.lost_track_buffer);
+    const double range_checked_lost_buffer = static_cast<double>(scaled_lost_buffer);
+    if (!std::isfinite(scaled_lost_buffer) ||
+        range_checked_lost_buffer > static_cast<double>(INT_MAX)) {
         throw_invalid_argument("scaled lost_track_buffer exceeds tracker range");
     }
     if (options.minimum_consecutive_frames < 1) {
@@ -95,8 +96,10 @@ void validate_frame(const DetectionFrame& frame) {
             throw_invalid_argument("detection boxes must have positive area");
         }
         if (detection.box.left < 0.0f || detection.box.top < 0.0f ||
-            detection.box.right > static_cast<float>(frame.image_width) ||
-            detection.box.bottom > static_cast<float>(frame.image_height)) {
+            static_cast<double>(detection.box.right) >
+                static_cast<double>(frame.image_width) ||
+            static_cast<double>(detection.box.bottom) >
+                static_cast<double>(frame.image_height)) {
             throw_invalid_argument("detection boxes must lie inside the image");
         }
     }

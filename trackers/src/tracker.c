@@ -183,8 +183,19 @@ static int confidence_passes(detection_t detection, float threshold) {
     return !detection.has_confidence || detection.confidence >= threshold;
 }
 
-static int scaled_lost_buffer(int lost_track_buffer, float frame_rate) {
-    return (int)(frame_rate / 30.0f * (float)lost_track_buffer);
+static int scaled_lost_buffer_checked(
+    int lost_track_buffer,
+    float frame_rate,
+    int* result
+) {
+    const float scaled = frame_rate / 30.0f * (float)lost_track_buffer;
+    const double range_checked = (double)scaled;
+    if (!result || !isfinite(scaled) ||
+        range_checked < (double)INT_MIN || range_checked > (double)INT_MAX) {
+        return 0;
+    }
+    *result = (int)scaled;
+    return 1;
 }
 
 static void set_identity(float* matrix, int dim) {
@@ -704,12 +715,16 @@ ocsort_config_t ocsort_default_config(void) {
 sort_t* sort_create(const sort_config_t* config_in) {
     const sort_config_t config =
         config_in ? *config_in : sort_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     sort_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -851,12 +866,16 @@ size_t sort_update(sort_t* tracker, const detection_t* detections,
 bytetrack_t* bytetrack_create(const bytetrack_config_t* config_in) {
     const bytetrack_config_t config =
         config_in ? *config_in : bytetrack_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     bytetrack_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -1220,12 +1239,16 @@ size_t bytetrack_update(
 cbiou_t* cbiou_create(const cbiou_config_t* config_in) {
     const cbiou_config_t config =
         config_in ? *config_in : cbiou_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     cbiou_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_biou_threshold = config.minimum_biou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -1456,12 +1479,16 @@ static void ocsort_track_free(ocsort_track_t* track) {
 ocsort_t* ocsort_create(const ocsort_config_t* config_in) {
     const ocsort_config_t config =
         config_in ? *config_in : ocsort_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     ocsort_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->direction_consistency_weight = config.direction_consistency_weight;

@@ -128,6 +128,8 @@ spec("YOLO ByteTrack session") {
         options = immediate_options();
         options.lost_track_buffer = INT_MAX;
         options.frame_rate = 30.0f;
+        check_throws_as(ByteTrackSession(options), YoloError);
+        options.frame_rate = std::nextafter(30.0f, 0.0f);
         check_nothrow(ByteTrackSession(options));
     }
 
@@ -173,8 +175,11 @@ spec("YOLO ByteTrack session") {
         (void)session.update(classes);
         (void)control.update(classes);
 
-        trackers_test_alloc_fail_after(16);
+        // Two non-empty clones consume four allocations and the first class
+        // prepare phase consumes fourteen. The next allocation starts class two.
+        trackers_test_alloc_fail_after(18);
         check_throws_as(session.update(classes), YoloError);
+        check(trackers_test_alloc_count() == (size_t)18);
         trackers_test_alloc_reset();
 
         TrackFrame actual = session.update(classes);
@@ -222,5 +227,17 @@ spec("YOLO ByteTrack session") {
         (void)session.update(frame_for(-1));
         TrackFrame result = session.update(frame_for(-1));
         check(*result.detections[0].track_id == UINT64_C(0xffffffff00000000));
+    }
+
+    it("compares image bounds without rounding int32 dimensions to float") {
+        const float rounded_int_max = static_cast<float>(INT_MAX);
+        const float last_representable = std::nextafter(rounded_int_max, 0.0f);
+        ByteTrackSession session(immediate_options());
+        check_nothrow(session.update({INT_MAX, INT_MAX, {
+            {{0, 0, last_representable, last_representable}, 0.95f, 0},
+        }}));
+        check_throws_as(session.update({INT_MAX, INT_MAX, {
+            {{0, 0, rounded_int_max, last_representable}, 0.95f, 0},
+        }}), YoloError);
     }
 }

@@ -1,5 +1,8 @@
 #include "trackers/tracker.h"
 
+#include <limits.h>
+#include <math.h>
+
 #include "tinytest.h"
 #include "tracker_test_alloc.h"
 
@@ -44,7 +47,7 @@ suite("bytetrack update status") {
         bytetrack_destroy(tracker);
     }
 
-    it("clones tracker state without sharing later resets") {
+    it("keeps a clone usable after its source is destroyed") {
         bytetrack_config_t config = bytetrack_default_config();
         config.minimum_consecutive_frames = 1;
         bytetrack_t* tracker = bytetrack_create(&config);
@@ -61,31 +64,47 @@ suite("bytetrack update status") {
         check_equal(bytetrack_clone(tracker, &clone), TRACKER_STATUS_OK);
         check_not_null(clone);
 
-        bytetrack_reset(tracker);
-        check_equal(bytetrack_update_ex(tracker, detections, 1, output, 1, &written),
-                    TRACKER_STATUS_OK);
-        check_equal(output[0].tracked.tracker_id, -1);
+        bytetrack_destroy(tracker);
+        tracker = NULL;
         check_equal(bytetrack_update_ex(clone, detections, 1, output, 1, &written),
                     TRACKER_STATUS_OK);
         check_equal(output[0].tracked.tracker_id, 0);
 
         bytetrack_destroy(clone);
-        bytetrack_destroy(tracker);
     }
 
-    it("leaves the source untouched when clone allocation fails") {
-        bytetrack_t* tracker = bytetrack_create(NULL);
+    it("leaves a non-empty source usable when tracks clone allocation fails") {
+        bytetrack_config_t config = bytetrack_default_config();
+        detection_t detection = make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f);
+        tracked_detection_ex_t output[1];
+        size_t written = 0;
+        config.minimum_consecutive_frames = 1;
+        bytetrack_t* tracker = bytetrack_create(&config);
         bytetrack_t* clone = (bytetrack_t*)1;
 
         check_not_null(tracker);
-        trackers_test_alloc_fail_after(0);
+        check_equal(bytetrack_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        trackers_test_alloc_fail_after(1);
         check_equal(bytetrack_clone(tracker, &clone), TRACKER_STATUS_ALLOCATION_FAILED);
         check_null(clone);
         trackers_test_alloc_reset();
-        check_equal(bytetrack_clone(tracker, &clone), TRACKER_STATUS_OK);
-        check_not_null(clone);
+        check_equal(bytetrack_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(output[0].tracked.tracker_id, 0);
 
-        bytetrack_destroy(clone);
+        bytetrack_destroy(tracker);
+    }
+
+    it("rejects scaled lost buffers that cannot be represented as int") {
+        bytetrack_config_t config = bytetrack_default_config();
+        config.lost_track_buffer = INT_MAX;
+        config.frame_rate = 30.0f;
+        check_null(bytetrack_create(&config));
+
+        config.frame_rate = nextafterf(30.0f, 0.0f);
+        bytetrack_t* tracker = bytetrack_create(&config);
+        check_not_null(tracker);
         bytetrack_destroy(tracker);
     }
 }
