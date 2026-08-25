@@ -102,7 +102,8 @@ spec("TensorRT YOLO engine contract") {
         check(contract.opt_input_width == INT64_C(640));
         check(contract.max_input_width == INT64_C(1280));
         check(contract.images.max_bytes == std::size_t{58'982'400});
-        check(contract.floating_point_type == TensorDataType::Float32);
+        check(contract.input_type == TensorDataType::Float32);
+        check(contract.output_type == TensorDataType::Float32);
     }
 
     it("accepts the EfficientNMS trailing singleton count dimension") {
@@ -176,7 +177,7 @@ spec("TensorRT YOLO engine contract") {
         }
     }
 
-    it("accepts FP16 boxes and scores") {
+    it("accepts independent FP16 input and output types") {
         EngineMetadata metadata = valid_fp32_metadata();
         metadata.tensors[0].data_type = TensorDataType::Float16;
         metadata.tensors[2].data_type = TensorDataType::Float16;
@@ -186,7 +187,34 @@ spec("TensorRT YOLO engine contract") {
         metadata.tensors[3].physical_layout.bytes_per_component = 2;
 
         const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
-        check(contract.floating_point_type == TensorDataType::Float16);
+        check(contract.input_type == TensorDataType::Float16);
+        check(contract.output_type == TensorDataType::Float16);
+    }
+
+    it("accepts FP16 input with FP32 EfficientNMS outputs") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        metadata.tensors[0].data_type = TensorDataType::Float16;
+        metadata.tensors[0].physical_layout.bytes_per_component = 2;
+
+        const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
+        check(contract.input_type == TensorDataType::Float16);
+        check(contract.output_type == TensorDataType::Float32);
+        check(contract.images.max_bytes == std::size_t{29'491'200});
+        check(contract.boxes.max_bytes == std::size_t{19'200});
+    }
+
+    it("accepts FP32 input with FP16 EfficientNMS outputs") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        metadata.tensors[2].data_type = TensorDataType::Float16;
+        metadata.tensors[3].data_type = TensorDataType::Float16;
+        metadata.tensors[2].physical_layout.bytes_per_component = 2;
+        metadata.tensors[3].physical_layout.bytes_per_component = 2;
+
+        const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
+        check(contract.input_type == TensorDataType::Float32);
+        check(contract.output_type == TensorDataType::Float16);
+        check(contract.images.max_bytes == std::size_t{58'982'400});
+        check(contract.boxes.max_bytes == std::size_t{9'600});
     }
 
     it("binds a valid contract by name instead of tensor vector order") {

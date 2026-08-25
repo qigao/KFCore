@@ -160,10 +160,10 @@ TensorRtDetector::detect_batch(const std::vector<ImageView>& images)
         // copied into detector-owned pinned storage before asynchronous work is submitted.
         const detail::BatchInputPlan input_plan = detail::prepare_batch(
             images, minimum_batch, maximum_batch, input_width, input_height,
-            contract.floating_point_type, engine_options.max_input_bytes);
+            contract.input_type, engine_options.max_input_bytes);
         const detail::DetectionBufferLayout output_layout =
             detail::compute_detection_buffer_layout(images.size(), max_detections,
-                                                    contract.floating_point_type,
+                                                    contract.output_type,
                                                     engine_options.max_output_bytes);
         if (input_plan.input_bytes > contract.images.max_bytes ||
             output_layout.num_dets_bytes > contract.num_dets.max_bytes ||
@@ -254,7 +254,7 @@ TensorRtDetector::detect_batch(const std::vector<ImageView>& images)
                 void* destination = input_device_bytes + image_index * input_bytes_per_image;
                 detail::launch_letterbox(source, source_stride, image.pixel_format, destination,
                                          input_width, input_height,
-                                         contract.floating_point_type, plan.transform,
+                                         contract.input_type, plan.transform,
                                          impl_->options.mean, impl_->options.stddev,
                                          impl_->options.border_value, stream);
                 stream_work_pending = true;
@@ -302,7 +302,7 @@ TensorRtDetector::detect_batch(const std::vector<ImageView>& images)
                                "detection completion");
             stream_work_pending = false;
 
-            const std::size_t float_bytes = floating_element_size(contract.floating_point_type);
+            const std::size_t float_bytes = floating_element_size(contract.output_type);
             const detail::EfficientNmsOutputView output_view {
                 static_cast<const std::int32_t*>(impl_->num_dets_host.data()),
                 output_layout.num_dets_bytes / sizeof(std::int32_t),
@@ -313,7 +313,7 @@ TensorRtDetector::detect_batch(const std::vector<ImageView>& images)
                 static_cast<const std::int32_t*>(impl_->labels_host.data()),
                 output_layout.labels_bytes / sizeof(std::int32_t),
                 max_detections,
-                contract.floating_point_type,
+                contract.output_type,
             };
             std::vector<detail::LetterboxTransform> transforms;
             transforms.reserve(input_plan.images.size());

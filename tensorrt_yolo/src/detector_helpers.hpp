@@ -50,7 +50,7 @@ struct EfficientNmsOutputView
     const std::int32_t* labels;
     std::size_t         labels_count;
     std::size_t         max_detections;
-    TensorDataType      floating_point_type;
+    TensorDataType      output_type;
 };
 
 BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t min_batch,
@@ -60,7 +60,7 @@ BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t m
 
 DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
                                                        std::size_t max_detections,
-                                                       TensorDataType floating_point_type,
+                                                       TensorDataType output_type,
                                                        std::size_t max_output_bytes);
 
 std::vector<DetectionFrame>

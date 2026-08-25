@@ -241,8 +241,11 @@ ValidatedContract validate_engine_contract(
         }
         require_type(num_dets, TensorDataType::Int32);
         require_type(labels, TensorDataType::Int32);
-        require_type(boxes, images.data_type);
-        require_type(scores, images.data_type);
+        if (boxes.data_type != TensorDataType::Float16 &&
+            boxes.data_type != TensorDataType::Float32) {
+            contract_error(boxes.name, "output data type must be Float16 or Float32");
+        }
+        require_type(scores, boxes.data_type);
         for (const TensorDesc* tensor : {&images, &num_dets, &boxes, &scores, &labels}) {
             validate_physical_layout(*tensor);
         }
@@ -293,7 +296,7 @@ ValidatedContract validate_engine_contract(
             images.min_shape[0], images.opt_shape[0], images.max_shape[0], boxes.max_shape[1],
             images.min_shape[2], images.opt_shape[2], images.max_shape[2],
             images.min_shape[3], images.opt_shape[3], images.max_shape[3],
-            images.data_type, validated_images.max_bytes, output_bytes,
+            images.data_type, boxes.data_type, validated_images.max_bytes, output_bytes,
             std::move(validated_images), std::move(validated_num_dets),
             std::move(validated_boxes), std::move(validated_scores), std::move(validated_labels)};
     } catch (const std::bad_alloc&) {

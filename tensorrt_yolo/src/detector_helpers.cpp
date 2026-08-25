@@ -292,7 +292,7 @@ BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t m
 
 DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
                                                        std::size_t max_detections,
-                                                       TensorDataType floating_point_type,
+                                                       TensorDataType output_type,
                                                        std::size_t max_output_bytes)
 {
     if (batch == 0 || max_detections == 0)
@@ -300,7 +300,7 @@ DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
         throw_invalid("output layout stage: batch and maximum detections must be positive");
     }
     const std::size_t floating_bytes =
-        floating_element_size(floating_point_type, "output layout");
+        floating_element_size(output_type, "output layout");
     const std::size_t slots = checked_multiply(batch, max_detections, "output layout");
 
     DetectionBufferLayout result;
@@ -347,7 +347,7 @@ decode_efficient_nms(const std::vector<ImageView>& images,
         require_exact_size(outputs.boxes_count, box_elements, "boxes");
         require_exact_size(outputs.scores_count, slots, "scores");
         require_exact_size(outputs.labels_count, slots, "labels");
-        (void)floating_element_size(outputs.floating_point_type, "output validation");
+        (void)floating_element_size(outputs.output_type, "output validation");
 
         std::vector<DetectionFrame> results;
         results.reserve(images.size());
@@ -377,15 +377,15 @@ decode_efficient_nms(const std::vector<ImageView>& images,
                 const std::size_t slot = detection_base + detection_index;
                 const std::size_t box_base = slot * kBoxCoordinates;
                 const float left = floating_value(outputs.boxes, box_base,
-                                                  outputs.floating_point_type);
+                                                  outputs.output_type);
                 const float top = floating_value(outputs.boxes, box_base + 1,
-                                                 outputs.floating_point_type);
+                                                 outputs.output_type);
                 const float right = floating_value(outputs.boxes, box_base + 2,
-                                                   outputs.floating_point_type);
+                                                   outputs.output_type);
                 const float bottom = floating_value(outputs.boxes, box_base + 3,
-                                                    outputs.floating_point_type);
+                                                    outputs.output_type);
                 const float score =
-                    floating_value(outputs.scores, slot, outputs.floating_point_type);
+                    floating_value(outputs.scores, slot, outputs.output_type);
                 if (!std::isfinite(score))
                 {
                     throw_inference("output validation stage: score is not finite");

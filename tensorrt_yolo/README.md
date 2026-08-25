@@ -8,7 +8,8 @@ CMake target 组成：`KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
 
 只加载部署方生成或经可信渠道认证的序列化 engine。首期 engine 必须有一个 NCHW 三通道
 `images` 输入，以及 `num_dets`（INT32）、`boxes`、`scores` 和 `labels`（INT32）四个输出。
-`images`、`boxes` 和 `scores` 必须三者共同为 FP16 或共同为 FP32；名称可在 `TensorNames` 中显式覆盖。不合约的
+`images` 可独立为 FP16 或 FP32；`boxes` 和 `scores` 也可为 FP16 或 FP32，但二者必须同型。
+输入与 EfficientNMS 浮点输出不要求同型。名称可在 `TensorNames` 中显式覆盖。不合约的
 engine 会失败，绝不改走 raw-head 解码、CPU NMS、ONNX Runtime 或 OpenCV DNN。
 `num_dets` 可使用 `[batch]`，也可使用 TensorRT EfficientNMS 的 `[batch, 1]`；后一种形式的尾维必须固定为 1。
 

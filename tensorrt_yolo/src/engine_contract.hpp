@@ -68,7 +68,8 @@ struct ValidatedContract {
     std::int64_t min_input_width;
     std::int64_t opt_input_width;
     std::int64_t max_input_width;
-    TensorDataType floating_point_type;
+    TensorDataType input_type;
+    TensorDataType output_type;
     std::size_t input_bytes;
     std::size_t output_bytes;
     ValidatedTensor images;
