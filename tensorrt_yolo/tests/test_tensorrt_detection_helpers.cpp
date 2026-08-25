@@ -261,6 +261,25 @@ spec("TensorRT YOLO detection helpers")
         check(std::fabs(detection.score - 0.5f) < 1.0e-6f);
     }
 
+    it("rejects a box that collapses inside letterbox padding")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = { host_view(pixels, 960, 320, 2880) };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(960, 320, 640, 640),
+        };
+        const std::int32_t counts[] = { 1 };
+        const float boxes[] = { 10.0f, 0.0f, 20.0f, 100.0f };
+        const float scores[] = { 0.5f };
+        const std::int32_t labels[] = { 0 };
+        const EfficientNmsOutputView outputs {
+            counts, 1, boxes, 4, scores, 1, labels, 1, 1, TensorDataType::Float32,
+        };
+
+        expect_yolo_error([&] { (void)decode_efficient_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "positive area");
+    }
+
     it("rejects inconsistent output sizes counts labels and invalid floating values")
     {
         std::uint8_t pixels[3] {};

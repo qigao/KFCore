@@ -417,13 +417,20 @@ decode_efficient_nms(const std::vector<ImageView>& images,
                 }
                 const float image_width = static_cast<float>(image.width);
                 const float image_height = static_cast<float>(image.height);
+                const BoxF restored_box {
+                    (std::clamp)(mapped_left, 0.0f, image_width),
+                    (std::clamp)(mapped_top, 0.0f, image_height),
+                    (std::clamp)(mapped_right, 0.0f, image_width),
+                    (std::clamp)(mapped_bottom, 0.0f, image_height),
+                };
+                if (!(restored_box.left < restored_box.right) ||
+                    !(restored_box.top < restored_box.bottom))
+                {
+                    throw_inference(
+                        "output validation stage: restored box must have positive area");
+                }
                 frame.detections.push_back({
-                    {
-                        (std::clamp)(mapped_left, 0.0f, image_width),
-                        (std::clamp)(mapped_top, 0.0f, image_height),
-                        (std::clamp)(mapped_right, 0.0f, image_width),
-                        (std::clamp)(mapped_bottom, 0.0f, image_height),
-                    },
+                    restored_box,
                     score,
                     label,
                 });
