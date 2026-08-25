@@ -51,6 +51,53 @@ if(BUILD_TESTS)
   add_test(NAME test_yolo_tracking COMMAND test_yolo_tracking)
 endif()
 
+if(KFCORE_BUILD_TENSORRT_YOLO)
+  add_library(tensorrt_yolo SHARED
+    src/cuda_buffer.cpp
+    src/engine.cpp)
+  add_library(KFCore::tensorrt_yolo ALIAS tensorrt_yolo)
+
+  target_include_directories(tensorrt_yolo
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(tensorrt_yolo
+    PUBLIC KFCore::yolo_tracking
+    PRIVATE
+      TensorRT::nvinfer
+      TensorRT::nvinfer_plugin
+      CUDA::cudart)
+  set_target_properties(tensorrt_yolo PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    EXPORT_NAME tensorrt_yolo
+    FOLDER "tensorrt_yolo"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
+  if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
+    add_executable(test_tensorrt_integration
+      tests/test_tensorrt_integration.cpp)
+    target_link_libraries(test_tensorrt_integration PRIVATE
+      KFCore::tensorrt_yolo
+      TurboUtils::TinyTest)
+    set_target_properties(test_tensorrt_integration PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_tensorrt_integration COMMAND test_tensorrt_integration)
+  endif()
+
+  install(TARGETS tensorrt_yolo
+    EXPORT KFCoreTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
+
 install(TARGETS kfcore_yolo_tracking
   EXPORT KFCoreTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"

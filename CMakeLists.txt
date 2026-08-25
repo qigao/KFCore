@@ -28,6 +28,16 @@ include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
 
+if(KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_TRACKING)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_TENSORRT_YOLO requires KFCORE_BUILD_YOLO_TRACKING=ON")
+endif()
+
+if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS AND NOT KFCORE_BUILD_TENSORRT_YOLO)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS requires KFCORE_BUILD_TENSORRT_YOLO=ON")
+endif()
+
 find_package(Threads REQUIRED)
 
 find_package(TurboUtils CONFIG REQUIRED
@@ -44,6 +54,11 @@ add_subdirectory(trackers)
 
 if(KFCORE_BUILD_YOLO_TRACKING)
   enable_language(CXX)
+  if(KFCORE_BUILD_TENSORRT_YOLO)
+    find_package(TensorRT REQUIRED)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+  endif()
   add_subdirectory(tensorrt_yolo)
 endif()
 

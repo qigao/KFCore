@@ -93,6 +93,20 @@
             }
         },
         {
+            "name": "win-yolo-release-user",
+            "displayName": "YOLO TensorRT Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "environment": {
+                "TENSORRT_ROOT": "$env{PKG_ROOT}/tensorrt",
+                "OPENCV_LITE_ROOT": "$env{PKG_ROOT}/opencv-lite"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_YOLO_TRACKING": "ON",
+                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
+                "KFCORE_BUILD_YOLO_OPENCV": "ON"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -147,6 +161,11 @@
             "configurePreset": "win-yolo-tracking-dev-user"
         },
         {
+            "name": "win-yolo-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-yolo-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -172,6 +191,14 @@
             "name": "install-win-yolo-tracking-dev-user",
             "inherits": "install-win-dev-user",
             "configurePreset": "win-yolo-tracking-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-yolo-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-yolo-release-user",
             "targets": [
                 "install"
             ]
@@ -206,6 +233,11 @@
             "name": "win-yolo-tracking-dev-user",
             "inherits": "win-dev-user",
             "configurePreset": "win-yolo-tracking-dev-user"
+        },
+        {
+            "name": "win-yolo-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-yolo-release-user"
         },
         {
             "name": "linux-dev-user",
