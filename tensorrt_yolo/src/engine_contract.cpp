@@ -12,7 +12,8 @@ namespace kfcore::yolo {
 namespace {
 
 constexpr std::size_t kImageRank = 4;
-constexpr std::size_t kCountRank = 1;
+constexpr std::size_t kFlatCountRank = 1;
+constexpr std::size_t kEfficientNmsCountRank = 2;
 constexpr std::size_t kBoxesRank = 3;
 constexpr std::size_t kDetectionsRank = 2;
 constexpr std::int64_t kImageChannels = 3;
@@ -125,6 +126,19 @@ void validate_profile_shape(
     }
 }
 
+void validate_count_profile_shape(const TensorDesc& tensor) {
+    const std::size_t rank = tensor.min_shape.size();
+    if (rank != kFlatCountRank && rank != kEfficientNmsCountRank) {
+        contract_error(tensor.name, "profile rank does not match the EfficientNMS contract");
+    }
+    validate_profile_shape(tensor, rank);
+    if (rank == kEfficientNmsCountRank &&
+        (tensor.min_shape[1] != 1 || tensor.opt_shape[1] != 1 ||
+         tensor.max_shape[1] != 1)) {
+        contract_error(tensor.name, "trailing count dimension must be 1");
+    }
+}
+
 void require_type(const TensorDesc& tensor, TensorDataType expected) {
     if (tensor.data_type != expected) {
         contract_error(tensor.name, "unexpected tensor data type");
@@ -217,7 +231,7 @@ ValidatedContract validate_engine_contract(
         const TensorDesc& labels = *required[4].descriptor;
 
         validate_profile_shape(images, kImageRank, true);
-        validate_profile_shape(num_dets, kCountRank);
+        validate_count_profile_shape(num_dets);
         validate_profile_shape(boxes, kBoxesRank);
         validate_profile_shape(scores, kDetectionsRank);
         validate_profile_shape(labels, kDetectionsRank);

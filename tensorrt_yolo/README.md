@@ -10,6 +10,7 @@ CMake target 组成：`KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
 `images` 输入，以及 `num_dets`（INT32）、`boxes`、`scores` 和 `labels`（INT32）四个输出。
 `images`、`boxes` 和 `scores` 必须三者共同为 FP16 或共同为 FP32；名称可在 `TensorNames` 中显式覆盖。不合约的
 engine 会失败，绝不改走 raw-head 解码、CPU NMS、ONNX Runtime 或 OpenCV DNN。
+`num_dets` 可使用 `[batch]`，也可使用 TensorRT EfficientNMS 的 `[batch, 1]`；后一种形式的尾维必须固定为 1。
 
 五个张量都必须使用线性、非向量化的标量物理布局：TensorRT format 为 `kLINEAR`、
 vectorized dimension 为 `-1`、components per element 为 `1`，且 bytes per component 与逻辑

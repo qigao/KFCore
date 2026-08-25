@@ -105,6 +105,27 @@ spec("TensorRT YOLO engine contract") {
         check(contract.floating_point_type == TensorDataType::Float32);
     }
 
+    it("accepts the EfficientNMS trailing singleton count dimension") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        metadata.tensors[1].min_shape = {1, 1};
+        metadata.tensors[1].opt_shape = {2, 1};
+        metadata.tensors[1].max_shape = {4, 1};
+
+        const ValidatedContract contract =
+            validate_engine_contract(metadata, {}, limits());
+        check(contract.num_dets.max_elements == std::size_t{4});
+        check(contract.num_dets.max_bytes == std::size_t{16});
+    }
+
+    it("rejects a non-singleton EfficientNMS count dimension") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        metadata.tensors[1].min_shape = {1, 2};
+        metadata.tensors[1].opt_shape = {2, 2};
+        metadata.tensors[1].max_shape = {4, 2};
+
+        check_error(metadata, "trailing count dimension must be 1");
+    }
+
     it("selects optimum spatial dimensions when no detector size is configured") {
         const ValidatedContract contract =
             validate_engine_contract(valid_fp32_metadata(), {}, limits());
