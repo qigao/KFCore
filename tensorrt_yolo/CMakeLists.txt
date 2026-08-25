@@ -282,6 +282,8 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
         KFCORE_TENSORRT_TEST_FP16)
       target_link_libraries(test_tensorrt_integration_fp16 PRIVATE
         KFCore::tensorrt_yolo
+        TensorRT::nvinfer
+        TensorRT::nvinfer_plugin
         CUDA::cudart
         TurboUtils::TinyTest)
       set_target_properties(test_tensorrt_integration_fp16 PROPERTIES

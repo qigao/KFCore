@@ -16,16 +16,17 @@ function(_find_tensorrt_write_fixture name version_contents)
   file(WRITE "${_root}/include/NvInfer.h" "#pragma once\n")
   file(WRITE "${_root}/include/NvInferPlugin.h" "#pragma once\n")
   file(WRITE "${_root}/include/NvInferVersion.h" "${version_contents}\n")
-  if(WIN32)
-    set(_library_prefix "")
-    set(_library_suffix ".lib")
-  else()
-    set(_library_prefix "lib")
-    set(_library_suffix ".a")
-  endif()
   foreach(_major IN ITEMS 10 11)
-    file(WRITE "${_root}/lib/${_library_prefix}nvinfer_${_major}${_library_suffix}" "")
-    file(WRITE "${_root}/lib/${_library_prefix}nvinfer_plugin_${_major}${_library_suffix}" "")
+    foreach(_library IN ITEMS nvinfer nvinfer_plugin)
+      file(WRITE "${_root}/lib/${_library}_${_major}.lib" "")
+      file(WRITE "${_root}/lib/lib${_library}_${_major}.a" "")
+      file(WRITE "${_root}/lib/lib${_library}.so.${_major}" "")
+    endforeach()
+  endforeach()
+  foreach(_library IN ITEMS nvinfer nvinfer_plugin)
+    file(WRITE "${_root}/lib/${_library}.lib" "")
+    file(WRITE "${_root}/lib/lib${_library}.a" "")
+    file(WRITE "${_root}/lib/lib${_library}.so" "")
   endforeach()
   set(${name}_ROOT "${_root}" PARENT_SCOPE)
 endfunction()
@@ -38,6 +39,7 @@ function(_find_tensorrt_expect_success name expected_version scenario)
       "-DFIND_TENSORRT_EXPECTED_VERSION=${expected_version}"
       "-DFIND_TENSORRT_SCENARIO=${scenario}"
       "-DFIND_TENSORRT_PRESEEDED_ROOT=${${name}_PRESEEDED_ROOT}"
+      ${ARGN}
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _output
     ERROR_VARIABLE _error)
@@ -54,6 +56,7 @@ function(_find_tensorrt_expect_failure name expected_error scenario)
       "-DFIND_TENSORRT_EXPECTED_VERSION=0.0.0"
       "-DFIND_TENSORRT_SCENARIO=${scenario}"
       "-DFIND_TENSORRT_PRESEEDED_ROOT=${${name}_PRESEEDED_ROOT}"
+      ${ARGN}
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _output
     ERROR_VARIABLE _error)
@@ -82,6 +85,27 @@ _find_tensorrt_write_fixture(repeated
   "#define NV_TENSORRT_MAJOR 11\n#define NV_TENSORRT_MINOR 2\n#define NV_TENSORRT_PATCH 1")
 set(repeated_PRESEEDED_ROOT "${repeated_ROOT}")
 _find_tensorrt_expect_success(repeated "11.2.1" repeated)
+
+_find_tensorrt_write_fixture(unversioned
+  "#define NV_TENSORRT_MAJOR 11\n#define NV_TENSORRT_MINOR 2\n#define NV_TENSORRT_PATCH 1")
+set(unversioned_PRESEEDED_ROOT "${unversioned_ROOT}")
+_find_tensorrt_expect_success(unversioned "11.2.1" unversioned)
+set(unversioned_unix_ROOT "${unversioned_ROOT}")
+set(unversioned_unix_PRESEEDED_ROOT "${unversioned_ROOT}")
+_find_tensorrt_expect_success(
+  unversioned_unix "11.2.1" unversioned -DCMAKE_SYSTEM_NAME=Linux)
+
+_find_tensorrt_write_fixture(abi_mismatch
+  "#define NV_TENSORRT_MAJOR 11\n#define NV_TENSORRT_MINOR 2\n#define NV_TENSORRT_PATCH 1")
+set(abi_mismatch_windows_ROOT "${abi_mismatch_ROOT}")
+set(abi_mismatch_windows_PRESEEDED_ROOT "${abi_mismatch_ROOT}")
+_find_tensorrt_expect_failure(
+  abi_mismatch_windows "does not match TensorRT major" abi_mismatch)
+set(abi_mismatch_unix_ROOT "${abi_mismatch_ROOT}")
+set(abi_mismatch_unix_PRESEEDED_ROOT "${abi_mismatch_ROOT}")
+_find_tensorrt_expect_failure(
+  abi_mismatch_unix "does not match TensorRT major" abi_mismatch
+  -DCMAKE_SYSTEM_NAME=Linux)
 
 _find_tensorrt_write_fixture(partial
   "#define NV_TENSORRT_MAJOR 11\n#define NV_TENSORRT_MINOR 2\n#define NV_TENSORRT_PATCH 1")

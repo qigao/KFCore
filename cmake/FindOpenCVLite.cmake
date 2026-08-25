@@ -99,6 +99,50 @@ set(_OpenCVLite_version_suffix
 set(OpenCVLite_VERSION
   "${_OpenCVLite_VERSION_MAJOR}.${_OpenCVLite_VERSION_MINOR}.${_OpenCVLite_VERSION_REVISION}")
 
+function(_opencv_lite_validate_library_abi target component library_path)
+  file(REAL_PATH "${library_path}" _OpenCVLite_library_real)
+  get_filename_component(_OpenCVLite_filename "${_OpenCVLite_library_real}" NAME)
+  set(_OpenCVLite_stems
+    "opencv_${component}"
+    "opencv_${component}d"
+    "opencv_${component}${_OpenCVLite_version_suffix}"
+    "opencv_${component}${_OpenCVLite_version_suffix}d")
+  set(_OpenCVLite_expected_filenames)
+  foreach(_OpenCVLite_stem IN LISTS _OpenCVLite_stems)
+    list(APPEND _OpenCVLite_expected_filenames
+      "${_OpenCVLite_stem}.lib"
+      "${_OpenCVLite_stem}.dll"
+      "lib${_OpenCVLite_stem}.a"
+      "lib${_OpenCVLite_stem}.so"
+      "lib${_OpenCVLite_stem}.dylib")
+  endforeach()
+  if(_OpenCVLite_filename IN_LIST _OpenCVLite_expected_filenames)
+    return()
+  endif()
+
+  set(_OpenCVLite_soname_versions
+    "${_OpenCVLite_VERSION_MAJOR}.${_OpenCVLite_VERSION_MINOR}"
+    "${OpenCVLite_VERSION}"
+    "${_OpenCVLite_VERSION_MAJOR}${_OpenCVLite_VERSION_MINOR}"
+    "${_OpenCVLite_version_suffix}")
+  set(_OpenCVLite_soname_stems
+    "libopencv_${component}"
+    "libopencv_${component}d")
+  foreach(_OpenCVLite_stem IN LISTS _OpenCVLite_soname_stems)
+    foreach(_OpenCVLite_soname_version IN LISTS _OpenCVLite_soname_versions)
+      if(_OpenCVLite_filename STREQUAL
+           "${_OpenCVLite_stem}.so.${_OpenCVLite_soname_version}" OR
+         _OpenCVLite_filename STREQUAL
+           "${_OpenCVLite_stem}.${_OpenCVLite_soname_version}.dylib")
+        return()
+      endif()
+    endforeach()
+  endforeach()
+  message(FATAL_ERROR
+    "${target} imported location does not match OpenCV Lite header version "
+    "${OpenCVLite_VERSION}: ${_OpenCVLite_library_real}")
+endfunction()
+
 function(_opencv_lite_validate_existing_target component)
   set(_OpenCVLite_target "OpenCVLite::${component}")
   get_target_property(_OpenCVLite_imported "${_OpenCVLite_target}" IMPORTED)
@@ -164,13 +208,8 @@ function(_opencv_lite_validate_existing_target component)
       endif()
       _opencv_lite_require_contained(
         "${_OpenCVLite_location}" "${_OpenCVLite_target} imported location")
-      get_filename_component(_OpenCVLite_filename "${_OpenCVLite_location}" NAME)
-      if(NOT _OpenCVLite_filename MATCHES
-         "^(lib)?opencv_${component}(${_OpenCVLite_version_suffix})?d?(\\.lib|\\.a|\\.dll|\\.dylib|\\.so(\\.[0-9.]+)?)$")
-        message(FATAL_ERROR
-          "${_OpenCVLite_target} imported location has an unexpected library format: "
-          "${_OpenCVLite_filename}")
-      endif()
+      _opencv_lite_validate_library_abi(
+        "${_OpenCVLite_target}" "${component}" "${_OpenCVLite_location}")
       set(_OpenCVLite_has_location TRUE)
     endforeach()
   endforeach()

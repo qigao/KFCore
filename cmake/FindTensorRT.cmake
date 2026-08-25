@@ -96,6 +96,32 @@ set(_TensorRT_library_paths
   "${_TensorRT_root}/lib/x64"
   "${_TensorRT_root}/targets/x86_64-linux-gnu/lib")
 
+function(_tensorrt_validate_library_abi target library_stem library_path)
+  file(REAL_PATH "${library_path}" _TensorRT_library_real)
+  get_filename_component(_TensorRT_filename "${_TensorRT_library_real}" NAME)
+  set(_TensorRT_expected_filenames
+    "${library_stem}.lib"
+    "${library_stem}_${TensorRT_VERSION_MAJOR}.lib"
+    "${library_stem}.dll"
+    "${library_stem}_${TensorRT_VERSION_MAJOR}.dll"
+    "lib${library_stem}.a"
+    "lib${library_stem}_${TensorRT_VERSION_MAJOR}.a"
+    "lib${library_stem}.so"
+    "lib${library_stem}_${TensorRT_VERSION_MAJOR}.so"
+    "lib${library_stem}.dylib"
+    "lib${library_stem}_${TensorRT_VERSION_MAJOR}.dylib")
+  if(_TensorRT_filename IN_LIST _TensorRT_expected_filenames OR
+     _TensorRT_filename MATCHES
+       "^lib${library_stem}\\.so\\.${TensorRT_VERSION_MAJOR}(\\.[0-9]+)*$" OR
+     _TensorRT_filename MATCHES
+       "^lib${library_stem}\\.${TensorRT_VERSION_MAJOR}(\\.[0-9]+)*\\.dylib$")
+    return()
+  endif()
+  message(FATAL_ERROR
+    "${target} imported location does not match TensorRT major version "
+    "${TensorRT_VERSION_MAJOR}: ${_TensorRT_library_real}")
+endfunction()
+
 function(_tensorrt_validate_existing_target target library_stem output_library)
   get_target_property(_TensorRT_imported "${target}" IMPORTED)
   if(NOT _TensorRT_imported)
@@ -150,12 +176,8 @@ function(_tensorrt_validate_existing_target target library_stem output_library)
         message(FATAL_ERROR "${target} imported location does not exist: ${_TensorRT_location}")
       endif()
       _tensorrt_require_contained("${_TensorRT_location}" "${target} imported location")
-      get_filename_component(_TensorRT_filename "${_TensorRT_location}" NAME)
-      if(NOT _TensorRT_filename MATCHES
-         "^(lib)?${library_stem}(_[0-9]+)?(\\.lib|\\.a|\\.dll|\\.dylib|\\.so(\\.[0-9.]+)?)$")
-        message(FATAL_ERROR
-          "${target} imported location has an unexpected library format: ${_TensorRT_filename}")
-      endif()
+      _tensorrt_validate_library_abi(
+        "${target}" "${library_stem}" "${_TensorRT_location}")
       if(NOT _TensorRT_representative_library)
         set(_TensorRT_representative_library "${_TensorRT_location}")
       endif()

@@ -44,6 +44,7 @@ function(_find_opencv_expect_failure name scenario sdk_root preseeded_root compo
       "-DFIND_OPENCV_LITE_SCENARIO=${scenario}"
       "-DFIND_OPENCV_LITE_PRESEEDED_ROOT=${preseeded_root}"
       "-DFIND_OPENCV_LITE_COMPONENTS=${components}"
+      ${ARGN}
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _output
     ERROR_VARIABLE _error)
@@ -76,6 +77,27 @@ foreach(_component IN ITEMS core imgproc imgcodecs)
     file(WRITE "${_poison_root}/lib/libopencv_${_component}4130.a" "")
   endif()
 endforeach()
+
+set(_abi_mismatch_root "${_fixture_root}/abi_mismatch_sdk")
+file(MAKE_DIRECTORY "${_abi_mismatch_root}/include/opencv2/core"
+  "${_abi_mismatch_root}/lib" "${_abi_mismatch_root}/bin")
+file(WRITE "${_abi_mismatch_root}/include/opencv2/core.hpp" "#pragma once\n")
+file(WRITE "${_abi_mismatch_root}/include/opencv2/core/version.hpp"
+  "#define CV_VERSION_MAJOR 4\n#define CV_VERSION_MINOR 13\n#define CV_VERSION_REVISION 0\n")
+foreach(_component IN ITEMS core imgproc imgcodecs)
+  file(WRITE "${_abi_mismatch_root}/lib/opencv_${_component}3416.lib" "")
+  file(WRITE "${_abi_mismatch_root}/bin/opencv_${_component}3416.dll" "")
+  file(WRITE "${_abi_mismatch_root}/lib/libopencv_${_component}.so.3.4" "")
+endforeach()
+_find_opencv_expect_failure(
+  abi_mismatch_windows abi_mismatch "${_abi_mismatch_root}"
+  "${_abi_mismatch_root}" "core,imgproc,imgcodecs"
+  "does not match OpenCV Lite header")
+_find_opencv_expect_failure(
+  abi_mismatch_unix abi_mismatch "${_abi_mismatch_root}"
+  "${_abi_mismatch_root}" "core,imgproc,imgcodecs"
+  "does not match OpenCV Lite header"
+  -DCMAKE_SYSTEM_NAME=Linux)
 _find_opencv_expect_failure(root_mismatch root_mismatch "${_fixture_root}/sdk"
   "${_poison_root}" "core,imgproc,imgcodecs" "resolved outside")
 

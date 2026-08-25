@@ -21,24 +21,35 @@ function(_fixture_add_opencv_target component)
     message(FATAL_ERROR "FIND_OPENCV_LITE_PRESEEDED_ROOT is required for preseeded targets")
   endif()
   if(WIN32)
+    if(FIND_OPENCV_LITE_SCENARIO STREQUAL "abi_mismatch")
+      set(_fixture_opencv_suffix 3416)
+    else()
+      set(_fixture_opencv_suffix 4130)
+    endif()
     add_library(OpenCVLite::${component} SHARED IMPORTED)
     set_target_properties(OpenCVLite::${component} PROPERTIES
       IMPORTED_CONFIGURATIONS RELEASE
       IMPORTED_IMPLIB_RELEASE
-        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/opencv_${component}4130.lib"
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/opencv_${component}${_fixture_opencv_suffix}.lib"
       IMPORTED_LOCATION_RELEASE
-        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/bin/opencv_${component}4130.dll"
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/bin/opencv_${component}${_fixture_opencv_suffix}.dll"
       INTERFACE_INCLUDE_DIRECTORIES "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/include")
   else()
+    if(FIND_OPENCV_LITE_SCENARIO STREQUAL "abi_mismatch")
+      set(_fixture_opencv_library "libopencv_${component}.so.3.4")
+    else()
+      set(_fixture_opencv_library "libopencv_${component}4130.a")
+    endif()
     add_library(OpenCVLite::${component} UNKNOWN IMPORTED)
     set_target_properties(OpenCVLite::${component} PROPERTIES
       IMPORTED_LOCATION
-        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/libopencv_${component}4130.a"
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/${_fixture_opencv_library}"
       INTERFACE_INCLUDE_DIRECTORIES "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/include")
   endif()
 endfunction()
 
-if(FIND_OPENCV_LITE_SCENARIO MATCHES "^(dependency_first|partial|root_mismatch)$")
+if(FIND_OPENCV_LITE_SCENARIO MATCHES
+   "^(dependency_first|partial|root_mismatch|abi_mismatch)$")
   _fixture_add_opencv_target(core)
   if(NOT FIND_OPENCV_LITE_SCENARIO STREQUAL "partial")
     _fixture_add_opencv_target(imgproc)
@@ -93,6 +104,8 @@ if(WIN32 AND TARGET OpenCVLite::core)
   if(NOT _runtime_contained)
     message(FATAL_ERROR "OpenCV Lite release runtime escapes OPENCV_LITE_ROOT")
   endif()
-elseif(TARGET OpenCVLite::core AND NOT _core_location MATCHES "opencv_core4130")
+elseif(TARGET OpenCVLite::core AND
+       NOT FIND_OPENCV_LITE_SCENARIO STREQUAL "abi_mismatch" AND
+       NOT _core_location MATCHES "opencv_core4130")
   message(FATAL_ERROR "OpenCV Lite target has no resolved Unix library: ${_core_location}")
 endif()
