@@ -1,4 +1,6 @@
-add_library(kfcore_yolo_tracking SHARED src/tracking.cpp)
+add_library(kfcore_yolo_tracking SHARED
+  src/engine_contract.cpp
+  src/tracking.cpp)
 add_library(KFCore::yolo_tracking ALIAS kfcore_yolo_tracking)
 
 target_link_libraries(kfcore_yolo_tracking PRIVATE KFCore::trackers)
@@ -14,6 +16,19 @@ set_target_properties(kfcore_yolo_tracking PROPERTIES
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 if(BUILD_TESTS)
+  add_executable(test_tensorrt_contract tests/test_tensorrt_contract.cpp)
+  target_include_directories(test_tensorrt_contract PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(test_tensorrt_contract PRIVATE
+    KFCore::yolo_tracking
+    TurboUtils::TinyTest)
+  set_target_properties(test_tensorrt_contract PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/tests")
+  add_test(NAME test_tensorrt_contract COMMAND test_tensorrt_contract)
+
   add_executable(test_yolo_tracking
     tests/test_yolo_tracking.cpp
     src/tracking.cpp
