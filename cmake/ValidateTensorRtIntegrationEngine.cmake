@@ -21,6 +21,16 @@ function(kfcore_validate_tensorrt_integration_engine configured_path output_vari
   set(${output_variable} "${_kfcore_engine_real}" PARENT_SCOPE)
 endfunction()
 
+function(kfcore_validate_optional_tensorrt_integration_engine configured_path output_variable)
+  if("${configured_path}" STREQUAL "")
+    set(${output_variable} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  kfcore_validate_tensorrt_integration_engine("${configured_path}" _validated_engine)
+  set(${output_variable} "${_validated_engine}" PARENT_SCOPE)
+endfunction()
+
 function(kfcore_set_tensorrt_integration_test_engine test_name validated_path)
   if(NOT TEST "${test_name}")
     message(FATAL_ERROR

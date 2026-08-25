@@ -28,9 +28,9 @@ function(_integration_engine_configure name engine_path)
   set(${name}_OUTPUT "${_output}\n${_error}" PARENT_SCOPE)
 endfunction()
 
-function(_assert_fixture_test_registered test_name)
+function(_assert_fixture_test_registered configuration_name test_name)
   execute_process(
-    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/valid"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/${configuration_name}"
       -C Debug -N -R "^${test_name}$"
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _output
@@ -41,6 +41,34 @@ function(_assert_fixture_test_registered test_name)
   endif()
 endfunction()
 
+function(_assert_fixture_test_count configuration_name expected_count)
+  execute_process(
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/${configuration_name}"
+      -C Debug -N
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _output
+    ERROR_VARIABLE _error)
+  if(NOT _result EQUAL 0 OR NOT _output MATCHES "Total Tests: ${expected_count}")
+    message(FATAL_ERROR
+      "CTest should register ${expected_count} tests for ${configuration_name}:\n"
+      "${_output}\n${_error}")
+  endif()
+endfunction()
+
+function(_run_fixture_tests configuration_name)
+  execute_process(
+    COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/${configuration_name}"
+      -C Debug --output-on-failure
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _output
+    ERROR_VARIABLE _error)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR
+      "CTest should receive the validated engine path for ${configuration_name}:\n"
+      "${_output}\n${_error}")
+  endif()
+endfunction()
+
 _integration_engine_configure(valid "${_valid_engine}"
   "-DKFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE=${_valid_yolo11_face_engine}"
   "-DKFCORE_FIXTURE_EXPECTED_PATH=${_valid_engine}")
@@ -48,30 +76,27 @@ if(NOT valid_RESULT EQUAL 0)
   message(FATAL_ERROR
     "Two valid engine files should configure and register distinct CTests:\n${valid_OUTPUT}")
 endif()
-execute_process(
-  COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/valid"
-    -C Debug -N
-  RESULT_VARIABLE _valid_ctest_list_result
-  OUTPUT_VARIABLE _valid_ctest_list_output
-  ERROR_VARIABLE _valid_ctest_list_error)
-if(NOT _valid_ctest_list_result EQUAL 0 OR
-   NOT _valid_ctest_list_output MATCHES "Total Tests: 2")
+_assert_fixture_test_count(valid 2)
+_assert_fixture_test_registered(valid fixture_tensorrt_integration)
+_assert_fixture_test_registered(valid fixture_tensorrt_integration_yolo11_face)
+_run_fixture_tests(valid)
+
+_integration_engine_configure(empty_face "${_valid_engine}"
+  "-DKFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE=")
+if(NOT empty_face_RESULT EQUAL 0)
   message(FATAL_ERROR
-    "Two distinct TensorRT integration CTests should be registered:\n"
-    "${_valid_ctest_list_output}\n${_valid_ctest_list_error}")
+    "An empty optional face engine should register only the primary CTest:\n${empty_face_OUTPUT}")
 endif()
-_assert_fixture_test_registered(fixture_tensorrt_integration)
-_assert_fixture_test_registered(fixture_tensorrt_integration_yolo11_face)
-execute_process(
-  COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_fixture_root}/valid"
-    -C Debug --output-on-failure
-  RESULT_VARIABLE _valid_ctest_result
-  OUTPUT_VARIABLE _valid_ctest_output
-  ERROR_VARIABLE _valid_ctest_error)
-if(NOT _valid_ctest_result EQUAL 0)
+_assert_fixture_test_count(empty_face 1)
+_assert_fixture_test_registered(empty_face fixture_tensorrt_integration)
+_run_fixture_tests(empty_face)
+
+_integration_engine_configure(missing_face "${_valid_engine}"
+  "-DKFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE=${_fixture_root}/missing-face.engine")
+if(missing_face_RESULT EQUAL 0 OR
+   NOT missing_face_OUTPUT MATCHES "must name an existing file")
   message(FATAL_ERROR
-    "CTest should receive the validated engine path:\n"
-    "${_valid_ctest_output}\n${_valid_ctest_error}")
+    "A nonexistent optional face engine should fail at configure time:\n${missing_face_OUTPUT}")
 endif()
 
 _integration_engine_configure(empty ""
