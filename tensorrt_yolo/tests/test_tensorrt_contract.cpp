@@ -82,6 +82,19 @@ spec("TensorRT YOLO engine contract") {
         check(contract.floating_point_type == TensorDataType::Float16);
     }
 
+    it("binds a valid contract by name instead of tensor vector order") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        std::swap(metadata.tensors[0], metadata.tensors[4]);
+        std::swap(metadata.tensors[1], metadata.tensors[3]);
+
+        const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
+        check(contract.images.descriptor.name == "images");
+        check(contract.num_dets.descriptor.name == "num_dets");
+        check(contract.boxes.descriptor.name == "boxes");
+        check(contract.scores.descriptor.name == "scores");
+        check(contract.labels.descriptor.name == "labels");
+    }
+
     it("rejects missing duplicate and extra tensors by name") {
         EngineMetadata missing = valid_fp32_metadata();
         missing.tensors.pop_back();
@@ -154,8 +167,10 @@ spec("TensorRT YOLO engine contract") {
         check_error(inconsistent_batch, "labels");
 
         EngineMetadata inconsistent_detections = valid_fp32_metadata();
+        inconsistent_detections.tensors[3].min_shape[1] = 299;
+        inconsistent_detections.tensors[3].opt_shape[1] = 299;
         inconsistent_detections.tensors[3].max_shape[1] = 299;
-        check_error(inconsistent_detections, "scores");
+        check_error(inconsistent_detections, "profile dimension does not match boxes");
     }
 
     it("rejects non-positive dimensions") {
@@ -191,7 +206,13 @@ spec("TensorRT YOLO engine contract") {
         check_error(metadata, "limits", YoloErrorCode::ResourceLimitExceeded, limited);
 
         EngineMetadata overflow = valid_fp32_metadata();
-        const std::int64_t excessive_detections = (std::numeric_limits<std::int64_t>::max)();
+        for (TensorDesc& tensor_desc : overflow.tensors) {
+            tensor_desc.min_shape[0] = 1;
+            tensor_desc.opt_shape[0] = 1;
+            tensor_desc.max_shape[0] = 1;
+        }
+        const std::int64_t excessive_detections =
+            (std::numeric_limits<std::int64_t>::max)() / 4;
         for (std::size_t tensor_index : {std::size_t{2}, std::size_t{3}, std::size_t{4}}) {
             overflow.tensors[tensor_index].min_shape[1] = excessive_detections;
             overflow.tensors[tensor_index].opt_shape[1] = excessive_detections;
@@ -202,7 +223,8 @@ spec("TensorRT YOLO engine contract") {
         limited.max_detections = (std::numeric_limits<std::size_t>::max)();
         limited.max_input_bytes = (std::numeric_limits<std::size_t>::max)();
         limited.max_output_bytes = (std::numeric_limits<std::size_t>::max)();
-        check_error(overflow, "boxes", YoloErrorCode::ResourceLimitExceeded, limited);
+        check_error(overflow, "maximum buffer byte count overflowed",
+                    YoloErrorCode::ResourceLimitExceeded, limited);
     }
 
     it("rejects overflowing total output bytes") {
