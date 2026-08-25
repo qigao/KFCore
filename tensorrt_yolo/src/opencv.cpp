@@ -8,7 +8,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 
 namespace kfcore::yolo {
@@ -75,6 +77,10 @@ void validate_tracks(const cv::Mat& image, const TrackFrame& tracks) {
         if (box.left >= box.right || box.top >= box.bottom) {
             throw_invalid_argument("track boxes must have positive area");
         }
+        if (!std::isfinite(tracked.detection.score) || tracked.detection.score < 0.0f ||
+            tracked.detection.score > 1.0f) {
+            throw_invalid_argument("track score must be finite and within [0, 1]");
+        }
     }
 }
 
@@ -103,6 +109,16 @@ int clipped_ceil(float coordinate, int maximum) noexcept {
 std::uint64_t unconfirmed_color_key(const TrackedDetection& tracked, std::size_t index) noexcept {
     return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(tracked.detection.class_id)) << 32U) ^
            static_cast<std::uint64_t>(index);
+}
+
+std::string label_for(const TrackedDetection& tracked) {
+    std::ostringstream label;
+    label << "class=" << tracked.detection.class_id << " score=" << std::fixed
+          << std::setprecision(2) << tracked.detection.score;
+    if (tracked.track_id.has_value()) {
+        label << " id=" << *tracked.track_id;
+    }
+    return label.str();
 }
 
 }  // namespace
@@ -143,12 +159,10 @@ void draw_tracks(cv::Mat& image, const TrackFrame& tracks, const DrawOptions& op
         cv::rectangle(image, cv::Point(left, top), cv::Point(right, bottom), color,
                       options.line_thickness, cv::LINE_8);
 
-        if (tracked.track_id.has_value()) {
-            const std::string label = std::to_string(*tracked.track_id);
-            const int label_y = top > 1 ? top - 1 : top;
-            cv::putText(image, label, cv::Point(left, label_y), cv::FONT_HERSHEY_SIMPLEX,
-                        options.font_scale, color, options.line_thickness, cv::LINE_8);
-        }
+        const std::string label = label_for(tracked);
+        const int label_y = top > 1 ? top - 1 : top;
+        cv::putText(image, label, cv::Point(left, label_y), cv::FONT_HERSHEY_SIMPLEX,
+                    options.font_scale, color, options.line_thickness, cv::LINE_8);
     }
 }
 

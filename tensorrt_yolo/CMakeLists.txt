@@ -15,8 +15,6 @@ set_target_properties(kfcore_yolo_tracking PROPERTIES
   FOLDER "tensorrt_yolo"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
-option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
-
 if(KFCORE_BUILD_YOLO_OPENCV)
   find_package(OpenCVLite REQUIRED)
 
