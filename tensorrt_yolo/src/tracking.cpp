@@ -85,6 +85,9 @@ void validate_frame(const DetectionFrame& frame) {
         throw_invalid_argument("image dimensions must be positive");
     }
     for (const Detection& detection : frame.detections) {
+        if (detection.class_id < 0) {
+            throw_invalid_argument("detection class_id must not be negative");
+        }
         if (!is_finite(detection)) {
             throw_invalid_argument("detection coordinates and score must be finite");
         }

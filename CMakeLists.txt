@@ -27,6 +27,7 @@ include(CMakeOptions.cmake)
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
+include(ValidateTensorRtIntegrationEngine)
 
 if(KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_TRACKING)
   message(FATAL_ERROR
@@ -41,6 +42,12 @@ endif()
 if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS AND NOT KFCORE_BUILD_TENSORRT_YOLO)
   message(FATAL_ERROR
     "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS requires KFCORE_BUILD_TENSORRT_YOLO=ON")
+endif()
+
+if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
+  kfcore_validate_tensorrt_integration_engine(
+    "${KFCORE_TENSORRT_TEST_ENGINE}"
+    KFCORE_TENSORRT_TEST_ENGINE_VALIDATED)
 endif()
 
 find_package(Threads REQUIRED)
@@ -65,6 +72,11 @@ if(BUILD_TESTS)
       "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
       "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_find_opencv_lite.cmake")
+  add_test(NAME test_tensorrt_integration_engine_config
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_integration_engine_config.cmake")
 endif()
 
 add_subdirectory(vendor)

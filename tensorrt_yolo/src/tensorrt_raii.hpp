@@ -83,10 +83,12 @@ struct Engine::State final
 struct TensorRtDetector::Impl final
 {
     Impl(std::shared_ptr<const Engine::State>               state_in,
-         detail::TensorRtOwner<nvinfer1::IExecutionContext> context_in, DetectorOptions options_in)
+         detail::TensorRtOwner<nvinfer1::IExecutionContext> context_in,
+         DetectorOptions options_in, SelectedInputSize input_size_in)
         : state(std::move(state_in))
         , context(std::move(context_in))
         , options(std::move(options_in))
+        , input_size(input_size_in)
     {
     }
 
@@ -94,6 +96,7 @@ struct TensorRtDetector::Impl final
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context;
     detail::CudaStream                                 stream;
     DetectorOptions                                    options;
+    SelectedInputSize                                  input_size;
     std::atomic_flag                                   in_use = ATOMIC_FLAG_INIT;
     detail::CudaBuffer                                 source_device;
     detail::CudaBuffer                                 input_device;

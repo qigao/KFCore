@@ -96,24 +96,10 @@ namespace
         }
     }
 
-    void validate_detector_options(const DetectorOptions&   options,
-                                   const ValidatedContract& contract)
+    SelectedInputSize validate_detector_options(const DetectorOptions&   options,
+                                                const ValidatedContract& contract)
     {
-        if (options.input_size.has_value())
-        {
-            const std::int32_t height = (*options.input_size)[0];
-            const std::int32_t width  = (*options.input_size)[1];
-            if (height <= 0 || width <= 0)
-            {
-                throw_invalid("detector options stage: input_size dimensions must be positive");
-            }
-            if (static_cast<std::int64_t>(height) != contract.input_height ||
-                static_cast<std::int64_t>(width) != contract.input_width)
-            {
-                throw_invalid(
-                    "detector options stage: input_size must match the engine input dimensions");
-            }
-        }
+        const SelectedInputSize input_size = select_input_size(contract, options.input_size);
         for (float value : options.mean)
         {
             if (!std::isfinite(value))
@@ -133,6 +119,7 @@ namespace
         {
             throw_invalid("detector options stage: border_value must be within [0, 255]");
         }
+        return input_size;
     }
 
     std::vector<std::byte> read_engine_file(const std::filesystem::path& path)
@@ -194,6 +181,43 @@ namespace
             throw_contract(std::string("metadata extraction stage: invalid I/O mode for tensor ") +
                            tensor_name);
         }
+    }
+
+    TensorPhysicalFormat tensor_physical_format(nvinfer1::TensorFormat format) noexcept
+    {
+        return format == nvinfer1::TensorFormat::kLINEAR ? TensorPhysicalFormat::Linear
+                                                          : TensorPhysicalFormat::Unsupported;
+    }
+
+    std::int32_t scalar_bytes(TensorDataType data_type) noexcept
+    {
+        return data_type == TensorDataType::Float16 ? std::int32_t { 2 } : std::int32_t { 4 };
+    }
+
+    TensorPhysicalLayout tensor_physical_layout(const nvinfer1::ICudaEngine& engine,
+                                                const char* tensor_name,
+                                                TensorDataType data_type)
+    {
+        const std::int32_t vectorized_dimension = engine.getTensorVectorizedDim(tensor_name);
+        std::int32_t components_per_element =
+            engine.getTensorComponentsPerElement(tensor_name);
+        std::int32_t bytes_per_component = engine.getTensorBytesPerComponent(tensor_name);
+
+        // TensorRT reports -1 for scalar component queries in some 10.x/11.x releases.
+        // Normalize that documented sentinel while preserving all vectorized values verbatim.
+        if (vectorized_dimension == -1)
+        {
+            if (components_per_element == -1)
+            {
+                components_per_element = 1;
+            }
+            if (bytes_per_component == -1)
+            {
+                bytes_per_component = scalar_bytes(data_type);
+            }
+        }
+        return { tensor_physical_format(engine.getTensorFormat(tensor_name)),
+                 vectorized_dimension, components_per_element, bytes_per_component };
     }
 
     std::vector<std::int64_t> dimensions(const nvinfer1::Dims& dims, const char* tensor_name,
@@ -293,6 +317,8 @@ namespace
             descriptor.name      = name;
             descriptor.mode      = tensor_io_mode(trt_mode, name);
             descriptor.data_type = tensor_data_type(engine.getTensorDataType(name), name);
+            descriptor.physical_layout =
+                tensor_physical_layout(engine, name, descriptor.data_type);
             if (trt_mode == nvinfer1::TensorIOMode::kINPUT)
             {
                 descriptor.min_shape =
@@ -387,7 +413,7 @@ std::unique_ptr<TensorRtDetector> Engine::create_detector(const DetectorOptions&
     {
         throw_invalid("detector creation stage: engine state is unavailable");
     }
-    validate_detector_options(options, state_->contract);
+    const SelectedInputSize input_size = validate_detector_options(options, state_->contract);
     detail::check_cuda(cudaSetDevice(state_->options.device_id), "cudaSetDevice",
                        "detector creation");
 
@@ -400,7 +426,8 @@ std::unique_ptr<TensorRtDetector> Engine::create_detector(const DetectorOptions&
 
     try
     {
-        auto impl = std::make_unique<TensorRtDetector::Impl>(state_, std::move(context), options);
+        auto impl = std::make_unique<TensorRtDetector::Impl>(state_, std::move(context), options,
+                                                             input_size);
         const ValidatedContract& contract = state_->contract;
         impl->input_device.reserve(contract.images.max_bytes, state_->options.max_input_bytes);
         impl->input_host.reserve(contract.images.max_bytes, state_->options.max_input_bytes);

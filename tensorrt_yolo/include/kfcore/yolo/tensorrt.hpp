@@ -36,6 +36,7 @@ struct EngineOptions
 
 struct DetectorOptions
 {
+    // Optional {height, width}. Unset selects profile 0's optimum spatial shape.
     std::optional<std::array<std::int32_t, 2>> input_size;
     std::array<float, 3>                       mean { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>                       stddev { 1.0f, 1.0f, 1.0f };

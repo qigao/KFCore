@@ -11,6 +11,13 @@ CMake target 组成：`KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
 `images`、`boxes` 和 `scores` 必须三者共同为 FP16 或共同为 FP32；名称可在 `TensorNames` 中显式覆盖。不合约的
 engine 会失败，绝不改走 raw-head 解码、CPU NMS、ONNX Runtime 或 OpenCV DNN。
 
+五个张量都必须使用线性、非向量化的标量物理布局：TensorRT format 为 `kLINEAR`、
+vectorized dimension 为 `-1`、components per element 为 `1`，且 bytes per component 与逻辑
+dtype 一致。engine 必须只有 profile 0；`images` 可在 profile 0 中动态改变 batch、height 和
+width，其余轴与所有输出的非 batch 轴必须固定。`DetectorOptions::input_size` 按
+`{height, width}` 指定尺寸并必须落在 profile 0 的 min/max 范围内；未指定时使用 opt H/W。
+缓冲区按 profile max shape 分配，每次推理按实际 batch 与选定 H/W 设置输入 shape。
+
 `ImageView` 是借用视图：host 或同 CUDA device 的输入内存必须在 `detect()` 或
 `detect_batch()` 返回前持续有效；返回后 detector 不再保留该视图。一个 `Engine` 可被多个
 worker 共享，但每个 worker 必须拥有自己的 `TensorRtDetector`；同一 detector 不可并发调用。
@@ -63,9 +70,15 @@ cmake --build --preset win-yolo-release-user
 ctest --preset win-yolo-release-user
 ```
 
+`KFCORE_TENSORRT_TEST_ENGINE` 是 configure-time `FILEPATH` cache 变量（同名环境变量仅用于初始化
+它）。启用集成测试时，空路径、不存在的路径或目录都会在 configure 阶段失败；验证后的规范路径
+会显式写入 `test_tensorrt_integration` 的 CTest environment。
+
 TensorRT/CUDA DLL 由部署环境提供；安装包不复制它们。若没有与目标 GPU/TensorRT 版本匹配的
 可信 engine，GPU 推理测试是明确阻塞项，不能用任意 engine 或其他推理后端代替。
 
 OpenCV-only 入口仅启用 `KFCore::yolo_opencv` 和 `KFCore::yolo_tracking`；它仍要求显式开启
 tracking 与有效 `OPENCV_LITE_ROOT`，但不会启用 CUDA/TensorRT detector，也不会提供
-`track_image_sequence`。OpenCV 只负责 `cv::Mat` 视图、绘制和图片 I/O 边界。
+`track_image_sequence`。adapter 与已安装的 KFCore package 仅要求 OpenCV Lite 的 `core`、
+`imgproc`；只有 `track_image_sequence` 额外要求 `imgcodecs`。不发现或链接 `dnn`、`highgui`
+或 `videoio`。

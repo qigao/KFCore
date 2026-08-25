@@ -1,11 +1,5 @@
 include(FindPackageHandleStandardArgs)
 
-if(TARGET TensorRT::nvinfer OR TARGET TensorRT::nvinfer_plugin)
-  message(FATAL_ERROR
-    "FindTensorRT requires ownership of TensorRT::nvinfer and "
-    "TensorRT::nvinfer_plugin; a target already exists")
-endif()
-
 if(NOT DEFINED ENV{TENSORRT_ROOT} OR "$ENV{TENSORRT_ROOT}" STREQUAL "")
   message(FATAL_ERROR
     "TENSORRT_ROOT is required when KFCORE_BUILD_TENSORRT_YOLO=ON")
@@ -102,30 +96,115 @@ set(_TensorRT_library_paths
   "${_TensorRT_root}/lib/x64"
   "${_TensorRT_root}/targets/x86_64-linux-gnu/lib")
 
-unset(TensorRT_NVINFER_LIBRARY CACHE)
-find_library(TensorRT_NVINFER_LIBRARY
-  NAMES "nvinfer_${TensorRT_VERSION_MAJOR}" nvinfer
-  PATHS ${_TensorRT_library_paths}
-  NO_DEFAULT_PATH)
+function(_tensorrt_validate_existing_target target library_stem output_library)
+  get_target_property(_TensorRT_imported "${target}" IMPORTED)
+  if(NOT _TensorRT_imported)
+    message(FATAL_ERROR "${target} is not a verifiable imported target")
+  endif()
 
-unset(TensorRT_NVINFER_PLUGIN_LIBRARY CACHE)
-find_library(TensorRT_NVINFER_PLUGIN_LIBRARY
-  NAMES "nvinfer_plugin_${TensorRT_VERSION_MAJOR}" nvinfer_plugin
-  PATHS ${_TensorRT_library_paths}
-  NO_DEFAULT_PATH)
+  get_target_property(_TensorRT_includes "${target}" INTERFACE_INCLUDE_DIRECTORIES)
+  if(NOT _TensorRT_includes)
+    message(FATAL_ERROR "${target} has no verifiable include directory")
+  endif()
+  set(_TensorRT_has_expected_include FALSE)
+  foreach(_TensorRT_include IN LISTS _TensorRT_includes)
+    if(_TensorRT_include MATCHES "\\$<")
+      message(FATAL_ERROR "${target} has an unverified generator-expression include")
+    endif()
+    if(NOT IS_DIRECTORY "${_TensorRT_include}")
+      message(FATAL_ERROR "${target} include directory does not exist: ${_TensorRT_include}")
+    endif()
+    _tensorrt_require_contained("${_TensorRT_include}" "${target} include directory")
+    if(EXISTS "${_TensorRT_include}/NvInfer.h" AND
+       EXISTS "${_TensorRT_include}/NvInferVersion.h")
+      set(_TensorRT_has_expected_include TRUE)
+    endif()
+  endforeach()
+  if(NOT _TensorRT_has_expected_include)
+    message(FATAL_ERROR "${target} does not expose the validated TensorRT headers")
+  endif()
 
-if(NOT TensorRT_NVINFER_LIBRARY)
-  message(FATAL_ERROR
-    "TENSORRT_ROOT does not contain the nvinfer library: ${_TensorRT_root}")
+  set(_TensorRT_location_properties IMPORTED_LOCATION IMPORTED_IMPLIB)
+  get_target_property(_TensorRT_configurations "${target}" IMPORTED_CONFIGURATIONS)
+  list(APPEND _TensorRT_configurations DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+  list(REMOVE_DUPLICATES _TensorRT_configurations)
+  foreach(_TensorRT_configuration IN LISTS _TensorRT_configurations)
+    string(TOUPPER "${_TensorRT_configuration}" _TensorRT_configuration_upper)
+    list(APPEND _TensorRT_location_properties
+      "IMPORTED_LOCATION_${_TensorRT_configuration_upper}"
+      "IMPORTED_IMPLIB_${_TensorRT_configuration_upper}")
+  endforeach()
+  list(REMOVE_DUPLICATES _TensorRT_location_properties)
+
+  set(_TensorRT_representative_library)
+  foreach(_TensorRT_property IN LISTS _TensorRT_location_properties)
+    get_target_property(_TensorRT_locations "${target}" "${_TensorRT_property}")
+    if(NOT _TensorRT_locations)
+      continue()
+    endif()
+    foreach(_TensorRT_location IN LISTS _TensorRT_locations)
+      if(_TensorRT_location MATCHES "\\$<")
+        message(FATAL_ERROR "${target} has an unverified generator-expression location")
+      endif()
+      if(NOT EXISTS "${_TensorRT_location}")
+        message(FATAL_ERROR "${target} imported location does not exist: ${_TensorRT_location}")
+      endif()
+      _tensorrt_require_contained("${_TensorRT_location}" "${target} imported location")
+      get_filename_component(_TensorRT_filename "${_TensorRT_location}" NAME)
+      if(NOT _TensorRT_filename MATCHES
+         "^(lib)?${library_stem}(_[0-9]+)?(\\.lib|\\.a|\\.dll|\\.dylib|\\.so(\\.[0-9.]+)?)$")
+        message(FATAL_ERROR
+          "${target} imported location has an unexpected library format: ${_TensorRT_filename}")
+      endif()
+      if(NOT _TensorRT_representative_library)
+        set(_TensorRT_representative_library "${_TensorRT_location}")
+      endif()
+    endforeach()
+  endforeach()
+  if(NOT _TensorRT_representative_library)
+    message(FATAL_ERROR "${target} has no verifiable imported library location")
+  endif()
+  set(${output_library} "${_TensorRT_representative_library}" PARENT_SCOPE)
+endfunction()
+
+set(_TensorRT_reuse_targets FALSE)
+if(TARGET TensorRT::nvinfer OR TARGET TensorRT::nvinfer_plugin)
+  if(NOT TARGET TensorRT::nvinfer OR NOT TARGET TensorRT::nvinfer_plugin)
+    message(FATAL_ERROR
+      "FindTensorRT rejects partial imported targets; both TensorRT::nvinfer and "
+      "TensorRT::nvinfer_plugin are required")
+  endif()
+  _tensorrt_validate_existing_target(
+    TensorRT::nvinfer nvinfer TensorRT_NVINFER_LIBRARY)
+  _tensorrt_validate_existing_target(
+    TensorRT::nvinfer_plugin nvinfer_plugin TensorRT_NVINFER_PLUGIN_LIBRARY)
+  set(_TensorRT_reuse_targets TRUE)
+else()
+  unset(TensorRT_NVINFER_LIBRARY CACHE)
+  find_library(TensorRT_NVINFER_LIBRARY
+    NAMES "nvinfer_${TensorRT_VERSION_MAJOR}" nvinfer
+    PATHS ${_TensorRT_library_paths}
+    NO_DEFAULT_PATH)
+
+  unset(TensorRT_NVINFER_PLUGIN_LIBRARY CACHE)
+  find_library(TensorRT_NVINFER_PLUGIN_LIBRARY
+    NAMES "nvinfer_plugin_${TensorRT_VERSION_MAJOR}" nvinfer_plugin
+    PATHS ${_TensorRT_library_paths}
+    NO_DEFAULT_PATH)
+
+  if(NOT TensorRT_NVINFER_LIBRARY)
+    message(FATAL_ERROR
+      "TENSORRT_ROOT does not contain the nvinfer library: ${_TensorRT_root}")
+  endif()
+  _tensorrt_require_contained("${TensorRT_NVINFER_LIBRARY}" "nvinfer library")
+
+  if(NOT TensorRT_NVINFER_PLUGIN_LIBRARY)
+    message(FATAL_ERROR
+      "TENSORRT_ROOT does not contain the nvinfer_plugin library: ${_TensorRT_root}")
+  endif()
+  _tensorrt_require_contained(
+    "${TensorRT_NVINFER_PLUGIN_LIBRARY}" "nvinfer_plugin library")
 endif()
-_tensorrt_require_contained("${TensorRT_NVINFER_LIBRARY}" "nvinfer library")
-
-if(NOT TensorRT_NVINFER_PLUGIN_LIBRARY)
-  message(FATAL_ERROR
-    "TENSORRT_ROOT does not contain the nvinfer_plugin library: ${_TensorRT_root}")
-endif()
-_tensorrt_require_contained(
-  "${TensorRT_NVINFER_PLUGIN_LIBRARY}" "nvinfer_plugin library")
 
 find_package_handle_standard_args(TensorRT
   REQUIRED_VARS
@@ -134,7 +213,7 @@ find_package_handle_standard_args(TensorRT
     TensorRT_NVINFER_PLUGIN_LIBRARY
   VERSION_VAR TensorRT_VERSION)
 
-if(TensorRT_FOUND)
+if(TensorRT_FOUND AND NOT _TensorRT_reuse_targets)
   add_library(TensorRT::nvinfer UNKNOWN IMPORTED)
   set_target_properties(TensorRT::nvinfer PROPERTIES
     IMPORTED_LOCATION "${TensorRT_NVINFER_LIBRARY}"

@@ -1,0 +1,11 @@
+if(NOT DEFINED EXPECTED_ENGINE)
+  message(FATAL_ERROR "EXPECTED_ENGINE is required")
+endif()
+if(NOT DEFINED ENV{KFCORE_TENSORRT_TEST_ENGINE})
+  message(FATAL_ERROR "CTest did not receive KFCORE_TENSORRT_TEST_ENGINE")
+endif()
+if(NOT "$ENV{KFCORE_TENSORRT_TEST_ENGINE}" STREQUAL "${EXPECTED_ENGINE}")
+  message(FATAL_ERROR
+    "CTest received an unexpected engine path: "
+    "$ENV{KFCORE_TENSORRT_TEST_ENGINE}")
+endif()

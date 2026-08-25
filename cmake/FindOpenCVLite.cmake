@@ -1,23 +1,47 @@
 include(FindPackageHandleStandardArgs)
 
-if(TARGET OpenCVLite::core OR TARGET OpenCVLite::imgproc OR TARGET OpenCVLite::imgcodecs)
-  message(FATAL_ERROR
-    "FindOpenCVLite requires ownership of OpenCVLite imported targets; a target already exists")
+set(_OpenCVLite_supported_components core imgproc imgcodecs)
+if(OpenCVLite_FIND_COMPONENTS)
+  set(_OpenCVLite_requested_components ${OpenCVLite_FIND_COMPONENTS})
+else()
+  set(_OpenCVLite_requested_components core imgproc)
+  set(OpenCVLite_FIND_COMPONENTS ${_OpenCVLite_requested_components})
+  foreach(_OpenCVLite_component IN LISTS _OpenCVLite_requested_components)
+    set(OpenCVLite_FIND_REQUIRED_${_OpenCVLite_component} ${OpenCVLite_FIND_REQUIRED})
+  endforeach()
 endif()
-
-foreach(_OpenCVLite_predefined IN ITEMS
-    OpenCVLite_INCLUDE_DIR
-    OpenCVLite_CORE_RELEASE_LIBRARY
-    OpenCVLite_CORE_DEBUG_LIBRARY
-    OpenCVLite_IMGPROC_RELEASE_LIBRARY
-    OpenCVLite_IMGPROC_DEBUG_LIBRARY
-    OpenCVLite_IMGCODECS_RELEASE_LIBRARY
-    OpenCVLite_IMGCODECS_DEBUG_LIBRARY)
-  if(DEFINED ${_OpenCVLite_predefined} OR DEFINED CACHE{${_OpenCVLite_predefined}})
-    message(FATAL_ERROR
-      "FindOpenCVLite refuses a predefined result: ${_OpenCVLite_predefined}")
+list(LENGTH _OpenCVLite_requested_components _OpenCVLite_requested_count)
+if(_OpenCVLite_requested_count EQUAL 0)
+  message(FATAL_ERROR "FindOpenCVLite requires at least one component")
+endif()
+set(_OpenCVLite_unique_components ${_OpenCVLite_requested_components})
+list(REMOVE_DUPLICATES _OpenCVLite_unique_components)
+list(LENGTH _OpenCVLite_unique_components _OpenCVLite_unique_count)
+if(NOT _OpenCVLite_unique_count EQUAL _OpenCVLite_requested_count)
+  message(FATAL_ERROR "FindOpenCVLite rejects duplicate requested components")
+endif()
+foreach(_OpenCVLite_component IN LISTS _OpenCVLite_requested_components)
+  if(NOT _OpenCVLite_component IN_LIST _OpenCVLite_supported_components)
+    message(FATAL_ERROR "FindOpenCVLite does not support component: ${_OpenCVLite_component}")
   endif()
 endforeach()
+
+if(NOT TARGET OpenCVLite::core AND NOT TARGET OpenCVLite::imgproc AND
+   NOT TARGET OpenCVLite::imgcodecs)
+  foreach(_OpenCVLite_predefined IN ITEMS
+      OpenCVLite_INCLUDE_DIR
+      OpenCVLite_CORE_RELEASE_LIBRARY
+      OpenCVLite_CORE_DEBUG_LIBRARY
+      OpenCVLite_IMGPROC_RELEASE_LIBRARY
+      OpenCVLite_IMGPROC_DEBUG_LIBRARY
+      OpenCVLite_IMGCODECS_RELEASE_LIBRARY
+      OpenCVLite_IMGCODECS_DEBUG_LIBRARY)
+    if(DEFINED ${_OpenCVLite_predefined} OR DEFINED CACHE{${_OpenCVLite_predefined}})
+      message(FATAL_ERROR
+        "FindOpenCVLite refuses a predefined result: ${_OpenCVLite_predefined}")
+    endif()
+  endforeach()
+endif()
 
 if(NOT DEFINED ENV{OPENCV_LITE_ROOT} OR "$ENV{OPENCV_LITE_ROOT}" STREQUAL "")
   message(FATAL_ERROR "OPENCV_LITE_ROOT is required when KFCORE_BUILD_YOLO_OPENCV=ON")
@@ -72,9 +96,97 @@ foreach(_OpenCVLite_version_part IN ITEMS MAJOR MINOR REVISION)
 endforeach()
 set(_OpenCVLite_version_suffix
   "${_OpenCVLite_VERSION_MAJOR}${_OpenCVLite_VERSION_MINOR}${_OpenCVLite_VERSION_REVISION}")
+set(OpenCVLite_VERSION
+  "${_OpenCVLite_VERSION_MAJOR}.${_OpenCVLite_VERSION_MINOR}.${_OpenCVLite_VERSION_REVISION}")
+
+function(_opencv_lite_validate_existing_target component)
+  set(_OpenCVLite_target "OpenCVLite::${component}")
+  get_target_property(_OpenCVLite_imported "${_OpenCVLite_target}" IMPORTED)
+  if(NOT _OpenCVLite_imported)
+    message(FATAL_ERROR "${_OpenCVLite_target} is not a verifiable imported target")
+  endif()
+
+  get_target_property(_OpenCVLite_includes "${_OpenCVLite_target}"
+    INTERFACE_INCLUDE_DIRECTORIES)
+  if(NOT _OpenCVLite_includes)
+    message(FATAL_ERROR "${_OpenCVLite_target} has no verifiable include directory")
+  endif()
+  set(_OpenCVLite_has_expected_include FALSE)
+  foreach(_OpenCVLite_include IN LISTS _OpenCVLite_includes)
+    if(_OpenCVLite_include MATCHES "\\$<")
+      message(FATAL_ERROR
+        "${_OpenCVLite_target} has an unverified generator-expression include")
+    endif()
+    if(NOT IS_DIRECTORY "${_OpenCVLite_include}")
+      message(FATAL_ERROR
+        "${_OpenCVLite_target} include directory does not exist: ${_OpenCVLite_include}")
+    endif()
+    _opencv_lite_require_contained(
+      "${_OpenCVLite_include}" "${_OpenCVLite_target} include directory")
+    if(EXISTS "${_OpenCVLite_include}/opencv2/core.hpp" AND
+       EXISTS "${_OpenCVLite_include}/opencv2/core/version.hpp")
+      set(_OpenCVLite_has_expected_include TRUE)
+    endif()
+  endforeach()
+  if(NOT _OpenCVLite_has_expected_include)
+    message(FATAL_ERROR
+      "${_OpenCVLite_target} does not expose the validated OpenCV Lite headers")
+  endif()
+
+  set(_OpenCVLite_location_properties IMPORTED_LOCATION IMPORTED_IMPLIB)
+  get_target_property(_OpenCVLite_configurations "${_OpenCVLite_target}"
+    IMPORTED_CONFIGURATIONS)
+  list(APPEND _OpenCVLite_configurations DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+  list(REMOVE_DUPLICATES _OpenCVLite_configurations)
+  foreach(_OpenCVLite_configuration IN LISTS _OpenCVLite_configurations)
+    string(TOUPPER "${_OpenCVLite_configuration}" _OpenCVLite_configuration_upper)
+    list(APPEND _OpenCVLite_location_properties
+      "IMPORTED_LOCATION_${_OpenCVLite_configuration_upper}"
+      "IMPORTED_IMPLIB_${_OpenCVLite_configuration_upper}")
+  endforeach()
+  list(REMOVE_DUPLICATES _OpenCVLite_location_properties)
+
+  set(_OpenCVLite_has_location FALSE)
+  foreach(_OpenCVLite_property IN LISTS _OpenCVLite_location_properties)
+    get_target_property(_OpenCVLite_locations "${_OpenCVLite_target}"
+      "${_OpenCVLite_property}")
+    if(NOT _OpenCVLite_locations)
+      continue()
+    endif()
+    foreach(_OpenCVLite_location IN LISTS _OpenCVLite_locations)
+      if(_OpenCVLite_location MATCHES "\\$<")
+        message(FATAL_ERROR
+          "${_OpenCVLite_target} has an unverified generator-expression location")
+      endif()
+      if(NOT EXISTS "${_OpenCVLite_location}")
+        message(FATAL_ERROR
+          "${_OpenCVLite_target} imported location does not exist: ${_OpenCVLite_location}")
+      endif()
+      _opencv_lite_require_contained(
+        "${_OpenCVLite_location}" "${_OpenCVLite_target} imported location")
+      get_filename_component(_OpenCVLite_filename "${_OpenCVLite_location}" NAME)
+      if(NOT _OpenCVLite_filename MATCHES
+         "^(lib)?opencv_${component}(${_OpenCVLite_version_suffix})?d?(\\.lib|\\.a|\\.dll|\\.dylib|\\.so(\\.[0-9.]+)?)$")
+        message(FATAL_ERROR
+          "${_OpenCVLite_target} imported location has an unexpected library format: "
+          "${_OpenCVLite_filename}")
+      endif()
+      set(_OpenCVLite_has_location TRUE)
+    endforeach()
+  endforeach()
+  if(NOT _OpenCVLite_has_location)
+    message(FATAL_ERROR
+      "${_OpenCVLite_target} has no verifiable imported library location")
+  endif()
+endfunction()
 
 function(_opencv_lite_find_component component)
   string(TOUPPER "${component}" _OpenCVLite_upper)
+  if(TARGET OpenCVLite::${component})
+    _opencv_lite_validate_existing_target("${component}")
+    set(OpenCVLite_${component}_FOUND TRUE PARENT_SCOPE)
+    return()
+  endif()
   set(_OpenCVLite_release_names "opencv_${component}${_OpenCVLite_version_suffix}" "opencv_${component}")
   set(_OpenCVLite_debug_names "opencv_${component}${_OpenCVLite_version_suffix}d" "opencv_${component}d")
   set(_OpenCVLite_library_paths
@@ -200,14 +312,28 @@ function(_opencv_lite_find_component component)
     set_target_properties(OpenCVLite::${component} PROPERTIES
       IMPORTED_LOCATION "${_OpenCVLite_selected_library}")
   endif()
+  set(OpenCVLite_${component}_FOUND TRUE PARENT_SCOPE)
 endfunction()
 
-_opencv_lite_find_component(core)
-_opencv_lite_find_component(imgproc)
-_opencv_lite_find_component(imgcodecs)
+set(_OpenCVLite_existing_target_count 0)
+foreach(_OpenCVLite_component IN LISTS _OpenCVLite_requested_components)
+  if(TARGET OpenCVLite::${_OpenCVLite_component})
+    math(EXPR _OpenCVLite_existing_target_count "${_OpenCVLite_existing_target_count} + 1")
+  endif()
+endforeach()
+if(_OpenCVLite_existing_target_count GREATER 0 AND
+   _OpenCVLite_existing_target_count LESS _OpenCVLite_requested_count)
+  message(FATAL_ERROR
+    "FindOpenCVLite rejects partial imported targets for the requested components")
+endif()
+
+foreach(_OpenCVLite_component IN LISTS _OpenCVLite_requested_components)
+  _opencv_lite_find_component("${_OpenCVLite_component}")
+endforeach()
 
 find_package_handle_standard_args(OpenCVLite
   REQUIRED_VARS OpenCVLite_INCLUDE_DIR
+  VERSION_VAR OpenCVLite_VERSION
   HANDLE_COMPONENTS)
 
 mark_as_advanced(OpenCVLite_INCLUDE_DIR)

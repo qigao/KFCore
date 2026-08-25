@@ -145,8 +145,8 @@ TensorRtDetector::detect_batch(const std::vector<ImageView>& images)
 
     const ValidatedContract& contract = impl_->state->contract;
     const EngineOptions& engine_options = impl_->state->options;
-    const std::int32_t input_width = checked_dimension(contract.input_width, "input width");
-    const std::int32_t input_height = checked_dimension(contract.input_height, "input height");
+    const std::int32_t input_width = impl_->input_size.width;
+    const std::int32_t input_height = impl_->input_size.height;
     const std::size_t minimum_batch = static_cast<std::size_t>(
         checked_dimension(contract.min_batch, "minimum batch"));
     const std::size_t maximum_batch = static_cast<std::size_t>(

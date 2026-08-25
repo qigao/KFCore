@@ -4,6 +4,7 @@
 
 #include <climits>
 #include <limits>
+#include <string>
 
 using namespace kfcore::yolo;
 
@@ -222,11 +223,51 @@ spec("YOLO ByteTrack session") {
         check(*reused_epoch.detections[0].track_id == (std::uint64_t)0);
     }
 
-    it("encodes negative class IDs with the specified unsigned bit pattern") {
-        ByteTrackSession session(immediate_options());
-        (void)session.update(frame_for(-1));
-        TrackFrame result = session.update(frame_for(-1));
-        check(*result.detections[0].track_id == UINT64_C(0xffffffff00000000));
+    it("rejects a negative class before reserving a tracker or consuming its first ID") {
+        ByteTrackOptions options = immediate_options();
+        options.max_class_trackers = 1;
+        ByteTrackSession session(options);
+
+        bool rejected = false;
+        try {
+            (void)session.update(frame_for(-1));
+        } catch (const YoloError& error) {
+            rejected = true;
+            check(error.code() == YoloErrorCode::InvalidArgument);
+            check(std::string(error.what()).find("class_id") != std::string::npos);
+        }
+        check(rejected);
+        if (!rejected) {
+            return;
+        }
+
+        (void)session.update(frame_for(0));
+        TrackFrame first_confirmed = session.update(frame_for(0));
+        check(first_confirmed.detections[0].track_id.has_value());
+        check(*first_confirmed.detections[0].track_id == std::uint64_t{0});
+    }
+
+    it("does not advance an existing class when a mixed frame contains a negative class") {
+        ByteTrackOptions options = immediate_options();
+        options.minimum_consecutive_frames = 3;
+        ByteTrackSession session(options);
+        ByteTrackSession control(options);
+        (void)session.update(frame_for(0));
+        (void)control.update(frame_for(0));
+        DetectionFrame invalid{100, 100, {
+            {{10, 10, 20, 20}, 0.95f, 0},
+            {{30, 30, 40, 40}, 0.95f, -1},
+        }};
+
+        check_throws_as(session.update(invalid), YoloError);
+        TrackFrame actual_second = session.update(frame_for(0));
+        TrackFrame expected_second = control.update(frame_for(0));
+        check(actual_second.detections[0].track_id ==
+              expected_second.detections[0].track_id);
+        TrackFrame actual_third = session.update(frame_for(0));
+        TrackFrame expected_third = control.update(frame_for(0));
+        check(actual_third.detections[0].track_id == expected_third.detections[0].track_id);
+        check(*actual_third.detections[0].track_id == std::uint64_t{0});
     }
 
     it("compares image bounds without rounding int32 dimensions to float") {

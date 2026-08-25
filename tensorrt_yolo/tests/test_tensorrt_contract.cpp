@@ -1,8 +1,10 @@
 #include "engine_contract.hpp"
 #include "tinytest.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -10,6 +12,12 @@
 using namespace kfcore::yolo;
 
 namespace {
+
+TensorPhysicalLayout scalar_layout(TensorDataType data_type) {
+    const std::int32_t scalar_bytes =
+        data_type == TensorDataType::Float16 ? std::int32_t{2} : std::int32_t{4};
+    return {TensorPhysicalFormat::Linear, -1, 1, scalar_bytes};
+}
 
 TensorDesc tensor(
     std::string name,
@@ -20,13 +28,13 @@ TensorDesc tensor(
     std::vector<std::int64_t> max_shape
 ) {
     return {std::move(name), mode, data_type, std::move(min_shape), std::move(opt_shape),
-            std::move(max_shape)};
+            std::move(max_shape), scalar_layout(data_type)};
 }
 
 EngineMetadata valid_fp32_metadata() {
     return {{
         tensor("images", TensorIoMode::Input, TensorDataType::Float32,
-               {1, 3, 640, 640}, {2, 3, 640, 640}, {4, 3, 640, 640}),
+               {1, 3, 320, 480}, {2, 3, 640, 640}, {4, 3, 960, 1280}),
         tensor("num_dets", TensorIoMode::Output, TensorDataType::Int32,
                {1}, {2}, {4}),
         tensor("boxes", TensorIoMode::Output, TensorDataType::Float32,
@@ -59,17 +67,92 @@ void check_error(
     check(threw);
 }
 
+void check_physical_error(
+    const EngineMetadata& metadata,
+    const std::string& tensor_name,
+    const std::string& expected_detail
+) {
+    bool threw = false;
+    try {
+        (void)validate_engine_contract(metadata, {}, limits());
+    } catch (const YoloError& error) {
+        threw = true;
+        const std::string message(error.what());
+        check(error.code() == YoloErrorCode::EngineContractMismatch);
+        check(message.find(tensor_name) != std::string::npos);
+        check(message.find(expected_detail) != std::string::npos);
+    }
+    check(threw);
+}
+
 }  // namespace
 
 spec("TensorRT YOLO engine contract") {
-    it("accepts named dynamic-batch NCHW EfficientNMS tensors") {
+    it("preserves named profile-zero dynamic batch and spatial dimensions") {
         const ValidatedContract contract = validate_engine_contract(valid_fp32_metadata(), {}, limits());
 
+        check(contract.min_batch == INT64_C(1));
+        check(contract.opt_batch == INT64_C(2));
         check(contract.max_batch == INT64_C(4));
         check(contract.max_detections == INT64_C(300));
-        check(contract.input_height == INT64_C(640));
-        check(contract.input_width == INT64_C(640));
+        check(contract.min_input_height == INT64_C(320));
+        check(contract.opt_input_height == INT64_C(640));
+        check(contract.max_input_height == INT64_C(960));
+        check(contract.min_input_width == INT64_C(480));
+        check(contract.opt_input_width == INT64_C(640));
+        check(contract.max_input_width == INT64_C(1280));
+        check(contract.images.max_bytes == std::size_t{58'982'400});
         check(contract.floating_point_type == TensorDataType::Float32);
+    }
+
+    it("selects optimum spatial dimensions when no detector size is configured") {
+        const ValidatedContract contract =
+            validate_engine_contract(valid_fp32_metadata(), {}, limits());
+
+        const SelectedInputSize selected = select_input_size(contract, std::nullopt);
+        check(selected.height == 640);
+        check(selected.width == 640);
+    }
+
+    it("accepts explicit minimum interior and maximum profile sizes") {
+        const ValidatedContract contract =
+            validate_engine_contract(valid_fp32_metadata(), {}, limits());
+        const std::array<std::array<std::int32_t, 2>, 3> sizes = {{
+            {{320, 480}},
+            {{700, 900}},
+            {{960, 1280}},
+        }};
+
+        for (const auto& size : sizes) {
+            const SelectedInputSize selected = select_input_size(contract, size);
+            check(selected.height == size[0]);
+            check(selected.width == size[1]);
+        }
+    }
+
+    it("rejects explicit spatial dimensions outside the profile range") {
+        const ValidatedContract contract =
+            validate_engine_contract(valid_fp32_metadata(), {}, limits());
+        const std::array<std::array<std::int32_t, 2>, 6> invalid_sizes = {{
+            {{0, 640}},
+            {{640, 0}},
+            {{319, 640}},
+            {{961, 640}},
+            {{640, 479}},
+            {{640, 1281}},
+        }};
+
+        for (const auto& size : invalid_sizes) {
+            bool threw = false;
+            try {
+                (void)select_input_size(contract, size);
+            } catch (const YoloError& error) {
+                threw = true;
+                check(error.code() == YoloErrorCode::InvalidArgument);
+                check(std::string(error.what()).find("input_size") != std::string::npos);
+            }
+            check(threw);
+        }
     }
 
     it("accepts FP16 boxes and scores") {
@@ -77,6 +160,9 @@ spec("TensorRT YOLO engine contract") {
         metadata.tensors[0].data_type = TensorDataType::Float16;
         metadata.tensors[2].data_type = TensorDataType::Float16;
         metadata.tensors[3].data_type = TensorDataType::Float16;
+        metadata.tensors[0].physical_layout.bytes_per_component = 2;
+        metadata.tensors[2].physical_layout.bytes_per_component = 2;
+        metadata.tensors[3].physical_layout.bytes_per_component = 2;
 
         const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
         check(contract.floating_point_type == TensorDataType::Float16);
@@ -93,6 +179,45 @@ spec("TensorRT YOLO engine contract") {
         check(contract.boxes.descriptor.name == "boxes");
         check(contract.scores.descriptor.name == "scores");
         check(contract.labels.descriptor.name == "labels");
+    }
+
+    it("rejects non-linear physical format on every required tensor") {
+        const EngineMetadata baseline = valid_fp32_metadata();
+        for (std::size_t index = 0; index < baseline.tensors.size(); ++index) {
+            EngineMetadata metadata = baseline;
+            metadata.tensors[index].physical_layout.format = TensorPhysicalFormat::Unsupported;
+            check_physical_error(metadata, metadata.tensors[index].name, "physical format");
+        }
+    }
+
+    it("rejects vectorized storage on every required tensor") {
+        const EngineMetadata baseline = valid_fp32_metadata();
+        for (std::size_t index = 0; index < baseline.tensors.size(); ++index) {
+            EngineMetadata metadata = baseline;
+            metadata.tensors[index].physical_layout.vectorized_dimension = 1;
+            check_physical_error(metadata, metadata.tensors[index].name,
+                                 "vectorized dimension");
+        }
+    }
+
+    it("rejects non-scalar components on every required tensor") {
+        const EngineMetadata baseline = valid_fp32_metadata();
+        for (std::size_t index = 0; index < baseline.tensors.size(); ++index) {
+            EngineMetadata metadata = baseline;
+            metadata.tensors[index].physical_layout.components_per_element = 2;
+            check_physical_error(metadata, metadata.tensors[index].name,
+                                 "components per element");
+        }
+    }
+
+    it("rejects component byte widths that differ from scalar dtype") {
+        const EngineMetadata baseline = valid_fp32_metadata();
+        for (std::size_t index = 0; index < baseline.tensors.size(); ++index) {
+            EngineMetadata metadata = baseline;
+            metadata.tensors[index].physical_layout.bytes_per_component = 1;
+            check_physical_error(metadata, metadata.tensors[index].name,
+                                 "bytes per component");
+        }
     }
 
     it("rejects missing duplicate and extra tensors by name") {
@@ -153,10 +278,14 @@ spec("TensorRT YOLO engine contract") {
         check_error(wrong_box_width, "boxes");
     }
 
-    it("rejects non-batch dynamic dimensions and inconsistent profiles") {
-        EngineMetadata dynamic_height = valid_fp32_metadata();
-        dynamic_height.tensors[0].min_shape[2] = 320;
-        check_error(dynamic_height, "images");
+    it("rejects dynamic channels outputs and inconsistent profile ordering") {
+        EngineMetadata dynamic_channels = valid_fp32_metadata();
+        dynamic_channels.tensors[0].min_shape[1] = 2;
+        check_error(dynamic_channels, "images");
+
+        EngineMetadata dynamic_output = valid_fp32_metadata();
+        dynamic_output.tensors[2].min_shape[1] = 299;
+        check_error(dynamic_output, "boxes");
 
         EngineMetadata profile_order = valid_fp32_metadata();
         profile_order.tensors[3].opt_shape[0] = 5;

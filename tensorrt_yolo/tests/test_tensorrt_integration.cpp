@@ -1,12 +1,18 @@
 #include "kfcore/yolo/tensorrt.hpp"
 #include "tinytest.hpp"
 
+#include <NvInfer.h>
+#include <NvInferPlugin.h>
 #include <cuda_runtime_api.h>
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,6 +37,90 @@ std::filesystem::path required_engine_path(const char* variable)
 std::filesystem::path test_engine_path()
 {
     return required_engine_path("KFCORE_TENSORRT_TEST_ENGINE");
+}
+
+class SilentTensorRtLogger final : public nvinfer1::ILogger
+{
+public:
+    void log(Severity, const char*) noexcept override
+    {
+    }
+};
+
+struct ProfileInputSizes
+{
+    std::size_t minimum_batch;
+    std::array<std::array<std::int32_t, 2>, 3> spatial_sizes;
+};
+
+std::array<std::int32_t, 2> checked_spatial_size(const nvinfer1::Dims& shape,
+                                                 const char* selector)
+{
+    if (shape.nbDims != 4 || shape.d[0] <= 0 || shape.d[2] <= 0 || shape.d[3] <= 0 ||
+        static_cast<std::uintmax_t>(shape.d[0]) >
+            static_cast<std::uintmax_t>((std::numeric_limits<std::size_t>::max)()) ||
+        shape.d[2] > (std::numeric_limits<std::int32_t>::max)() ||
+        shape.d[3] > (std::numeric_limits<std::int32_t>::max)())
+    {
+        throw YoloError(YoloErrorCode::EngineContractMismatch,
+                        std::string("integration profile inspection stage: invalid ") +
+                            selector + " images shape");
+    }
+    return { static_cast<std::int32_t>(shape.d[2]),
+             static_cast<std::int32_t>(shape.d[3]) };
+}
+
+ProfileInputSizes inspect_profile_input_sizes(const std::filesystem::path& engine_path)
+{
+    std::ifstream stream(engine_path, std::ios::binary | std::ios::ate);
+    if (!stream.is_open() || stream.tellg() <= std::ifstream::pos_type { 0 })
+    {
+        throw YoloError(YoloErrorCode::FileIo,
+                        "integration profile inspection stage: cannot read engine");
+    }
+    const std::size_t byte_count = static_cast<std::size_t>(stream.tellg());
+    std::vector<char> bytes(byte_count);
+    stream.seekg(0, std::ios::beg);
+    if (!stream.read(bytes.data(), static_cast<std::streamsize>(byte_count)))
+    {
+        throw YoloError(YoloErrorCode::FileIo,
+                        "integration profile inspection stage: truncated engine");
+    }
+
+    SilentTensorRtLogger logger;
+    if (!initLibNvInferPlugins(&logger, ""))
+    {
+        throw YoloError(YoloErrorCode::TensorRtFailure,
+                        "integration profile inspection stage: plugin initialization failed");
+    }
+    std::unique_ptr<nvinfer1::IRuntime> runtime(nvinfer1::createInferRuntime(logger));
+    if (!runtime)
+    {
+        throw YoloError(YoloErrorCode::TensorRtFailure,
+                        "integration profile inspection stage: runtime creation failed");
+    }
+    std::unique_ptr<nvinfer1::ICudaEngine> engine(
+        runtime->deserializeCudaEngine(bytes.data(), bytes.size()));
+    if (!engine || engine->getNbOptimizationProfiles() != 1)
+    {
+        throw YoloError(YoloErrorCode::EngineContractMismatch,
+                        "integration profile inspection stage: exactly profile 0 is required");
+    }
+
+    const nvinfer1::Dims minimum = engine->getProfileShape(
+        "images", 0, nvinfer1::OptProfileSelector::kMIN);
+    const nvinfer1::Dims optimum = engine->getProfileShape(
+        "images", 0, nvinfer1::OptProfileSelector::kOPT);
+    const nvinfer1::Dims maximum = engine->getProfileShape(
+        "images", 0, nvinfer1::OptProfileSelector::kMAX);
+    const std::array<std::int32_t, 2> minimum_size =
+        checked_spatial_size(minimum, "minimum");
+    return {
+        static_cast<std::size_t>(minimum.d[0]),
+        {{ minimum_size,
+           checked_spatial_size(optimum, "optimum"),
+           checked_spatial_size(maximum, "maximum") }},
+    };
 }
 
 class OwnedRgbImage final
@@ -201,6 +291,29 @@ spec("TensorRT YOLO integration")
                 check(detection.box.top >= 0.0f);
                 check(detection.box.right <= static_cast<float>(result.image_width));
                 check(detection.box.bottom <= static_cast<float>(result.image_height));
+            }
+        }
+    }
+
+    it("runs profile-zero minimum optimum and maximum spatial input sizes")
+    {
+        const std::filesystem::path engine_path = test_engine_path();
+        const ProfileInputSizes profile = inspect_profile_input_sizes(engine_path);
+        auto engine = Engine::load(engine_path, EngineOptions {});
+        OwnedRgbImage image(960, 320);
+        const std::vector<ImageView> batch(profile.minimum_batch, image.view());
+
+        for (const auto& spatial_size : profile.spatial_sizes)
+        {
+            DetectorOptions options;
+            options.input_size = spatial_size;
+            auto detector = engine->create_detector(options);
+            const std::vector<DetectionFrame> results = detector->detect_batch(batch);
+            check(results.size() == profile.minimum_batch);
+            for (const DetectionFrame& result : results)
+            {
+                check(result.image_width == image.view().width);
+                check(result.image_height == image.view().height);
             }
         }
     }

@@ -5,15 +5,75 @@ project(FindOpenCVLiteFixture NONE)
 if(NOT DEFINED FIND_OPENCV_LITE_MODULE_DIR)
   message(FATAL_ERROR "FIND_OPENCV_LITE_MODULE_DIR is required")
 endif()
+if(NOT DEFINED FIND_OPENCV_LITE_SCENARIO)
+  set(FIND_OPENCV_LITE_SCENARIO discover)
+endif()
+if(NOT DEFINED FIND_OPENCV_LITE_COMPONENTS)
+  set(FIND_OPENCV_LITE_COMPONENTS "core,imgproc,imgcodecs")
+endif()
+string(REPLACE "," ";" _fixture_requested_components
+  "${FIND_OPENCV_LITE_COMPONENTS}")
 
 list(PREPEND CMAKE_MODULE_PATH "${FIND_OPENCV_LITE_MODULE_DIR}")
-find_package(OpenCVLite REQUIRED)
 
-get_target_property(_core_implib OpenCVLite::core IMPORTED_IMPLIB_RELEASE)
-get_target_property(_core_location OpenCVLite::core IMPORTED_LOCATION)
-get_target_property(_core_location_release OpenCVLite::core IMPORTED_LOCATION_RELEASE)
-get_target_property(_core_type OpenCVLite::core TYPE)
-if(WIN32)
+function(_fixture_add_opencv_target component)
+  if(NOT DEFINED FIND_OPENCV_LITE_PRESEEDED_ROOT)
+    message(FATAL_ERROR "FIND_OPENCV_LITE_PRESEEDED_ROOT is required for preseeded targets")
+  endif()
+  if(WIN32)
+    add_library(OpenCVLite::${component} SHARED IMPORTED)
+    set_target_properties(OpenCVLite::${component} PROPERTIES
+      IMPORTED_CONFIGURATIONS RELEASE
+      IMPORTED_IMPLIB_RELEASE
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/opencv_${component}4130.lib"
+      IMPORTED_LOCATION_RELEASE
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/bin/opencv_${component}4130.dll"
+      INTERFACE_INCLUDE_DIRECTORIES "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/include")
+  else()
+    add_library(OpenCVLite::${component} UNKNOWN IMPORTED)
+    set_target_properties(OpenCVLite::${component} PROPERTIES
+      IMPORTED_LOCATION
+        "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/lib/libopencv_${component}4130.a"
+      INTERFACE_INCLUDE_DIRECTORIES "${FIND_OPENCV_LITE_PRESEEDED_ROOT}/include")
+  endif()
+endfunction()
+
+if(FIND_OPENCV_LITE_SCENARIO MATCHES "^(dependency_first|partial|root_mismatch)$")
+  _fixture_add_opencv_target(core)
+  if(NOT FIND_OPENCV_LITE_SCENARIO STREQUAL "partial")
+    _fixture_add_opencv_target(imgproc)
+    _fixture_add_opencv_target(imgcodecs)
+  endif()
+endif()
+
+find_package(OpenCVLite REQUIRED COMPONENTS ${_fixture_requested_components})
+if(FIND_OPENCV_LITE_SCENARIO STREQUAL "repeated")
+  find_package(OpenCVLite REQUIRED COMPONENTS ${_fixture_requested_components})
+endif()
+
+foreach(_fixture_component IN LISTS _fixture_requested_components)
+  if(NOT TARGET OpenCVLite::${_fixture_component})
+    message(FATAL_ERROR "Requested target was not exported: OpenCVLite::${_fixture_component}")
+  endif()
+endforeach()
+if(DEFINED FIND_OPENCV_LITE_EXPECT_ABSENT)
+  string(REPLACE "," ";" _fixture_absent_components
+    "${FIND_OPENCV_LITE_EXPECT_ABSENT}")
+  foreach(_fixture_component IN LISTS _fixture_absent_components)
+    if(TARGET OpenCVLite::${_fixture_component})
+      message(FATAL_ERROR
+        "Unrequested target was exported: OpenCVLite::${_fixture_component}")
+    endif()
+  endforeach()
+endif()
+
+if(TARGET OpenCVLite::core)
+  get_target_property(_core_implib OpenCVLite::core IMPORTED_IMPLIB_RELEASE)
+  get_target_property(_core_location OpenCVLite::core IMPORTED_LOCATION)
+  get_target_property(_core_location_release OpenCVLite::core IMPORTED_LOCATION_RELEASE)
+  get_target_property(_core_type OpenCVLite::core TYPE)
+endif()
+if(WIN32 AND TARGET OpenCVLite::core)
   if(NOT _core_type STREQUAL "SHARED_LIBRARY")
     message(FATAL_ERROR "OpenCV Lite target must model a Windows DLL: ${_core_type}")
   endif()
@@ -33,6 +93,6 @@ if(WIN32)
   if(NOT _runtime_contained)
     message(FATAL_ERROR "OpenCV Lite release runtime escapes OPENCV_LITE_ROOT")
   endif()
-elseif(NOT _core_location MATCHES "opencv_core4130")
+elseif(TARGET OpenCVLite::core AND NOT _core_location MATCHES "opencv_core4130")
   message(FATAL_ERROR "OpenCV Lite target has no resolved Unix library: ${_core_location}")
 endif()

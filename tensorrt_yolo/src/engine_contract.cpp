@@ -26,6 +26,10 @@ constexpr std::int64_t kBoxCoordinates = 4;
     throw YoloError(YoloErrorCode::ResourceLimitExceeded, stage + " stage: " + detail);
 }
 
+[[noreturn]] void invalid_error(const std::string& stage, const std::string& detail) {
+    throw YoloError(YoloErrorCode::InvalidArgument, stage + " stage: " + detail);
+}
+
 std::size_t element_size(TensorDataType data_type, const std::string& name) {
     switch (data_type) {
     case TensorDataType::Float32:
@@ -93,7 +97,11 @@ void bind_required_tensors(
     }
 }
 
-void validate_profile_shape(const TensorDesc& tensor, std::size_t rank) {
+void validate_profile_shape(
+    const TensorDesc& tensor,
+    std::size_t rank,
+    bool allow_dynamic_spatial = false
+) {
     if (tensor.min_shape.size() != rank || tensor.opt_shape.size() != rank ||
         tensor.max_shape.size() != rank) {
         contract_error(tensor.name, "profile rank does not match the EfficientNMS contract");
@@ -108,8 +116,11 @@ void validate_profile_shape(const TensorDesc& tensor, std::size_t rank) {
         if (minimum > optimum || optimum > maximum) {
             contract_error(tensor.name, "profile dimensions must satisfy min <= opt <= max");
         }
-        if (index != 0 && (minimum != optimum || optimum != maximum)) {
-            contract_error(tensor.name, "only the batch dimension may be dynamic");
+        const bool dynamic = minimum != optimum || optimum != maximum;
+        const bool spatial_dimension = allow_dynamic_spatial && (index == 2 || index == 3);
+        if (index != 0 && dynamic && !spatial_dimension) {
+            contract_error(tensor.name,
+                           "only batch and image spatial dimensions may be dynamic");
         }
     }
 }
@@ -117,6 +128,23 @@ void validate_profile_shape(const TensorDesc& tensor, std::size_t rank) {
 void require_type(const TensorDesc& tensor, TensorDataType expected) {
     if (tensor.data_type != expected) {
         contract_error(tensor.name, "unexpected tensor data type");
+    }
+}
+
+void validate_physical_layout(const TensorDesc& tensor) {
+    if (tensor.physical_layout.format != TensorPhysicalFormat::Linear) {
+        contract_error(tensor.name, "physical format must be linear");
+    }
+    if (tensor.physical_layout.vectorized_dimension != -1) {
+        contract_error(tensor.name, "vectorized dimension must be -1");
+    }
+    if (tensor.physical_layout.components_per_element != 1) {
+        contract_error(tensor.name, "components per element must be 1");
+    }
+    const std::size_t expected_bytes = element_size(tensor.data_type, tensor.name);
+    if (tensor.physical_layout.bytes_per_component <= 0 ||
+        static_cast<std::size_t>(tensor.physical_layout.bytes_per_component) != expected_bytes) {
+        contract_error(tensor.name, "bytes per component must match the scalar data type");
     }
 }
 
@@ -188,7 +216,7 @@ ValidatedContract validate_engine_contract(
         const TensorDesc& scores = *required[3].descriptor;
         const TensorDesc& labels = *required[4].descriptor;
 
-        validate_profile_shape(images, kImageRank);
+        validate_profile_shape(images, kImageRank, true);
         validate_profile_shape(num_dets, kCountRank);
         validate_profile_shape(boxes, kBoxesRank);
         validate_profile_shape(scores, kDetectionsRank);
@@ -201,6 +229,9 @@ ValidatedContract validate_engine_contract(
         require_type(labels, TensorDataType::Int32);
         require_type(boxes, images.data_type);
         require_type(scores, images.data_type);
+        for (const TensorDesc* tensor : {&images, &num_dets, &boxes, &scores, &labels}) {
+            validate_physical_layout(*tensor);
+        }
         if (images.min_shape[1] != kImageChannels) {
             contract_error(images.name, "input channel dimension must be 3");
         }
@@ -246,14 +277,40 @@ ValidatedContract validate_engine_contract(
 
         return {
             images.min_shape[0], images.opt_shape[0], images.max_shape[0], boxes.max_shape[1],
-            images.min_shape[2], images.min_shape[3], images.data_type, validated_images.max_bytes,
-            output_bytes, std::move(validated_images), std::move(validated_num_dets),
+            images.min_shape[2], images.opt_shape[2], images.max_shape[2],
+            images.min_shape[3], images.opt_shape[3], images.max_shape[3],
+            images.data_type, validated_images.max_bytes, output_bytes,
+            std::move(validated_images), std::move(validated_num_dets),
             std::move(validated_boxes), std::move(validated_scores), std::move(validated_labels)};
     } catch (const std::bad_alloc&) {
         resource_error("metadata", "metadata validation allocation failed");
     } catch (const std::length_error&) {
         resource_error("metadata", "metadata validation exceeded container capacity");
     }
+}
+
+SelectedInputSize select_input_size(
+    const ValidatedContract& contract,
+    const std::optional<std::array<std::int32_t, 2>>& configured_size
+) {
+    std::int64_t height = contract.opt_input_height;
+    std::int64_t width = contract.opt_input_width;
+    if (configured_size.has_value()) {
+        height = (*configured_size)[0];
+        width = (*configured_size)[1];
+        if (height <= 0 || width <= 0) {
+            invalid_error("detector options", "input_size dimensions must be positive");
+        }
+    }
+    if (height < contract.min_input_height || height > contract.max_input_height ||
+        width < contract.min_input_width || width > contract.max_input_width) {
+        invalid_error("detector options", "input_size must be within the engine profile range");
+    }
+    if (height > (std::numeric_limits<std::int32_t>::max)() ||
+        width > (std::numeric_limits<std::int32_t>::max)()) {
+        resource_error("detector options", "input_size exceeds detector dimension range");
+    }
+    return {static_cast<std::int32_t>(height), static_cast<std::int32_t>(width)};
 }
 
 }  // namespace kfcore::yolo

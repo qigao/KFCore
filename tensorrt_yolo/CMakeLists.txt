@@ -34,18 +34,6 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
     "${CMAKE_SOURCE_DIR}/cmake/tests/YoloTrackingInstalledConsumer/main.cpp"
     "${_yolo_tracking_consumer_source_dir}/main.cpp"
     COPYONLY)
-  add_test(NAME test_yolo_tracking_installed_consumer
-    COMMAND "${CMAKE_COMMAND}"
-      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-      "-DKFCORE_CONSUMER_SOURCE_DIR=${_yolo_tracking_consumer_source_dir}"
-      "-DKFCORE_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/build"
-      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install"
-      "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-      "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
-      "-DKFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS=${_yolo_consumer_enable_sanitizer_address}"
-      "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
-
   set(_trackers_consumer_source_dir
     "${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/source")
   configure_file(
@@ -56,21 +44,48 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
     "${CMAKE_SOURCE_DIR}/cmake/tests/TrackersInstalledConsumer/main.c"
     "${_trackers_consumer_source_dir}/main.c"
     COPYONLY)
-  add_test(NAME test_trackers_installed_consumer
-    COMMAND "${CMAKE_COMMAND}"
-      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-      "-DKFCORE_CONSUMER_SOURCE_DIR=${_trackers_consumer_source_dir}"
-      "-DKFCORE_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/build"
-      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install"
-      "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-      "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
-      "-DKFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS=${_yolo_consumer_enable_sanitizer_address}"
-      "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
+  function(_kfcore_add_installed_consumer_test test_name source_dir work_name mode)
+    set(_consumer_root "${CMAKE_BINARY_DIR}/tests/${work_name}")
+    add_test(NAME "${test_name}"
+      COMMAND "${CMAKE_COMMAND}"
+        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+        "-DKFCORE_CONSUMER_SOURCE_DIR=${source_dir}"
+        "-DKFCORE_CONSUMER_BINARY_DIR=${_consumer_root}/build"
+        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_consumer_root}/install"
+        "-DKFCORE_CONSUMER_KFCORE_DIR=${_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+        "-DKFCORE_CONSUMER_TRACKERS_DIR=${_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
+        "-DKFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS=${_yolo_consumer_enable_sanitizer_address}"
+        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
+        "-DKFCORE_CONSUMER_MODE=${mode}"
+        "-DKFCORE_CONSUMER_HAS_TENSORRT_YOLO=${KFCORE_BUILD_TENSORRT_YOLO}"
+        "-DKFCORE_CONSUMER_HAS_YOLO_OPENCV=${KFCORE_BUILD_YOLO_OPENCV}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
+  endfunction()
+
+  _kfcore_add_installed_consumer_test(
+    test_yolo_tracking_installed_consumer
+    "${_yolo_tracking_consumer_source_dir}"
+    yolo_tracking_installed_consumer
+    kfcore_first)
+  _kfcore_add_installed_consumer_test(
+    test_trackers_installed_consumer
+    "${_trackers_consumer_source_dir}"
+    trackers_installed_consumer
+    trackers_first)
+  _kfcore_add_installed_consumer_test(
+    test_yolo_tracking_dependency_first_installed_consumer
+    "${_yolo_tracking_consumer_source_dir}"
+    yolo_tracking_dependency_first_installed_consumer
+    dependency_first)
+  _kfcore_add_installed_consumer_test(
+    test_yolo_tracking_repeated_kfcore_installed_consumer
+    "${_yolo_tracking_consumer_source_dir}"
+    yolo_tracking_repeated_kfcore_installed_consumer
+    repeated_kfcore)
 endif()
 
 if(KFCORE_BUILD_YOLO_OPENCV)
-  find_package(OpenCVLite REQUIRED)
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
 
   add_library(kfcore_yolo_opencv SHARED src/opencv.cpp)
   target_link_libraries(kfcore_yolo_opencv
@@ -194,6 +209,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     FOLDER "tensorrt_yolo")
 
   if(KFCORE_BUILD_YOLO_OPENCV)
+    find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
     add_executable(track_image_sequence examples/track_image_sequence.cpp)
     target_link_libraries(track_image_sequence PRIVATE
       KFCore::tensorrt_yolo
@@ -244,6 +260,8 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       tests/test_tensorrt_integration.cpp)
     target_link_libraries(test_tensorrt_integration PRIVATE
       KFCore::tensorrt_yolo
+      TensorRT::nvinfer
+      TensorRT::nvinfer_plugin
       CUDA::cudart
       TurboUtils::TinyTest)
     set_target_properties(test_tensorrt_integration PROPERTIES
@@ -252,6 +270,9 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       CXX_EXTENSIONS OFF
       FOLDER "tensorrt_yolo/tests")
     add_test(NAME test_tensorrt_integration COMMAND test_tensorrt_integration)
+    kfcore_set_tensorrt_integration_test_engine(
+      test_tensorrt_integration
+      "${KFCORE_TENSORRT_TEST_ENGINE_VALIDATED}")
 
     if(DEFINED ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}
        AND NOT "$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}" STREQUAL "")
