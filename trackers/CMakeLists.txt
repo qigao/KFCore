@@ -46,7 +46,10 @@ if(BUILD_TESTS)
   set_target_properties(test_tracker PROPERTIES
     FOLDER "trackers" )
 
-  add_executable(test_bytetrack_status tests/test_bytetrack_status.c src/tracker.c)
+  add_executable(test_bytetrack_status
+    tests/test_bytetrack_status.c
+    tests/tracker_test_alloc.c
+    src/tracker.c)
   target_compile_definitions(test_bytetrack_status PRIVATE KFCORE_TRACKERS_TEST_ALLOCATOR)
   target_include_directories(test_bytetrack_status PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

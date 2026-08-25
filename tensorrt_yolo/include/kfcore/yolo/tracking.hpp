@@ -29,6 +29,7 @@ public:
     ByteTrackSession& operator=(const ByteTrackSession&) = delete;
 
     TrackFrame update(const DetectionFrame& frame);
+    // Discards every class tracker. The next update starts a new local-ID epoch.
     void reset() noexcept;
 
 private:

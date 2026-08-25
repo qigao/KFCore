@@ -4,6 +4,7 @@
 #include "trackers/tracker.h"
 
 #include <cmath>
+#include <climits>
 #include <map>
 #include <memory>
 #include <new>
@@ -49,6 +50,12 @@ void validate_options(const ByteTrackOptions& options) {
     if (!std::isfinite(options.frame_rate) || options.frame_rate <= 0.0f) {
         throw_invalid_argument("frame_rate must be finite and positive");
     }
+    const long double scaled_lost_buffer =
+        static_cast<long double>(options.frame_rate) / 30.0L *
+        static_cast<long double>(options.lost_track_buffer);
+    if (!std::isfinite(scaled_lost_buffer) || scaled_lost_buffer > INT_MAX) {
+        throw_invalid_argument("scaled lost_track_buffer exceeds tracker range");
+    }
     if (options.minimum_consecutive_frames < 1) {
         throw_invalid_argument("minimum_consecutive_frames must be positive");
     }
@@ -70,6 +77,29 @@ bool is_finite(const Detection& detection) noexcept {
     return std::isfinite(detection.box.left) && std::isfinite(detection.box.top) &&
            std::isfinite(detection.box.right) && std::isfinite(detection.box.bottom) &&
            std::isfinite(detection.score);
+}
+
+void validate_frame(const DetectionFrame& frame) {
+    if (frame.image_width <= 0 || frame.image_height <= 0) {
+        throw_invalid_argument("image dimensions must be positive");
+    }
+    for (const Detection& detection : frame.detections) {
+        if (!is_finite(detection)) {
+            throw_invalid_argument("detection coordinates and score must be finite");
+        }
+        if (detection.score < 0.0f || detection.score > 1.0f) {
+            throw_invalid_argument("detection score must be within [0, 1]");
+        }
+        if (detection.box.left >= detection.box.right ||
+            detection.box.top >= detection.box.bottom) {
+            throw_invalid_argument("detection boxes must have positive area");
+        }
+        if (detection.box.left < 0.0f || detection.box.top < 0.0f ||
+            detection.box.right > static_cast<float>(frame.image_width) ||
+            detection.box.bottom > static_cast<float>(frame.image_height)) {
+            throw_invalid_argument("detection boxes must lie inside the image");
+        }
+    }
 }
 
 detection_t to_tracker_detection(const Detection& detection) noexcept {
@@ -123,6 +153,15 @@ TrackerOwner make_tracker(const ByteTrackOptions& options) {
     return tracker;
 }
 
+TrackerOwner clone_tracker(const bytetrack_t* source) {
+    bytetrack_t* raw_clone = nullptr;
+    const tracker_status_t status = bytetrack_clone(source, &raw_clone);
+    if (status != TRACKER_STATUS_OK) {
+        throw tracker_error(status);
+    }
+    return TrackerOwner(raw_clone);
+}
+
 void require_scratch_size(std::size_t count, std::size_t element_size) {
     std::size_t bytes = 0;
     if (!detail::checked_multiply_size(count, element_size, &bytes)) {
@@ -162,6 +201,11 @@ ByteTrackSession::ByteTrackSession(ByteTrackSession&&) noexcept = default;
 ByteTrackSession& ByteTrackSession::operator=(ByteTrackSession&&) noexcept = default;
 
 TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
+    if (!impl_) {
+        throw YoloError(YoloErrorCode::InvalidArgument,
+                        "cannot update a moved-from ByteTrackSession");
+    }
+    validate_frame(frame);
     const std::size_t detection_count = frame.detections.size();
     if (detection_count > impl_->options.max_detections_per_frame) {
         throw_resource_limit("frame exceeds max_detections_per_frame");
@@ -174,9 +218,6 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
         std::map<std::int32_t, DetectionGroup> groups;
         for (std::size_t index = 0; index < detection_count; ++index) {
             const Detection& detection = frame.detections[index];
-            if (!is_finite(detection)) {
-                throw_invalid_argument("detection coordinates and score must be finite");
-            }
             DetectionGroup& group = groups[detection.class_id];
             group.detections.push_back(to_tracker_detection(detection));
             group.original_indices.push_back(index);
@@ -205,13 +246,17 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
             result.detections[index].detection = frame.detections[index];
         }
 
+        std::map<std::int32_t, TrackerOwner> staged_trackers;
+        for (const auto& entry : impl_->trackers) {
+            staged_trackers.emplace(entry.first, clone_tracker(entry.second.get()));
+        }
         for (const auto& entry : groups) {
-            if (impl_->trackers.find(entry.first) == impl_->trackers.end()) {
-                impl_->trackers.emplace(entry.first, make_tracker(impl_->options));
+            if (staged_trackers.find(entry.first) == staged_trackers.end()) {
+                staged_trackers.emplace(entry.first, make_tracker(impl_->options));
             }
         }
 
-        for (auto& entry : impl_->trackers) {
+        for (auto& entry : staged_trackers) {
             const std::int32_t class_id = entry.first;
             bytetrack_t* tracker = entry.second.get();
             auto group_it = groups.find(class_id);
@@ -256,6 +301,7 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
             }
         }
 
+        impl_->trackers.swap(staged_trackers);
         return result;
     } catch (const std::bad_alloc&) {
         throw YoloError(YoloErrorCode::TrackerAllocationFailure,
@@ -266,9 +312,10 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
 }
 
 void ByteTrackSession::reset() noexcept {
-    for (auto& entry : impl_->trackers) {
-        bytetrack_reset(entry.second.get());
+    if (!impl_) {
+        return;
     }
+    impl_->trackers.clear();
 }
 
 }  // namespace kfcore::yolo

@@ -880,6 +880,42 @@ void bytetrack_reset(bytetrack_t* tracker) {
     tracker->next_id = 0;
 }
 
+tracker_status_t bytetrack_clone(const bytetrack_t* source, bytetrack_t** output) {
+    bytetrack_t* clone;
+    size_t track_bytes = 0;
+
+    if (!source || !output) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
+    }
+    *output = NULL;
+    if (source->track_count > source->track_capacity ||
+        (source->track_capacity && !source->tracks) ||
+        !checked_multiply_size(source->track_capacity, sizeof(*source->tracks), &track_bytes)) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
+    clone = calloc(1, sizeof(*clone));
+    if (!clone) {
+        return TRACKER_STATUS_ALLOCATION_FAILED;
+    }
+    *clone = *source;
+    clone->tracks = NULL;
+    if (source->track_capacity) {
+        clone->tracks = malloc(track_bytes);
+        if (!clone->tracks) {
+            free(clone);
+            return TRACKER_STATUS_ALLOCATION_FAILED;
+        }
+        if (source->track_count) {
+            memcpy(clone->tracks, source->tracks,
+                   sizeof(*clone->tracks) * source->track_count);
+        }
+    }
+
+    *output = clone;
+    return TRACKER_STATUS_OK;
+}
+
 static void byte_retain_alive(bytetrack_t* tracker) {
     size_t out = 0;
     for (size_t i = 0; i < tracker->track_count; ++i) {

@@ -103,6 +103,7 @@ size_t sort_update(
 bytetrack_t* bytetrack_create(const bytetrack_config_t* config);
 void bytetrack_destroy(bytetrack_t* tracker);
 void bytetrack_reset(bytetrack_t* tracker);
+tracker_status_t bytetrack_clone(const bytetrack_t* source, bytetrack_t** output);
 tracker_status_t bytetrack_update_ex(
     bytetrack_t* tracker,
     const detection_t* detections,

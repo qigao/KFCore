@@ -9,7 +9,7 @@ project(
   VERSION 0.1.0
   DESCRIPTION "Kalman filter implementations in C"
   HOMEPAGE_URL "https://github.com/qigao/KFCore"
-  LANGUAGES C CXX)
+  LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -43,6 +43,7 @@ add_subdirectory(vendor)
 add_subdirectory(trackers)
 
 if(KFCORE_BUILD_YOLO_TRACKING)
+  enable_language(CXX)
   add_subdirectory(tensorrt_yolo)
 endif()
 
