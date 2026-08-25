@@ -15,6 +15,30 @@ set_target_properties(kfcore_yolo_tracking PROPERTIES
   FOLDER "tensorrt_yolo"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
+option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
+
+if(KFCORE_BUILD_YOLO_OPENCV)
+  find_package(OpenCVLite REQUIRED)
+
+  add_library(kfcore_yolo_opencv SHARED src/opencv.cpp)
+  add_library(KFCore::yolo_opencv ALIAS kfcore_yolo_opencv)
+  target_link_libraries(kfcore_yolo_opencv
+    PUBLIC
+      KFCore::yolo_tracking
+      OpenCVLite::core
+      OpenCVLite::imgproc)
+  target_include_directories(kfcore_yolo_opencv PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  set_target_properties(kfcore_yolo_opencv PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    EXPORT_NAME yolo_opencv
+    FOLDER "tensorrt_yolo"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
 if(BUILD_TESTS)
   add_executable(test_tensorrt_contract tests/test_tensorrt_contract.cpp)
   target_include_directories(test_tensorrt_contract PRIVATE
@@ -66,6 +90,19 @@ if(BUILD_TESTS)
   add_test(NAME test_yolo_tracking COMMAND test_yolo_tracking)
 endif()
 
+if(KFCORE_BUILD_YOLO_OPENCV AND BUILD_TESTS)
+  add_executable(test_yolo_opencv tests/test_yolo_opencv.cpp)
+  target_link_libraries(test_yolo_opencv PRIVATE
+    KFCore::yolo_opencv
+    TurboUtils::TinyTest)
+  set_target_properties(test_yolo_opencv PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/tests")
+  add_test(NAME test_yolo_opencv COMMAND test_yolo_opencv)
+endif()
+
 if(KFCORE_BUILD_TENSORRT_YOLO)
   add_library(tensorrt_yolo SHARED
     src/cuda_buffer.cpp
@@ -97,6 +134,19 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     EXPORT_NAME tensorrt_yolo
     FOLDER "tensorrt_yolo"
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
+  if(KFCORE_BUILD_YOLO_OPENCV)
+    add_executable(track_image_sequence examples/track_image_sequence.cpp)
+    target_link_libraries(track_image_sequence PRIVATE
+      KFCore::tensorrt_yolo
+      KFCore::yolo_opencv
+      OpenCVLite::imgcodecs)
+    set_target_properties(track_image_sequence PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/examples")
+  endif()
 
   if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
     add_executable(test_cuda_buffer
