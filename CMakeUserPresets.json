@@ -85,6 +85,14 @@
             ]
         },
         {
+            "name": "win-yolo-tracking-dev-user",
+            "displayName": "YOLO Tracking Developer Build (Windows, User)",
+            "inherits": "win-dev-user",
+            "cacheVariables": {
+                "KFCORE_BUILD_YOLO_TRACKING": "ON"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -134,6 +142,11 @@
             "configurePreset": "win-release-user"
         },
         {
+            "name": "win-yolo-tracking-dev-user",
+            "inherits": "win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -151,6 +164,14 @@
         {
             "name": "install-win-release-user",
             "configurePreset": "win-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-yolo-tracking-dev-user",
+            "inherits": "install-win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user",
             "targets": [
                 "install"
             ]
@@ -180,6 +201,11 @@
             "name": "win-release-user",
             "inherits": "base-test",
             "configurePreset": "win-release-user"
+        },
+        {
+            "name": "win-yolo-tracking-dev-user",
+            "inherits": "win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user"
         },
         {
             "name": "linux-dev-user",

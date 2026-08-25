@@ -4,6 +4,7 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 option(KFCORE_BUILD_TESTS "Build KFCore C tests" ON)
 option(KFCORE_BUILD_NAVIGATION_TOOLS "Build navigation helper functions" ON)
+option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_APRILTAG "Build the vendored AprilTag detector library" ON)
 option(KFCORE_BUILD_APRILTAG_EXAMPLES "Build the vendored AprilTag example programs" OFF)
 option(KFCORE_BUILD_APRILTAG_TESTS "Build the vendored AprilTag upstream tests" OFF)
