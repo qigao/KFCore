@@ -1,3 +1,6 @@
+#ifndef KALMAN_TAKASU_H
+#define KALMAN_TAKASU_H
+
 /** @file kalman_takasu.h
  * KFCore
  * @author Jan Zwiener (jan@zwiener.org)
@@ -106,3 +109,5 @@ extern "C"
 #endif
 
 /* @} */
+
+#endif /* KALMAN_TAKASU_H */

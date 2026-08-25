@@ -16,9 +16,10 @@ option(APRILTAG_BUILD_EXAMPLES "Build AprilTag example executables" ${APRILTAG_S
 option(APRILTAG_BUILD_PYTHON_WRAPPER "Builds AprilTag Python wrapper" ${APRILTAG_STANDALONE})
 option(APRILTAG_BUILD_TESTS "Build AprilTag tests" ${APRILTAG_STANDALONE})
 option(APRILTAG_INSTALL "Generate AprilTag install and package rules" ${APRILTAG_STANDALONE})
+option(APRILTAG_USE_LIBJPEG_TURBO "Use libjpeg-turbo as the default JPEG decoder" ON)
 option(ASAN "Use AddressSanitizer for debug builds to detect memory issues" OFF)
 
-if(NOT TARGET TurboNet::Utils)
+if(NOT TARGET TurboUtils::Core)
     find_package(TurboNet CONFIG REQUIRED)
 endif()
 
@@ -125,7 +126,14 @@ if(APRILTAG_WITH_MINIBLAS_HELPERS)
     target_compile_definitions(${PROJECT_NAME} PUBLIC APRILTAG_HAVE_MINIBLAS=1)
 endif()
 
-target_link_libraries(${PROJECT_NAME} PUBLIC TurboNet::Utils)
+if(APRILTAG_USE_LIBJPEG_TURBO)
+    find_package(libjpeg-turbo CONFIG REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PUBLIC
+        $<IF:$<TARGET_EXISTS:libjpeg-turbo::turbojpeg>,libjpeg-turbo::turbojpeg,libjpeg-turbo::turbojpeg-static>)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC APRILTAG_USE_LIBJPEG_TURBO=1)
+endif()
+
+target_link_libraries(${PROJECT_NAME} PUBLIC TurboUtils::Core)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES SOVERSION 3 VERSION ${PROJECT_VERSION})
 set_target_properties(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX "d")

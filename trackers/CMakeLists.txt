@@ -1,8 +1,9 @@
 include(CMakePackageConfigHelpers)
 
 add_library(trackers SHARED src/tracker.c)
-add_library(trackers::trackers ALIAS trackers)
-
+add_library(KFCore::trackers ALIAS trackers)
+set_target_properties(trackers PROPERTIES
+    FOLDER "trackers" )
 target_include_directories(
   trackers PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                   $<INSTALL_INTERFACE:include>)
@@ -32,16 +33,18 @@ endif()
 
 if(BUILD_TESTS)
 
-  add_executable(tests tests/test_trackers.c)
-  target_link_libraries(tests PRIVATE trackers TurboNet::TinyTest)
+  add_executable(test_tracker tests/test_trackers.c)
+  target_link_libraries(test_tracker PRIVATE trackers TurboUtils::TinyTest)
   if(WIN32)
     add_custom_command(
-      TARGET tests
+      TARGET test_tracker
       POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:tests>)
+              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:test_tracker>)
   endif()
-  add_test(NAME tests COMMAND tests)
+  add_test(NAME test_tracker COMMAND test_tracker)
+  set_target_properties(test_tracker PROPERTIES
+    FOLDER "trackers" )
 endif()
 
 install(
@@ -69,7 +72,7 @@ write_basic_package_version_file(
 
 install(
   EXPORT trackersTargets
-  NAMESPACE trackers::
+  NAMESPACE KFCore::
   DESTINATION "${trackers_config_install_dir}")
 
 install(

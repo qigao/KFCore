@@ -20,6 +20,7 @@ typedef struct assignment_result {
     size_t unmatched_row_count;
     int* unmatched_cols;
     size_t unmatched_col_count;
+    int status;
 } assignment_result_t;
 
 typedef struct kf_xyxy {
@@ -47,26 +48,16 @@ typedef struct kf7_snapshot {
     float P[7 * 7];
 } kf7_snapshot_t;
 
-typedef struct sort_track {
+typedef struct kf_xyxy_track {
     int tracker_id;
     int number_of_successful_updates;
     int time_since_update;
     kf_xyxy_t estimator;
-} sort_track_t;
+} kf_xyxy_track_t;
 
-typedef struct byte_track {
-    int tracker_id;
-    int number_of_successful_updates;
-    int time_since_update;
-    kf_xyxy_t estimator;
-} byte_track_t;
-
-typedef struct cbiou_track {
-    int tracker_id;
-    int number_of_successful_updates;
-    int time_since_update;
-    kf_xyxy_t estimator;
-} cbiou_track_t;
+typedef kf_xyxy_track_t sort_track_t;
+typedef kf_xyxy_track_t byte_track_t;
+typedef kf_xyxy_track_t cbiou_track_t;
 
 typedef struct observation {
     int age;
@@ -247,8 +238,8 @@ static void compute_velocity(box_t from, box_t to, float out[2]) {
     const float cy1 = (from.y1 + from.y2) * 0.5f;
     const float cx2 = (to.x1 + to.x2) * 0.5f;
     const float cy2 = (to.y1 + to.y2) * 0.5f;
-    out[0] = cy2 - cy1;
-    out[1] = cx2 - cx1;
+    out[0] = cx2 - cx1;
+    out[1] = cy2 - cy1;
     const float norm = sqrtf(out[0] * out[0] + out[1] * out[1]) + TRACKERS_EPS;
     out[0] /= norm;
     out[1] /= norm;
@@ -287,6 +278,10 @@ static assignment_result_t assign_greedy(
 ) {
     assignment_result_t result;
     memset(&result, 0, sizeof(result));
+    if (rows && cols && !scores) {
+        result.status = -1;
+        return result;
+    }
     const size_t max_matches = rows < cols ? rows : cols;
     int* row_used = rows ? calloc(rows, sizeof(int)) : NULL;
     int* col_used = cols ? calloc(cols, sizeof(int)) : NULL;
@@ -301,6 +296,7 @@ static assignment_result_t assign_greedy(
         free(row_used);
         free(col_used);
         free_assignment(&result);
+        result.status = -1;
         return result;
     }
 
@@ -619,11 +615,19 @@ size_t sort_update(sort_t* tracker, const detection_t* detections,
 
     float* iou = build_iou_matrix(track_boxes, tracker->track_count, detection_boxes, detection_count);
     assignment_result_t assignments = assign_greedy(
-        iou ? iou : NULL,
+        iou,
         tracker->track_count,
         detection_count,
         tracker->minimum_iou_threshold
     );
+
+    if (assignments.status == -1) {
+        free_assignment(&assignments);
+        free(iou);
+        free(track_boxes);
+        free(detection_boxes);
+        return 0;
+    }
 
     for (size_t i = 0; i < assignments.match_count; ++i) {
         const int row = assignments.match_rows[i];
@@ -786,6 +790,16 @@ size_t bytetrack_update(bytetrack_t* tracker,
         tracker->minimum_iou_threshold
     );
 
+    if (high.status == -1 || (high_count && !high_boxes)) {
+        free_assignment(&high);
+        free(high_iou);
+        free(high_boxes);
+        free(track_boxes);
+        free(high_indices);
+        free(low_indices);
+        return 0;
+    }
+
     for (size_t i = 0; i < high.match_count; ++i) {
         const int row = high.match_rows[i];
         const int det_idx = high_indices[high.match_cols[i]];
@@ -813,6 +827,22 @@ size_t bytetrack_update(bytetrack_t* tracker,
         low_count,
         tracker->minimum_iou_threshold
     );
+
+    if (low.status == -1 || 
+        (high.unmatched_row_count && !remaining_boxes) ||
+        (low_count && !low_boxes)) {
+        free_assignment(&low);
+        free(low_iou);
+        free(low_boxes);
+        free(remaining_boxes);
+        free_assignment(&high);
+        free(high_iou);
+        free(high_boxes);
+        free(track_boxes);
+        free(high_indices);
+        free(low_indices);
+        return 0;
+    }
 
     for (size_t i = 0; i < low.match_count; ++i) {
         const int track_idx = high.unmatched_rows[low.match_rows[i]];
@@ -981,6 +1011,16 @@ size_t cbiou_update(cbiou_t* tracker,
         tracker->minimum_biou_threshold
     );
 
+    if (high.status == -1 || (high_count && !high_boxes)) {
+        free_assignment(&high);
+        free(high_scores);
+        free(high_boxes);
+        free(track_boxes);
+        free(high_indices);
+        free(low_indices);
+        return 0;
+    }
+
     for (size_t i = 0; i < high.match_count; ++i) {
         const int row = high.match_rows[i];
         const int det_idx = high_indices[high.match_cols[i]];
@@ -1018,6 +1058,22 @@ size_t cbiou_update(cbiou_t* tracker,
         low_count,
         tracker->minimum_biou_threshold
     );
+
+    if (low.status == -1 ||
+        (high.unmatched_row_count && !remaining_boxes) ||
+        (low_count && !low_boxes)) {
+        free_assignment(&low);
+        free(low_scores);
+        free(low_boxes);
+        free(remaining_boxes);
+        free_assignment(&high);
+        free(high_scores);
+        free(high_boxes);
+        free(track_boxes);
+        free(high_indices);
+        free(low_indices);
+        return 0;
+    }
 
     for (size_t i = 0; i < low.match_count; ++i) {
         const int track_idx = high.unmatched_rows[low.match_rows[i]];
@@ -1265,7 +1321,6 @@ static void ocsort_prune(ocsort_t* tracker) {
     }
     tracker->track_count = out;
 }
-
 static float direction_score(const ocsort_track_t* track, box_t reference,
                              box_t detection, float confidence) {
     if (!track->has_velocity) {
@@ -1275,7 +1330,7 @@ static float direction_score(const ocsort_track_t* track, box_t reference,
     const float ref_cy = (reference.y1 + reference.y2) * 0.5f;
     const float det_cx = (detection.x1 + detection.x2) * 0.5f;
     const float det_cy = (detection.y1 + detection.y2) * 0.5f;
-    float direction[2] = {det_cy - ref_cy, det_cx - ref_cx};
+    float direction[2] = {det_cx - ref_cx, det_cy - ref_cy};
     const float norm = sqrtf(direction[0] * direction[0] + direction[1] * direction[1]) + TRACKERS_EPS;
     direction[0] /= norm;
     direction[1] /= norm;
@@ -1359,6 +1414,19 @@ size_t ocsort_update(ocsort_t* tracker,
     }
 
     assignment_result_t first = assign_greedy(combined, tracker->track_count, kept_count, -INFINITY);
+    if (first.status == -1) {
+        free_assignment(&first);
+        free(predicted);
+        free(reference);
+        free(combined);
+        free(iou);
+        free(kept);
+        free(filtered);
+        free(detection_boxes);
+        free(confidences);
+        return 0;
+    }
+
     int* track_unmatched = tracker->track_count ? malloc(sizeof(int) * tracker->track_count) : NULL;
     int* det_unmatched = kept_count ? malloc(sizeof(int) * kept_count) : NULL;
     int* track_used = tracker->track_count ? calloc(tracker->track_count, sizeof(int)) : NULL;
@@ -1416,40 +1484,80 @@ size_t ocsort_update(ocsort_t* tracker,
     if (track_unmatched_count && det_unmatched_count) {
         box_t* last_boxes = malloc(sizeof(*last_boxes) * track_unmatched_count);
         box_t* unmatched_det_boxes = malloc(sizeof(*unmatched_det_boxes) * det_unmatched_count);
-        if (last_boxes && unmatched_det_boxes) {
-            for (size_t i = 0; i < track_unmatched_count; ++i) {
-                last_boxes[i] = tracker->tracks[track_unmatched[i]].last_observation;
-            }
-            for (size_t i = 0; i < det_unmatched_count; ++i) {
-                unmatched_det_boxes[i] = detection_boxes[det_unmatched[i]];
-            }
-            float* second_iou = build_iou_matrix(last_boxes, track_unmatched_count,
-                                                 unmatched_det_boxes, det_unmatched_count);
-            assignment_result_t second = assign_greedy(second_iou, track_unmatched_count,
-                                                       det_unmatched_count,
-                                                       tracker->minimum_iou_threshold);
-            for (size_t i = 0; i < second.match_count; ++i) {
-                const int track_idx = track_unmatched[second.match_rows[i]];
-                const int det_idx = det_unmatched[second.match_cols[i]];
-                ocsort_update_track(&tracker->tracks[track_idx], &detection_boxes[det_idx]);
-                out_det[out_count] = det_idx;
-                out_id[out_count] = ocsort_resolve_id(tracker, &tracker->tracks[track_idx]);
-                ++out_count;
-            }
-            for (size_t i = 0; i < second.unmatched_row_count; ++i) {
-                ocsort_update_track(&tracker->tracks[track_unmatched[second.unmatched_rows[i]]], NULL);
-            }
-            ocsort_prune(tracker);
-            for (size_t i = 0; i < second.unmatched_col_count; ++i) {
-                const int det_idx = det_unmatched[second.unmatched_cols[i]];
-                (void)ocsort_add_track(tracker, detection_boxes[det_idx]);
-                out_det[out_count] = det_idx;
-                out_id[out_count] = -1;
-                ++out_count;
-            }
+        if (!last_boxes || !unmatched_det_boxes) {
+            free(last_boxes);
+            free(unmatched_det_boxes);
+            free_assignment(&first);
+            free(track_unmatched);
+            free(det_unmatched);
+            free(track_used);
+            free(det_used);
+            free(out_det);
+            free(out_id);
+            free(predicted);
+            free(reference);
+            free(combined);
+            free(iou);
+            free(kept);
+            free(filtered);
+            free(detection_boxes);
+            free(confidences);
+            return 0;
+        }
+        for (size_t i = 0; i < track_unmatched_count; ++i) {
+            last_boxes[i] = tracker->tracks[track_unmatched[i]].last_observation;
+        }
+        for (size_t i = 0; i < det_unmatched_count; ++i) {
+            unmatched_det_boxes[i] = detection_boxes[det_unmatched[i]];
+        }
+        float* second_iou = build_iou_matrix(last_boxes, track_unmatched_count,
+                                             unmatched_det_boxes, det_unmatched_count);
+        assignment_result_t second = assign_greedy(second_iou, track_unmatched_count,
+                                                   det_unmatched_count,
+                                                   tracker->minimum_iou_threshold);
+        if (second.status == -1) {
             free_assignment(&second);
             free(second_iou);
+            free(last_boxes);
+            free(unmatched_det_boxes);
+            free_assignment(&first);
+            free(track_unmatched);
+            free(det_unmatched);
+            free(track_used);
+            free(det_used);
+            free(out_det);
+            free(out_id);
+            free(predicted);
+            free(reference);
+            free(combined);
+            free(iou);
+            free(kept);
+            free(filtered);
+            free(detection_boxes);
+            free(confidences);
+            return 0;
         }
+        for (size_t i = 0; i < second.match_count; ++i) {
+            const int track_idx = track_unmatched[second.match_rows[i]];
+            const int det_idx = det_unmatched[second.match_cols[i]];
+            ocsort_update_track(&tracker->tracks[track_idx], &detection_boxes[det_idx]);
+            out_det[out_count] = det_idx;
+            out_id[out_count] = ocsort_resolve_id(tracker, &tracker->tracks[track_idx]);
+            ++out_count;
+        }
+        for (size_t i = 0; i < second.unmatched_row_count; ++i) {
+            ocsort_update_track(&tracker->tracks[track_unmatched[second.unmatched_rows[i]]], NULL);
+        }
+        ocsort_prune(tracker);
+        for (size_t i = 0; i < second.unmatched_col_count; ++i) {
+            const int det_idx = det_unmatched[second.unmatched_cols[i]];
+            (void)ocsort_add_track(tracker, detection_boxes[det_idx]);
+            out_det[out_count] = det_idx;
+            out_id[out_count] = -1;
+            ++out_count;
+        }
+        free_assignment(&second);
+        free(second_iou);
         free(last_boxes);
         free(unmatched_det_boxes);
     } else {

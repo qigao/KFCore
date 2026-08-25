@@ -53,7 +53,7 @@ either expressed or implied, of the Regents of The University of Michigan.
 
 #include "common/getopt.h"
 #include "common/image_u8.h"
-#include "common/pjpeg.h"
+#include "common/jpeg_loader.h"
 #include "common/zarray.h"
 
 #define  HAMM_HIST_MAX 10
@@ -153,19 +153,16 @@ int main(int argc, char *argv[])
                 str_ends_with(path, "pgm") || str_ends_with(path, "PGM"))
                 im = image_u8_create_from_pnm(path);
             else if (str_ends_with(path, "jpg") || str_ends_with(path, "JPG")) {
-                int err = 0;
-                pjpeg_t *pjpeg = pjpeg_create_from_file(path, 0, &err);
-                if (pjpeg == NULL) {
-                    printf("pjpeg failed to load: %s, error %d\n", path, err);
-                    continue;
-                }
-
                 if (1) {
-                    im = pjpeg_to_u8_baseline(pjpeg);
+                    im = image_u8_create_from_jpeg(path);
                 } else {
                     printf("illumination invariant\n");
 
-                    image_u8x3_t *imc =  pjpeg_to_u8x3_baseline(pjpeg);
+                    image_u8x3_t *imc = image_u8x3_create_from_jpeg(path);
+                    if (!imc) {
+                        printf("jpeg failed to load: %s\n", path);
+                        continue;
+                    }
 
                     im = image_u8_create(imc->width, imc->height);
 
@@ -191,7 +188,10 @@ int main(int argc, char *argv[])
                         image_u8_write_pnm(im, "debug_invariant.pnm");
                 }
 
-                pjpeg_destroy(pjpeg);
+                if (!im) {
+                    printf("jpeg failed to load: %s\n", path);
+                    continue;
+                }
             }
 
             if (im == NULL) {

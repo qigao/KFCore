@@ -8,7 +8,7 @@
 #include "apriltag.h"
 #include "apriltag_pose.h"
 #include "common/matd.h"
-#include "common/pjpeg.h"
+#include "common/jpeg_loader.h"
 #include "test/getline.h"
 
 // Declare tag family creation functions - use tag36h11 instead of tagStandard41h12
@@ -109,16 +109,7 @@ int main(int argc, char *argv[]) {
     // td->refine_pose = 0;
 
     // Load image
-    int pjpeg_error;
-    pjpeg_t *pjpeg = pjpeg_create_from_file(image_path, 0, &pjpeg_error);  // Fix function call, add error parameter
-    if (!pjpeg || pjpeg_error) {
-        printf("Failed to load image: %s, error code: %d\n", image_path, pjpeg_error);
-        return 1;
-    }
-
-    image_u8_t *im = pjpeg_to_u8_baseline(pjpeg);
-    pjpeg_destroy(pjpeg);
-
+    image_u8_t *im = image_u8_create_from_jpeg(image_path);
     if (!im) {
         printf("Failed to decode image: %s\n", image_path);
         return 1;

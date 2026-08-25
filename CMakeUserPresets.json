@@ -5,16 +5,24 @@
     ],
     "configurePresets": [
         {
+            "name": "win-toolchain",
+            "hidden": true,
+            "environment": {
+                "PROJECT_ROOT": "C:/projects/cpp",
+                "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
+                "VCPKG_ROOT": "C:/tools/vcpkg",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
+            }
+        },
+        {
             "name": "win-paths",
             "hidden": true,
-            "cacheVariables": { 
-                "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
-                "TURBONET_ROOT": "c:/projects/cpp/external/pkgs/turbonet",
+            "inherits": "win-toolchain",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
-            },
-            "environment": {
-                "VCPKG_ROOT": "C:/tools/vcpkg"
             },
             "architecture": {
                 "value": "x64",
@@ -28,13 +36,15 @@
         {
             "name": "linux-paths",
             "hidden": true,
-            "cacheVariables": {  
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "VCPKG_MANIFEST_MODE": "ON",
-                "CMAKE_MAKE_PROGRAM": "/usr/bin/ninja"
+                "VCPKG_MANIFEST_MODE": "ON"
             },
             "environment": {
-                "VCPKG_ROOT": "/opt/vcpkg"
+                "PKG_ROOT": "/opt",
+                "VCPKG_ROOT": "/opt/vcpkg",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
             }
         },
         {
@@ -42,9 +52,14 @@
             "displayName": "Developer Build (Windows, User)",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-windows/",
-                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/x64-windows/tools/pkgconf/pkgconf.exe"
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
+            },
+            "environment": {
+                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
+                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
+                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-dev-user",
@@ -55,9 +70,14 @@
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
             "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-windows",
-                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/x64-windows/tools/pkgconf/pkgconf.exe"
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
+            },
+            "environment": {
+                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
+                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
+                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
@@ -69,8 +89,15 @@
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-linux/"
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
+            },
+            "environment": {
+                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
+                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
+                "PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "base-linux-dev-user",
@@ -81,8 +108,15 @@
             "name": "linux-release-user",
             "displayName": "Release Build (Linux, User)",
             "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/x64-linux"
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
+            },
+            "environment": {
+                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
+                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
+                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
+                "PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "release-linux-ninja",
@@ -106,52 +140,56 @@
         {
             "name": "linux-release-user",
             "configurePreset": "linux-release-user"
+        },
+        {
+            "name": "install-win-dev-user",
+            "configurePreset": "win-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-release-user",
+            "configurePreset": "win-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-linux-dev-user",
+            "configurePreset": "linux-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-linux-release-user",
+            "configurePreset": "linux-release-user",
+            "targets": [
+                "install"
+            ]
         }
     ],
     "testPresets": [
         {
             "name": "win-dev-user",
-            "configurePreset": "win-dev-user",
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": false
-            },
-            "output": {
-                "outputOnFailure": true
-            }
+            "inherits": "base-test",
+            "configurePreset": "win-dev-user"
         },
         {
             "name": "win-release-user",
-            "configurePreset": "win-release-user",
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": false
-            },
-            "output": {
-                "outputOnFailure": true
-            }
+            "inherits": "base-test",
+            "configurePreset": "win-release-user"
         },
         {
             "name": "linux-dev-user",
-            "configurePreset": "linux-dev-user",
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": false
-            },
-            "output": {
-                "outputOnFailure": true
-            }
+            "inherits": "base-test",
+            "configurePreset": "linux-dev-user"
         },
         {
             "name": "linux-release-user",
-            "configurePreset": "linux-release-user",
-            "execution": {
-                "noTestsAction": "error",
-                "stopOnFailure": false
-            },
-            "output": {
-                "outputOnFailure": true
-            }
+            "inherits": "base-test",
+            "configurePreset": "linux-release-user"
         }
     ]
 }

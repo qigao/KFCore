@@ -1,3 +1,6 @@
+#ifndef KALMAN_UDU_H
+#define KALMAN_UDU_H
+
 /** @file kalman_udu.h
  * @author Jan Zwiener (jan@zwiener.org)
  *
@@ -156,3 +159,5 @@ extern "C"
 #endif
 
 /* @} */
+
+#endif /* KALMAN_UDU_H */

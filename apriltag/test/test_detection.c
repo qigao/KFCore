@@ -1,10 +1,12 @@
 #include <stdarg.h>
 #include <apriltag.h>
 #include <tag36h11.h>
-#include <common/pjpeg.h>
+#include <common/jpeg_loader.h>
 #include <math.h>
 
 #include "getline.h"
+
+static const double DETECTION_CORNER_TOLERANCE_PX = 2e-1;
 
 
 char*
@@ -47,7 +49,7 @@ detection_compare_function(const apriltag_detection_t *a, const apriltag_detecti
     for (int e = 0; e<4; e++) {
         for (int c = 0; c<2; c++) {
             const double d = a->p[e][c] - b->p[e][c];
-            if (fabs(d) > 1e-1) {
+            if (fabs(d) > DETECTION_CORNER_TOLERANCE_PX) {
                 return copysign(1, d);
             }
         }
@@ -74,17 +76,12 @@ main(int argc, char *argv[])
 
     // load image
     char* const path_img = format("%s.jpg", argv[1]);
-    pjpeg_t *pjpeg = pjpeg_create_from_file(path_img, 0, NULL);
-    if (pjpeg == NULL) {
+    image_u8_t *im = image_u8_create_from_jpeg(path_img);
+    if (im == NULL) {
         free(path_img);
         return EXIT_FAILURE;
     }
-    image_u8_t *im = pjpeg_to_u8_baseline(pjpeg);
     free(path_img);
-    if (im == NULL) {
-        pjpeg_destroy(pjpeg);
-        return EXIT_FAILURE;
-    }
 
     // load true detection
     char* const path_det_true = format("%s.txt", argv[1]);
@@ -165,7 +162,6 @@ main(int argc, char *argv[])
 
     apriltag_detections_destroy(detections);
     image_u8_destroy(im);
-    pjpeg_destroy(pjpeg);
 
     apriltag_detector_destroy(td);
     tag36h11_destroy(tf);

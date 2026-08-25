@@ -1,7 +1,7 @@
 # CMakeLists.txt for the KFCore Kalman filter unit tests.
 #
 # The test executable links against the `kfcore` library (via the KFCore::kfcore
-# alias) and the TurboNet::TinyTest framework that provides the tinytest.h
+# alias) and the TurboUtils::TinyTest framework that provides the tinytest.h
 # header and test runner.
 
 if(BUILD_TESTING)
@@ -10,7 +10,7 @@ if(BUILD_TESTING)
     target_link_libraries(kfcore_kalman_tests
         PRIVATE
             KFCore::kfcore
-            TurboNet::TinyTest)
+            TurboUtils::TinyTest)
 
     # The test source includes linalg.h / navtoolbox.h directly, so make the
     # vendored miniblas headers reachable as well.

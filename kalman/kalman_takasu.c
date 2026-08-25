@@ -28,7 +28,7 @@
 #define KALMAN_MAX_STATE_SIZE 32 /* kalman filter scratchpad buf size */
 #endif
 #ifndef KALMAN_MAX_MEASUREMENTS
-#define KALMAN_MAX_MEASUREMENTS 3 /* kalman filter scratchpad buf size */
+#define KALMAN_MAX_MEASUREMENTS 4 /* kalman filter scratchpad buf size */
 #endif
 
 /******************************************************************************
@@ -122,10 +122,15 @@ int kalman_takasu(float* x, float* P, const float* dz, const float* R, const flo
     trisolveright(L, D /*E*/, m, n, "N");  // (6) solve K*L = E, for K, overwrite D with K
     matmul("N", "N", n, 1, m, 1.0f, D /*K*/, dz, 1.0f, x); // (7) x = x + K * dz (K is stored in D)
 
-    /* FIXME check for P positive definite (symmetric is automatic)*/
-    /* FIXME check for isfinite() in state vector */
-
-    /* (*) If a Cholesky decomposition is found the trsm operations will succeed. */
+    /* Verify state vector is finite after update (catches NaN/Inf propagation). */
+#ifndef NDEBUG
+    for (int _i = 0; _i < n; _i++)
+    {
+        assert(isfinite(x[_i]) && "State vector contains NaN or Inf after Takasu update");
+    }
+#endif
+    /* Note: kalman_predict() writes the full n×n P matrix (not upper-triangular only).
+     * Symmetry is restored here by the syrk update in step (5). */
 
     return 0;
 }
@@ -133,7 +138,8 @@ int kalman_takasu(float* x, float* P, const float* dz, const float* R, const flo
 void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
                     int r)
 {
-    assert(r <= KALMAN_MAX_STATE_SIZE);
+    assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
+    assert(r >= 0 && r <= KALMAN_MAX_STATE_SIZE);
     float alpha, beta;
 
     if (x) //  if prediction of state vector is requested: x = Phi*x;

@@ -31,9 +31,9 @@ spec("trackers c") {
         ocsort_t* ocsort = ocsort_create(NULL);
         tracked_detection_t tracked[1];
 
-        check_size_eq(sort_update(sort, NULL, 0, tracked, 1), 0u);
-        check_size_eq(bytetrack_update(bytetrack, NULL, 0, tracked, 1), 0u);
-        check_size_eq(ocsort_update(ocsort, NULL, 0, tracked, 1), 0u);
+        check_equal(sort_update(sort, NULL, 0, tracked, 1), 0u);
+        check_equal(bytetrack_update(bytetrack, NULL, 0, tracked, 1), 0u);
+        check_equal(ocsort_update(ocsort, NULL, 0, tracked, 1), 0u);
 
         sort_destroy(sort);
         bytetrack_destroy(bytetrack);
@@ -51,7 +51,7 @@ spec("trackers c") {
 
         size_t count = sort_update(tracker, detections, 1, tracked, 1);
 
-        check_size_eq(count, 1u);
+        check_equal(count, 1u);
         check(tracked[0].tracker_id >= 0);
         sort_destroy(tracker);
     }
@@ -72,10 +72,10 @@ spec("trackers c") {
         size_t count1 = sort_update(tracker, frame1, 1, tracked1, 1);
         size_t count2 = sort_update(tracker, frame2, 1, tracked2, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
         check(tracked1[0].tracker_id >= 0);
-        check_int_eq(tracked1[0].tracker_id, tracked2[0].tracker_id);
+        check_equal(tracked1[0].tracker_id, tracked2[0].tracker_id);
         sort_destroy(tracker);
     }
 
@@ -93,10 +93,10 @@ spec("trackers c") {
         size_t count1 = sort_update(tracker, frame1, 1, tracked1, 1);
         size_t count2 = sort_update(tracker, frame2, 1, tracked2, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
-        check_int_eq(tracked1[0].tracker_id, -1);
-        check_int_eq(tracked2[0].tracker_id, -1);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
+        check_equal(tracked1[0].tracker_id, -1);
+        check_equal(tracked2[0].tracker_id, -1);
         sort_destroy(tracker);
     }
 
@@ -113,8 +113,8 @@ spec("trackers c") {
         sort_reset(tracker);
         size_t count = sort_update(tracker, detections, 1, tracked, 1);
 
-        check_size_eq(count, 1u);
-        check_int_eq(tracked[0].tracker_id, 0);
+        check_equal(count, 1u);
+        check_equal(tracked[0].tracker_id, 0);
         sort_destroy(tracker);
     }
 
@@ -127,8 +127,8 @@ spec("trackers c") {
 
         size_t count = bytetrack_update(tracker, detections, 1, tracked, 1);
 
-        check_size_eq(count, 1u);
-        check_int_eq(tracked[0].tracker_id, -1);
+        check_equal(count, 1u);
+        check_equal(tracked[0].tracker_id, -1);
         bytetrack_destroy(tracker);
     }
 
@@ -146,9 +146,9 @@ spec("trackers c") {
         size_t count1 = bytetrack_update(tracker, frame1, 1, tracked1, 1);
         size_t count2 = bytetrack_update(tracker, frame2, 1, tracked2, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
-        check_int_eq(tracked1[0].tracker_id, -1);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
+        check_equal(tracked1[0].tracker_id, -1);
         check(tracked2[0].tracker_id >= 0);
         bytetrack_destroy(tracker);
     }
@@ -172,12 +172,12 @@ spec("trackers c") {
         size_t count2 = bytetrack_update(tracker, frame2, 1, tracked2, 1);
         size_t count3 = bytetrack_update(tracker, frame3, 1, tracked3, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
-        check_size_eq(count3, 1u);
-        check_int_eq(tracked1[0].tracker_id, -1);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
+        check_equal(count3, 1u);
+        check_equal(tracked1[0].tracker_id, -1);
         check(tracked2[0].tracker_id >= 0);
-        check_int_eq(tracked2[0].tracker_id, tracked3[0].tracker_id);
+        check_equal(tracked2[0].tracker_id, tracked3[0].tracker_id);
         bytetrack_destroy(tracker);
     }
 
@@ -198,7 +198,7 @@ spec("trackers c") {
         (void)sort_update(tracker, frame1, 2, tracked, 2);
         size_t count = sort_update(tracker, frame2, 2, tracked, 2);
 
-        check_size_eq(count, 2u);
+        check_equal(count, 2u);
         check(tracked[0].tracker_id >= 0);
         check(tracked[1].tracker_id >= 0);
         check(tracked[0].tracker_id != tracked[1].tracker_id);
@@ -223,7 +223,7 @@ spec("trackers c") {
         (void)bytetrack_update(tracker, frame1, 2, tracked, 2);
         size_t count = bytetrack_update(tracker, frame2, 2, tracked, 2);
 
-        check_size_eq(count, 2u);
+        check_equal(count, 2u);
         check(fabsf(tracked[0].detection.box.x1 - 0.5f) < 1e-5f);
         check(tracked[0].tracker_id >= 0);
         check(fabsf(tracked[1].detection.box.x1 - 100.5f) < 1e-5f);
@@ -253,9 +253,9 @@ spec("trackers c") {
         size_t count1 = cbiou_update(tracker, frame1, 1, tracked1, 1);
         size_t count2 = cbiou_update(tracker, frame2, 1, tracked2, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
-        check_int_eq(tracked1[0].tracker_id, -1);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
+        check_equal(tracked1[0].tracker_id, -1);
         check(tracked2[0].tracker_id >= 0);
         cbiou_destroy(tracker);
     }
@@ -279,8 +279,8 @@ spec("trackers c") {
         (void)cbiou_update(tracker, frame1, 1, tracked, 1);
         size_t count = cbiou_update(tracker, frame2, 1, tracked, 1);
 
-        check_size_eq(count, 1u);
-        check_int_eq(tracked[0].tracker_id, 0);
+        check_equal(count, 1u);
+        check_equal(tracked[0].tracker_id, 0);
         cbiou_destroy(tracker);
     }
 
@@ -293,8 +293,8 @@ spec("trackers c") {
 
         size_t count = ocsort_update(tracker, detections, 1, tracked, 1);
 
-        check_size_eq(count, 1u);
-        check_int_eq(tracked[0].tracker_id, -1);
+        check_equal(count, 1u);
+        check_equal(tracked[0].tracker_id, -1);
         ocsort_destroy(tracker);
     }
 
@@ -307,7 +307,7 @@ spec("trackers c") {
 
         size_t count = ocsort_update(tracker, detections, 1, tracked, 1);
 
-        check_size_eq(count, 0u);
+        check_equal(count, 0u);
         ocsort_destroy(tracker);
     }
 
@@ -327,9 +327,9 @@ spec("trackers c") {
         size_t count1 = ocsort_update(tracker, frame1, 1, tracked1, 1);
         size_t count2 = ocsort_update(tracker, frame2, 1, tracked2, 1);
 
-        check_size_eq(count1, 1u);
-        check_size_eq(count2, 1u);
-        check_int_eq(tracked1[0].tracker_id, -1);
+        check_equal(count1, 1u);
+        check_equal(count2, 1u);
+        check_equal(tracked1[0].tracker_id, -1);
         check(tracked2[0].tracker_id >= 0);
         ocsort_destroy(tracker);
     }
@@ -351,7 +351,7 @@ spec("trackers c") {
         (void)ocsort_update(tracker, frame1, 2, tracked, 2);
         size_t count = ocsort_update(tracker, frame2, 2, tracked, 2);
 
-        check_size_eq(count, 2u);
+        check_equal(count, 2u);
         check(fabsf(tracked[0].detection.box.x1 - 0.5f) < 1e-5f);
         check(tracked[0].tracker_id >= 0);
         check(fabsf(tracked[1].detection.box.x1 - 100.5f) < 1e-5f);

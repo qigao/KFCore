@@ -16,13 +16,24 @@
 /******************************************************************************
  * DEFINES
  ******************************************************************************/
-
+#ifndef PI_FLOAT
 #define PI_FLOAT (3.141592653589793f)
+#endif
+#ifndef RAD2DEG
 #define RAD2DEG(x) ((x) * (180.0f / PI_FLOAT))
+#endif
+#ifndef DEG2RAD
 #define DEG2RAD(x) ((x) * (PI_FLOAT / 180.0f))
+#endif
+#ifndef CLIGHT
 #define CLIGHT (299792458.0)    /* speed of light (m/s) */
+#endif
+#ifndef OMGE
 #define OMGE (7.2921151467E-5f) /* Earth rotation rate 15deg/h */
+#endif
+#ifndef GRAVITY
 #define GRAVITY (9.81f)         /* Gravity */
+#endif
 
 /******************************************************************************
  * TYPEDEFS

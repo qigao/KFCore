@@ -36,7 +36,7 @@ file(GLOB TAG_FILES "${PROJECT_SOURCE_DIR}/tag*.c")
 
 add_executable(test_quick_decode test_quick_decode.c "${PROJECT_SOURCE_DIR}/apriltag_quad_thresh.c" ${COMMON_SRC} ${TAG_FILES})
 target_include_directories(test_quick_decode PRIVATE "${PROJECT_SOURCE_DIR}")
-target_link_libraries(test_quick_decode PRIVATE TurboNet::Utils)
+target_link_libraries(test_quick_decode PRIVATE TurboUtils::Core)
 
 if (UNIX)
     target_link_libraries(test_quick_decode m)

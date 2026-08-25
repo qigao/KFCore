@@ -1,12 +1,120 @@
 # KFCore
 
-**KFCore** is a lightweight and efficient Kalman Filter library implemented in
-C. Designed for both embedded systems and research applications, KFCore offers
-numerically stable algorithms with minimal dependencies and low memory usage.
-By leveraging advanced formulations and optimized computations, KFCore provides
-a robust solution for state estimation in various projects.
+**KFCore** is a C foundation for spatial localization, rigid-body tracking,
+pose fusion, and interaction state. The system direction is based on practical
+pose sources such as VIO, VINS, AprilTag/marker observations, IMU prediction,
+fixed-camera observations, GNSS/RTK, odometry, depth, and LiDAR. These
+observations are fused into stable pose, velocity, attitude, rigid-body, and
+interaction state for VR, outdoor games, robotics, and drone assistance.
 
-## Quick check
+Kalman-family filters are an implementation layer in this architecture, not the
+whole product boundary. The core rule is:
+
+```text
+observations produce poses;
+poses live in explicit frames;
+fusion owns state;
+applications consume stable predicted state.
+```
+
+## System Architecture
+
+KFCore is organized from bottom to top around spatial state, not around one
+filter algorithm:
+
+```text
+sensor / observation layer:
+  camera / headset camera / fixed camera / IMU / AprilTag / marker /
+  wheel odometry / GNSS-RTK / depth / LiDAR / barometer / rangefinder
+
+pose source layer:
+  VIO / VINS / AprilTag pose / fixed-camera tag observation /
+  optical flow / IMU prediction / GNSS position / odometry delta
+
+spatial primitive layer:
+  timestamp / coordinate frame / pose / velocity / covariance /
+  rigid body / landmark / observation confidence
+
+fusion layer:
+  KF / EKF / UKF / error-state navigation fusion /
+  outlier gates / dynamic covariance / dropout handling / prediction
+
+state layer:
+  device pose / rigid body pose / prop pose / robot pose / drone pose /
+  tag landmark map / camera rig state / tracking confidence
+
+interaction layer:
+  region trigger / contact / docking / landing / prop interaction /
+  player-object events / tracking lost-recovered
+
+shared service layer:
+  scene anchors / prop registry / interaction events / multiplayer session /
+  authoritative shared world state / state replication
+
+render asset layer:
+  3DGS scene assets / prop visual assets / occlusion metadata /
+  renderer-facing spatial state
+
+application layer:
+  VR / outdoor games / robotics / drone assistance / AR-MR /
+  virtual production
+```
+
+### Implementation Principles
+
+- **Observation first**
+  - A pose update must come from an explicit observation source: VIO/VINS,
+    AprilTag, fixed camera, IMU, GNSS, odometry, depth, or another sensor.
+  - Every observation should carry timestamp, frame, confidence or covariance,
+    and enough metadata to audit why it was accepted.
+
+- **Explicit coordinate frames**
+  - `map/world`, `camera_i`, `tag_j`, `body/device`, `imu`, `enu/ned`, and
+    `vr/game` frames must be modeled explicitly.
+  - Raw detections should not directly drive application state; they must first
+    be converted into frame-aware observations.
+
+- **Fusion owns state**
+  - Pose, rigid-body, and interaction state are advanced by prediction and
+    correction steps, not by ad hoc overwrites from individual sensors.
+  - KF/EKF/UKF, navigation fusion, dynamic covariance, Mahalanobis gates, and
+    dropout handling are used to keep state stable and explainable.
+
+- **Applications consume stable state**
+  - VR/game/render loops consume predicted pose, confidence, and events.
+  - Drone and robot control consume fused localization, velocity, attitude,
+    environment confidence, and landing/docking cues.
+  - MR headsets consume per-user pose and renderer-facing shared state; shared
+    scene, prop, interaction, and multiplayer authority stays in the service
+    layer.
+
+## Implemented Layers
+
+Current repository modules map into the architecture as follows:
+
+- **Math and filter core**
+  - `kalman/`: Takasu covariance-form Kalman filter, UDU Bierman/Thornton
+    filter, EKF helpers, covariance-form UKF helpers, signal filters, gates,
+    navigation helpers, and 2D/3D fusion helpers.
+  - `vendor/miniblas/`: small BLAS/linalg backend used by the core filters.
+
+- **Spatial perception**
+  - `apriltag/`: AprilTag detection, tag pose support, JPEG/PNM image loading,
+    and fixed-camera marker observation building blocks.
+  - JPEG decoding can use libjpeg-turbo through the `jpeg_loader` path.
+
+- **Tracking**
+  - `trackers/`: SORT, ByteTrack, C-BIoU, and OC-SORT style visual tracking
+    helpers exposed as `KFCore::trackers`.
+
+- **Device I/O**
+  - `turbo_serial/`: serial device access for sensor and embedded integration.
+
+The full repository uses CMake, TurboNet, vendored code, and vcpkg packages.
+The low-level Kalman core remains suitable for small C integrations, but the
+complete spatial stack is not a no-dependency, no-heap embedded profile.
+
+## Numerical Core Quick Check
 
 Are you calculating the inverse of a matrix in your Kalman filter code?
 Or does your Kalman filter implementation handle numerical problems with a measurement sensitivity matrix $\mathbf{H}$ and a covariance matrix $\mathbf{R}$ such as this?
@@ -29,61 +137,7 @@ $$
 
 You could use the `Joseph Form` to mitigate the numerical issues of the standard/vanilla Kalman equations, but this formulation requires more matrix operations and is thus not as fast and potentially still numerically inferior.
 
-## Features
-
-- **High Numerical Stability**
-  - Implements the **UDU** (Bierman/Thornton) algorithms for superior numerical stability compared to the standard Kalman Filter formulations [(2)](https://ntrs.nasa.gov/api/citations/20180003657/downloads/20180003657.pdf).
-  - Includes the **Takasu formulation**, a fast and efficient implementation if you don't want a square root formulation such as the `UDU` filter.
-  - Provides **EKF** and covariance-form **UKF** helpers for nonlinear process and measurement models.
-  - Provides lightweight **signal filters** for scalar/vector low-pass,
-    high-pass, moving average, median, clamp, deadband, slew-rate limiting,
-    rate limiting, acceleration limiting, jerk limiting, Hampel outlier
-    filtering, trimmed mean, winsorized mean, Savitzky-Golay smoothing, moving
-    RMS, moving min/max, running quantiles, exponentially weighted statistics,
-    MAD noise estimation, variance/stddev, FIR, generic IIR, biquad IIR,
-    cascaded SOS, DC blocking, peak hold, adaptive EMA, One Euro adaptive
-    filtering, alpha-beta and alpha-beta-gamma tracking, complementary
-    filtering, hysteresis, debounce, majority voting, Schmitt triggers, edge
-    detection, sample-and-hold, dropout decay, Z-score/IQR gates, Huber/Tukey
-    robust weights, Euclidean norm/distance, Euclidean distance-gated updates,
-    and Mahalanobis gates.
-  - Provides lightweight **navigation/IMU helpers** for gyro Euler integration,
-    quaternion attitude math/integration, Euler conversion output,
-    roll/pitch/yaw complementary filtering, accelerometer gravity gating,
-    body-frame gravity removal, and static/ZUPT detection.
-  - Includes a lightweight **2D fusion system layer** for IMU prediction and
-    position, navigation-frame velocity, body-frame optical/visual velocity,
-    yaw, and ZUPT updates.
-  - Includes a lightweight **3D quaternion error-state fusion layer** with
-    nominal `p, v, q, ba, bg` state and `dp, dv, dtheta, dba, dbg` covariance
-    for IMU prediction, position/velocity, attitude, and ZUPT updates.
-
-- **Focus on Embedded Targets**
-  - Uses only **static memory allocation**, ensuring guaranteed runtime and memory usage suitable for resource-constrained environments.
-  - No dynamic memory allocation, making it ideal for embedded systems.
-
-- **No External Dependencies**
-  - Written in plain **C code** with no external code dependencies.
-  - Easy integration into any project without the need for additional libraries.
-
-- **Mathematical Optimizations**
-  - Leverages the symmetry and positive semi-definiteness of covariance matrices.
-  - Taking advantage of triangular shaped matrices.
-
-- **Robust**
-  - Added functionality to detect measurement errors and reject them with
-  a Χ² statistical test.
-  - Option to reduce the influence of potential outliers based on the Mahalanobis
-    distance (Chang, 2014).
-
-- **Optional: Optimized Computations with BLAS Interface**
-  - Utilizes a **BLAS interface** to take advantage of optimized BLAS libraries on the target platform.
-  - Provides a small built-in **miniblas** library with SIMDE-backed BLAS1
-    vector routines, BLAS2 matrix-vector routines, BLAS3 matrix routines,
-    vector statistics/distances, and small fixed-size matrix helpers.
-  - Exposes project-friendly wrappers for the same helpers through `linalg.h`.
-
-## Supported Filters
+## Fusion And Filtering Features
 
 KFCore currently provides these filter and fusion building blocks:
 
@@ -121,37 +175,52 @@ KFCore currently provides these filter and fusion building blocks:
 
 ## Project Direction
 
-KFCore is evolving toward a robotics, drone, and AR/VR state-estimation and
-perception foundation. The core idea is to combine camera, AprilTag, depth,
-LiDAR, IMU, odometry, RTK/GNSS, and other sensor observations with lightweight
-filters, gates, and fusion layers.
+KFCore is evolving toward a lightweight spatial state engine. The base
+capability is pose and localization from VIO/VINS/TAG/IMU style observations;
+the higher-level capability is stable rigid-body and interaction state.
 
 - **Robotics**
   - AprilTag pose, visual tracking, IMU fusion, wheel odometry, LiDAR/depth
     terrain detection, static/ZUPT detection, and traversability estimation.
 
 - **AR/VR/MR**
-  - Marker tracking, camera pose smoothing, IMU + visual pose fusion,
-    plane/ground detection, jitter reduction, and spatial interaction support.
-  - Low-cost inside-out tracking with AprilTag anchors for room-scale
+  - VIO/VINS pose, marker anchors, fixed-camera observations, IMU prediction,
+    rigid props, player/device pose smoothing, and interaction events.
+  - Low-cost room-scale or semi-outdoor tracking with AprilTag anchors for
     calibration, drift correction, relocalization, and rigid-body prop/tool
-    simulation when OptiTrack-class global tracking is unavailable.
+    simulation.
+  - For MR, keep the headset responsible for per-user sensing, display, and
+    render timing. KFCore-side services should provide the shared scene model,
+    tracked props, interaction state, anchors, and multiplayer session state.
+  - Use 3DGS as a renderer-facing scene and prop asset representation; fusion
+    and interaction logic should consume metric poses, anchors, masks, and
+    confidence rather than 3DGS renderer internals.
+
+- **Outdoor games**
+  - Outdoor play areas can combine VIO/VINS, GNSS, AprilTag landmarks,
+    fixed-camera zones, IMU prediction, and map priors.
+  - The game layer should receive filtered pose, trigger regions, prop state,
+    confidence, and tracking lost/recovered events rather than raw detections.
 
 - **Drones**
-  - RTK/GNSS + vision + IMU + barometer/rangefinder/LiDAR fusion for robust
-    localization across different environments.
+  - RTK/GNSS + VIO/VINS + AprilTag landing markers + IMU +
+    barometer/rangefinder/LiDAR fusion for robust assistance across different
+    environments.
   - Target state includes position, velocity, attitude quaternion, IMU bias,
-    sensor confidence, and environment mode.
+    sensor confidence, environment mode, landing/docking cues, and failover
+    status.
 
 Different environments should use different fusion strategies:
 
 | Environment | Primary observations | Fusion strategy |
 |-------------|----------------------|-----------------|
-| Open sky | RTK/GNSS, IMU, barometer | RTK/GNSS position anchors with high-rate IMU prediction; gate GNSS jumps and smooth altitude. |
-| Urban / multipath | IMU, vision/VIO, GNSS, LiDAR/depth | Down-weight or reject unstable GNSS; rely more on vision, inertial prediction, and local geometry. |
-| Indoor / GNSS-denied | Vision/VIO, AprilTag, IMU, LiDAR/depth, rangefinder | Vision or marker pose provides position correction; IMU predicts between frames; range/depth stabilizes height and obstacles. |
+| Indoor VR / room-scale | VIO/VINS, AprilTag anchors, IMU, fixed cameras | Use VIO for continuous motion, tag anchors for drift correction, and fixed cameras for region/object events. |
+| Shared MR venue | Headset VIO, fixed cameras, AprilTag/marker anchors, prop IMU/IR, server session state | Headset handles per-user pose/display timing; shared services own scene anchors, prop identity, interaction events, and multiplayer replication. |
+| Outdoor game area | VIO/VINS, GNSS, AprilTag landmarks, IMU, map priors | Fuse local visual-inertial pose with global anchors; gate GNSS jumps and expose confidence to gameplay. |
+| Open sky drone | RTK/GNSS, IMU, barometer | Use GNSS position anchors with high-rate IMU prediction; gate jumps and smooth altitude. |
+| Urban / multipath | VIO/VINS, IMU, GNSS, LiDAR/depth | Down-weight or reject unstable GNSS; rely more on visual-inertial prediction and local geometry. |
+| Indoor / GNSS-denied robot | VIO/VINS, AprilTag, IMU, LiDAR/depth, rangefinder | Vision or marker pose provides position correction; IMU predicts between frames; range/depth stabilizes height and obstacles. |
 | Landing / docking | AprilTag/marker, optical flow, IMU, rangefinder | Use marker-relative pose and range for high-precision low-speed control; apply strict outlier gates. |
-| Rough terrain / ground robots | IMU, wheel odometry, LiDAR/depth, camera terrain cues | Fuse odometry and IMU with terrain slope/roughness; detect slip, impact, steps, and traversability changes. |
 
 Maps and landmarks are part of the fusion strategy:
 
@@ -196,22 +265,25 @@ The long-term architecture is:
 
 ```text
 sensor input:
-  camera / AprilTag / depth / LiDAR / IMU / odometry / RTK-GNSS
+  camera / VIO-VINS / AprilTag / marker / depth / LiDAR / IMU /
+  odometry / RTK-GNSS / fixed camera
 
-preprocessing:
-  signal filters / feature extraction / outlier gates / confidence estimates
+pose source:
+  visual-inertial pose / tag pose / GNSS position / odometry delta /
+  optical flow / fixed-camera observation
 
 fusion:
   Kalman / EKF / UKF / navigation fusion / environment-specific update policy
 
 output:
-  pose / velocity / attitude / terrain state / tracking state / confidence
+  pose / velocity / attitude / rigid-body state / interaction state /
+  terrain state / tracking confidence
 ```
 
-### Spatial State Engine
+### Spatial State Engine Roadmap
 
-The consolidated direction is a shared spatial state engine for robotics,
-drones, games, AR/VR, and virtual production. The engine should fuse
+The consolidated direction is a shared spatial state engine for VR, outdoor
+games, drones, robotics, AR/MR, and virtual production. The engine should fuse
 localization, recognition, rigid-body tracking, human state estimation, map
 anchors, and confidence metadata into one stable world model.
 
@@ -230,24 +302,30 @@ fusion:
 
 world state:
   map anchors / camera rigs / players or actors / rigid props / vehicles /
-  drones / terrain regions / interaction events / confidence
+  drones / terrain regions / interaction events / multiplayer session /
+  confidence
 
 outputs:
   robot navigation state / drone localization state / game state /
-  cinematic state / render and compositing metadata
+  MR shared state / cinematic state / render and compositing metadata
 ```
 
 Game output prioritizes low latency, stable predicted poses, interaction
 events, region triggers, and tracking confidence. Cinematic output prioritizes
 virtual camera pose, actor root pose, skeleton or mesh state, rigid prop pose,
 person masks, occlusion regions, render passes, and AI-video conditioning data.
+MR output prioritizes per-user predicted headset/device pose, shared anchors,
+tracked props, interaction events, multiplayer replication state, and
+renderer-facing scene metadata. 3DGS can provide scene and prop appearance, but
+the fusion layer remains the source of metric pose, identity, confidence, and
+interaction truth.
 
-### Low-Cost VR and Interaction Requirements
+### VR, Outdoor Game, And Drone Requirements
 
-The practical low-cost direction is not a direct replacement for OptiTrack.
-Instead, fixed commodity cameras, inside-out tracking, AprilTag anchors, IMU
-prediction, and KF/EKF/UKF fusion should cooperate to produce stable game,
-robot, or cinematic state.
+The practical direction is not a direct replacement for one tracking system.
+Instead, VIO/VINS, fixed commodity cameras, AprilTag anchors, IMU prediction,
+GNSS where available, and KF/EKF/UKF fusion should cooperate to produce stable
+VR, outdoor game, robot, drone, or cinematic state.
 
 - **Coordinate model**
   - Define `map/world`, `camera_i`, `tag_j`, `body/device`, `imu`, `enu/ned`,
@@ -276,11 +354,17 @@ robot, or cinematic state.
     relocalization, docking, landing, and game triggers.
 
 - **Inside-out/VIO**
-  - Use inside-out tracking for continuous head, controller, device, or prop
-    motion.
+  - Use VIO/VINS or inside-out tracking for continuous head, controller,
+    device, drone, robot, or prop motion.
   - Maintain `vio_pose_in_vio_map` and an alignment from the VIO map into the
     global `map/world` frame.
   - Correct drift when AprilTag or fixed-camera observations are available.
+
+- **Outdoor localization**
+  - Combine VIO/VINS with GNSS/RTK and known outdoor tags or visual markers.
+  - Use map priors and zone definitions to decide when GNSS, visual-inertial,
+    or marker observations should dominate.
+  - Expose confidence and environment mode to game logic or drone assistance.
 
 - **IMU prediction**
   - Use gyroscope integration, accelerometer gravity alignment, bias
@@ -299,11 +383,28 @@ robot, or cinematic state.
     pose sources.
 
 - **Game interaction output**
-  - Export stable `player_pose`, `prop_pose`, interaction events, region
-    triggers, confidence, tracking-lost/recovered events, and predicted render
-    poses.
+  - Export stable `player_pose`, `device_pose`, `prop_pose`, interaction
+    events, region triggers, confidence, tracking-lost/recovered events, and
+    predicted render poses.
   - The render loop should consume filtered and predicted state, not raw
     low-rate camera observations directly.
+
+- **MR shared service output**
+  - Export `scene_anchor`, `player_pose`, `headset_pose`, `device_pose`,
+    `prop_pose`, `interaction_event`, session membership, ownership, authority,
+    confidence, and predicted render poses.
+  - Treat the MR headset as a per-user terminal for sensing, display timing,
+    reprojection, and local rendering; shared scene, prop, interaction, and
+    multiplayer state should be owned by the service layer.
+  - Keep 3DGS assets behind a renderer boundary. The service should publish
+    metric transforms, visibility, masks, occlusion hints, and stable IDs that
+    a Unity, Unreal, OpenXR, WebXR, or custom 3DGS renderer can consume.
+
+- **Drone assistance output**
+  - Export position, velocity, attitude, landing-marker pose, range confidence,
+    obstacle or terrain cues, tracking health, and failover status.
+  - Flight control should consume fused and gated state, not raw tag or GNSS
+    measurements directly.
 
 - **Virtual production output**
   - Export `virtual_camera_pose`, `actor_root_pose`, `actor_skeleton`,
@@ -314,7 +415,7 @@ robot, or cinematic state.
   - Use AI video models as a downstream cinematic rendering or style layer,
     not as the primary source of physical tracking truth.
 
-Initial implementation modules should be:
+Roadmap modules:
 
 ```text
 frame_transform:
@@ -329,11 +430,31 @@ fixed_camera_observation:
 object_pose_filter:
   filtered prop/player/object state with confidence and dropout handling
 
+active_ir_keypoint_tracker:
+  non-blinking IR LED keypoints for rigid-body edges, axes, tips, muzzles,
+  grips, and visibility masks; marker pose provides identity and association
+
+rigid_body_imu_predictor:
+  IMU pose in body frame, gyro/accelerometer bias, timestamp sync, latency
+  compensation, rolling-shutter compensation, and visual dropout bridging
+
 insideout_tag_relocalization:
   VIO map alignment and drift correction from known anchors
 
 game_state_output:
   stable poses, events, confidence, and predicted render state
+
+mr_shared_state_output:
+  shared anchors, per-user headset/device poses, prop poses, interaction
+  events, ownership, authority, confidence, and predicted render state
+
+multiplayer_spatial_service:
+  authoritative shared world state, session membership, prop ownership,
+  interaction event ordering, and state replication
+
+gs3d_render_boundary:
+  stable IDs, transforms, masks, occlusion hints, and renderer-facing metadata
+  for 3DGS scene and prop assets
 
 person_interaction_tracker:
   person mask, region, skeleton/root state, contact, sit/stand, and motion events
@@ -341,6 +462,88 @@ person_interaction_tracker:
 cinematic_state_output:
   virtual camera, actor, prop, mask, occlusion, confidence, and render metadata
 ```
+
+### Bottom-Up TODO
+
+- [ ] Define the common spatial data contracts:
+  `timestamp`, `frame_id`, `pose`, `velocity`, `covariance`, `confidence`,
+  `source_id`, and observation status.
+- [ ] Define coordinate-frame conventions for `map/world`, `camera_i`,
+  `tag_j`, `body/device`, `imu`, `enu/ned`, and `vr/game`, including
+  handedness and unit conventions.
+- [ ] Finish the frame transform layer for point, pose, covariance, ENU/NED,
+  and game-engine frame conversion.
+- [ ] Add a tag landmark database with `tag_id`, `pose_in_map`, physical size,
+  covariance, region, usage, and attached-object metadata.
+- [ ] Add fixed-camera observation adapters that convert camera extrinsics and
+  AprilTag/person/object detections into map-frame observations.
+- [ ] Add VIO/VINS adapter interfaces for pose, pose delta, covariance,
+  timestamp, tracking quality, and relocalization state.
+- [ ] Add IMU prediction interfaces for gyro integration, gravity alignment,
+  bias estimation, static detection, and ZUPT.
+- [ ] Add GNSS/RTK and outdoor marker observation interfaces for outdoor game
+  areas and drone assistance.
+- [ ] Define the rigid-body state model for devices, props, robots, drones,
+  and tracked objects.
+- [ ] Add rigid-body marker calibration:
+  `body_id`, `marker_id`, `marker_pose_in_body`, physical marker size,
+  interaction points, axes, edge keypoints, collision proxies, and visibility
+  masks.
+- [ ] Add active IR LED keypoint layout for irregular rigid bodies:
+  non-blinking IR LEDs define sword tips/blade axes, toy-gun muzzles/sights,
+  grips, edges, and other body-local keypoints.
+- [ ] Add active IR LED detector:
+  IR-pass camera support, thresholding, blob extraction, centroid estimation,
+  exposure controls, ambient-light rejection, and per-keypoint confidence.
+- [ ] Add marker-guided IR LED association:
+  marker identifies `body_id` and gives initial pose; projected expected LED
+  positions are matched to non-blinking IR blobs by geometry, distance,
+  visibility mask, and temporal consistency.
+- [ ] Add pose refinement from IR keypoints:
+  refine `body_pose` from known 3D LED keypoints and detected 2D centroids,
+  reject outliers, and fall back to marker-only or prediction-only state when
+  too few keypoints are visible.
+- [ ] Add rigid-body IMU model:
+  `imu_pose_in_body`, gyro/accelerometer bias, sampling rate, timestamp sync,
+  static detection, calibration state, and confidence.
+- [ ] Add IMU visual compensation:
+  use IMU prediction to compensate camera latency, fast motion, rolling shutter,
+  and short-term marker/IR occlusion.
+- [ ] Add marker/IR/IMU fusion:
+  marker gives identity and absolute correction, non-blinking IR LEDs refine
+  edges/keypoints, and IMU predicts high-rate pose between visual updates.
+- [ ] Implement object/rigid-body fusion with prediction, correction, dynamic
+  covariance, Mahalanobis gates, dropout handling, and confidence decay.
+- [ ] Implement VIO/tag relocalization to align local VIO maps into the shared
+  `map/world` frame.
+- [ ] Implement interaction-state extraction: region triggers, contact events,
+  docking/landing state, tracking lost/recovered, and prop/player events.
+- [ ] Implement VR/game output adapters for predicted `player_pose`,
+  `device_pose`, `prop_pose`, interaction events, confidence, and latency
+  compensation.
+- [ ] Define MR shared-state contracts:
+  `scene_anchor`, `headset_pose`, `device_pose`, `prop_pose`,
+  `interaction_event`, `session_id`, `player_id`, ownership, authority,
+  confidence, and predicted render timestamps.
+- [ ] Implement multiplayer spatial service state:
+  authoritative shared world state, session membership, prop ownership,
+  interaction event ordering, conflict resolution, and state replication.
+- [ ] Implement MR headset adapter boundaries:
+  headset-local VIO/display timing/reprojection stays on the headset; shared
+  anchors, props, interactions, and multiplayer state come from KFCore services.
+- [ ] Implement 3DGS renderer boundary:
+  publish stable scene/prop IDs, metric transforms, masks, occlusion hints,
+  visibility, and confidence for Unity, Unreal, OpenXR, WebXR, or custom 3DGS
+  renderers without coupling fusion state to renderer internals.
+- [ ] Implement outdoor game output adapters for play-area localization,
+  global/local anchor confidence, region events, and tracking health.
+- [ ] Implement drone assistance output adapters for position, velocity,
+  attitude, landing-marker pose, range confidence, terrain/obstacle cues,
+  failover state, and control-facing health.
+- [ ] Add replayable datasets and regression tests for indoor VR, outdoor game,
+  and drone landing/docking scenarios.
+- [ ] Add benchmarks for observation ingestion, frame transforms, fusion update,
+  prediction latency, and application output latency.
 
 ## Implementations
 
@@ -410,16 +613,47 @@ Clone the repository:
 
     git clone https://github.com/jnz/KFCore.git
 
-### C Version
+### CMake Integration
 
-- Copy `linalg.c` and `linalg.h` from the `c/` directory to your project.
-- Copy `miniblas.c` and `miniblas.h` from the `c/` directory to your project.
-- If your platform has an optimized BLAS library that you want to use, you
-  can exclude miniblas.
+KFCore is built as CMake targets. The core Kalman and signal/navigation helpers
+are exposed through `KFCore::kfcore`; the visual tracking helpers are exposed
+through `KFCore::trackers`.
+
+```cmake
+find_package(KFCore CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE KFCore::kfcore)
+```
+
+For tracker support:
+
+```cmake
+find_package(trackers CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE KFCore::trackers)
+```
+
+When building from this repository, the important options are:
+
+- `KFCORE_BUILD_APRILTAG`: build the vendored AprilTag detector.
+- `KFCORE_BUILD_APRILTAG_TESTS`: build AprilTag tests.
+- `KFCORE_BUILD_APRILTAG_EXAMPLES`: build AprilTag examples.
+- `KFCORE_BUILD_NAVIGATION_TOOLS`: build frame transform and navigation fusion
+  helpers.
+- `KFCORE_BUILD_TESTS`: build local tests.
+
+The full repository depends on TurboNet and vcpkg packages such as SIMDe, STC,
+xxHash, stb, and libjpeg-turbo. For a small embedded integration, use only the
+needed `kalman/` and `vendor/miniblas/` sources and avoid the perception,
+tracking, and serial layers.
+
+### Source Integration
+
+If you need to embed only the numerical core into a small C project, copy the
+specific source files from `kalman/` and `vendor/miniblas/` instead of pulling
+the whole spatial stack.
 
 **How to add the KFCore Takasu formulation to your project**
-   - Add the files `kalman_takasu.c` and `kalman_takasu.h` from the `c/`
-     directory to your project.
+   - Add `kalman/kalman_takasu.c` and `kalman/kalman_takasu.h`.
+   - Add the required linear algebra backend from `vendor/miniblas/`.
    - Include the header file in your code:
 
 ```c
@@ -427,8 +661,8 @@ Clone the repository:
 ```
 
 **How to add the KFCore UDU formulation to your project**
-   - Add the files `kalman_udu.c` and `kalman_udu.h` from the `c/`
-     directory to your project.
+   - Add `kalman/kalman_udu.c` and `kalman/kalman_udu.h`.
+   - Add the required linear algebra backend from `vendor/miniblas/`.
    - Include the header file in your code:
 
 ```c
@@ -436,8 +670,8 @@ Clone the repository:
 ```
 
 **How to add nonlinear EKF/UKF helpers to your project**
-   - Add `kalman_ekf.c/.h` for EKF helpers.
-   - Add `kalman_ukf.c/.h` for covariance-form UKF helpers.
+   - Add `kalman/kalman_ekf.c/.h` for EKF helpers.
+   - Add `kalman/kalman_ukf.c/.h` for covariance-form UKF helpers.
    - These helpers reuse the C Kalman and linear algebra routines above.
 
 ```c
@@ -446,15 +680,16 @@ Clone the repository:
 ```
 
 **How to add signal filters to your project**
-   - Add `signal_filters.c/.h` for scalar/vector low-pass, high-pass, moving
-     average, median, limit/deadband/slew-rate, Hampel, FIR, generic IIR,
-     biquad IIR, cascaded SOS, moving RMS, running variance/stddev, trimmed
-     mean, winsorized mean, Savitzky-Golay, moving min/max, running quantiles,
-     exponentially weighted statistics, MAD noise estimation, Z-score/IQR
-     gates, Huber/Tukey weights, majority voting, Schmitt triggers, edge
-     detection, sample-and-hold, dropout decay, peak hold, DC blocker, adaptive
-     EMA, One Euro, alpha-beta, alpha-beta-gamma, complementary, hysteresis,
-     debounce, Euclidean distance, and Mahalanobis filtering helpers.
+   - Add `kalman/signal_filters.c/.h` for scalar/vector low-pass, high-pass,
+     moving average, median, limit/deadband/slew-rate, Hampel, FIR, generic
+     IIR, biquad IIR, cascaded SOS, moving RMS, running variance/stddev,
+     trimmed mean, winsorized mean, Savitzky-Golay, moving min/max, running
+     quantiles, exponentially weighted statistics, MAD noise estimation,
+     Z-score/IQR gates, Huber/Tukey weights, majority voting, Schmitt triggers,
+     edge detection, sample-and-hold, dropout decay, peak hold, DC blocker,
+     adaptive EMA, One Euro, alpha-beta, alpha-beta-gamma, complementary,
+     hysteresis, debounce, Euclidean distance, and Mahalanobis filtering
+     helpers.
 
 ```c
     #include "signal_filters.h"

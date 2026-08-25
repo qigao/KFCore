@@ -29,7 +29,13 @@ include(Sanitizers)
 include(CmakeUtils)
 
 find_package(Threads REQUIRED)
-find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
+
+find_package(TurboUtils CONFIG REQUIRED
+             PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
+find_package(TurboParser CONFIG REQUIRED
+             PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
+find_package(TurboNet CONFIG REQUIRED
+             PATHS "$ENV{TURBONET_ROOT}" NO_DEFAULT_PATH)
 
 include(CTest)
 
@@ -46,8 +52,7 @@ if(KFCORE_BUILD_APRILTAG)
   set(APRILTAG_INSTALL OFF CACHE BOOL "Install AprilTag from the vendored subproject" FORCE)
   add_subdirectory(apriltag)
 endif()
-add_subdirectory(kalman)
-add_subdirectory(turbo_serial)
+add_subdirectory(kalman) 
 
 if(KFCORE_INSTALL)
   include(CMakePackageConfigHelpers)

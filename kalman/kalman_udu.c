@@ -53,6 +53,10 @@ int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float 
     float a[KALMAN_MAX_STATE_SIZE];
     float b[KALMAN_MAX_STATE_SIZE];
     float alpha = R;
+    if (alpha <= 0.0f)
+    {
+        return -1;
+    }
     float gamma = 1.0f / alpha;
 
     {
@@ -72,9 +76,13 @@ int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float 
     {
         float beta = alpha;
         alpha += a[j] * b[j];
+        if (alpha <= 0.0f)
+        {
+            return -1;
+        }
         float lambda = -a[j] * gamma;
 
-        gamma = 1.0f / alpha; // FIXME add test to check for UDU filter health
+        gamma = 1.0f / alpha;
 
         d[j] *= beta * gamma;
         for (int i = 0; i < j; i++)
