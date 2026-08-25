@@ -1,5 +1,26 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+set(KFCore_HAS_YOLO_TRACKING "@KFCORE_BUILD_YOLO_TRACKING@")
+set(KFCore_HAS_TENSORRT_YOLO "@KFCORE_BUILD_TENSORRT_YOLO@")
+set(KFCore_HAS_YOLO_OPENCV "@KFCORE_BUILD_YOLO_OPENCV@")
+
+if(KFCore_HAS_TENSORRT_YOLO)
+  list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_dependency(CUDAToolkit)
+  find_package(TensorRT REQUIRED MODULE)
+endif()
+
+if(KFCore_HAS_YOLO_OPENCV)
+  list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_package(OpenCVLite REQUIRED MODULE)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/KFCoreTargets.cmake")
+
+if(KFCore_HAS_YOLO_TRACKING)
+  find_dependency(trackers CONFIG)
+endif()
 
 check_required_components(KFCore)

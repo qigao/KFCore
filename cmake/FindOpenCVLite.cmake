@@ -119,7 +119,11 @@ function(_opencv_lite_find_component component)
     endif()
   endforeach()
 
-  add_library(OpenCVLite::${component} UNKNOWN IMPORTED)
+  if(WIN32)
+    add_library(OpenCVLite::${component} SHARED IMPORTED)
+  else()
+    add_library(OpenCVLite::${component} UNKNOWN IMPORTED)
+  endif()
   set_target_properties(OpenCVLite::${component} PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${OpenCVLite_INCLUDE_DIR}")
 
@@ -158,10 +162,6 @@ function(_opencv_lite_find_component component)
         IMPORTED_IMPLIB_RELEASE "${OpenCVLite_${_OpenCVLite_upper}_RELEASE_LIBRARY}")
       set_property(TARGET OpenCVLite::${component} PROPERTY
         IMPORTED_LOCATION_RELEASE "${_OpenCVLite_${_OpenCVLite_upper}_RELEASE_RUNTIME}")
-      set_property(TARGET OpenCVLite::${component} PROPERTY
-        IMPORTED_IMPLIB "${OpenCVLite_${_OpenCVLite_upper}_RELEASE_LIBRARY}")
-      set_property(TARGET OpenCVLite::${component} PROPERTY
-        IMPORTED_LOCATION "${_OpenCVLite_${_OpenCVLite_upper}_RELEASE_RUNTIME}")
       list(APPEND _OpenCVLite_imported_configurations RELEASE)
     endif()
     if(OpenCVLite_${_OpenCVLite_upper}_DEBUG_LIBRARY)

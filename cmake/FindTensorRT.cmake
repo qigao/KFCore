@@ -57,16 +57,36 @@ endif()
 _tensorrt_require_contained("${TensorRT_INCLUDE_DIR}/NvInferPlugin.h" "plugin header")
 
 file(READ "${_TensorRT_version_header}" _TensorRT_version_contents)
-foreach(_component IN ITEMS MAJOR MINOR PATCH)
+
+function(_tensorrt_read_version_component component output_variable)
   string(REGEX MATCH
-    "#[ \t]*define[ \t]+NV_TENSORRT_${_component}[ \t]+([0-9]+)"
-    _TensorRT_${_component}_match
+    "#[ \t]*define[ \t]+NV_TENSORRT_${component}[ \t]+([A-Za-z_][A-Za-z0-9_]*|[0-9]+)"
+    _TensorRT_component_match
     "${_TensorRT_version_contents}")
-  if(NOT _TensorRT_${_component}_match)
+  if(NOT _TensorRT_component_match)
     message(FATAL_ERROR
-      "NvInferVersion.h does not define NV_TENSORRT_${_component}")
+      "NvInferVersion.h does not define a parseable NV_TENSORRT_${component}")
   endif()
-  set(TensorRT_VERSION_${_component} "${CMAKE_MATCH_1}")
+
+  set(_TensorRT_component_value "${CMAKE_MATCH_1}")
+  if(NOT _TensorRT_component_value MATCHES "^[0-9]+$")
+    string(REGEX MATCH
+      "#[ \t]*define[ \t]+${_TensorRT_component_value}[ \t]+([0-9]+)"
+      _TensorRT_indirect_match
+      "${_TensorRT_version_contents}")
+    if(NOT _TensorRT_indirect_match)
+      message(FATAL_ERROR
+        "NvInferVersion.h defines NV_TENSORRT_${component} through an unparseable macro: "
+        "${_TensorRT_component_value}")
+    endif()
+    set(_TensorRT_component_value "${CMAKE_MATCH_1}")
+  endif()
+
+  set(${output_variable} "${_TensorRT_component_value}" PARENT_SCOPE)
+endfunction()
+
+foreach(_component IN ITEMS MAJOR MINOR PATCH)
+  _tensorrt_read_version_component(${_component} TensorRT_VERSION_${_component})
 endforeach()
 
 if(NOT TensorRT_VERSION_MAJOR EQUAL 10 AND NOT TensorRT_VERSION_MAJOR EQUAL 11)

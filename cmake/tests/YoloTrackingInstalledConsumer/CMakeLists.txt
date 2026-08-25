@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(YoloTrackingInstalledConsumer LANGUAGES CXX)
+
+find_package(KFCore CONFIG REQUIRED)
+
+add_executable(yolo_tracking_installed_consumer main.cpp)
+target_link_libraries(yolo_tracking_installed_consumer PRIVATE KFCore::yolo_tracking)
+target_compile_features(yolo_tracking_installed_consumer PRIVATE cxx_std_17)

@@ -54,6 +54,19 @@ find_package(TurboNet CONFIG REQUIRED
 
 include(CTest)
 
+if(BUILD_TESTS)
+  add_test(NAME test_find_tensorrt
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_find_tensorrt.cmake")
+  add_test(NAME test_find_opencv_lite
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_find_opencv_lite.cmake")
+endif()
+
 add_subdirectory(vendor)
 add_subdirectory(trackers)
 
@@ -99,6 +112,16 @@ if(KFCORE_INSTALL)
                   kalman/navigation_tools/nav_fusion2d.h
                   kalman/navigation_tools/nav_fusion3d.h
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
+  endif()
+
+  if(KFCORE_BUILD_TENSORRT_YOLO)
+    install(FILES cmake/FindTensorRT.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+  endif()
+
+  if(KFCORE_BUILD_YOLO_OPENCV)
+    install(FILES cmake/FindOpenCVLite.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
   endif()
 
   install(

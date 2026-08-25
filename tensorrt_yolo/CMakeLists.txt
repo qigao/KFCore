@@ -1,7 +1,6 @@
 add_library(kfcore_yolo_tracking SHARED
   src/engine_contract.cpp
   src/tracking.cpp)
-add_library(KFCore::yolo_tracking ALIAS kfcore_yolo_tracking)
 
 target_link_libraries(kfcore_yolo_tracking PRIVATE KFCore::trackers)
 target_include_directories(kfcore_yolo_tracking PUBLIC
@@ -11,15 +10,38 @@ set_target_properties(kfcore_yolo_tracking PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  EXPORT_NAME yolo_tracking
   FOLDER "tensorrt_yolo"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
+cmake_config_target(kfcore_yolo_tracking
+  ALIAS KFCore::yolo_tracking
+  EXPORT_NAME yolo_tracking
+  EXPORT_SET KFCoreTargets
+  FOLDER "tensorrt_yolo")
+
+if(BUILD_TESTS AND KFCORE_INSTALL)
+  set(_yolo_tracking_consumer_source_dir
+    "${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/source")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/tests/YoloTrackingInstalledConsumer/CMakeLists.txt"
+    "${_yolo_tracking_consumer_source_dir}/CMakeLists.txt"
+    COPYONLY)
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/tests/YoloTrackingInstalledConsumer/main.cpp"
+    "${_yolo_tracking_consumer_source_dir}/main.cpp"
+    COPYONLY)
+  add_test(NAME test_yolo_tracking_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${_yolo_tracking_consumer_source_dir}"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
+endif()
 
 if(KFCORE_BUILD_YOLO_OPENCV)
   find_package(OpenCVLite REQUIRED)
 
   add_library(kfcore_yolo_opencv SHARED src/opencv.cpp)
-  add_library(KFCore::yolo_opencv ALIAS kfcore_yolo_opencv)
   target_link_libraries(kfcore_yolo_opencv
     PUBLIC
       KFCore::yolo_tracking
@@ -32,9 +54,13 @@ if(KFCORE_BUILD_YOLO_OPENCV)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    EXPORT_NAME yolo_opencv
     FOLDER "tensorrt_yolo"
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  cmake_config_target(kfcore_yolo_opencv
+    ALIAS KFCore::yolo_opencv
+    EXPORT_NAME yolo_opencv
+    EXPORT_SET KFCoreTargets
+    FOLDER "tensorrt_yolo")
 endif()
 
 if(BUILD_TESTS)
@@ -109,7 +135,6 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     src/engine_file.cpp
     src/engine.cpp
     src/letterbox.cu)
-  add_library(KFCore::tensorrt_yolo ALIAS tensorrt_yolo)
 
   target_include_directories(tensorrt_yolo
     PUBLIC
@@ -129,9 +154,13 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    EXPORT_NAME tensorrt_yolo
     FOLDER "tensorrt_yolo"
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  cmake_config_target(tensorrt_yolo
+    ALIAS KFCore::tensorrt_yolo
+    EXPORT_NAME tensorrt_yolo
+    EXPORT_SET KFCoreTargets
+    FOLDER "tensorrt_yolo")
 
   if(KFCORE_BUILD_YOLO_OPENCV)
     add_executable(track_image_sequence examples/track_image_sequence.cpp)
@@ -233,16 +262,9 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     add_test(NAME test_letterbox_cuda COMMAND test_letterbox_cuda)
   endif()
 
-  install(TARGETS tensorrt_yolo
-    EXPORT KFCoreTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-install(TARGETS kfcore_yolo_tracking
-  EXPORT KFCoreTargets
-  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+cmake_install_headers(
+  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  PATTERNS "*.hpp")

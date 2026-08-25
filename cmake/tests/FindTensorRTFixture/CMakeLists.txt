@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(FindTensorRTFixture NONE)
+
+if(NOT DEFINED FIND_TENSORRT_MODULE_DIR)
+  message(FATAL_ERROR "FIND_TENSORRT_MODULE_DIR is required")
+endif()
+if(NOT DEFINED FIND_TENSORRT_EXPECTED_VERSION)
+  message(FATAL_ERROR "FIND_TENSORRT_EXPECTED_VERSION is required")
+endif()
+
+list(PREPEND CMAKE_MODULE_PATH "${FIND_TENSORRT_MODULE_DIR}")
+find_package(TensorRT REQUIRED)
+
+if(NOT TensorRT_VERSION STREQUAL FIND_TENSORRT_EXPECTED_VERSION)
+  message(FATAL_ERROR
+    "Unexpected TensorRT version ${TensorRT_VERSION}; expected ${FIND_TENSORRT_EXPECTED_VERSION}")
+endif()
