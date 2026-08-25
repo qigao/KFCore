@@ -84,6 +84,8 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       src/cuda_buffer.cpp)
     target_include_directories(test_cuda_buffer PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(test_cuda_buffer PRIVATE
+      KFCORE_YOLO_CUDA_BUFFER_TESTING)
     target_link_libraries(test_cuda_buffer PRIVATE
       KFCore::yolo_tracking
       CUDA::cudart

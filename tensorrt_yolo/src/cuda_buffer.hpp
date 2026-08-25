@@ -10,6 +10,7 @@ namespace kfcore::yolo::detail
 
 void check_cuda(cudaError_t result, std::string_view operation, std::string_view stage);
 
+#if defined(KFCORE_YOLO_CUDA_BUFFER_TESTING)
 struct CudaMemoryApi
 {
     cudaError_t (*malloc_device)(void**, std::size_t);
@@ -17,12 +18,15 @@ struct CudaMemoryApi
     cudaError_t (*malloc_pinned)(void**, std::size_t);
     cudaError_t (*free_pinned)(void*);
 };
+#endif
 
 class CudaBuffer final
 {
 public:
     CudaBuffer() noexcept;
+#if defined(KFCORE_YOLO_CUDA_BUFFER_TESTING)
     explicit CudaBuffer(const CudaMemoryApi& api) noexcept;
+#endif
     ~CudaBuffer() noexcept;
 
     CudaBuffer(const CudaBuffer&)            = delete;
@@ -39,16 +43,20 @@ public:
     std::size_t capacity() const noexcept;
 
 private:
+#if defined(KFCORE_YOLO_CUDA_BUFFER_TESTING)
     CudaMemoryApi api_;
-    void*         data_     = nullptr;
-    std::size_t   capacity_ = 0;
+#endif
+    void*       data_     = nullptr;
+    std::size_t capacity_ = 0;
 };
 
 class PinnedHostBuffer final
 {
 public:
     PinnedHostBuffer() noexcept;
+#if defined(KFCORE_YOLO_CUDA_BUFFER_TESTING)
     explicit PinnedHostBuffer(const CudaMemoryApi& api) noexcept;
+#endif
     ~PinnedHostBuffer() noexcept;
 
     PinnedHostBuffer(const PinnedHostBuffer&)            = delete;
@@ -63,9 +71,11 @@ public:
     std::size_t capacity() const noexcept;
 
 private:
+#if defined(KFCORE_YOLO_CUDA_BUFFER_TESTING)
     CudaMemoryApi api_;
-    void*         data_     = nullptr;
-    std::size_t   capacity_ = 0;
+#endif
+    void*       data_     = nullptr;
+    std::size_t capacity_ = 0;
 };
 
 } // namespace kfcore::yolo::detail
