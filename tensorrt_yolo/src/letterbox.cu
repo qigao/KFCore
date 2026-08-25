@@ -14,8 +14,6 @@ namespace kfcore::yolo::detail
 namespace
 {
 
-    constexpr int kBlockWidth = 16;
-    constexpr int kBlockHeight = 16;
     constexpr float kPixelScale = 1.0f / 255.0f;
 
     template <typename Destination>
@@ -96,32 +94,31 @@ namespace
     __global__ void letterbox_kernel(const std::uint8_t* source, std::size_t source_stride,
                                      PixelFormat source_format, Destination* destination,
                                      std::int32_t destination_width,
-                                     std::int32_t destination_height,
+                                     std::size_t total_pixels,
                                      LetterboxTransform transform, float mean0, float mean1,
                                      float mean2, float stddev0, float stddev1, float stddev2,
                                      float border_value)
     {
-        const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-        const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-        if (x >= destination_width || y >= destination_height)
-        {
-            return;
-        }
         const float means[3] = { mean0, mean1, mean2 };
         const float standard_deviations[3] = { stddev0, stddev1, stddev2 };
-        const std::size_t plane_elements = static_cast<std::size_t>(destination_width) *
-                                           static_cast<std::size_t>(destination_height);
-        const std::size_t pixel_index = static_cast<std::size_t>(y) *
-                                            static_cast<std::size_t>(destination_width) +
-                                        static_cast<std::size_t>(x);
-        for (int channel = 0; channel < 3; ++channel)
+        const std::size_t start = static_cast<std::size_t>(blockIdx.x) * blockDim.x +
+                                  threadIdx.x;
+        const std::size_t step = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+        for (std::size_t pixel_index = start; pixel_index < total_pixels; pixel_index += step)
         {
-            const float pixel = bilinear_channel(source, source_stride, transform, x, y, channel,
-                                                 source_format, border_value);
-            const float normalized =
-                (pixel * kPixelScale - means[channel]) / standard_deviations[channel];
-            destination[static_cast<std::size_t>(channel) * plane_elements + pixel_index] =
-                convert_destination<Destination>(normalized);
+            const int x = static_cast<int>(pixel_index %
+                                           static_cast<std::size_t>(destination_width));
+            const int y = static_cast<int>(pixel_index /
+                                           static_cast<std::size_t>(destination_width));
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const float pixel = bilinear_channel(source, source_stride, transform, x, y,
+                                                     channel, source_format, border_value);
+                const float normalized =
+                    (pixel * kPixelScale - means[channel]) / standard_deviations[channel];
+                destination[static_cast<std::size_t>(channel) * total_pixels + pixel_index] =
+                    convert_destination<Destination>(normalized);
+            }
         }
     }
 
@@ -155,22 +152,24 @@ void launch_letterbox(const std::uint8_t* source, std::size_t source_stride,
         throw_invalid("source pixel format is unsupported");
     }
 
-    const dim3 block(kBlockWidth, kBlockHeight);
-    const dim3 grid((static_cast<unsigned int>(destination_width) + block.x - 1U) / block.x,
-                    (static_cast<unsigned int>(destination_height) + block.y - 1U) / block.y);
+    const LetterboxLaunchPlan launch_plan =
+        plan_letterbox_launch(static_cast<std::size_t>(destination_width),
+                              static_cast<std::size_t>(destination_height));
+    const dim3 block(kLetterboxThreadsPerBlock);
+    const dim3 grid(launch_plan.block_count);
     const cudaStream_t cuda_stream = reinterpret_cast<cudaStream_t>(stream);
     switch (destination_type)
     {
     case TensorDataType::Float16:
         letterbox_kernel<<<grid, block, 0, cuda_stream>>>(
             source, source_stride, source_format, static_cast<__half*>(destination),
-            destination_width, destination_height, transform, mean[0], mean[1], mean[2],
+            destination_width, launch_plan.total_pixels, transform, mean[0], mean[1], mean[2],
             stddev[0], stddev[1], stddev[2], border_value);
         break;
     case TensorDataType::Float32:
         letterbox_kernel<<<grid, block, 0, cuda_stream>>>(
             source, source_stride, source_format, static_cast<float*>(destination),
-            destination_width, destination_height, transform, mean[0], mean[1], mean[2],
+            destination_width, launch_plan.total_pixels, transform, mean[0], mean[1], mean[2],
             stddev[0], stddev[1], stddev[2], border_value);
         break;
     case TensorDataType::Int32:

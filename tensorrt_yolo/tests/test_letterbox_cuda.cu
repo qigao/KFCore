@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 using namespace kfcore::yolo;
 using namespace kfcore::yolo::detail;
@@ -44,59 +43,160 @@ private:
     void* data_ = nullptr;
 };
 
+class ExplicitStream final
+{
+public:
+    ExplicitStream()
+    {
+        check(cudaStreamCreate(&stream_) == cudaSuccess);
+    }
+
+    ~ExplicitStream()
+    {
+        if (stream_ != nullptr)
+        {
+            (void)cudaStreamDestroy(stream_);
+        }
+    }
+
+    ExplicitStream(const ExplicitStream&) = delete;
+    ExplicitStream& operator=(const ExplicitStream&) = delete;
+
+    cudaStream_t get() const noexcept
+    {
+        return stream_;
+    }
+
+private:
+    cudaStream_t stream_ = nullptr;
+};
+
+template <std::size_t Size>
+void check_fp32(const std::array<float, Size>& actual,
+                const std::array<float, Size>& expected, float tolerance)
+{
+    for (std::size_t index = 0; index < Size; ++index)
+    {
+        check(std::fabs(actual[index] - expected[index]) < tolerance);
+    }
+}
+
 } // namespace
 
 spec("CUDA letterbox")
 {
-    it("converts RGB8 and BGR8 host images to normalized FP32 NCHW")
+    it("writes two padded non-packed images to consecutive FP32 NCHW slices")
     {
-        const std::array<std::uint8_t, 6> rgb = { 255, 0, 0, 0, 128, 255 };
-        const std::array<std::uint8_t, 6> bgr = { 0, 0, 255, 255, 128, 0 };
-        DeviceAllocation source(rgb.size());
-        DeviceAllocation destination(6 * sizeof(float));
-        std::array<float, 6> output {};
-        const LetterboxTransform transform = compute_letterbox_transform(2, 1, 2, 1);
-        const std::array<float, 3> mean = { 0.0f, 0.0f, 0.0f };
-        const std::array<float, 3> stddev = { 1.0f, 1.0f, 1.0f };
+        constexpr std::size_t kSourceStride = 8;
+        constexpr std::size_t kImageElements = 3 * 2 * 3;
+        const std::array<std::uint8_t, kSourceStride> rgb = {
+            255, 0, 0, 0, 128, 255, 17, 19,
+        };
+        const std::array<std::uint8_t, kSourceStride> bgr = {
+            0, 255, 0, 64, 0, 255, 23, 29,
+        };
+        const std::array<float, kImageElements * 2> expected = {
+            0.6941177f, 0.6941177f, 1.8f, -0.2f, 0.6941177f, 0.6941177f,
+            0.9882353f, 0.9882353f, -0.8f, 1.2078432f, 0.9882353f, 0.9882353f,
+            0.0735294f, 0.0735294f, -0.15f, 0.35f, 0.0735294f, 0.0735294f,
+            0.6941177f, 0.6941177f, -0.2f, 1.8f, 0.6941177f, 0.6941177f,
+            0.9882353f, 0.9882353f, 3.2f, -0.8f, 0.9882353f, 0.9882353f,
+            0.0735294f, 0.0735294f, -0.15f, -0.0245098f, 0.0735294f, 0.0735294f,
+        };
+        DeviceAllocation first_source(rgb.size());
+        DeviceAllocation second_source(bgr.size());
+        DeviceAllocation destination(expected.size() * sizeof(float));
+        ExplicitStream stream;
+        std::array<float, kImageElements * 2> output {};
 
-        for (const auto& input : { std::pair { &rgb, PixelFormat::Rgb8 },
-                                  std::pair { &bgr, PixelFormat::Bgr8 } })
-        {
-            check(cudaMemcpy(source.get(), input.first->data(), input.first->size(),
-                             cudaMemcpyHostToDevice) == cudaSuccess);
-            launch_letterbox(static_cast<const std::uint8_t*>(source.get()), 6,
-                             input.second, destination.get(), 2, 1,
-                             TensorDataType::Float32, transform, mean, stddev, 114.0f, nullptr);
-            check(cudaDeviceSynchronize() == cudaSuccess);
-            check(cudaMemcpy(output.data(), destination.get(), 6 * sizeof(float),
-                             cudaMemcpyDeviceToHost) == cudaSuccess);
-            check(std::fabs(output[0] - 1.0f) < 1.0e-6f);
-            check(std::fabs(output[1]) < 1.0e-6f);
-            check(std::fabs(output[2]) < 1.0e-6f);
-            check(std::fabs(output[3] - (128.0f / 255.0f)) < 1.0e-6f);
-            check(std::fabs(output[4]) < 1.0e-6f);
-            check(std::fabs(output[5] - 1.0f) < 1.0e-6f);
-        }
+        check(cudaMemcpyAsync(first_source.get(), rgb.data(), rgb.size(),
+                              cudaMemcpyHostToDevice, stream.get()) == cudaSuccess);
+        check(cudaMemcpyAsync(second_source.get(), bgr.data(), bgr.size(),
+                              cudaMemcpyHostToDevice, stream.get()) == cudaSuccess);
+
+        const LetterboxTransform transform = compute_letterbox_transform(2, 1, 2, 3);
+        const std::array<float, 3> mean = { 0.1f, 0.2f, 0.3f };
+        const std::array<float, 3> stddev = { 0.5f, 0.25f, 2.0f };
+        launch_letterbox(static_cast<const std::uint8_t*>(first_source.get()), kSourceStride,
+                         PixelFormat::Rgb8, destination.get(), 2, 3,
+                         TensorDataType::Float32, transform, mean, stddev, 114.0f,
+                         stream.get());
+        auto* second_destination = static_cast<std::byte*>(destination.get()) +
+                                   kImageElements * sizeof(float);
+        launch_letterbox(static_cast<const std::uint8_t*>(second_source.get()), kSourceStride,
+                         PixelFormat::Bgr8, second_destination, 2, 3,
+                         TensorDataType::Float32, transform, mean, stddev, 114.0f,
+                         stream.get());
+
+        check(cudaMemcpyAsync(output.data(), destination.get(), output.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
+        check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
+        check_fp32(output, expected, 1.0e-5f);
     }
 
-    it("writes normalized FP16 NCHW")
+    it("bilinearly samples the midpoint during non-square FP32 scaling")
     {
-        const std::array<std::uint8_t, 3> rgb = { 64, 128, 255 };
+        constexpr std::size_t kSourceStride = 8;
+        const std::array<std::uint8_t, kSourceStride> rgb = {
+            0, 64, 128, 200, 192, 0, 31, 37,
+        };
+        const std::array<float, 18> expected = {
+            0.0f, 0.3921569f, 0.7843137f, 0.0f, 0.3921569f, 0.7843137f,
+            0.2509804f, 0.5019608f, 0.7529412f,
+            0.2509804f, 0.5019608f, 0.7529412f,
+            0.5019608f, 0.2509804f, 0.0f, 0.5019608f, 0.2509804f, 0.0f,
+        };
         DeviceAllocation source(rgb.size());
-        DeviceAllocation destination(3 * sizeof(__half));
-        std::array<__half, 3> output {};
-        check(cudaMemcpy(source.get(), rgb.data(), rgb.size(), cudaMemcpyHostToDevice) ==
-              cudaSuccess);
+        DeviceAllocation destination(expected.size() * sizeof(float));
+        ExplicitStream stream;
+        std::array<float, expected.size()> output {};
 
-        launch_letterbox(static_cast<const std::uint8_t*>(source.get()), 3,
-                         PixelFormat::Rgb8, destination.get(), 1, 1,
-                         TensorDataType::Float16, compute_letterbox_transform(1, 1, 1, 1),
-                         { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, 114.0f, nullptr);
-        check(cudaDeviceSynchronize() == cudaSuccess);
-        check(cudaMemcpy(output.data(), destination.get(), 3 * sizeof(__half),
-                         cudaMemcpyDeviceToHost) == cudaSuccess);
-        check(std::fabs(__half2float(output[0]) - (64.0f / 255.0f)) < 5.0e-4f);
-        check(std::fabs(__half2float(output[1]) - (128.0f / 255.0f)) < 5.0e-4f);
-        check(std::fabs(__half2float(output[2]) - 1.0f) < 5.0e-4f);
+        check(cudaMemcpyAsync(source.get(), rgb.data(), rgb.size(), cudaMemcpyHostToDevice,
+                              stream.get()) == cudaSuccess);
+        launch_letterbox(static_cast<const std::uint8_t*>(source.get()), kSourceStride,
+                         PixelFormat::Rgb8, destination.get(), 3, 2,
+                         TensorDataType::Float32, compute_letterbox_transform(2, 1, 3, 2),
+                         { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, 114.0f,
+                         stream.get());
+        check(cudaMemcpyAsync(output.data(), destination.get(), output.size() * sizeof(float),
+                              cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
+        check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
+        check_fp32(output, expected, 1.0e-5f);
+    }
+
+    it("writes horizontal borders and image pixels to FP16 NCHW on an explicit stream")
+    {
+        constexpr std::size_t kSourceStride = 5;
+        const std::array<std::uint8_t, kSourceStride * 2> rgb = {
+            64, 128, 255, 41, 43,
+            255, 0, 128, 47, 53,
+        };
+        const std::array<float, 18> expected = {
+            0.4470588f, 0.2509804f, 0.4470588f,
+            0.4470588f, 1.0f, 0.4470588f,
+            0.4470588f, 0.5019608f, 0.4470588f,
+            0.4470588f, 0.0f, 0.4470588f,
+            0.4470588f, 1.0f, 0.4470588f,
+            0.4470588f, 0.5019608f, 0.4470588f,
+        };
+        DeviceAllocation source(rgb.size());
+        DeviceAllocation destination(expected.size() * sizeof(__half));
+        ExplicitStream stream;
+        std::array<__half, expected.size()> output {};
+
+        check(cudaMemcpyAsync(source.get(), rgb.data(), rgb.size(), cudaMemcpyHostToDevice,
+                              stream.get()) == cudaSuccess);
+        launch_letterbox(static_cast<const std::uint8_t*>(source.get()), kSourceStride,
+                         PixelFormat::Rgb8, destination.get(), 3, 2,
+                         TensorDataType::Float16, compute_letterbox_transform(1, 2, 3, 2),
+                         { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, 114.0f,
+                         stream.get());
+        check(cudaMemcpyAsync(output.data(), destination.get(), output.size() * sizeof(__half),
+                              cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
+        check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
+        for (std::size_t index = 0; index < output.size(); ++index)
+        {
+            check(std::fabs(__half2float(output[index]) - expected[index]) < 8.0e-4f);
+        }
     }
 }

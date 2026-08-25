@@ -10,6 +10,9 @@
 namespace kfcore::yolo::detail
 {
 
+inline constexpr std::uint32_t kLetterboxThreadsPerBlock = 256;
+inline constexpr std::uint32_t kLetterboxMaxBlocks = 4096;
+
 struct LetterboxTransform
 {
     float        scale;
@@ -18,6 +21,15 @@ struct LetterboxTransform
     std::int32_t source_width;
     std::int32_t source_height;
 };
+
+struct LetterboxLaunchPlan
+{
+    std::size_t   total_pixels;
+    std::uint32_t block_count;
+};
+
+LetterboxLaunchPlan plan_letterbox_launch(std::size_t destination_width,
+                                          std::size_t destination_height);
 
 LetterboxTransform compute_letterbox_transform(std::int32_t source_width,
                                                std::int32_t source_height,

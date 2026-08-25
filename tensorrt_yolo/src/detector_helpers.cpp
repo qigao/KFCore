@@ -137,6 +137,26 @@ namespace
 
 } // namespace
 
+LetterboxLaunchPlan plan_letterbox_launch(std::size_t destination_width,
+                                          std::size_t destination_height)
+{
+    if (destination_width == 0 || destination_height == 0)
+    {
+        throw_invalid("letterbox launch stage: dimensions must be positive");
+    }
+
+    const std::size_t total_pixels =
+        checked_multiply(destination_width, destination_height, "letterbox launch");
+    const std::size_t required_blocks =
+        total_pixels / kLetterboxThreadsPerBlock +
+        (total_pixels % kLetterboxThreadsPerBlock == 0 ? 0U : 1U);
+    return {
+        total_pixels,
+        static_cast<std::uint32_t>((std::min)(required_blocks,
+                                              std::size_t { kLetterboxMaxBlocks })),
+    };
+}
+
 LetterboxTransform compute_letterbox_transform(std::int32_t source_width,
                                                std::int32_t source_height,
                                                std::int32_t destination_width,

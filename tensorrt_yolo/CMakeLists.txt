@@ -145,6 +145,28 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       FOLDER "tensorrt_yolo/tests")
     add_test(NAME test_tensorrt_integration COMMAND test_tensorrt_integration)
 
+    if(DEFINED ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}
+       AND NOT "$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}" STREQUAL "")
+      add_executable(test_tensorrt_integration_fp16
+        tests/test_tensorrt_integration.cpp)
+      target_compile_definitions(test_tensorrt_integration_fp16 PRIVATE
+        KFCORE_TENSORRT_TEST_FP16)
+      target_link_libraries(test_tensorrt_integration_fp16 PRIVATE
+        KFCore::tensorrt_yolo
+        CUDA::cudart
+        TurboUtils::TinyTest)
+      set_target_properties(test_tensorrt_integration_fp16 PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        FOLDER "tensorrt_yolo/tests")
+      add_test(NAME test_tensorrt_integration_fp16
+        COMMAND test_tensorrt_integration_fp16)
+      set_tests_properties(test_tensorrt_integration_fp16 PROPERTIES
+        ENVIRONMENT
+          "KFCORE_TENSORRT_TEST_ENGINE_FP16=$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}")
+    endif()
+
     add_executable(test_letterbox_cuda
       tests/test_letterbox_cuda.cu)
     target_include_directories(test_letterbox_cuda PRIVATE

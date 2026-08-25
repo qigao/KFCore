@@ -143,6 +143,18 @@ void check_same_frame(const DetectionFrame& actual, const DetectionFrame& expect
 
 spec("TensorRT YOLO integration")
 {
+#if defined(KFCORE_TENSORRT_TEST_FP16)
+    it("supports an FP16 input engine when explicitly supplied")
+    {
+        auto engine = Engine::load(required_engine_path("KFCORE_TENSORRT_TEST_ENGINE_FP16"),
+                                   EngineOptions {});
+        auto detector = engine->create_detector(DetectorOptions {});
+        OwnedRgbImage image(640, 384);
+        const DetectionFrame result = detector->detect(image.view());
+        check(result.image_width == 640);
+        check(result.image_height == 384);
+    }
+#else
     it("rejects a missing engine file with a typed error")
     {
         EngineOptions options;
@@ -173,6 +185,10 @@ spec("TensorRT YOLO integration")
         const auto results = detector->detect_batch({ wide.view(), tall.view() });
 
         check(results.size() == std::size_t { 2 });
+        if (results.size() != std::size_t { 2 })
+        {
+            return;
+        }
         check(results[0].image_width == 960);
         check(results[0].image_height == 320);
         check(results[1].image_width == 320);
@@ -212,22 +228,6 @@ spec("TensorRT YOLO integration")
         check_same_frame(device_result, host_result);
     }
 
-    it("supports an FP16 input engine when explicitly supplied")
-    {
-        const char* value = std::getenv("KFCORE_TENSORRT_TEST_ENGINE_FP16");
-        if (value == nullptr || *value == '\0')
-        {
-            return;
-        }
-        auto engine = Engine::load(required_engine_path("KFCORE_TENSORRT_TEST_ENGINE_FP16"),
-                                   EngineOptions {});
-        auto detector = engine->create_detector(DetectorOptions {});
-        OwnedRgbImage image(640, 384);
-        const DetectionFrame result = detector->detect(image.view());
-        check(result.image_width == 640);
-        check(result.image_height == 384);
-    }
-
     it("allows two detectors to share one immutable engine")
     {
         auto engine = Engine::load(test_engine_path(), EngineOptions {});
@@ -248,4 +248,5 @@ spec("TensorRT YOLO integration")
 
         check_throws_as(detector->detect(invalid), YoloError);
     }
+#endif
 }

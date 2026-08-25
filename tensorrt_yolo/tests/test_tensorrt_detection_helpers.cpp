@@ -41,6 +41,33 @@ ImageView host_view(const void* data, std::int32_t width, std::int32_t height,
 
 spec("TensorRT YOLO detection helpers")
 {
+    it("plans a bounded one-dimensional launch across the old grid-y boundary")
+    {
+        constexpr std::size_t kLegacyBlockHeight = 16;
+        constexpr std::size_t kLegacyGridYLimit = 65'535;
+        constexpr std::size_t kAtBoundaryHeight =
+            kLegacyBlockHeight * kLegacyGridYLimit;
+        constexpr std::size_t kPastBoundaryHeight =
+            kLegacyBlockHeight * (kLegacyGridYLimit + 1);
+        const LetterboxLaunchPlan at_boundary =
+            plan_letterbox_launch(1, kAtBoundaryHeight);
+        const LetterboxLaunchPlan past_boundary =
+            plan_letterbox_launch(1, kPastBoundaryHeight);
+
+        check(at_boundary.total_pixels == kAtBoundaryHeight);
+        check(past_boundary.total_pixels == kPastBoundaryHeight);
+        check(at_boundary.block_count > 0);
+        check(past_boundary.block_count > 0);
+        check(at_boundary.block_count <= kLetterboxMaxBlocks);
+        check(past_boundary.block_count <= kLetterboxMaxBlocks);
+
+        expect_yolo_error(
+            [] {
+                (void)plan_letterbox_launch((std::numeric_limits<std::size_t>::max)(), 2);
+            },
+            YoloErrorCode::ResourceLimitExceeded, "overflow");
+    }
+
     it("computes independent transforms for wide and tall images")
     {
         const LetterboxTransform wide = compute_letterbox_transform(960, 320, 640, 640);
