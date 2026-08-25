@@ -2,11 +2,12 @@ if(NOT DEFINED KFCORE_SOURCE_DIR OR NOT DEFINED KFCORE_TEST_BINARY_DIR)
   message(FATAL_ERROR "KFCORE_SOURCE_DIR and KFCORE_TEST_BINARY_DIR are required")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../SafeTestDirectory.cmake")
+
 set(_fixture_source
   "${KFCORE_SOURCE_DIR}/cmake/tests/TensorRtIntegrationEngineFixture")
 set(_fixture_root "${KFCORE_TEST_BINARY_DIR}/tensorrt_integration_engine_config")
-file(REMOVE_RECURSE "${_fixture_root}")
-file(MAKE_DIRECTORY "${_fixture_root}")
+kfcore_reset_test_directory("${KFCORE_TEST_BINARY_DIR}" "${_fixture_root}")
 set(_valid_engine "${_fixture_root}/trusted.engine")
 file(WRITE "${_valid_engine}" "fixture")
 

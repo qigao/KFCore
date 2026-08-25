@@ -31,7 +31,12 @@ if("${KFCORE_CONSUMER_BUILD_CONFIG}" STREQUAL "" OR
     "KFCORE_CONSUMER_BUILD_CONFIG must name a non-empty CMake configuration")
 endif()
 
-file(REMOVE_RECURSE "${KFCORE_CONSUMER_BINARY_DIR}" "${KFCORE_CONSUMER_INSTALL_PREFIX}")
+include("${CMAKE_CURRENT_LIST_DIR}/../SafeTestDirectory.cmake")
+set(_consumer_test_root "${KFCORE_BINARY_DIR}/tests")
+kfcore_reset_test_directory(
+  "${_consumer_test_root}" "${KFCORE_CONSUMER_BINARY_DIR}")
+kfcore_reset_test_directory(
+  "${_consumer_test_root}" "${KFCORE_CONSUMER_INSTALL_PREFIX}")
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --install "${KFCORE_BINARY_DIR}"

@@ -77,6 +77,11 @@ if(BUILD_TESTS)
       "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
       "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_integration_engine_config.cmake")
+  add_test(NAME test_safe_test_directory
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_safe_test_directory.cmake")
 endif()
 
 add_subdirectory(vendor)

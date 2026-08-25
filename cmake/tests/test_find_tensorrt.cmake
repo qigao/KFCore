@@ -5,10 +5,11 @@ if(NOT DEFINED KFCORE_TEST_BINARY_DIR)
   message(FATAL_ERROR "KFCORE_TEST_BINARY_DIR is required")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../SafeTestDirectory.cmake")
+
 set(_fixture_source "${KFCORE_SOURCE_DIR}/cmake/tests/FindTensorRTFixture")
 set(_fixture_root "${KFCORE_TEST_BINARY_DIR}/find_tensorrt")
-file(REMOVE_RECURSE "${_fixture_root}")
-file(MAKE_DIRECTORY "${_fixture_root}")
+kfcore_reset_test_directory("${KFCORE_TEST_BINARY_DIR}" "${_fixture_root}")
 
 function(_find_tensorrt_write_fixture name version_contents)
   set(_root "${_fixture_root}/${name}/sdk")

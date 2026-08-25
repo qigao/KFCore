@@ -2,9 +2,11 @@ if(NOT DEFINED KFCORE_SOURCE_DIR OR NOT DEFINED KFCORE_TEST_BINARY_DIR)
   message(FATAL_ERROR "KFCORE_SOURCE_DIR and KFCORE_TEST_BINARY_DIR are required")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../SafeTestDirectory.cmake")
+
 set(_fixture_source "${KFCORE_SOURCE_DIR}/cmake/tests/FindOpenCVLiteFixture")
 set(_fixture_root "${KFCORE_TEST_BINARY_DIR}/find_opencv_lite")
-file(REMOVE_RECURSE "${_fixture_root}")
+kfcore_reset_test_directory("${KFCORE_TEST_BINARY_DIR}" "${_fixture_root}")
 file(MAKE_DIRECTORY "${_fixture_root}/sdk/include/opencv2/core"
   "${_fixture_root}/sdk/lib" "${_fixture_root}/sdk/bin")
 file(WRITE "${_fixture_root}/sdk/include/opencv2/core.hpp" "#pragma once\n")
