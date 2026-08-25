@@ -25,15 +25,13 @@ kfcore_add_tensorrt_integration_test(
   "-DEXPECTED_ENGINE=${_validated_engine}"
   "-DEXPECTED_TEST_NAME=fixture_tensorrt_integration"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/check_engine_environment.cmake")
-if(NOT "${_validated_yolo11_face_engine}" STREQUAL "")
-  kfcore_add_tensorrt_integration_test(
-    fixture_tensorrt_integration_yolo11_face
-    "${_validated_yolo11_face_engine}"
-    "${CMAKE_COMMAND}"
-    "-DEXPECTED_ENGINE=${_validated_yolo11_face_engine}"
-    "-DEXPECTED_TEST_NAME=fixture_tensorrt_integration_yolo11_face"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/check_engine_environment.cmake")
-endif()
+kfcore_add_optional_tensorrt_integration_test(
+  fixture_tensorrt_integration_yolo11_face
+  "${_validated_yolo11_face_engine}"
+  "${CMAKE_COMMAND}"
+  "-DEXPECTED_ENGINE=${_validated_yolo11_face_engine}"
+  "-DEXPECTED_TEST_NAME=fixture_tensorrt_integration_yolo11_face"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/check_engine_environment.cmake")
 if(DEFINED KFCORE_FIXTURE_EXPECTED_PATH)
   file(REAL_PATH "${KFCORE_FIXTURE_EXPECTED_PATH}" _expected_engine)
   if(NOT _validated_engine STREQUAL _expected_engine)

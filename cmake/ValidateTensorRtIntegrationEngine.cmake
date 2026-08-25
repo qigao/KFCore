@@ -51,3 +51,11 @@ function(kfcore_add_tensorrt_integration_test test_name validated_path)
   add_test(NAME "${test_name}" COMMAND ${ARGN})
   kfcore_set_tensorrt_integration_test_engine("${test_name}" "${validated_path}")
 endfunction()
+
+function(kfcore_add_optional_tensorrt_integration_test test_name validated_path)
+  if("${validated_path}" STREQUAL "")
+    return()
+  endif()
+
+  kfcore_add_tensorrt_integration_test("${test_name}" "${validated_path}" ${ARGN})
+endfunction()
