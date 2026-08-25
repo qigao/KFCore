@@ -35,6 +35,28 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
       "-DKFCORE_CONSUMER_SOURCE_DIR=${_yolo_tracking_consumer_source_dir}"
       "-DKFCORE_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/build"
       "-DKFCORE_CONSUMER_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
+
+  set(_trackers_consumer_source_dir
+    "${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/source")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/tests/TrackersInstalledConsumer/CMakeLists.txt"
+    "${_trackers_consumer_source_dir}/CMakeLists.txt"
+    COPYONLY)
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/tests/TrackersInstalledConsumer/main.c"
+    "${_trackers_consumer_source_dir}/main.c"
+    COPYONLY)
+  add_test(NAME test_trackers_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${_trackers_consumer_source_dir}"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
 endif()
 

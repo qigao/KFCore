@@ -16,10 +16,17 @@ function(_find_tensorrt_write_fixture name version_contents)
   file(WRITE "${_root}/include/NvInfer.h" "#pragma once\n")
   file(WRITE "${_root}/include/NvInferPlugin.h" "#pragma once\n")
   file(WRITE "${_root}/include/NvInferVersion.h" "${version_contents}\n")
-  file(WRITE "${_root}/lib/nvinfer_10.lib" "")
-  file(WRITE "${_root}/lib/nvinfer_plugin_10.lib" "")
-  file(WRITE "${_root}/lib/nvinfer_11.lib" "")
-  file(WRITE "${_root}/lib/nvinfer_plugin_11.lib" "")
+  if(WIN32)
+    set(_library_prefix "")
+    set(_library_suffix ".lib")
+  else()
+    set(_library_prefix "lib")
+    set(_library_suffix ".a")
+  endif()
+  foreach(_major IN ITEMS 10 11)
+    file(WRITE "${_root}/lib/${_library_prefix}nvinfer_${_major}${_library_suffix}" "")
+    file(WRITE "${_root}/lib/${_library_prefix}nvinfer_plugin_${_major}${_library_suffix}" "")
+  endforeach()
   set(${name}_ROOT "${_root}" PARENT_SCOPE)
 endfunction()
 
@@ -37,7 +44,7 @@ function(_find_tensorrt_expect_success name expected_version)
   endif()
 endfunction()
 
-function(_find_tensorrt_expect_failure name)
+function(_find_tensorrt_expect_failure name expected_error)
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "TENSORRT_ROOT=${${name}_ROOT}"
       "${CMAKE_COMMAND}" -S "${_fixture_source}" -B "${_fixture_root}/${name}/build"
@@ -46,8 +53,9 @@ function(_find_tensorrt_expect_failure name)
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _output
     ERROR_VARIABLE _error)
-  if(_result EQUAL 0)
-    message(FATAL_ERROR "${name} should have been rejected")
+  if(_result EQUAL 0 OR NOT "${_output}\n${_error}" MATCHES "${expected_error}")
+    message(FATAL_ERROR
+      "${name} should have been rejected with ${expected_error}:\n${_output}\n${_error}")
   endif()
 endfunction()
 
@@ -61,8 +69,8 @@ _find_tensorrt_expect_success(enterprise_indirect "11.2.1")
 
 _find_tensorrt_write_fixture(unresolvable
   "#define NV_TENSORRT_MAJOR TRT_MAJOR_UNDEFINED\n#define NV_TENSORRT_MINOR 2\n#define NV_TENSORRT_PATCH 1")
-_find_tensorrt_expect_failure(unresolvable)
+_find_tensorrt_expect_failure(unresolvable "unparseable macro")
 
 _find_tensorrt_write_fixture(unsupported
   "#define NV_TENSORRT_MAJOR 9\n#define NV_TENSORRT_MINOR 0\n#define NV_TENSORRT_PATCH 0")
-_find_tensorrt_expect_failure(unsupported)
+_find_tensorrt_expect_failure(unsupported "Unsupported TensorRT major version 9")
