@@ -75,12 +75,12 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
   _kfcore_add_installed_consumer_test(
     test_yolo_tracking_dependency_first_installed_consumer
     "${_yolo_tracking_consumer_source_dir}"
-    yolo_tracking_dependency_first_installed_consumer
+    yolo_dep_first_consumer
     dependency_first)
   _kfcore_add_installed_consumer_test(
     test_yolo_tracking_repeated_kfcore_installed_consumer
     "${_yolo_tracking_consumer_source_dir}"
-    yolo_tracking_repeated_kfcore_installed_consumer
+    yolo_repeat_consumer
     repeated_kfcore)
 endif()
 
