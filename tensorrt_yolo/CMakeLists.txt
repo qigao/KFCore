@@ -24,12 +24,6 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
   else()
     set(_yolo_consumer_enable_sanitizer_address OFF)
   endif()
-  if(CMAKE_BUILD_TYPE)
-    set(_yolo_consumer_build_config "${CMAKE_BUILD_TYPE}")
-  else()
-    set(_yolo_consumer_build_config Debug)
-  endif()
-
   set(_yolo_tracking_consumer_source_dir
     "${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/source")
   configure_file(
@@ -49,7 +43,7 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
       "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
       "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/yolo_tracking_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
       "-DKFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS=${_yolo_consumer_enable_sanitizer_address}"
-      "-DKFCORE_CONSUMER_BUILD_CONFIG=${_yolo_consumer_build_config}"
+      "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
 
   set(_trackers_consumer_source_dir
@@ -71,7 +65,7 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
       "-DKFCORE_CONSUMER_KFCORE_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
       "-DKFCORE_CONSUMER_TRACKERS_DIR=${CMAKE_BINARY_DIR}/tests/trackers_installed_consumer/install/${CMAKE_INSTALL_LIBDIR}/cmake/trackers"
       "-DKFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS=${_yolo_consumer_enable_sanitizer_address}"
-      "-DKFCORE_CONSUMER_BUILD_CONFIG=${_yolo_consumer_build_config}"
+      "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_yolo_tracking_installed_consumer.cmake")
 endif()
 
