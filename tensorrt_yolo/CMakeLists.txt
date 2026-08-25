@@ -29,6 +29,21 @@ if(BUILD_TESTS)
     FOLDER "tensorrt_yolo/tests")
   add_test(NAME test_tensorrt_contract COMMAND test_tensorrt_contract)
 
+  add_executable(test_tensorrt_detection_helpers
+    tests/test_tensorrt_detection_helpers.cpp
+    src/detector_helpers.cpp)
+  target_include_directories(test_tensorrt_detection_helpers PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(test_tensorrt_detection_helpers PRIVATE
+    KFCore::yolo_tracking
+    TurboUtils::TinyTest)
+  set_target_properties(test_tensorrt_detection_helpers PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/tests")
+  add_test(NAME test_tensorrt_detection_helpers COMMAND test_tensorrt_detection_helpers)
+
   add_executable(test_yolo_tracking
     tests/test_yolo_tracking.cpp
     src/tracking.cpp
@@ -54,8 +69,11 @@ endif()
 if(KFCORE_BUILD_TENSORRT_YOLO)
   add_library(tensorrt_yolo SHARED
     src/cuda_buffer.cpp
+    src/detector_helpers.cpp
+    src/detector.cpp
     src/engine_file.cpp
-    src/engine.cpp)
+    src/engine.cpp
+    src/letterbox.cu)
   add_library(KFCore::tensorrt_yolo ALIAS tensorrt_yolo)
 
   target_include_directories(tensorrt_yolo
@@ -71,6 +89,8 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       TensorRT::nvinfer_plugin
       CUDA::cudart)
   set_target_properties(tensorrt_yolo PROPERTIES
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
@@ -116,6 +136,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       tests/test_tensorrt_integration.cpp)
     target_link_libraries(test_tensorrt_integration PRIVATE
       KFCore::tensorrt_yolo
+      CUDA::cudart
       TurboUtils::TinyTest)
     set_target_properties(test_tensorrt_integration PROPERTIES
       CXX_STANDARD 17
@@ -123,6 +144,23 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       CXX_EXTENSIONS OFF
       FOLDER "tensorrt_yolo/tests")
     add_test(NAME test_tensorrt_integration COMMAND test_tensorrt_integration)
+
+    add_executable(test_letterbox_cuda
+      tests/test_letterbox_cuda.cu)
+    target_include_directories(test_letterbox_cuda PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_letterbox_cuda PRIVATE
+      KFCore::tensorrt_yolo
+      CUDA::cudart
+      TurboUtils::TinyTest)
+    set_target_properties(test_letterbox_cuda PROPERTIES
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_letterbox_cuda COMMAND test_letterbox_cuda)
   endif()
 
   install(TARGETS tensorrt_yolo

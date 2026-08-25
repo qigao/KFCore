@@ -6,6 +6,7 @@
 
 #include <NvInfer.h>
 
+#include <atomic>
 #include <cstdio>
 #include <memory>
 #include <utility>
@@ -93,6 +94,8 @@ struct TensorRtDetector::Impl final
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context;
     detail::CudaStream                                 stream;
     DetectorOptions                                    options;
+    std::atomic_flag                                   in_use = ATOMIC_FLAG_INIT;
+    detail::CudaBuffer                                 source_device;
     detail::CudaBuffer                                 input_device;
     detail::CudaBuffer                                 num_dets_device;
     detail::CudaBuffer                                 boxes_device;

@@ -426,11 +426,4 @@ std::unique_ptr<TensorRtDetector> Engine::create_detector(const DetectorOptions&
     }
 }
 
-TensorRtDetector::TensorRtDetector(std::unique_ptr<Impl> impl)
-    : impl_(std::move(impl))
-{
-}
-
-TensorRtDetector::~TensorRtDetector() = default;
-
 } // namespace kfcore::yolo

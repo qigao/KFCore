@@ -72,6 +72,8 @@ public:
     TensorRtDetector(const TensorRtDetector&)            = delete;
     TensorRtDetector& operator=(const TensorRtDetector&) = delete;
 
+    // One detector owns one mutable context/stream/buffer set. Calls on the same detector must
+    // not overlap; separate detectors created from one Engine may run independently.
     DetectionFrame              detect(const ImageView& image);
     std::vector<DetectionFrame> detect_batch(const std::vector<ImageView>& images);
 
