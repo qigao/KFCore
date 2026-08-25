@@ -47,6 +47,9 @@ class TensorRtDetector;
 class Engine final
 {
 public:
+    // Publish engine files by writing a temporary file and atomically renaming it into place.
+    // load() rejects truncation and bytes observed beyond the initially measured size, but it
+    // cannot detect every same-size in-place rewrite or a mutation after its EOF check.
     static std::shared_ptr<const Engine> load(const std::filesystem::path& engine_path,
                                               const EngineOptions&         options = {});
 

@@ -1,5 +1,11 @@
 include(FindPackageHandleStandardArgs)
 
+if(TARGET TensorRT::nvinfer OR TARGET TensorRT::nvinfer_plugin)
+  message(FATAL_ERROR
+    "FindTensorRT requires ownership of TensorRT::nvinfer and "
+    "TensorRT::nvinfer_plugin; a target already exists")
+endif()
+
 if(NOT DEFINED ENV{TENSORRT_ROOT} OR "$ENV{TENSORRT_ROOT}" STREQUAL "")
   message(FATAL_ERROR
     "TENSORRT_ROOT is required when KFCORE_BUILD_TENSORRT_YOLO=ON")
@@ -10,7 +16,7 @@ if(NOT IS_DIRECTORY "$ENV{TENSORRT_ROOT}")
     "TENSORRT_ROOT is not a directory: $ENV{TENSORRT_ROOT}")
 endif()
 
-file(REAL_PATH "$ENV{TENSORRT_ROOT}" _TensorRT_root EXPAND_TILDE)
+file(REAL_PATH "$ENV{TENSORRT_ROOT}" _TensorRT_root)
 cmake_path(SET _TensorRT_root NORMALIZE "${_TensorRT_root}")
 
 function(_tensorrt_require_contained resolved_path description)
@@ -108,14 +114,11 @@ find_package_handle_standard_args(TensorRT
     TensorRT_NVINFER_PLUGIN_LIBRARY
   VERSION_VAR TensorRT_VERSION)
 
-if(TensorRT_FOUND AND NOT TARGET TensorRT::nvinfer)
+if(TensorRT_FOUND)
   add_library(TensorRT::nvinfer UNKNOWN IMPORTED)
   set_target_properties(TensorRT::nvinfer PROPERTIES
     IMPORTED_LOCATION "${TensorRT_NVINFER_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${TensorRT_INCLUDE_DIR}")
-endif()
-
-if(TensorRT_FOUND AND NOT TARGET TensorRT::nvinfer_plugin)
   add_library(TensorRT::nvinfer_plugin UNKNOWN IMPORTED)
   set_target_properties(TensorRT::nvinfer_plugin PROPERTIES
     IMPORTED_LOCATION "${TensorRT_NVINFER_PLUGIN_LIBRARY}"

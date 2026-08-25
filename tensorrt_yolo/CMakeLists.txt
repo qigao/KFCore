@@ -54,6 +54,7 @@ endif()
 if(KFCORE_BUILD_TENSORRT_YOLO)
   add_library(tensorrt_yolo SHARED
     src/cuda_buffer.cpp
+    src/engine_file.cpp
     src/engine.cpp)
   add_library(KFCore::tensorrt_yolo ALIAS tensorrt_yolo)
 
@@ -78,6 +79,37 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
   if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
+    add_executable(test_cuda_buffer
+      tests/test_cuda_buffer.cpp
+      src/cuda_buffer.cpp)
+    target_include_directories(test_cuda_buffer PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_cuda_buffer PRIVATE
+      KFCore::yolo_tracking
+      CUDA::cudart
+      TurboUtils::TinyTest)
+    set_target_properties(test_cuda_buffer PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_cuda_buffer COMMAND test_cuda_buffer)
+
+    add_executable(test_engine_file
+      tests/test_engine_file.cpp
+      src/engine_file.cpp)
+    target_include_directories(test_engine_file PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_engine_file PRIVATE
+      KFCore::yolo_tracking
+      TurboUtils::TinyTest)
+    set_target_properties(test_engine_file PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_engine_file COMMAND test_engine_file)
+
     add_executable(test_tensorrt_integration
       tests/test_tensorrt_integration.cpp)
     target_link_libraries(test_tensorrt_integration PRIVATE

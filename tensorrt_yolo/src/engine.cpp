@@ -1,5 +1,6 @@
 #include "kfcore/yolo/tensorrt.hpp"
 
+#include "engine_file.hpp"
 #include "tensorrt_raii.hpp"
 
 #include <NvInferPlugin.h>
@@ -10,7 +11,6 @@
 #include <fstream>
 #include <limits>
 #include <memory>
-#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -162,26 +162,7 @@ namespace
                 "engine file read stage: serialized engine exceeds the 1 GiB hard limit");
         }
 
-        try
-        {
-            std::vector<std::byte> bytes(static_cast<std::size_t>(engine_bytes));
-            stream.seekg(0, std::ios::beg);
-            if (!stream.read(reinterpret_cast<char*>(bytes.data()),
-                             static_cast<std::streamsize>(bytes.size())))
-            {
-                throw_file("engine file read stage: could not read the complete serialized engine");
-            }
-            return bytes;
-        }
-        catch (const std::bad_alloc&)
-        {
-            throw_resource("engine file read stage: serialized engine allocation failed");
-        }
-        catch (const std::length_error&)
-        {
-            throw_resource(
-                "engine file read stage: serialized engine size exceeds container capacity");
-        }
+        return detail::read_engine_stream_exact(stream, static_cast<std::size_t>(engine_bytes));
     }
 
     TensorDataType tensor_data_type(nvinfer1::DataType type, const char* tensor_name)
