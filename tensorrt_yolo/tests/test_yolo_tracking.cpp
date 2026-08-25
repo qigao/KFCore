@@ -79,10 +79,17 @@ spec("YOLO ByteTrack session") {
         ByteTrackSession session(options);
         DetectionFrame too_many{640, 480, {
             {{0, 0, 10, 10}, 0.95f, 0},
-            {{20, 20, 30, 30}, 0.95f, 0},
+            {{20, 20, std::numeric_limits<float>::quiet_NaN(), 30}, 0.95f, 0},
         }};
 
-        check_throws_as(session.update(too_many), YoloError);
+        bool rejected_by_limit = false;
+        try {
+            (void)session.update(too_many);
+        } catch (const YoloError& error) {
+            rejected_by_limit = true;
+            check(error.code() == YoloErrorCode::ResourceLimitExceeded);
+        }
+        check(rejected_by_limit);
         TrackFrame tentative = session.update(
             {640, 480, {{{0, 0, 10, 10}, 0.95f, 0}}});
         check(!tentative.detections[0].track_id.has_value());

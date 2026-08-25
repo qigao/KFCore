@@ -80,9 +80,12 @@ bool is_finite(const Detection& detection) noexcept {
            std::isfinite(detection.score);
 }
 
-void validate_frame(const DetectionFrame& frame) {
+void validate_frame(const DetectionFrame& frame, std::size_t max_detections) {
     if (frame.image_width <= 0 || frame.image_height <= 0) {
         throw_invalid_argument("image dimensions must be positive");
+    }
+    if (frame.detections.size() > max_detections) {
+        throw_resource_limit("frame exceeds max_detections_per_frame");
     }
     for (const Detection& detection : frame.detections) {
         if (detection.class_id < 0) {
@@ -211,11 +214,8 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
         throw YoloError(YoloErrorCode::InvalidArgument,
                         "cannot update a moved-from ByteTrackSession");
     }
-    validate_frame(frame);
+    validate_frame(frame, impl_->options.max_detections_per_frame);
     const std::size_t detection_count = frame.detections.size();
-    if (detection_count > impl_->options.max_detections_per_frame) {
-        throw_resource_limit("frame exceeds max_detections_per_frame");
-    }
     require_scratch_size(detection_count, sizeof(TrackedDetection));
     require_scratch_size(detection_count, sizeof(detection_t));
     require_scratch_size(detection_count, sizeof(tracked_detection_ex_t));
