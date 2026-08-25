@@ -335,9 +335,12 @@ global_id = (uint64(class_id) << 32) | uint32(local_tracker_id)
 
 新增选项：
 
+- `KFCORE_BUILD_YOLO_TRACKING=OFF`；
 - `KFCORE_BUILD_TENSORRT_YOLO=OFF`；
 - `KFCORE_BUILD_YOLO_OPENCV=OFF`；
 - `KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=OFF`。
+
+`KFCORE_BUILD_YOLO_TRACKING` 只启用公共类型和跟踪会话，依赖 C++17 与 `KFCore::trackers`，不查找 CUDA、TensorRT 或 OpenCV。`KFCORE_BUILD_TENSORRT_YOLO` 和 `KFCORE_BUILD_YOLO_OPENCV` 均要求 tracking 已启用；若调用方只打开后者，configure 直接给出依赖错误，不隐式改写用户选项。
 
 默认 C-only KFCore 构建不变。启用 TensorRT YOLO 后：
 
@@ -410,6 +413,7 @@ TensorRT engine 一般不跨平台、TensorRT 版本或 GPU 任意移植，因�
 - 现有 KFCore C API 和默认构建行为不变；
 - `bytetrack_update()` 保持公开签名和既有输出顺序；
 - 新 C++/CUDA 目标仅在显式选项开启时出现；
+- 无 TensorRT SDK 的环境可只开启 `KFCORE_BUILD_YOLO_TRACKING` 完成公共类型、tracker session 和契约纯逻辑测试；
 - 不修改现有 `TensorRT-YOLO/` 和 `TensorRT-YOLO11/` 参考目录。
 
 迁移路径：
