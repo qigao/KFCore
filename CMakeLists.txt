@@ -48,6 +48,11 @@ if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
   kfcore_validate_tensorrt_integration_engine(
     "${KFCORE_TENSORRT_TEST_ENGINE}"
     KFCORE_TENSORRT_TEST_ENGINE_VALIDATED)
+  if(NOT "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE}" STREQUAL "")
+    kfcore_validate_tensorrt_integration_engine(
+      "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE}"
+      KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_VALIDATED)
+  endif()
 endif()
 
 find_package(Threads REQUIRED)

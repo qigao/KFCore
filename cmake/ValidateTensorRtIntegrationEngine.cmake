@@ -31,3 +31,13 @@ function(kfcore_set_tensorrt_integration_test_engine test_name validated_path)
   set_tests_properties("${test_name}" PROPERTIES
     ENVIRONMENT "KFCORE_TENSORRT_TEST_ENGINE=${validated_path}")
 endfunction()
+
+function(kfcore_add_tensorrt_integration_test test_name validated_path)
+  if(ARGC LESS 3 OR "${ARGV2}" STREQUAL "")
+    message(FATAL_ERROR
+      "Cannot register TensorRT integration test without a command: ${test_name}")
+  endif()
+
+  add_test(NAME "${test_name}" COMMAND ${ARGN})
+  kfcore_set_tensorrt_integration_test_engine("${test_name}" "${validated_path}")
+endfunction()

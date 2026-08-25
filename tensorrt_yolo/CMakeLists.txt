@@ -269,10 +269,16 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
       CXX_STANDARD_REQUIRED ON
       CXX_EXTENSIONS OFF
       FOLDER "tensorrt_yolo/tests")
-    add_test(NAME test_tensorrt_integration COMMAND test_tensorrt_integration)
-    kfcore_set_tensorrt_integration_test_engine(
+    kfcore_add_tensorrt_integration_test(
       test_tensorrt_integration
-      "${KFCORE_TENSORRT_TEST_ENGINE_VALIDATED}")
+      "${KFCORE_TENSORRT_TEST_ENGINE_VALIDATED}"
+      test_tensorrt_integration)
+    if(NOT "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_VALIDATED}" STREQUAL "")
+      kfcore_add_tensorrt_integration_test(
+        test_tensorrt_integration_yolo11_face
+        "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_VALIDATED}"
+        test_tensorrt_integration)
+    endif()
 
     if(DEFINED ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}
        AND NOT "$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}" STREQUAL "")
