@@ -26,6 +26,19 @@ typedef struct tracked_detection {
     int tracker_id;
 } tracked_detection_t;
 
+typedef enum tracker_status {
+    TRACKER_STATUS_OK = 0,
+    TRACKER_STATUS_INVALID_ARGUMENT = 1,
+    TRACKER_STATUS_CAPACITY = 2,
+    TRACKER_STATUS_OVERFLOW = 3,
+    TRACKER_STATUS_ALLOCATION_FAILED = 4
+} tracker_status_t;
+
+typedef struct tracked_detection_ex {
+    tracked_detection_t tracked;
+    size_t detection_index;
+} tracked_detection_ex_t;
+
 typedef struct sort sort_t;
 typedef struct bytetrack bytetrack_t;
 typedef struct cbiou cbiou_t;
@@ -90,6 +103,14 @@ size_t sort_update(
 bytetrack_t* bytetrack_create(const bytetrack_config_t* config);
 void bytetrack_destroy(bytetrack_t* tracker);
 void bytetrack_reset(bytetrack_t* tracker);
+tracker_status_t bytetrack_update_ex(
+    bytetrack_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t bytetrack_update(
     bytetrack_t* tracker,
     const detection_t* detections,
