@@ -1,33 +1,24 @@
 #pragma once
 
 #include "engine_contract.hpp"
-#include "letterbox.hpp"
+#include "kfcore/image_processor/image_processor.hpp"
 #include "kfcore/yolo/types.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <vector>
 
 namespace kfcore::yolo::detail
 {
 
-inline constexpr std::size_t kNoStagingOffset = (std::numeric_limits<std::size_t>::max)();
-
-struct ImageInputPlan
-{
-    LetterboxTransform transform;
-    std::size_t        source_span_bytes;
-    std::size_t        packed_bytes;
-    std::size_t        staging_offset;
-};
+using LetterboxTransform = kfcore::image::LetterboxTransform;
 
 struct BatchInputPlan
 {
-    std::vector<ImageInputPlan> images;
-    std::size_t                 host_staging_bytes;
-    std::size_t                 input_elements;
-    std::size_t                 input_bytes;
+    std::vector<kfcore::image::ImageView> source_images;
+    kfcore::image::BatchPlan              processor;
+    std::size_t                           input_elements;
+    std::size_t                           input_bytes;
 };
 
 struct DetectionBufferLayout
@@ -58,14 +49,17 @@ BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t m
                              std::int32_t input_height, TensorDataType input_type,
                              std::size_t max_input_bytes);
 
-DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
-                                                       std::size_t max_detections,
-                                                       TensorDataType output_type,
-                                                       std::size_t max_output_bytes);
+LetterboxTransform compute_letterbox_transform(std::int32_t source_width,
+                                               std::int32_t source_height,
+                                               std::int32_t destination_width,
+                                               std::int32_t destination_height);
 
-std::vector<DetectionFrame>
-decode_efficient_nms(const std::vector<ImageView>&              images,
-                     const std::vector<LetterboxTransform>& transforms,
-                     const EfficientNmsOutputView&              outputs);
+DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch, std::size_t max_detections,
+                                                      TensorDataType output_type,
+                                                      std::size_t    max_output_bytes);
+
+std::vector<DetectionFrame> decode_efficient_nms(const std::vector<ImageView>&          images,
+                                                 const std::vector<LetterboxTransform>& transforms,
+                                                 const EfficientNmsOutputView&          outputs);
 
 } // namespace kfcore::yolo::detail

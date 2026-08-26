@@ -31,8 +31,8 @@ void expect_yolo_error(Callable&& callable, YoloErrorCode code, const char* mess
     }
 }
 
-ImageView host_view(const void* data, std::int32_t width, std::int32_t height,
-                    std::size_t stride, PixelFormat format = PixelFormat::Rgb8)
+ImageView host_view(const void* data, std::int32_t width, std::int32_t height, std::size_t stride,
+                    PixelFormat format = PixelFormat::Rgb8)
 {
     return { data, width, height, stride, format, MemoryKind::Host };
 }
@@ -41,33 +41,6 @@ ImageView host_view(const void* data, std::int32_t width, std::int32_t height,
 
 spec("TensorRT YOLO detection helpers")
 {
-    it("plans a bounded one-dimensional launch across the old grid-y boundary")
-    {
-        constexpr std::size_t kLegacyBlockHeight = 16;
-        constexpr std::size_t kLegacyGridYLimit = 65'535;
-        constexpr std::size_t kAtBoundaryHeight =
-            kLegacyBlockHeight * kLegacyGridYLimit;
-        constexpr std::size_t kPastBoundaryHeight =
-            kLegacyBlockHeight * (kLegacyGridYLimit + 1);
-        const LetterboxLaunchPlan at_boundary =
-            plan_letterbox_launch(1, kAtBoundaryHeight);
-        const LetterboxLaunchPlan past_boundary =
-            plan_letterbox_launch(1, kPastBoundaryHeight);
-
-        check(at_boundary.total_pixels == kAtBoundaryHeight);
-        check(past_boundary.total_pixels == kPastBoundaryHeight);
-        check(at_boundary.block_count > 0);
-        check(past_boundary.block_count > 0);
-        check(at_boundary.block_count <= kLetterboxMaxBlocks);
-        check(past_boundary.block_count <= kLetterboxMaxBlocks);
-
-        expect_yolo_error(
-            [] {
-                (void)plan_letterbox_launch((std::numeric_limits<std::size_t>::max)(), 2);
-            },
-            YoloErrorCode::ResourceLimitExceeded, "overflow");
-    }
-
     it("computes independent transforms for wide and tall images")
     {
         const LetterboxTransform wide = compute_letterbox_transform(960, 320, 640, 640);
@@ -93,58 +66,59 @@ spec("TensorRT YOLO detection helpers")
             [&] { (void)prepare_batch(empty, 1, 2, 640, 640, TensorDataType::Float32, 4096); },
             YoloErrorCode::InvalidArgument, "empty");
 
-        std::uint8_t pixels[12] {};
+        std::uint8_t    pixels[12] {};
         const ImageView view = host_view(pixels, 2, 2, 6);
         expect_yolo_error(
-            [&] {
-                (void)prepare_batch({ view, view, view }, 1, 2, 2, 2,
-                                    TensorDataType::Float32, 1024);
+            [&]
+            {
+                (void)prepare_batch({ view, view, view }, 1, 2, 2, 2, TensorDataType::Float32,
+                                    1024);
             },
             YoloErrorCode::ResourceLimitExceeded, "batch");
     }
 
     it("validates pointer dimensions stride format memory and checked source bytes")
     {
-        std::uint8_t pixels[12] {};
-        const ImageView valid = host_view(pixels, 2, 2, 6);
+        std::uint8_t         pixels[12] {};
+        const ImageView      valid = host_view(pixels, 2, 2, 6);
         const BatchInputPlan plan =
             prepare_batch({ valid }, 1, 1, 2, 2, TensorDataType::Float32, 1024);
-        check(plan.images.size() == 1);
-        check(plan.host_staging_bytes == 12);
+        check(plan.processor.images.size() == 1);
+        check(plan.processor.host_staging_bytes == 12);
         check(plan.input_bytes == 48);
 
         ImageView bad = valid;
-        bad.data = nullptr;
+        bad.data      = nullptr;
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
             YoloErrorCode::InvalidArgument, "data");
 
-        bad = valid;
+        bad       = valid;
         bad.width = 0;
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
             YoloErrorCode::InvalidArgument, "dimensions");
 
-        bad = valid;
+        bad            = valid;
         bad.row_stride = 5;
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
             YoloErrorCode::InvalidArgument, "stride");
 
-        bad = valid;
+        bad              = valid;
         bad.pixel_format = static_cast<PixelFormat>(99);
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
             YoloErrorCode::InvalidArgument, "pixel format");
 
-        bad = valid;
+        bad             = valid;
         bad.memory_kind = static_cast<MemoryKind>(99);
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
             YoloErrorCode::InvalidArgument, "memory kind");
 
-        bad = valid;
-        bad.height = 3;
+        bad            = valid;
+        bad.height     = 3;
         bad.row_stride = (std::numeric_limits<std::size_t>::max)();
         expect_yolo_error(
             [&] { (void)prepare_batch({ bad }, 1, 1, 2, 2, TensorDataType::Float32, 1024); },
@@ -158,17 +132,18 @@ spec("TensorRT YOLO detection helpers")
     it("plans host and CUDA-device inputs without mixing their staging offsets")
     {
         std::uint8_t host_pixels[12] {};
-        ImageView host = host_view(host_pixels, 2, 2, 6, PixelFormat::Bgr8);
-        ImageView device = host;
-        device.data = reinterpret_cast<const void*>(std::uintptr_t { 0x1000 });
-        device.memory_kind = MemoryKind::CudaDevice;
+        ImageView    host   = host_view(host_pixels, 2, 2, 6, PixelFormat::Bgr8);
+        ImageView    device = host;
+        device.data         = reinterpret_cast<const void*>(std::uintptr_t { 0x1000 });
+        device.memory_kind  = MemoryKind::CudaDevice;
 
         const BatchInputPlan plan =
             prepare_batch({ host, device }, 1, 2, 2, 2, TensorDataType::Float16, 1024);
-        check(plan.host_staging_bytes == 12);
+        check(plan.processor.host_staging_bytes == 12);
         check(plan.input_bytes == 48);
-        check(plan.images[0].staging_offset == 0);
-        check(plan.images[1].staging_offset == kNoStagingOffset);
+        check(plan.processor.images[0].requires_staging);
+        check(plan.processor.images[0].staging_offset == 0);
+        check(!plan.processor.images[1].requires_staging);
     }
 
     it("computes bounded dynamic tensor byte sizes")
@@ -191,18 +166,19 @@ spec("TensorRT YOLO detection helpers")
             [&] { (void)compute_detection_buffer_layout(2, 3, TensorDataType::Float32, 151); },
             YoloErrorCode::ResourceLimitExceeded, "outputs");
         expect_yolo_error(
-            [&] {
-                (void)compute_detection_buffer_layout(
-                    (std::numeric_limits<std::size_t>::max)(), 2,
-                    TensorDataType::Float32, (std::numeric_limits<std::size_t>::max)());
+            [&]
+            {
+                (void)compute_detection_buffer_layout((std::numeric_limits<std::size_t>::max)(), 2,
+                                                      TensorDataType::Float32,
+                                                      (std::numeric_limits<std::size_t>::max)());
             },
             YoloErrorCode::ResourceLimitExceeded, "overflow");
     }
 
     it("inverse-transforms each batch image and preserves result order")
     {
-        std::uint8_t wide_pixels[3] {};
-        std::uint8_t tall_pixels[3] {};
+        std::uint8_t                 wide_pixels[3] {};
+        std::uint8_t                 tall_pixels[3] {};
         const std::vector<ImageView> images = {
             host_view(wide_pixels, 960, 320, 2880),
             host_view(tall_pixels, 320, 960, 960),
@@ -212,12 +188,12 @@ spec("TensorRT YOLO detection helpers")
             compute_letterbox_transform(320, 960, 640, 640),
         };
         const std::int32_t counts[] = { 1, 1 };
-        const float boxes[] = {
-            0.0f, 640.0f / 3.0f, 640.0f, 1280.0f / 3.0f,
-            640.0f / 3.0f, 0.0f, 1280.0f / 3.0f, 640.0f,
+        const float        boxes[]  = {
+            0.0f,          640.0f / 3.0f, 640.0f,         1280.0f / 3.0f,
+            640.0f / 3.0f, 0.0f,          1280.0f / 3.0f, 640.0f,
         };
-        const float scores[] = { 0.75f, 0.5f };
-        const std::int32_t labels[] = { 3, 7 };
+        const float                  scores[] = { 0.75f, 0.5f };
+        const std::int32_t           labels[] = { 3, 7 };
         const EfficientNmsOutputView outputs {
             counts, 2, boxes, 8, scores, 2, labels, 2, 1, TensorDataType::Float32,
         };
@@ -238,15 +214,15 @@ spec("TensorRT YOLO detection helpers")
 
     it("decodes FP16 outputs and clamps only finite coordinates")
     {
-        std::uint8_t pixels[3] {};
-        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        std::uint8_t                          pixels[3] {};
+        const std::vector<ImageView>          images     = { host_view(pixels, 2, 2, 6) };
         const std::vector<LetterboxTransform> transforms = {
             compute_letterbox_transform(2, 2, 2, 2),
         };
-        const std::int32_t counts[] = { 1 };
-        const std::uint16_t boxes[] = { 0xbc00, 0xbc00, 0x4200, 0x4200 };
-        const std::uint16_t scores[] = { 0x3800 };
-        const std::int32_t labels[] = { 1 };
+        const std::int32_t           counts[] = { 1 };
+        const std::uint16_t          boxes[]  = { 0xbc00, 0xbc00, 0x4200, 0x4200 };
+        const std::uint16_t          scores[] = { 0x3800 };
+        const std::int32_t           labels[] = { 1 };
         const EfficientNmsOutputView outputs {
             counts, 1, boxes, 4, scores, 1, labels, 1, 1, TensorDataType::Float16,
         };
@@ -263,15 +239,15 @@ spec("TensorRT YOLO detection helpers")
 
     it("rejects a box that collapses inside letterbox padding")
     {
-        std::uint8_t pixels[3] {};
-        const std::vector<ImageView> images = { host_view(pixels, 960, 320, 2880) };
+        std::uint8_t                          pixels[3] {};
+        const std::vector<ImageView>          images     = { host_view(pixels, 960, 320, 2880) };
         const std::vector<LetterboxTransform> transforms = {
             compute_letterbox_transform(960, 320, 640, 640),
         };
-        const std::int32_t counts[] = { 1 };
-        const float boxes[] = { 10.0f, 0.0f, 20.0f, 100.0f };
-        const float scores[] = { 0.5f };
-        const std::int32_t labels[] = { 0 };
+        const std::int32_t           counts[] = { 1 };
+        const float                  boxes[]  = { 10.0f, 0.0f, 20.0f, 100.0f };
+        const float                  scores[] = { 0.5f };
+        const std::int32_t           labels[] = { 0 };
         const EfficientNmsOutputView outputs {
             counts, 1, boxes, 4, scores, 1, labels, 1, 1, TensorDataType::Float32,
         };
@@ -282,15 +258,15 @@ spec("TensorRT YOLO detection helpers")
 
     it("rejects inconsistent output sizes counts labels and invalid floating values")
     {
-        std::uint8_t pixels[3] {};
-        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        std::uint8_t                          pixels[3] {};
+        const std::vector<ImageView>          images     = { host_view(pixels, 2, 2, 6) };
         const std::vector<LetterboxTransform> transforms = {
             compute_letterbox_transform(2, 2, 2, 2),
         };
-        std::int32_t counts[] = { 1 };
-        float boxes[] = { 0.0f, 0.0f, 1.0f, 1.0f };
-        float scores[] = { 0.5f };
-        std::int32_t labels[] = { 0 };
+        std::int32_t           counts[] = { 1 };
+        float                  boxes[]  = { 0.0f, 0.0f, 1.0f, 1.0f };
+        float                  scores[] = { 0.5f };
+        std::int32_t           labels[] = { 0 };
         EfficientNmsOutputView outputs {
             counts, 1, boxes, 4, scores, 1, labels, 1, 1, TensorDataType::Float32,
         };

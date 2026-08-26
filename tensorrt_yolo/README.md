@@ -1,7 +1,8 @@
 # TensorRT YOLO 与 ByteTrack
 
-本模块把可信的 TensorRT EfficientNMS engine 接到 KFCore 自有 ByteTrack。它由三个可选
-CMake target 组成：`KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
+本模块把可信的 TensorRT EfficientNMS engine 接到 KFCore 自有 ByteTrack。它使用独立的
+`KFCore::image_processor` 完成通用 CUDA 图像到 Tensor 处理，并提供三个 YOLO target：
+`KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
 `KFCore::yolo_opencv`。默认 KFCore C 构建不会发现 CUDA、TensorRT 或 OpenCV。
 
 ## 运行契约
@@ -24,6 +25,8 @@ width，其余轴与所有输出的非 batch 轴必须固定。`DetectorOptions:
 `detect_batch()` 返回前持续有效；返回后 detector 不再保留该视图。一个 `Engine` 可被多个
 worker 共享，但每个 worker 必须拥有自己的 `TensorRtDetector`；同一 detector 不可并发调用。
 由 `cv::Mat` 创建视图时，`Mat` 的释放、重分配或 backing storage 改变同样会使该视图失效。
+检测器把 YOLO 视图适配到 `KFCore::image_processor`，处理器不包含 TensorRT 类型，也不保留输入、
+工作区、输出 Tensor 或 stream。支持范围和独立使用方式见 `image_processor/README.md`。
 
 每条摄像头/图片序列拥有一个顺序调用的 `ByteTrackSession`。跟踪按类别隔离，公开 ID 为
 `(uint64_t(class_id) << 32) | uint32_t(local_tracker_id)`；`reset()` 清空全部类别状态，之后
@@ -97,11 +100,18 @@ TensorRT/CUDA DLL 由部署环境提供；安装包不复制它们。若没有�
 
 ## YOLO11 / YOLO11-face 验证记录
 
-**事实（2026-08-26 本地验证）**：通用 `yolo11n` engine 与 `yolov11n-face` engine 均在真实的
+**事实（2026-08-26 ImageProcessor 重构前基线）**：通用 `yolo11n` engine 与
+`yolov11n-face` engine 均在真实的
 TensorRT 11.2 / CUDA 12.8 环境执行。face engine 直接运行既有集成测试为 8/8 cases、25 assertions；
 独立 CTest `test_tensorrt_integration_yolo11_face` 为 1/1；相邻 TensorRT、tracking、OpenCV、
 CUDA buffer、engine-file 与 CMake 配置测试合计 66 cases、2087 assertions；合并的 focused 范围为
 74 cases、2112 assertions。
+
+**事实（2026-08-26 ImageProcessor 重构验证）**：CUDA 12.8 standalone preset 的 CPU/CUDA 与
+安装消费端 ImageProcessor CTests 为 3/3；TensorRT 11.2 release preset 的非 opt-in 全套 CTests 为 19/19，包含
+安装消费端、YOLO helper、tracking、OpenCV 和真实 GPU kernel 测试。此前本地 engine 随参考目录
+清理，故本次重构后没有重跑需要 `.engine` 的 opt-in TensorRT runtime/YOLO11-face 测试；上段数据
+只作为重构前行为基线，不作为本次 engine 级复验结果。
 
 **事实（engine 契约）**：face engine 是单类别 EfficientNMS engine，张量为 `images`、`num_dets`、
 `boxes`、`scores`、`labels`；`num_dets` 与 `labels` 为 INT32，`images`、`boxes`、`scores` 为 FP32，

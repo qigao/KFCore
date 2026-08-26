@@ -646,6 +646,8 @@ When building from this repository, the important options are:
 - `KFCORE_BUILD_APRILTAG_EXAMPLES`: build AprilTag examples.
 - `KFCORE_BUILD_NAVIGATION_TOOLS`: build frame transform and navigation fusion
   helpers.
+- `KFCORE_BUILD_IMAGE_PROCESSOR`: build the reusable CUDA BGR/RGB image-to-tensor
+  processor without requiring TensorRT or OpenCV.
 - `KFCORE_BUILD_TESTS`: build local tests.
 
 The full repository depends on TurboNet and vcpkg packages such as SIMDe, STC,

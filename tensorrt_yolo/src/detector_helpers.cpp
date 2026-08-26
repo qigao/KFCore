@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <new>
 #include <string>
@@ -17,7 +16,6 @@ namespace kfcore::yolo::detail
 namespace
 {
 
-    constexpr std::size_t kImageChannels = 3;
     constexpr std::size_t kBoxCoordinates = 4;
 
     [[noreturn]] void throw_invalid(std::string message)
@@ -69,24 +67,87 @@ namespace
         return result;
     }
 
-    void validate_image_enums(const ImageView& image)
+    [[noreturn]] void throw_processor_error(const kfcore::image::ImageProcessorError& error)
     {
-        switch (image.pixel_format)
+        switch (error.code())
+        {
+        case kfcore::image::ImageProcessorErrorCode::InvalidArgument:
+            throw YoloError(YoloErrorCode::InvalidArgument, error.what());
+        case kfcore::image::ImageProcessorErrorCode::ResourceLimitExceeded:
+            throw YoloError(YoloErrorCode::ResourceLimitExceeded, error.what());
+        case kfcore::image::ImageProcessorErrorCode::CudaFailure:
+            throw YoloError(YoloErrorCode::CudaFailure, error.what());
+        }
+        throw YoloError(YoloErrorCode::InvalidArgument,
+                        "image processor returned an unknown error code");
+    }
+
+    kfcore::image::PixelFormat processor_pixel_format(PixelFormat format)
+    {
+        switch (format)
         {
         case PixelFormat::Bgr8:
+            return kfcore::image::PixelFormat::Bgr8;
         case PixelFormat::Rgb8:
-            break;
-        default:
-            throw_invalid("input validation stage: unsupported pixel format");
+            return kfcore::image::PixelFormat::Rgb8;
         }
-        switch (image.memory_kind)
+        throw_invalid("input validation stage: unsupported pixel format");
+    }
+
+    kfcore::image::MemoryKind processor_memory_kind(MemoryKind memory_kind)
+    {
+        switch (memory_kind)
         {
         case MemoryKind::Host:
+            return kfcore::image::MemoryKind::Host;
         case MemoryKind::CudaDevice:
-            break;
-        default:
-            throw_invalid("input validation stage: unsupported memory kind");
+            return kfcore::image::MemoryKind::CudaDevice;
         }
+        throw_invalid("input validation stage: unsupported memory kind");
+    }
+
+    std::size_t legacy_source_capacity(const ImageView& image) noexcept
+    {
+        if (image.width <= 0 || image.height <= 0)
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+        const std::size_t width = static_cast<std::size_t>(image.width);
+        if (width > (std::numeric_limits<std::size_t>::max)() / 3U)
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+        const std::size_t row_bytes = width * 3U;
+        if (image.row_stride < row_bytes)
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+        const std::size_t preceding_rows = static_cast<std::size_t>(image.height - 1);
+        if (preceding_rows != 0 &&
+            image.row_stride > (std::numeric_limits<std::size_t>::max)() / preceding_rows)
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+        const std::size_t preceding_bytes = preceding_rows * image.row_stride;
+        if (row_bytes > (std::numeric_limits<std::size_t>::max)() - preceding_bytes)
+        {
+            return (std::numeric_limits<std::size_t>::max)();
+        }
+        return preceding_bytes + row_bytes;
+    }
+
+    kfcore::image::TensorElementType processor_element_type(TensorDataType type)
+    {
+        switch (type)
+        {
+        case TensorDataType::Float16:
+            return kfcore::image::TensorElementType::Float16;
+        case TensorDataType::Float32:
+            return kfcore::image::TensorElementType::Float32;
+        case TensorDataType::Int32:
+            throw_invalid("input validation stage: floating tensor type is invalid");
+        }
+        throw_invalid("input validation stage: floating tensor type is unknown");
     }
 
     float half_to_float(std::uint16_t bits) noexcept
@@ -94,7 +155,7 @@ namespace
         const bool          negative = (bits & UINT16_C(0x8000)) != 0;
         const std::uint16_t exponent = static_cast<std::uint16_t>((bits >> 10) & 0x1fU);
         const std::uint16_t fraction = static_cast<std::uint16_t>(bits & 0x03ffU);
-        float value = 0.0f;
+        float               value    = 0.0f;
         if (exponent == 0)
         {
             value = std::ldexp(static_cast<float>(fraction), -24);
@@ -137,51 +198,20 @@ namespace
 
 } // namespace
 
-LetterboxLaunchPlan plan_letterbox_launch(std::size_t destination_width,
-                                          std::size_t destination_height)
-{
-    if (destination_width == 0 || destination_height == 0)
-    {
-        throw_invalid("letterbox launch stage: dimensions must be positive");
-    }
-
-    const std::size_t total_pixels =
-        checked_multiply(destination_width, destination_height, "letterbox launch");
-    const std::size_t required_blocks =
-        total_pixels / kLetterboxThreadsPerBlock +
-        (total_pixels % kLetterboxThreadsPerBlock == 0 ? 0U : 1U);
-    return {
-        total_pixels,
-        static_cast<std::uint32_t>((std::min)(required_blocks,
-                                              std::size_t { kLetterboxMaxBlocks })),
-    };
-}
-
 LetterboxTransform compute_letterbox_transform(std::int32_t source_width,
                                                std::int32_t source_height,
                                                std::int32_t destination_width,
                                                std::int32_t destination_height)
 {
-    if (source_width <= 0 || source_height <= 0 || destination_width <= 0 ||
-        destination_height <= 0)
+    try
     {
-        throw YoloError(YoloErrorCode::InvalidArgument,
-                        "letterbox transform stage: dimensions must be positive");
+        return kfcore::image::ImageProcessor::letterbox_transform(
+            source_width, source_height, destination_width, destination_height);
     }
-
-    const float scale = (std::min)(static_cast<float>(destination_width) /
-                                       static_cast<float>(source_width),
-                                   static_cast<float>(destination_height) /
-                                       static_cast<float>(source_height));
-    return {
-        scale,
-        (static_cast<float>(destination_width) - static_cast<float>(source_width) * scale) *
-            0.5f,
-        (static_cast<float>(destination_height) - static_cast<float>(source_height) * scale) *
-            0.5f,
-        source_width,
-        source_height,
-    };
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        throw_processor_error(error);
+    }
 }
 
 BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t min_batch,
@@ -212,72 +242,50 @@ BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t m
             throw_resource("input validation stage: input byte limit must be positive");
         }
 
-        const std::size_t element_bytes = floating_element_size(input_type, "input validation");
         BatchInputPlan result {};
-        result.images.reserve(images.size());
-        std::size_t total_source_span = 0;
-
+        result.source_images.reserve(images.size());
         for (const ImageView& image : images)
         {
-            if (image.data == nullptr)
-            {
-                throw_invalid("input validation stage: image data must not be null");
-            }
-            if (image.width <= 0 || image.height <= 0)
-            {
-                throw_invalid("input validation stage: image dimensions must be positive");
-            }
-            validate_image_enums(image);
-
-            const std::size_t width = static_cast<std::size_t>(image.width);
-            const std::size_t height = static_cast<std::size_t>(image.height);
-            const std::size_t row_bytes =
-                checked_multiply(width, kImageChannels, "input validation");
-            if (image.row_stride < row_bytes)
-            {
-                throw_invalid("input validation stage: row stride is smaller than packed RGB8");
-            }
-            const std::size_t preceding_rows =
-                checked_multiply(height - 1, image.row_stride, "input validation");
-            const std::size_t source_span =
-                checked_add(preceding_rows, row_bytes, "input validation");
-            total_source_span =
-                checked_add(total_source_span, source_span, "input validation");
-            if (total_source_span > max_input_bytes)
-            {
-                throw_resource("input validation stage: source bytes exceed configured limit");
-            }
-
-            const std::size_t packed_bytes =
-                checked_multiply(row_bytes, height, "input validation");
-            std::size_t staging_offset = kNoStagingOffset;
-            if (image.memory_kind == MemoryKind::Host)
-            {
-                staging_offset = result.host_staging_bytes;
-                result.host_staging_bytes = checked_add(result.host_staging_bytes, packed_bytes,
-                                                        "input validation");
-            }
-            result.images.push_back({
-                compute_letterbox_transform(image.width, image.height, input_width, input_height),
-                source_span,
-                packed_bytes,
-                staging_offset,
+            result.source_images.push_back({
+                image.data,
+                legacy_source_capacity(image),
+                image.width,
+                image.height,
+                image.row_stride,
+                processor_pixel_format(image.pixel_format),
+                processor_memory_kind(image.memory_kind),
             });
         }
 
-        result.input_elements = checked_multiply(images.size(), kImageChannels, "input validation");
-        result.input_elements = checked_multiply(result.input_elements,
-                                                 static_cast<std::size_t>(input_height),
-                                                 "input validation");
-        result.input_elements = checked_multiply(result.input_elements,
-                                                 static_cast<std::size_t>(input_width),
-                                                 "input validation");
-        result.input_bytes =
-            checked_multiply(result.input_elements, element_bytes, "input validation");
-        if (result.input_bytes > max_input_bytes || result.host_staging_bytes > max_input_bytes)
+        std::byte                       destination_sentinel {};
+        const kfcore::image::TensorView destination {
+            &destination_sentinel,
+            (std::numeric_limits<std::size_t>::max)(),
+            static_cast<std::int32_t>(images.size()),
+            3,
+            input_height,
+            input_width,
+            processor_element_type(input_type),
+            kfcore::image::TensorLayout::Nchw,
+            kfcore::image::MemoryKind::CudaDevice,
+        };
+        try
+        {
+            result.processor = kfcore::image::ImageProcessor::plan(
+                result.source_images, destination, max_input_bytes,
+                (std::numeric_limits<std::size_t>::max)());
+        }
+        catch (const kfcore::image::ImageProcessorError& error)
+        {
+            throw_processor_error(error);
+        }
+        const std::size_t element_bytes = floating_element_size(input_type, "input validation");
+        result.input_bytes              = result.processor.tensor_bytes;
+        if (result.input_bytes > max_input_bytes)
         {
             throw_resource("input validation stage: input bytes exceed configured limit");
         }
+        result.input_elements = result.input_bytes / element_bytes;
         return result;
     }
     catch (const std::bad_alloc&)
@@ -290,31 +298,29 @@ BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t m
     }
 }
 
-DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
-                                                       std::size_t max_detections,
-                                                       TensorDataType output_type,
-                                                       std::size_t max_output_bytes)
+DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch, std::size_t max_detections,
+                                                      TensorDataType output_type,
+                                                      std::size_t    max_output_bytes)
 {
     if (batch == 0 || max_detections == 0)
     {
         throw_invalid("output layout stage: batch and maximum detections must be positive");
     }
-    const std::size_t floating_bytes =
-        floating_element_size(output_type, "output layout");
-    const std::size_t slots = checked_multiply(batch, max_detections, "output layout");
+    const std::size_t floating_bytes = floating_element_size(output_type, "output layout");
+    const std::size_t slots          = checked_multiply(batch, max_detections, "output layout");
 
     DetectionBufferLayout result;
     result.num_dets_bytes = checked_multiply(batch, sizeof(std::int32_t), "output layout");
-    result.boxes_bytes = checked_multiply(slots, kBoxCoordinates, "output layout");
-    result.boxes_bytes = checked_multiply(result.boxes_bytes, floating_bytes, "output layout");
-    result.scores_bytes = checked_multiply(slots, floating_bytes, "output layout");
-    result.labels_bytes = checked_multiply(slots, sizeof(std::int32_t), "output layout");
-    result.total_output_bytes = checked_add(result.num_dets_bytes, result.boxes_bytes,
-                                            "output layout");
-    result.total_output_bytes = checked_add(result.total_output_bytes, result.scores_bytes,
-                                            "output layout");
-    result.total_output_bytes = checked_add(result.total_output_bytes, result.labels_bytes,
-                                            "output layout");
+    result.boxes_bytes    = checked_multiply(slots, kBoxCoordinates, "output layout");
+    result.boxes_bytes    = checked_multiply(result.boxes_bytes, floating_bytes, "output layout");
+    result.scores_bytes   = checked_multiply(slots, floating_bytes, "output layout");
+    result.labels_bytes   = checked_multiply(slots, sizeof(std::int32_t), "output layout");
+    result.total_output_bytes =
+        checked_add(result.num_dets_bytes, result.boxes_bytes, "output layout");
+    result.total_output_bytes =
+        checked_add(result.total_output_bytes, result.scores_bytes, "output layout");
+    result.total_output_bytes =
+        checked_add(result.total_output_bytes, result.labels_bytes, "output layout");
     if (result.total_output_bytes > max_output_bytes)
     {
         throw_resource("output layout stage: outputs exceed configured byte limit");
@@ -322,21 +328,22 @@ DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch,
     return result;
 }
 
-std::vector<DetectionFrame>
-decode_efficient_nms(const std::vector<ImageView>& images,
-                     const std::vector<LetterboxTransform>& transforms,
-                     const EfficientNmsOutputView& outputs)
+std::vector<DetectionFrame> decode_efficient_nms(const std::vector<ImageView>&          images,
+                                                 const std::vector<LetterboxTransform>& transforms,
+                                                 const EfficientNmsOutputView&          outputs)
 {
     try
     {
         if (images.empty() || transforms.size() != images.size())
         {
-            throw_inference("output validation stage: image and transform vector size is inconsistent");
+            throw_inference(
+                "output validation stage: image and transform vector size is inconsistent");
         }
         if (outputs.num_dets == nullptr || outputs.boxes == nullptr || outputs.scores == nullptr ||
             outputs.labels == nullptr || outputs.max_detections == 0)
         {
-            throw_inference("output validation stage: output pointer or maximum detections is invalid");
+            throw_inference(
+                "output validation stage: output pointer or maximum detections is invalid");
         }
 
         const std::size_t slots =
@@ -353,7 +360,7 @@ decode_efficient_nms(const std::vector<ImageView>& images,
         results.reserve(images.size());
         for (std::size_t image_index = 0; image_index < images.size(); ++image_index)
         {
-            const ImageView& image = images[image_index];
+            const ImageView&          image     = images[image_index];
             const LetterboxTransform& transform = transforms[image_index];
             if (!std::isfinite(transform.scale) || transform.scale <= 0.0f ||
                 !std::isfinite(transform.pad_x) || !std::isfinite(transform.pad_y) ||
@@ -371,21 +378,18 @@ decode_efficient_nms(const std::vector<ImageView>& images,
             DetectionFrame frame { image.width, image.height, {} };
             frame.detections.reserve(static_cast<std::size_t>(count));
             const std::size_t detection_base = image_index * outputs.max_detections;
-            for (std::size_t detection_index = 0;
-                 detection_index < static_cast<std::size_t>(count); ++detection_index)
+            for (std::size_t detection_index = 0; detection_index < static_cast<std::size_t>(count);
+                 ++detection_index)
             {
-                const std::size_t slot = detection_base + detection_index;
+                const std::size_t slot     = detection_base + detection_index;
                 const std::size_t box_base = slot * kBoxCoordinates;
-                const float left = floating_value(outputs.boxes, box_base,
-                                                  outputs.output_type);
-                const float top = floating_value(outputs.boxes, box_base + 1,
-                                                 outputs.output_type);
-                const float right = floating_value(outputs.boxes, box_base + 2,
-                                                   outputs.output_type);
-                const float bottom = floating_value(outputs.boxes, box_base + 3,
-                                                    outputs.output_type);
-                const float score =
-                    floating_value(outputs.scores, slot, outputs.output_type);
+                const float left = floating_value(outputs.boxes, box_base, outputs.output_type);
+                const float top  = floating_value(outputs.boxes, box_base + 1, outputs.output_type);
+                const float right =
+                    floating_value(outputs.boxes, box_base + 2, outputs.output_type);
+                const float bottom =
+                    floating_value(outputs.boxes, box_base + 3, outputs.output_type);
+                const float score = floating_value(outputs.scores, slot, outputs.output_type);
                 if (!std::isfinite(score))
                 {
                     throw_inference("output validation stage: score is not finite");
@@ -406,18 +410,19 @@ decode_efficient_nms(const std::vector<ImageView>& images,
                 }
 
                 const float inverse_scale = 1.0f / transform.scale;
-                const float mapped_left = (left - transform.pad_x) * inverse_scale;
-                const float mapped_top = (top - transform.pad_y) * inverse_scale;
-                const float mapped_right = (right - transform.pad_x) * inverse_scale;
+                const float mapped_left   = (left - transform.pad_x) * inverse_scale;
+                const float mapped_top    = (top - transform.pad_y) * inverse_scale;
+                const float mapped_right  = (right - transform.pad_x) * inverse_scale;
                 const float mapped_bottom = (bottom - transform.pad_y) * inverse_scale;
                 if (!std::isfinite(mapped_left) || !std::isfinite(mapped_top) ||
                     !std::isfinite(mapped_right) || !std::isfinite(mapped_bottom))
                 {
-                    throw_inference("output validation stage: inverse box coordinate is not finite");
+                    throw_inference(
+                        "output validation stage: inverse box coordinate is not finite");
                 }
-                const float image_width = static_cast<float>(image.width);
+                const float image_width  = static_cast<float>(image.width);
                 const float image_height = static_cast<float>(image.height);
-                const BoxF restored_box {
+                const BoxF  restored_box {
                     (std::clamp)(mapped_left, 0.0f, image_width),
                     (std::clamp)(mapped_top, 0.0f, image_height),
                     (std::clamp)(mapped_right, 0.0f, image_width),
