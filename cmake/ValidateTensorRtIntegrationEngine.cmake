@@ -1,7 +1,12 @@
 function(kfcore_validate_tensorrt_integration_engine configured_path output_variable)
+  set(_kfcore_engine_variable "KFCORE_TENSORRT_TEST_ENGINE")
+  if(ARGC GREATER 2 AND NOT "${ARGV2}" STREQUAL "")
+    set(_kfcore_engine_variable "${ARGV2}")
+  endif()
+
   if("${configured_path}" STREQUAL "")
     message(FATAL_ERROR
-      "KFCORE_TENSORRT_TEST_ENGINE must not be empty when "
+      "${_kfcore_engine_variable} must not be empty when "
       "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON")
   endif()
 
@@ -13,7 +18,7 @@ function(kfcore_validate_tensorrt_integration_engine configured_path output_vari
   if(NOT EXISTS "${_kfcore_engine_absolute}" OR
      IS_DIRECTORY "${_kfcore_engine_absolute}")
     message(FATAL_ERROR
-      "KFCORE_TENSORRT_TEST_ENGINE must name an existing file: "
+      "${_kfcore_engine_variable} must name an existing file: "
       "${_kfcore_engine_absolute}")
   endif()
 
@@ -27,7 +32,8 @@ function(kfcore_validate_optional_tensorrt_integration_engine configured_path ou
     return()
   endif()
 
-  kfcore_validate_tensorrt_integration_engine("${configured_path}" _validated_engine)
+  kfcore_validate_tensorrt_integration_engine(
+    "${configured_path}" _validated_engine "${ARGV2}")
   set(${output_variable} "${_validated_engine}" PARENT_SCOPE)
 endfunction()
 

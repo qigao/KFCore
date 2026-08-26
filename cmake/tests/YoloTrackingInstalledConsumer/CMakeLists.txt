@@ -46,6 +46,5 @@ endif()
 
 add_executable(yolo_tracking_installed_consumer main.cpp)
 target_link_libraries(yolo_tracking_installed_consumer PRIVATE KFCore::yolo_tracking)
-target_compile_features(yolo_tracking_installed_consumer PRIVATE cxx_std_17)
 file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/consumer-target-file-$<CONFIG>.txt"
   CONTENT "$<TARGET_FILE:yolo_tracking_installed_consumer>")

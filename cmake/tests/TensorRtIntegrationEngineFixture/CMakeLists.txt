@@ -16,7 +16,8 @@ include(ValidateTensorRtIntegrationEngine)
 kfcore_validate_tensorrt_integration_engine(
   "${KFCORE_FIXTURE_ENGINE_PATH}" _validated_engine)
 kfcore_validate_optional_tensorrt_integration_engine(
-  "${KFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE}" _validated_yolo11_face_engine)
+  "${KFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE}" _validated_yolo11_face_engine
+  KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE)
 
 kfcore_add_tensorrt_integration_test(
   fixture_tensorrt_integration

@@ -94,7 +94,8 @@ _run_fixture_tests(empty_face)
 _integration_engine_configure(missing_face "${_valid_engine}"
   "-DKFCORE_FIXTURE_ENGINE_PATH_YOLO11_FACE=${_fixture_root}/missing-face.engine")
 if(missing_face_RESULT EQUAL 0 OR
-   NOT missing_face_OUTPUT MATCHES "must name an existing file")
+   NOT missing_face_OUTPUT MATCHES
+       "KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE must name an existing file")
   message(FATAL_ERROR
     "A nonexistent optional face engine should fail at configure time:\n${missing_face_OUTPUT}")
 endif()

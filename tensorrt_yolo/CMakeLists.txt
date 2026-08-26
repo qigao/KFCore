@@ -6,6 +6,7 @@ target_link_libraries(kfcore_yolo_tracking PRIVATE KFCore::trackers)
 target_include_directories(kfcore_yolo_tracking PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_features(kfcore_yolo_tracking PUBLIC cxx_std_17)
 set_target_properties(kfcore_yolo_tracking PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
