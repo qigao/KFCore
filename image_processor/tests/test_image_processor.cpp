@@ -37,6 +37,14 @@ ImageView host_view(const void* data, std::int32_t width, std::int32_t height, s
     return { data, byte_size, width, height, stride, format, MemoryKind::Host };
 }
 
+ImageView gray_host_view(const void* data, std::int32_t width, std::int32_t height,
+                         std::size_t stride)
+{
+    const std::size_t byte_size =
+        (static_cast<std::size_t>(height) - 1U) * stride + static_cast<std::size_t>(width);
+    return { data, byte_size, width, height, stride, PixelFormat::Gray8, MemoryKind::Host };
+}
+
 TensorView device_tensor(void* data, std::size_t bytes, std::int32_t batch, std::int32_t height,
                          std::int32_t width, TensorElementType type = TensorElementType::Float32)
 {
@@ -49,6 +57,115 @@ TensorView device_tensor(void* data, std::size_t bytes, std::int32_t batch, std:
 
 spec("ImageProcessor CPU contract")
 {
+    it("stages padded RGB8 and BGR8 images as deterministic packed grayscale")
+    {
+        constexpr std::size_t kSourceLimit = 1024;
+        const std::array<std::uint8_t, 8> rgb = {
+            255, 0, 0, 0, 255, 0, 90, 91,
+        };
+        const std::array<std::uint8_t, 8> bgr = {
+            255, 0, 0, 0, 0, 255, 92, 93,
+        };
+        std::array<std::uint8_t, 2> rgb_gray {};
+        std::array<std::uint8_t, 2> bgr_gray {};
+
+        const ImageView rgb_view = host_view(rgb.data(), 2, 1, rgb.size(), PixelFormat::Rgb8);
+        const ImageView bgr_view = host_view(bgr.data(), 2, 1, bgr.size(), PixelFormat::Bgr8);
+        check(ImageProcessor::packed_grayscale_bytes(rgb_view, kSourceLimit) == rgb_gray.size());
+        check(ImageProcessor::packed_grayscale_bytes(bgr_view, kSourceLimit) == bgr_gray.size());
+
+        ImageProcessor::stage_host_grayscale(
+            rgb_view, { rgb_gray.data(), rgb_gray.size() }, kSourceLimit);
+        ImageProcessor::stage_host_grayscale(
+            bgr_view, { bgr_gray.data(), bgr_gray.size() }, kSourceLimit);
+
+        const std::array<std::uint8_t, 2> expected_rgb = { 76, 150 };
+        const std::array<std::uint8_t, 2> expected_bgr = { 29, 76 };
+        check(rgb_gray == expected_rgb);
+        check(bgr_gray == expected_bgr);
+    }
+
+    it("copies padded Gray8 rows without copying padding bytes")
+    {
+        constexpr std::size_t kSourceLimit = 1024;
+        const std::array<std::uint8_t, 8> source = {
+            1, 2, 3, 90, 4, 5, 6, 91,
+        };
+        std::array<std::uint8_t, 6> destination {};
+        const ImageView image = gray_host_view(source.data(), 3, 2, 4);
+
+        check(ImageProcessor::packed_grayscale_bytes(image, kSourceLimit) == destination.size());
+        ImageProcessor::stage_host_grayscale(
+            image, { destination.data(), destination.size() }, kSourceLimit);
+
+        const std::array<std::uint8_t, 6> expected = { 1, 2, 3, 4, 5, 6 };
+        check(destination == expected);
+    }
+
+    it("rejects invalid grayscale staging contracts before reading input")
+    {
+        constexpr std::size_t kSourceLimit = 1024;
+        std::array<std::uint8_t, 6> pixels {};
+        std::array<std::uint8_t, 2> destination {};
+        const ImageView valid = host_view(pixels.data(), 2, 1, 6);
+
+        ImageView invalid = valid;
+        invalid.memory_kind = MemoryKind::CudaDevice;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::packed_grayscale_bytes(invalid, kSourceLimit); },
+            ImageProcessorErrorCode::InvalidArgument, "Host memory");
+
+        invalid = valid;
+        invalid.row_stride = 5;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::packed_grayscale_bytes(invalid, kSourceLimit); },
+            ImageProcessorErrorCode::InvalidArgument, "row stride");
+
+        invalid = valid;
+        invalid.byte_size = 5;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::packed_grayscale_bytes(invalid, kSourceLimit); },
+            ImageProcessorErrorCode::InvalidArgument, "image capacity");
+
+        expect_processor_error(
+            [&] { (void)ImageProcessor::packed_grayscale_bytes(valid, 5); },
+            ImageProcessorErrorCode::ResourceLimitExceeded, "source bytes");
+
+        expect_processor_error(
+            [&]
+            {
+                ImageProcessor::stage_host_grayscale(
+                    valid, { destination.data(), destination.size() - 1U }, kSourceLimit);
+            },
+            ImageProcessorErrorCode::InvalidArgument, "destination capacity");
+
+        expect_processor_error(
+            [&]
+            {
+                ImageProcessor::stage_host_grayscale(
+                    valid, { pixels.data(), destination.size() }, kSourceLimit);
+            },
+            ImageProcessorErrorCode::InvalidArgument, "must not overlap");
+
+        const std::uint8_t pixel = 0;
+        const ImageView huge = {
+            &pixel,
+            (std::numeric_limits<std::size_t>::max)(),
+            (std::numeric_limits<std::int32_t>::max)(),
+            (std::numeric_limits<std::int32_t>::max)(),
+            (std::numeric_limits<std::size_t>::max)(),
+            PixelFormat::Gray8,
+            MemoryKind::Host,
+        };
+        expect_processor_error(
+            [&]
+            {
+                (void)ImageProcessor::packed_grayscale_bytes(
+                    huge, (std::numeric_limits<std::size_t>::max)());
+            },
+            ImageProcessorErrorCode::ResourceLimitExceeded, "overflow");
+    }
+
     it("plans a bounded mixed host and CUDA-device batch")
     {
         std::array<std::uint8_t, 24>     host_pixels {};

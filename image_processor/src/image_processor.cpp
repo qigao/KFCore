@@ -14,6 +14,13 @@ namespace
 {
 
     constexpr std::size_t kImageChannels = 3;
+    constexpr std::size_t kGrayChannels  = 1;
+
+    constexpr std::uint32_t kRedLumaWeight   = 19595;
+    constexpr std::uint32_t kGreenLumaWeight = 38470;
+    constexpr std::uint32_t kBlueLumaWeight  = 7471;
+    constexpr std::uint32_t kLumaRounding    = 32768;
+    constexpr std::uint32_t kLumaShift       = 16;
 
     [[noreturn]] void throw_invalid(std::string message)
     {
@@ -65,6 +72,19 @@ namespace
             return;
         }
         throw_invalid(std::string(stage) + " stage: pixel format is unsupported");
+    }
+
+    std::size_t grayscale_source_channels(PixelFormat format)
+    {
+        switch (format)
+        {
+        case PixelFormat::Bgr8:
+        case PixelFormat::Rgb8:
+            return kImageChannels;
+        case PixelFormat::Gray8:
+            return kGrayChannels;
+        }
+        throw_invalid("grayscale staging stage: pixel format is unsupported");
     }
 
     void validate_memory_kind(MemoryKind memory_kind, const char* stage)
@@ -213,6 +233,78 @@ namespace
         }
     }
 
+    struct GrayscaleSourcePlan
+    {
+        std::size_t source_span_bytes = 0;
+        std::size_t packed_bytes      = 0;
+    };
+
+    GrayscaleSourcePlan validate_grayscale_source(const ImageView& image,
+                                                  std::size_t max_source_bytes)
+    {
+        if (max_source_bytes == 0)
+        {
+            throw_resource("grayscale staging stage: source byte limit must be positive");
+        }
+        if (image.data == nullptr)
+        {
+            throw_invalid("grayscale staging stage: image data must not be null");
+        }
+        if (image.width <= 0 || image.height <= 0)
+        {
+            throw_invalid("grayscale staging stage: image dimensions must be positive");
+        }
+        if (image.memory_kind != MemoryKind::Host)
+        {
+            throw_invalid("grayscale staging stage: image must use Host memory");
+        }
+
+        const std::size_t width    = static_cast<std::size_t>(image.width);
+        const std::size_t height   = static_cast<std::size_t>(image.height);
+        const std::size_t channels = grayscale_source_channels(image.pixel_format);
+        const std::size_t row_bytes =
+            checked_multiply(width, channels, "grayscale staging");
+        if (image.row_stride < row_bytes)
+        {
+            throw_invalid("grayscale staging stage: row stride is smaller than the packed row");
+        }
+        const std::size_t source_span =
+            checked_add(checked_multiply(height - 1U, image.row_stride, "grayscale staging"),
+                        row_bytes, "grayscale staging");
+        if (source_span > image.byte_size)
+        {
+            throw_invalid(
+                "grayscale staging stage: image capacity is smaller than required source span");
+        }
+        if (source_span > max_source_bytes)
+        {
+            throw_resource("grayscale staging stage: source bytes exceed configured limit");
+        }
+        return { source_span, checked_multiply(width, height, "grayscale staging") };
+    }
+
+    bool address_ranges_overlap(const void* first_data, std::size_t first_bytes,
+                                const void* second_data, std::size_t second_bytes)
+    {
+        const std::uintptr_t first_begin  = reinterpret_cast<std::uintptr_t>(first_data);
+        const std::uintptr_t second_begin = reinterpret_cast<std::uintptr_t>(second_data);
+        const std::uintptr_t address_max  = (std::numeric_limits<std::uintptr_t>::max)();
+        if (first_bytes > address_max - first_begin || second_bytes > address_max - second_begin)
+        {
+            throw_invalid("grayscale staging stage: memory address range overflows");
+        }
+        const std::uintptr_t first_end  = first_begin + first_bytes;
+        const std::uintptr_t second_end = second_begin + second_bytes;
+        return first_begin < second_end && second_begin < first_end;
+    }
+
+    std::uint8_t to_grayscale(std::uint8_t red, std::uint8_t green, std::uint8_t blue)
+    {
+        const std::uint32_t weighted = kRedLumaWeight * red + kGreenLumaWeight * green +
+                                       kBlueLumaWeight * blue + kLumaRounding;
+        return static_cast<std::uint8_t>(weighted >> kLumaShift);
+    }
+
 } // namespace
 
 ImageProcessorError::ImageProcessorError(ImageProcessorErrorCode code, std::string message)
@@ -224,6 +316,56 @@ ImageProcessorError::ImageProcessorError(ImageProcessorErrorCode code, std::stri
 ImageProcessorErrorCode ImageProcessorError::code() const noexcept
 {
     return code_;
+}
+
+std::size_t ImageProcessor::packed_grayscale_bytes(const ImageView& image,
+                                                   std::size_t max_source_bytes)
+{
+    return validate_grayscale_source(image, max_source_bytes).packed_bytes;
+}
+
+void ImageProcessor::stage_host_grayscale(const ImageView& image, MutableBufferView destination,
+                                          std::size_t max_source_bytes)
+{
+    const GrayscaleSourcePlan plan = validate_grayscale_source(image, max_source_bytes);
+    if (destination.data == nullptr)
+    {
+        throw_invalid("grayscale staging stage: destination data must not be null");
+    }
+    if (destination.byte_size < plan.packed_bytes)
+    {
+        throw_invalid(
+            "grayscale staging stage: destination capacity is smaller than required bytes");
+    }
+    if (address_ranges_overlap(image.data, plan.source_span_bytes, destination.data,
+                               plan.packed_bytes))
+    {
+        throw_invalid("grayscale staging stage: source and destination must not overlap");
+    }
+
+    const auto* source = static_cast<const std::uint8_t*>(image.data);
+    auto*       output = static_cast<std::uint8_t*>(destination.data);
+    const std::size_t width = static_cast<std::size_t>(image.width);
+    for (std::int32_t row = 0; row < image.height; ++row)
+    {
+        const auto* source_row = source + static_cast<std::size_t>(row) * image.row_stride;
+        auto*       output_row = output + static_cast<std::size_t>(row) * width;
+        if (image.pixel_format == PixelFormat::Gray8)
+        {
+            std::memcpy(output_row, source_row, width);
+            continue;
+        }
+
+        const bool source_is_rgb = image.pixel_format == PixelFormat::Rgb8;
+        for (std::size_t column = 0; column < width; ++column)
+        {
+            const auto* pixel = source_row + column * kImageChannels;
+            const std::uint8_t red   = pixel[source_is_rgb ? 0U : 2U];
+            const std::uint8_t green = pixel[1];
+            const std::uint8_t blue  = pixel[source_is_rgb ? 2U : 0U];
+            output_row[column] = to_grayscale(red, green, blue);
+        }
+    }
 }
 
 LetterboxTransform ImageProcessor::letterbox_transform(std::int32_t source_width,

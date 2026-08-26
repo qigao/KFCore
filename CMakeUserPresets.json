@@ -100,6 +100,19 @@
             }
         },
         {
+            "name": "win-sift-release-user",
+            "displayName": "SIFT PopSift Release Build (Windows, User)",
+            "inherits": "win-image-processor-release-user",
+            "environment": {
+                "POPSIFT_ROOT": "$env{PROJECT_ROOT}/KFCore/popsift-develop"
+            },
+            "cacheVariables": {
+                "CMAKE_CUDA_ARCHITECTURES": "native",
+                "KFCORE_BUILD_SIFT": "ON",
+                "KFCORE_BUILD_SIFT_POPSIFT": "ON"
+            }
+        },
+        {
             "name": "win-yolo-tracking-dev-user",
             "displayName": "YOLO Tracking Developer Build (Windows, User)",
             "inherits": "win-dev-user",
@@ -177,6 +190,11 @@
             "configurePreset": "win-image-processor-release-user"
         },
         {
+            "name": "win-sift-release-user",
+            "inherits": "win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user"
+        },
+        {
             "name": "win-yolo-tracking-dev-user",
             "inherits": "win-dev-user",
             "configurePreset": "win-yolo-tracking-dev-user"
@@ -212,6 +230,14 @@
             "name": "install-win-image-processor-release-user",
             "inherits": "install-win-release-user",
             "configurePreset": "win-image-processor-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-sift-release-user",
+            "inherits": "install-win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user",
             "targets": [
                 "install"
             ]
@@ -262,6 +288,11 @@
             "name": "win-image-processor-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-image-processor-release-user"
+        },
+        {
+            "name": "win-sift-release-user",
+            "inherits": "win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user"
         },
         {
             "name": "win-yolo-tracking-dev-user",

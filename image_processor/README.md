@@ -1,7 +1,8 @@
 # KFCore ImageProcessor
 
-`KFCore::image_processor` 是独立于推理 runtime 的 CUDA 图像到 Tensor 处理模块。当前支持
-BGR8/RGB8 的 Host 或同设备 CUDA 输入，输出 CUDA FP16/FP32 NCHW Tensor；一次 fused kernel
+`KFCore::image_processor` 是独立于推理 runtime 的图像处理模块。当前支持 Host
+Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8 的 Host 或同设备 CUDA 输入输出 CUDA
+FP16/FP32 NCHW Tensor；一次 fused kernel
 完成双线性 letterbox、RGB/BGR 通道排列、`pixel / 255`、mean/stddev 归一化和 HWC→NCHW。
 模块不依赖 TensorRT、ONNX Runtime 或 OpenCV。
 
@@ -81,12 +82,20 @@ void enqueue_rgb(const std::uint8_t* rgb_bytes, std::size_t rgb_byte_size,
 工作区容量。`enqueue()` 要求 plan、输入、Tensor 和两块工作区一致；成功只表示任务已提交，CUDA
 执行错误仍由调用方在 stream 同步边界处理。
 
+Host 灰度输出不需要 CUDA stream 或工作区。先用
+`packed_grayscale_bytes(image, max_source_bytes)` 验证视图并取得精确输出字节数，再分配输出并调用
+`stage_host_grayscale(image, destination, max_source_bytes)`。Gray8 输入逐行去除 padding；RGB/BGR
+使用固定 Q16 BT.601 权重转换，因此结果不依赖浮点舍入。两次调用都只在返回前借用输入，不保留
+指针；source 与 destination 不得重叠。CUDA-device 输入会明确失败，不会隐式执行 device-to-host
+复制。
+
 参数错误、容量不足、溢出、不支持格式、CUDA 指针设备不匹配和 CUDA 调用失败分别通过
-`ImageProcessorError::{code(),what()}` 报告。首期只接受连续 NCHW Tensor 和 BGR8/RGB8 单平面
-图像；Gray8、NV12/YUY2 及图像输出需在像素格式和 plane 契约扩展后实现，当前不会隐式 fallback。
+`ImageProcessorError::{code(),what()}` 报告。Tensor 路径只接受连续 NCHW Tensor 和 BGR8/RGB8
+单平面图像；Gray8 仅用于 Host 灰度输出。NV12/YUY2 及 CUDA 图像输出需在 plane 契约扩展后实现，
+当前不会隐式 fallback。
 
 ## AprilTag 边界
 
-vendored AprilTag 当前读取 CPU `image_u8_t` 灰度图。ImageProcessor 的无状态视图/工作区设计可
-复用为后续颜色转 Gray8 和 resize 的前端，但在新增明确的 Gray8 图像输出以及必要的 device→host
-边界之前，不把当前 Tensor 输出直接宣称为 AprilTag 输入。
+vendored AprilTag 当前读取 CPU `image_u8_t` 灰度图。Host 相机的 Gray8/BGR8/RGB8 帧可通过
+`stage_host_grayscale()` 生成紧密灰度 buffer，再以调用者拥有的生命周期交给 AprilTag。CUDA-device
+帧仍需调用者显式决定 device→host 边界；本模块不会隐藏该同步和复制成本。
