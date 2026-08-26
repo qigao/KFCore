@@ -37,22 +37,22 @@
 - Consumes: upstream PopSift source commit `36d704d39b4cc065839d84f3706b3fa88eff2518`.
 - Produces: an exact source baseline at `sift/vendor/popsift/src/popsift` and a human-auditable modification ledger.
 
-- [ ] **Step 1: Verify the local research snapshot against upstream**
+- [x] **Step 1: Verify the local research snapshot against upstream**
 
 Run `git -C build/research/popsift-upstream rev-parse HEAD` and compare the local snapshot with `git diff --no-index`.
 Expected: commit is exact and the source diff has no content changes.
 
-- [ ] **Step 2: Import only the library source and metadata**
+- [x] **Step 2: Import only the library source and metadata**
 
 Copy `src/popsift`, `cmake/sift_config.h.in`, and `COPYING.md` without transformations. Create `UPSTREAM.md` with URL,
 commit, version, import scope, exclusions, verification commands, and a local-modification ledger.
 
-- [ ] **Step 3: Verify the mechanical import before local patches**
+- [x] **Step 3: Verify the mechanical import before local patches**
 
 Run `git diff --no-index -- build/research/popsift-upstream/src/popsift sift/vendor/popsift/src/popsift`.
 Expected: no content differences.
 
-- [ ] **Step 4: Commit the source baseline separately**
+- [x] **Step 4: Commit the source baseline separately**
 
 ```powershell
 git add sift/vendor/popsift docs/superpowers
@@ -71,7 +71,7 @@ git commit -m "vendor: import PopSift CUDA SIFT baseline"
 - Consumes: existing `PopSiftOptions::validate()` and backend registry.
 - Produces: `std::size_t PopSiftOptions::max_pending_jobs`, default 8, accepted range `[1, 1024]`.
 
-- [ ] **Step 1: Write the failing options tests**
+- [x] **Step 1: Write the failing options tests**
 
 ```cpp
 check(defaults.max_pending_jobs == PopSiftOptions::kDefaultMaxPendingJobs);
@@ -80,11 +80,11 @@ expect_sift_error([&] { options.validate(); },
                   SiftErrorCode::ResourceLimitExceeded, "pending job limit");
 ```
 
-- [ ] **Step 2: Run the focused test and observe RED**
+- [x] **Step 2: Run the focused test and observe RED**
 
 Run the `test_popsift_options` target and test. Expected: compile failure because the new members do not exist.
 
-- [ ] **Step 3: Implement validation and backend compatibility**
+- [x] **Step 3: Implement validation and backend compatibility**
 
 ```cpp
 static constexpr std::size_t kDefaultMaxPendingJobs = 8U;
@@ -94,7 +94,7 @@ std::size_t max_pending_jobs = kDefaultMaxPendingJobs;
 
 Validate the closed interval and include the value in `BackendState`, `compatible_backend`, and internal constructor call.
 
-- [ ] **Step 4: Re-run the focused test and commit**
+- [x] **Step 4: Re-run the focused test and commit**
 
 Expected: `test_popsift_options` passes; commit as `feat(sift): bound pending CUDA jobs`.
 
@@ -111,31 +111,31 @@ Expected: `test_popsift_options` passes; commit as `feat(sift): bound pending CU
 - Consumes: `max_pending_jobs` from Task 2.
 - Produces: `SyncQueue<T>(std::size_t)`, `bool push(const T&)`, `bool pull(T&)`, `void close()`, and promise-based error propagation.
 
-- [ ] **Step 1: Write deterministic RED tests**
+- [x] **Step 1: Write deterministic RED tests**
 
 Cover FIFO, capacity-1 producer blocking/wake-up, consumer close wake-up, drain-after-close, rejected push, and host/device getter
 exception propagation. Synchronize with promises/futures; `wait_for` is only a bounded failure guard.
 
-- [ ] **Step 2: Build the internal test and observe RED**
+- [x] **Step 2: Build the internal test and observe RED**
 
 Expected: compile failure because bounded/close APIs and direct future exception propagation do not exist.
 
-- [ ] **Step 3: Implement the preallocated bounded queue**
+- [x] **Step 3: Implement the preallocated bounded queue**
 
 Use one constructor-sized `std::vector<T>`, head/tail/count, one mutex, and `not_empty`/`not_full` condition variables.
 `push` and `pull` wait on capacity/data or closure; `close` changes state under lock then wakes all. Reject zero capacity.
 
-- [ ] **Step 4: Implement exception completion and orderly close**
+- [x] **Step 4: Implement exception completion and orderly close**
 
 Replace `_err` plus `set_value(nullptr)` with `promise.set_exception`. Convert sentinel shutdown to close/drain. Catch per-job
 upload/extraction errors, return an acquired image exactly once, delete partial results, and complete the job. Worker initialization
 failure closes input and completes queued jobs with the same exception.
 
-- [ ] **Step 5: Run CPU-internal and CUDA adapter tests**
+- [x] **Step 5: Run CPU-internal and CUDA adapter tests**
 
 Run `test_popsift_internal` and `test_popsift_adapter`; repeat the adapter test 20 times. Expected: no failure or hang.
 
-- [ ] **Step 6: Commit the runtime hardening**
+- [x] **Step 6: Commit the runtime hardening**
 
 Commit as `fix(sift): bound PopSift pipeline failures`.
 
@@ -152,25 +152,25 @@ Commit as `fix(sift): bound PopSift pipeline failures`.
 - Consumes: vendored sources and internal runtime APIs.
 - Produces: private static `kfcore_popsift_internal`; installed public target stays `KFCore::sift_popsift`.
 
-- [ ] **Step 1: Establish configure RED**
+- [x] **Step 1: Establish configure RED**
 
 Remove `POPSIFT_ROOT` from the process and preset, then run a fresh configure. Expected before implementation: `requires POPSIFT_ROOT`.
 
-- [ ] **Step 2: Add the internal CUDA target**
+- [x] **Step 2: Add the internal CUDA target**
 
 List 63 files explicitly, generate private `popsift/sift_config.h`, link CUDA/Threads, set C++ and CUDA 17, separable compilation,
 PIC, and the existing MSVC CUDA preprocessor option. Do not install or export this target.
 
-- [ ] **Step 3: Remove external build/runtime assumptions**
+- [x] **Step 3: Remove external build/runtime assumptions**
 
 Remove external subdirectory/version checks, target-file workaround, DLL copy/install, and preset environment variable. Install only
 `COPYING.md` and `UPSTREAM.md` under `share/licenses/KFCore/popsift`.
 
-- [ ] **Step 4: Configure, build, and run installed consumer**
+- [x] **Step 4: Configure, build, and run installed consumer**
 
 Expected: no `POPSIFT_ROOT` access and installed consumer runs without `popsift.dll`.
 
-- [ ] **Step 5: Commit the reproducible build**
+- [x] **Step 5: Commit the reproducible build**
 
 Commit as `build(sift): internalize CUDA SIFT backend`.
 
@@ -185,20 +185,20 @@ Commit as `build(sift): internalize CUDA SIFT backend`.
 - Consumes: all earlier tasks.
 - Produces: repeatable verification evidence and an updated reviewable PR.
 
-- [ ] **Step 1: Run focused and repeated tests**
+- [x] **Step 1: Run focused and repeated tests**
 
 Run all `test_(sift|popsift)` tests and repeat `test_popsift_adapter` 20 times. Expected: zero failures.
 
-- [ ] **Step 2: Run the full preset**
+- [x] **Step 2: Run the full preset**
 
 Run `ctest --preset win-sift-release-user --output-on-failure`. Expected: all configured tests pass.
 
-- [ ] **Step 3: Inspect installed artifacts**
+- [x] **Step 3: Inspect installed artifacts**
 
 Use `fd.exe` under the isolated consumer prefix. Expected: KFCore SIFT DLLs, license, and provenance exist; `popsift.dll` and
 public PopSift headers do not.
 
-- [ ] **Step 4: Compare persistent-extractor timing**
+- [x] **Step 4: Compare persistent-extractor timing**
 
 Use identical image, options, warm-up, and iteration count before/after. Report measured median/per-image time; do not infer GPU
 saturation from functional tests.

@@ -102,6 +102,16 @@ if(BUILD_TESTS)
       CXX_EXTENSIONS OFF
       FOLDER "sift/tests")
     add_test(NAME test_popsift_adapter COMMAND test_popsift_adapter)
+
+    add_executable(benchmark_popsift tests/benchmark_popsift.cpp)
+    target_link_libraries(benchmark_popsift PRIVATE
+      KFCore::sift_popsift
+      TurboUtils::TinyTest)
+    set_target_properties(benchmark_popsift PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "sift/benchmarks")
   endif()
 
   if(KFCORE_INSTALL)

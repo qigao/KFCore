@@ -38,6 +38,8 @@ Windows 开发环境直接构建仓库内维护的 CUDA SIFT 源码：
 cmake --fresh --preset win-sift-release-user
 cmake --build --preset win-sift-release-user
 ctest --preset win-sift-release-user -R '^test_(sift|popsift)' --output-on-failure
+cmake --build --preset win-sift-release-user --target benchmark_popsift
+build/Msvc-Release/bin/benchmark_popsift.exe
 cmake --build --preset install-win-sift-release-user
 ```
 
