@@ -38,6 +38,11 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
   if(NOT TARGET PopSift::popsift)
     add_library(PopSift::popsift ALIAS popsift)
   endif()
+  get_target_property(_popsift_version popsift VERSION)
+  if(NOT _popsift_version VERSION_EQUAL "0.10.1")
+    message(FATAL_ERROR
+      "KFCore PopSift adapter requires PopSift 0.10.1, found '${_popsift_version}'")
+  endif()
 
   add_library(kfcore_sift_popsift SHARED src/popsift_extractor.cpp)
   target_include_directories(kfcore_sift_popsift PUBLIC
@@ -47,7 +52,7 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
   target_compile_features(kfcore_sift_popsift PUBLIC cxx_std_17)
   target_link_libraries(kfcore_sift_popsift
     PUBLIC KFCore::sift
-    PRIVATE "$<TARGET_LINKER_FILE:popsift>")
+    PRIVATE "$<TARGET_LINKER_FILE:popsift>" CUDA::cudart)
   add_dependencies(kfcore_sift_popsift popsift)
   set_target_properties(kfcore_sift_popsift PROPERTIES
     CXX_STANDARD 17
@@ -64,6 +69,11 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       "$<TARGET_FILE:popsift>" "$<TARGET_FILE_DIR:kfcore_sift_popsift>"
     VERBATIM)
+  install(TARGETS popsift
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  install(FILES "${_popsift_root}/COPYING.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
 endif()
 
 if(BUILD_TESTS)
@@ -86,9 +96,23 @@ if(BUILD_TESTS)
   add_test(NAME test_popsift_options COMMAND test_popsift_options)
 
   if(KFCORE_BUILD_SIFT_POPSIFT)
+    add_executable(test_popsift_result_validation tests/test_popsift_result_validation.cpp)
+    target_include_directories(test_popsift_result_validation PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(test_popsift_result_validation PRIVATE
+      KFCore::sift
+      TurboUtils::TinyTest)
+    set_target_properties(test_popsift_result_validation PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "sift/tests")
+    add_test(NAME test_popsift_result_validation COMMAND test_popsift_result_validation)
+
     add_executable(test_popsift_adapter tests/test_popsift_adapter.cpp)
     target_link_libraries(test_popsift_adapter PRIVATE
       KFCore::sift_popsift
+      CUDA::cudart
       TurboUtils::TinyTest)
     set_target_properties(test_popsift_adapter PROPERTIES
       CXX_STANDARD 17

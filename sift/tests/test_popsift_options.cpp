@@ -61,10 +61,12 @@ spec("PopSift options")
         expect_sift_error([&] { options.validate(); },
                           SiftErrorCode::ResourceLimitExceeded, "feature limit");
 
-        options.max_features =
-            static_cast<std::size_t>((std::numeric_limits<int>::max)()) + 1U;
+        options.max_features = PopSiftOptions::kMaximumMaxFeatures + 1U;
         expect_sift_error([&] { options.validate(); },
-                          SiftErrorCode::ResourceLimitExceeded, "PopSift int range");
+                          SiftErrorCode::ResourceLimitExceeded, "safe PopSift range");
+
+        options.max_features = PopSiftOptions::kMaximumMaxFeatures;
+        options.validate();
 
         options = {};
         options.normalization = static_cast<PopSiftDescriptorNormalization>(99);

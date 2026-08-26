@@ -31,6 +31,8 @@ if(KFCORE_EXPECT_SIFT_POPSIFT)
   endif()
   add_executable(sift_popsift_installed_consumer popsift_main.cpp)
   target_link_libraries(sift_popsift_installed_consumer PRIVATE KFCore::sift_popsift)
+  file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/popsift-consumer-target-file-$<CONFIG>.txt"
+    CONTENT "$<TARGET_FILE:sift_popsift_installed_consumer>")
 elseif(KFCore_HAS_SIFT_POPSIFT OR TARGET KFCore::sift_popsift)
   message(FATAL_ERROR "Installed KFCore package unexpectedly exports PopSift support")
 endif()

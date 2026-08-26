@@ -14,8 +14,9 @@ public:
     /**
      * Create a synchronous PopSift adapter.
      *
-     * The constructor validates all options and initializes the selected CUDA device through
-     * PopSift. It throws SiftError when options are invalid or the backend cannot initialize.
+     * The constructor validates all options and acquires a process-local backend for the selected
+     * CUDA device. Compatible instances share that backend. It throws SiftError when options are
+     * invalid, an active backend has conflicting algorithm options, or initialization fails.
      */
     explicit PopSiftExtractor(PopSiftOptions options = {});
     ~PopSiftExtractor() override;
@@ -28,8 +29,10 @@ public:
     /**
      * Extract one Host Gray8/BGR8/RGB8 image.
      *
-     * Calls on the same instance are serialized and block until PopSift returns. CUDA-device
-     * ImageView inputs are rejected; this adapter never performs an implicit device-to-host copy.
+     * Concurrent calls may enqueue independent jobs on the shared backend and each call blocks
+     * until its own result is ready. The caller must keep this object alive for the duration of
+     * every call. CUDA-device ImageView inputs are rejected; this adapter never performs an
+     * implicit device-to-host copy.
      */
     [[nodiscard]] FeatureSet extract(const image::ImageView& image) override;
 

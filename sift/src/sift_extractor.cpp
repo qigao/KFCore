@@ -2,7 +2,6 @@
 #include "kfcore/sift/popsift_options.hpp"
 #include "kfcore/sift/sift_extractor.hpp"
 
-#include <limits>
 #include <utility>
 
 namespace kfcore::sift
@@ -38,10 +37,10 @@ void PopSiftOptions::validate() const
         throw SiftError(SiftErrorCode::ResourceLimitExceeded,
                         "PopSift option validation stage: feature limit must be positive");
     }
-    if (max_features > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+    if (max_features > kMaximumMaxFeatures)
     {
         throw SiftError(SiftErrorCode::ResourceLimitExceeded,
-                        "PopSift option validation stage: feature limit exceeds PopSift int range");
+                        "PopSift option validation stage: feature limit exceeds the safe PopSift range");
     }
     switch (normalization)
     {

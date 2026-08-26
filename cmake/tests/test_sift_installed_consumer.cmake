@@ -84,3 +84,27 @@ if(NOT _run_result EQUAL 0)
   message(FATAL_ERROR
     "SIFT installed consumer failed:\n${_run_output}\n${_run_error}")
 endif()
+
+if(KFCORE_EXPECT_SIFT_POPSIFT)
+  set(_popsift_consumer_target_file
+    "${KFCORE_CONSUMER_BINARY_DIR}/popsift-consumer-target-file-${KFCORE_CONSUMER_BUILD_CONFIG}.txt")
+  if(NOT EXISTS "${_popsift_consumer_target_file}")
+    message(FATAL_ERROR "PopSift consumer did not generate its target file path")
+  endif()
+  file(READ "${_popsift_consumer_target_file}" _popsift_consumer_executable)
+  string(STRIP "${_popsift_consumer_executable}" _popsift_consumer_executable)
+  if(NOT EXISTS "${_popsift_consumer_executable}")
+    message(FATAL_ERROR
+      "PopSift consumer executable does not exist: ${_popsift_consumer_executable}")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "${_runtime_environment}"
+      "${_popsift_consumer_executable}"
+    RESULT_VARIABLE _popsift_run_result
+    OUTPUT_VARIABLE _popsift_run_output
+    ERROR_VARIABLE _popsift_run_error)
+  if(NOT _popsift_run_result EQUAL 0)
+    message(FATAL_ERROR
+      "Installed PopSift consumer failed:\n${_popsift_run_output}\n${_popsift_run_error}")
+  endif()
+endif()

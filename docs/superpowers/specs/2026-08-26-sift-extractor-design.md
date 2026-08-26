@@ -38,9 +38,14 @@ Host 灰度图。KFCore 不复制这两份源码。本次新增自有 SIFT 契�
 
 ## 并发、背压与关闭
 
-一个适配器实例内部用 mutex 串行化 `extract()`；KFCore 不创建任务线程或队列。一次调用立即等待
-该任务结果，因此每实例最多一个 PopSift 在途任务，调用线程的同步阻塞就是背压。不同实例可由
-调用者并行使用。析构前调用者必须确保没有并发调用；这是常规 C++ 对象生命周期约束。
+PopSift 0.10.1 的常量和 pyramid 缓冲指针是 device-global 状态，同一 CUDA context/device 上创建
+多个原生对象会产生竞态。适配器按 device 注册共享后端：同进程、同 device 且算法配置相同的多个
+逻辑实例共享一个原生对象，并发调用进入 PopSift 自带的线程安全队列；不同进程由独立 CUDA context
+隔离。`max_features` 或 descriptor normalization 不一致时拒绝复用，待旧后端全部释放后才能创建
+新配置。`max_image_bytes` 不影响原生状态，仍由每个逻辑实例独立持有。
+
+同步 `extract()` 在调用线程等待对应 job，队列和上游两张 image staging buffer 形成自然背压。
+析构前调用者必须确保没有继续访问该逻辑实例；这是常规 C++ 对象生命周期约束。
 
 PopSift 自己仍拥有工作线程和队列，其 worker 异常模型属于上游实现；适配器会处理同步可观察到的
 异常、null job 和 null result，但无法恢复第三方进程级终止。这一残余风险必须在 README 中披露。
@@ -48,8 +53,9 @@ PopSift 自己仍拥有工作线程和队列，其 worker 异常模型属于上�
 ## 兼容性、迁移与回滚
 
 `PixelFormat::Gray8` 是枚举的向后兼容扩展；现有 Tensor 预处理仍只接受 BGR8/RGB8，Gray8 只用于
-新的 Host 灰度 API。默认选项关闭，所以现有构建与部署不增加 PopSift 依赖。适配器部署仍需要
-PopSift 动态库，KFCore 不复制其源码或接管第三方许可证文件。使用者通过链接 `KFCore::sift` 或
+新的 Host 灰度 API。默认选项关闭，所以现有构建与部署不增加 PopSift 依赖。启用适配器时，安装
+规则会部署本地源码构建所得的 PopSift 动态库及其 `COPYING.md`，但不会把上游源码复制进 KFCore。
+使用者通过链接 `KFCore::sift` 或
 `KFCore::sift_popsift` 渐进迁移。回滚可删除新模块和枚举/API 扩展，不改变已有
 YOLO、AprilTag 或 Kalman 数据格式。
 
@@ -58,5 +64,5 @@ YOLO、AprilTag 或 Kalman 数据格式。
 - TinyTest：灰度精确值、padding、Gray8 复制、输入/容量/溢出/内存类型拒绝。
 - TinyTest：SIFT 错误契约和公共类型基本行为。
 - 条件构建：PopSift 适配器编译与真实 API 对齐。
-- 安装消费测试：`KFCore::sift` 导出和运行；启用 PopSift 时检查依赖导出。
+- 安装消费测试：`KFCore::sift` 导出和运行；启用 PopSift 时从隔离安装前缀加载动态库并构造适配器。
 - 相邻回归：ImageProcessor CPU/CUDA 测试和完整 CTest。

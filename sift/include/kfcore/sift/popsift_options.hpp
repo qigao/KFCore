@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace kfcore::sift
 {
@@ -18,6 +19,9 @@ struct PopSiftOptions
 {
     static constexpr std::size_t kDefaultMaxImageBytes = 64U * 1024U * 1024U;
     static constexpr std::size_t kDefaultMaxFeatures   = 100000U;
+    // PopSift performs signed-int expansions of this value, including a 1.1x filter bound.
+    static constexpr std::size_t kMaximumMaxFeatures =
+        static_cast<std::size_t>((std::numeric_limits<int>::max)()) / 2U;
 
     std::int32_t device          = 0;
     std::size_t  max_image_bytes = kDefaultMaxImageBytes;
