@@ -43,7 +43,7 @@ KFCore README 声明 modified BSD-3-Clause；本地 `TensorRT-YOLO` 使用 GPL-3
 ImageView
    |
    v
-TensorRtDetector ---> DetectionFrame
+ImageProcessor ---> TensorRtDetector ---> DetectionFrame
                            |
                            v
                     ByteTrackSession
@@ -63,7 +63,7 @@ TensorRtDetector ---> DetectionFrame
 
 - 读取受信来源的序列化 TensorRT engine；
 - 校验 engine 输入输出契约；
-- 管理 CUDA 预处理、I/O 缓冲、推理和后处理；
+- 通过独立 `KFCore::image_processor` 管理 CUDA 预处理，并管理 TensorRT I/O、推理和后处理；
 - 返回原图坐标系中的 `DetectionFrame`。
 
 所有权：
@@ -236,8 +236,9 @@ struct TrackFrame {
 预处理流程固定为：
 
 1. 校验 `ImageView`；
-2. 将 host 输入异步复制到 detector 工作区，或直接读取同 device 的 CUDA 输入；
-3. 在 detector stream 上执行 letterbox、BGR/RGB 排列和归一化；
+2. 由 `KFCore::image_processor` 将 host 输入打包并异步复制到 detector 工作区，或直接读取同
+   device 的 CUDA 输入；
+3. 由同一处理器在 detector stream 上执行 letterbox、BGR/RGB 排列、归一化和 NCHW 输出；
 4. 设置动态输入 shape 和全部命名张量地址；
 5. `enqueueV3()`；
 6. 仅将四个小型 NMS 输出复制回 host；
@@ -336,11 +337,12 @@ global_id = (uint64(class_id) << 32) | uint32(local_tracker_id)
 新增选项：
 
 - `KFCORE_BUILD_YOLO_TRACKING=OFF`；
+- `KFCORE_BUILD_IMAGE_PROCESSOR=OFF`；
 - `KFCORE_BUILD_TENSORRT_YOLO=OFF`；
 - `KFCORE_BUILD_YOLO_OPENCV=OFF`；
 - `KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=OFF`。
 
-`KFCORE_BUILD_YOLO_TRACKING` 只启用公共类型和跟踪会话，依赖 C++17 与 `KFCore::trackers`，不查找 CUDA、TensorRT 或 OpenCV。`KFCORE_BUILD_TENSORRT_YOLO` 和 `KFCORE_BUILD_YOLO_OPENCV` 均要求 tracking 已启用；若调用方只打开后者，configure 直接给出依赖错误，不隐式改写用户选项。
+`KFCORE_BUILD_YOLO_TRACKING` 只启用公共类型和跟踪会话，依赖 C++17 与 `KFCore::trackers`，不查找 CUDA、TensorRT 或 OpenCV。`KFCORE_BUILD_IMAGE_PROCESSOR` 可独立启用 CUDA 图像处理而不查找 TensorRT。`KFCORE_BUILD_TENSORRT_YOLO` 自动构建 ImageProcessor，且它与 `KFCORE_BUILD_YOLO_OPENCV` 均要求 tracking 已启用。
 
 默认 C-only KFCore 构建不变。启用 TensorRT YOLO 后：
 

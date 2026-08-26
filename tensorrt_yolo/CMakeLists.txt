@@ -124,21 +124,6 @@ if(BUILD_TESTS)
     FOLDER "tensorrt_yolo/tests")
   add_test(NAME test_tensorrt_contract COMMAND test_tensorrt_contract)
 
-  add_executable(test_tensorrt_detection_helpers
-    tests/test_tensorrt_detection_helpers.cpp
-    src/detector_helpers.cpp)
-  target_include_directories(test_tensorrt_detection_helpers PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src)
-  target_link_libraries(test_tensorrt_detection_helpers PRIVATE
-    KFCore::yolo_tracking
-    TurboUtils::TinyTest)
-  set_target_properties(test_tensorrt_detection_helpers PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    FOLDER "tensorrt_yolo/tests")
-  add_test(NAME test_tensorrt_detection_helpers COMMAND test_tensorrt_detection_helpers)
-
   add_executable(test_yolo_tracking
     tests/test_yolo_tracking.cpp
     src/tracking.cpp
@@ -180,8 +165,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     src/detector_helpers.cpp
     src/detector.cpp
     src/engine_file.cpp
-    src/engine.cpp
-    src/letterbox.cu)
+    src/engine.cpp)
 
   target_include_directories(tensorrt_yolo
     PUBLIC
@@ -192,6 +176,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
   target_link_libraries(tensorrt_yolo
     PUBLIC KFCore::yolo_tracking
     PRIVATE
+      KFCore::image_processor
       TensorRT::nvinfer
       TensorRT::nvinfer_plugin
       CUDA::cudart)
@@ -208,6 +193,24 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     EXPORT_NAME tensorrt_yolo
     EXPORT_SET KFCoreTargets
     FOLDER "tensorrt_yolo")
+
+  if(BUILD_TESTS)
+    add_executable(test_tensorrt_detection_helpers
+      tests/test_tensorrt_detection_helpers.cpp
+      src/detector_helpers.cpp)
+    target_include_directories(test_tensorrt_detection_helpers PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_tensorrt_detection_helpers PRIVATE
+      KFCore::yolo_tracking
+      KFCore::image_processor
+      TurboUtils::TinyTest)
+    set_target_properties(test_tensorrt_detection_helpers PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_tensorrt_detection_helpers COMMAND test_tensorrt_detection_helpers)
+  endif()
 
   if(KFCORE_BUILD_YOLO_OPENCV)
     find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
@@ -303,22 +306,6 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
           "KFCORE_TENSORRT_TEST_ENGINE_FP16=$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}")
     endif()
 
-    add_executable(test_letterbox_cuda
-      tests/test_letterbox_cuda.cu)
-    target_include_directories(test_letterbox_cuda PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(test_letterbox_cuda PRIVATE
-      KFCore::tensorrt_yolo
-      CUDA::cudart
-      TurboUtils::TinyTest)
-    set_target_properties(test_letterbox_cuda PROPERTIES
-      CUDA_STANDARD 17
-      CUDA_STANDARD_REQUIRED ON
-      CXX_STANDARD 17
-      CXX_STANDARD_REQUIRED ON
-      CXX_EXTENSIONS OFF
-      FOLDER "tensorrt_yolo/tests")
-    add_test(NAME test_letterbox_cuda COMMAND test_letterbox_cuda)
   endif()
 
 endif()
