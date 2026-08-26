@@ -66,18 +66,65 @@ cmake --build --preset install-win-yolo-release-user
 GPU 集成测试还必须显式启用并提供可信 engine：
 
 ```powershell
-$env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/trusted/yolo-efficientnms.engine'
+$env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
+$env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
+$env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
+$env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
 cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
 cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user
+ctest --preset win-yolo-release-user -R "test_tensorrt_integration(_yolo11_face)?"
 ```
 
 `KFCORE_TENSORRT_TEST_ENGINE` 是 configure-time `FILEPATH` cache 变量（同名环境变量仅用于初始化
 它）。启用集成测试时，空路径、不存在的路径或目录都会在 configure 阶段失败；验证后的规范路径
 会显式写入 `test_tensorrt_integration` 的 CTest environment。
 
+`KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE` 也是 configure-time `FILEPATH` cache 变量，同名环境
+变量仅用于初始化。它是可选缓存：空值明确表示不参加 face 验证，且不会注册额外 CTest；非空值若
+不是现有普通文件，则在 configure 阶段失败。其值有效时，会登记
+`test_tensorrt_integration_yolo11_face`；该测试复用既有的 `test_tensorrt_integration` 二进制，
+只把已验证的 face engine 路径作为该测试的 `KFCORE_TENSORRT_TEST_ENGINE` 环境变量注入。因此两个
+CTest 名称使用相同测试逻辑，但分别加载各自已验证的 engine。
+
+只验证缓存注册和环境注入时，可复现地运行：
+
+```powershell
+ctest --preset win-yolo-tracking-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
+```
+
 TensorRT/CUDA DLL 由部署环境提供；安装包不复制它们。若没有与目标 GPU/TensorRT 版本匹配的
 可信 engine，GPU 推理测试是明确阻塞项，不能用任意 engine 或其他推理后端代替。
+
+## YOLO11 / YOLO11-face 验证记录
+
+**事实（2026-08-26 本地验证）**：通用 `yolo11n` engine 与 `yolov11n-face` engine 均在真实的
+TensorRT 11.2 / CUDA 12.8 环境执行。face engine 直接运行既有集成测试为 8/8 cases、25 assertions；
+独立 CTest `test_tensorrt_integration_yolo11_face` 为 1/1；相邻 TensorRT、tracking、OpenCV、
+CUDA buffer、engine-file 与 CMake 配置测试合计 66 cases、2087 assertions；合并的 focused 范围为
+74 cases、2112 assertions。
+
+**事实（engine 契约）**：face engine 是单类别 EfficientNMS engine，张量为 `images`、`num_dets`、
+`boxes`、`scores`、`labels`；`num_dets` 与 `labels` 为 INT32，`images`、`boxes`、`scores` 为 FP32，
+全部为 `kLINEAR`。其动态 profile 为 min `1x3x320x320`、opt `2x3x640x640`、max
+`4x3x960x960`。动态性由这些张量 shape/profile 建立；不以 raw ONNX metadata 的 `dynamic=True`
+作为依据。该 engine 是为 TensorRT 11.2 和当前 RTX 4060 生成的 strongly typed FP32 本地产物，
+不是可移植 fixture，且未提交。
+
+**事实（图片序列）**：对 6 帧 `zidane` 序列，两个确认的轨迹从第 2 帧起稳定为 `id=0` 和 `id=1`。
+**限制（事实）**：该序列复用静态图片，不能覆盖运动、遮挡或重新关联；这些场景仍需独立的时序素材
+验证。
+
+### YOLO11-face 来源与本地产物边界
+
+**事实**：验证所用源模型由用户在本地 `yolo-models/yolov11n-face.pt` 提供。上游项目为
+[`akanametov/yolo-face`](https://github.com/akanametov/yolo-face)，发布资产的规范 URL 为
+[`yolov11n-face.pt`](https://github.com/akanametov/yolo-face/releases/download/1.0.0/yolov11n-face.pt)，
+源码许可证见 [upstream LICENSE](https://github.com/akanametov/yolo-face/blob/dev/LICENSE)。本仓库不
+复制、编译或链接任何该上游源码。
+
+**边界**：`.pt`、raw/转换后的 `.onnx`、TensorRT `.engine`、下载或生成的图片及渲染输出均为本地
+验证产物，不提交。此次验证未单独确认发布资产的权重再分发授权；部署或再分发前必须自行核实适用
+条款，本文不声明任何权利。
 
 OpenCV-only 入口仅启用 `KFCore::yolo_opencv` 和 `KFCore::yolo_tracking`；它仍要求显式开启
 tracking 与有效 `OPENCV_LITE_ROOT`，但不会启用 CUDA/TensorRT detector，也不会提供
