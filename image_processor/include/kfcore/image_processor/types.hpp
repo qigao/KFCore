@@ -12,6 +12,7 @@ enum class PixelFormat
 {
     Bgr8,
     Rgb8,
+    Gray8,
 };
 
 enum class MemoryKind

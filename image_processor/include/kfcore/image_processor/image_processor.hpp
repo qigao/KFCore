@@ -12,6 +12,15 @@ namespace kfcore::image
 class ImageProcessor final
 {
 public:
+    // Returns the packed Gray8 destination size after validating a borrowed Host image.
+    static std::size_t packed_grayscale_bytes(const ImageView& image,
+                                              std::size_t max_source_bytes);
+
+    // Converts Host Gray8/BGR8/RGB8 to packed Gray8. Source and destination must not overlap;
+    // the source is borrowed only for this call.
+    static void stage_host_grayscale(const ImageView& image, MutableBufferView destination,
+                                     std::size_t max_source_bytes);
+
     static LetterboxTransform letterbox_transform(std::int32_t source_width,
                                                   std::int32_t source_height,
                                                   std::int32_t destination_width,

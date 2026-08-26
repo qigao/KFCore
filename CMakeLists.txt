@@ -92,12 +92,20 @@ add_subdirectory(vendor)
 add_subdirectory(trackers)
 
 set(KFCORE_IMAGE_PROCESSOR_ENABLED OFF)
-if(KFCORE_BUILD_IMAGE_PROCESSOR OR KFCORE_BUILD_TENSORRT_YOLO)
+if(KFCORE_BUILD_IMAGE_PROCESSOR OR KFCORE_BUILD_TENSORRT_YOLO OR KFCORE_BUILD_SIFT)
   set(KFCORE_IMAGE_PROCESSOR_ENABLED ON)
   enable_language(CXX)
   enable_language(CUDA)
   find_package(CUDAToolkit REQUIRED)
   add_subdirectory(image_processor)
+endif()
+
+if(KFCORE_BUILD_SIFT_POPSIFT AND NOT KFCORE_BUILD_SIFT)
+  message(FATAL_ERROR "KFCORE_BUILD_SIFT_POPSIFT requires KFCORE_BUILD_SIFT=ON")
+endif()
+
+if(KFCORE_BUILD_SIFT)
+  add_subdirectory(sift)
 endif()
 
 if(KFCORE_BUILD_YOLO_TRACKING)

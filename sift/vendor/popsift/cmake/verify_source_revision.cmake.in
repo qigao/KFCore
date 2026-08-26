@@ -1,0 +1,47 @@
+if(EXISTS "@PROJECT_SOURCE_DIR@/.git")
+  execute_process(
+    COMMAND git -C "@PROJECT_SOURCE_DIR@" rev-parse --show-toplevel
+    RESULT_VARIABLE _kfcore_install_toplevel_result
+    OUTPUT_VARIABLE _kfcore_install_toplevel
+    ERROR_VARIABLE _kfcore_install_toplevel_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  file(REAL_PATH "@PROJECT_SOURCE_DIR@" _kfcore_install_source_real_path)
+  file(REAL_PATH "${_kfcore_install_toplevel}" _kfcore_install_git_real_path)
+  if(NOT _kfcore_install_toplevel_result EQUAL 0 OR
+     NOT _kfcore_install_source_real_path STREQUAL _kfcore_install_git_real_path)
+    message(FATAL_ERROR
+      "Cannot verify KFCore provenance against its repository root: "
+      "${_kfcore_install_toplevel_error}")
+  endif()
+  execute_process(
+    COMMAND git -C "@PROJECT_SOURCE_DIR@" rev-parse --verify HEAD
+    RESULT_VARIABLE _kfcore_install_revision_result
+    OUTPUT_VARIABLE _kfcore_install_revision
+    ERROR_VARIABLE _kfcore_install_revision_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT _kfcore_install_revision_result EQUAL 0)
+    message(FATAL_ERROR
+      "Cannot verify KFCore source revision before install: "
+      "${_kfcore_install_revision_error}")
+  endif()
+  if(NOT _kfcore_install_revision STREQUAL
+     "@KFCORE_CONFIGURED_SOURCE_REVISION@")
+    message(FATAL_ERROR
+      "KFCore HEAD changed from @KFCORE_CONFIGURED_SOURCE_REVISION@ to "
+      "${_kfcore_install_revision}; rerun CMake before installing")
+  endif()
+  execute_process(
+    COMMAND git -C "@PROJECT_SOURCE_DIR@" status --porcelain --untracked-files=all
+      -- sift/vendor/popsift
+    RESULT_VARIABLE _kfcore_install_status_result
+    OUTPUT_VARIABLE _kfcore_install_dirty_sources
+    ERROR_VARIABLE _kfcore_install_status_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT _kfcore_install_status_result EQUAL 0 OR
+     NOT _kfcore_install_dirty_sources STREQUAL "")
+    message(FATAL_ERROR
+      "PopSift MPL sources differ from the recorded KFCore commit; commit the "
+      "sources or distribute a matching source snapshot. Git status: "
+      "${_kfcore_install_dirty_sources}${_kfcore_install_status_error}")
+  endif()
+endif()
