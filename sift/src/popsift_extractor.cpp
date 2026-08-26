@@ -138,6 +138,7 @@ struct BackendState
     explicit BackendState(const PopSiftOptions& options)
         : device(options.device)
         , max_features(options.max_features)
+        , max_pending_jobs(options.max_pending_jobs)
         , normalization(options.normalization)
         , backend(std::make_unique<PopSift>(make_config(options),
                                             popsift::Config::ExtractingMode,
@@ -162,6 +163,7 @@ struct BackendState
 
     std::int32_t device;
     std::size_t max_features;
+    std::size_t max_pending_jobs;
     PopSiftDescriptorNormalization normalization;
     std::unique_ptr<PopSift> backend;
 };
@@ -199,6 +201,7 @@ BackendRegistry& backend_registry(int device_count)
 bool compatible_backend(const BackendState& backend, const PopSiftOptions& options)
 {
     return backend.max_features == options.max_features &&
+           backend.max_pending_jobs == options.max_pending_jobs &&
            backend.normalization == options.normalization;
 }
 

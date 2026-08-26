@@ -42,6 +42,11 @@ void PopSiftOptions::validate() const
         throw SiftError(SiftErrorCode::ResourceLimitExceeded,
                         "PopSift option validation stage: feature limit exceeds the safe PopSift range");
     }
+    if (max_pending_jobs == 0 || max_pending_jobs > kMaximumMaxPendingJobs)
+    {
+        throw SiftError(SiftErrorCode::ResourceLimitExceeded,
+                        "PopSift option validation stage: pending job limit must be within the supported range");
+    }
     switch (normalization)
     {
     case PopSiftDescriptorNormalization::Classic:

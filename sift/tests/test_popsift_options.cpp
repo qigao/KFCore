@@ -36,11 +36,13 @@ spec("PopSift options")
         check(defaults.device == 0);
         check(defaults.max_image_bytes == PopSiftOptions::kDefaultMaxImageBytes);
         check(defaults.max_features == PopSiftOptions::kDefaultMaxFeatures);
+        check(defaults.max_pending_jobs == PopSiftOptions::kDefaultMaxPendingJobs);
 
         PopSiftOptions options;
         options.device          = 2;
         options.max_image_bytes = 4096;
         options.max_features    = 512;
+        options.max_pending_jobs = 4;
         options.normalization   = PopSiftDescriptorNormalization::Classic;
         options.validate();
     }
@@ -66,6 +68,18 @@ spec("PopSift options")
                           SiftErrorCode::ResourceLimitExceeded, "safe PopSift range");
 
         options.max_features = PopSiftOptions::kMaximumMaxFeatures;
+        options.validate();
+
+        options = {};
+        options.max_pending_jobs = 0;
+        expect_sift_error([&] { options.validate(); },
+                          SiftErrorCode::ResourceLimitExceeded, "pending job limit");
+
+        options.max_pending_jobs = PopSiftOptions::kMaximumMaxPendingJobs + 1U;
+        expect_sift_error([&] { options.validate(); },
+                          SiftErrorCode::ResourceLimitExceeded, "pending job limit");
+
+        options.max_pending_jobs = PopSiftOptions::kMaximumMaxPendingJobs;
         options.validate();
 
         options = {};
