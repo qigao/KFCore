@@ -7,6 +7,7 @@
 */
 
 #include "common/clamp.h"
+#include "common/cuda_cleanup.h"
 #include "common/debug_macros.h"
 #include "common/write_plane_2d.h"
 #include "sift_constants.h"
@@ -29,6 +30,70 @@ namespace popsift {
 
 Octave::Octave()
 { }
+
+Octave::~Octave() noexcept
+{
+    releaseNoexcept();
+}
+
+void Octave::releaseNoexcept() noexcept
+{
+    popsift::cuda::CleanupStatus status;
+    const auto destroy_event = [&](cudaEvent_t& event, const char* operation) {
+        if (event != nullptr)
+        {
+            status.record(cudaEventDestroy(event), operation);
+            event = nullptr;
+        }
+    };
+    const auto destroy_texture = [&](cudaTextureObject_t& texture, const char* operation) {
+        if (texture != 0)
+        {
+            status.record(cudaDestroyTextureObject(texture), operation);
+            texture = 0;
+        }
+    };
+    const auto destroy_surface = [&](cudaSurfaceObject_t& surface, const char* operation) {
+        if (surface != 0)
+        {
+            status.record(cudaDestroySurfaceObject(surface), operation);
+            surface = 0;
+        }
+    };
+    const auto free_array = [&](cudaArray_t& array, const char* operation) {
+        if (array != nullptr)
+        {
+            status.record(cudaFreeArray(array), operation);
+            array = nullptr;
+        }
+    };
+
+    destroy_event(_scale_done, "destroy scale event");
+    destroy_event(_extrema_done, "destroy extrema event");
+    destroy_event(_ori_done, "destroy orientation event");
+    destroy_event(_desc_done, "destroy descriptor event");
+    if (_stream != nullptr)
+    {
+        status.record(cudaStreamDestroy(_stream), "destroy octave stream");
+        _stream = nullptr;
+    }
+
+    destroy_texture(_dog_3d_tex_point, "destroy DoG texture");
+    destroy_surface(_dog_3d_surf, "destroy DoG surface");
+    free_array(_dog_3d, "free DoG array");
+
+    destroy_texture(_intm_tex_point, "destroy intermediate point texture");
+    destroy_texture(_intm_tex_linear.tex, "destroy intermediate linear texture");
+    destroy_surface(_intm_surf, "destroy intermediate surface");
+    free_array(_intm, "free intermediate array");
+
+    destroy_texture(_data_tex_point, "destroy data point texture");
+    destroy_texture(_data_tex_linear.tex, "destroy data linear texture");
+    destroy_surface(_data_surf, "destroy data surface");
+    free_array(_data, "free data array");
+
+    status.report();
+}
 
 
 void Octave::alloc( const Config& conf, int width, int height, int levels, int gauss_group )

@@ -19,6 +19,7 @@
 #include <exception>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -284,6 +285,7 @@ private:
     bool private_init( int w, int h );
     bool private_uninit( );
     void private_apply_scale_factor( int& w, int& h );
+    void lockConfigurationForImage( int w, int h );
     void uploadImages( );
 
     /* The following methods are alternative worker functions for Jobs submitted by
@@ -299,6 +301,8 @@ private:
 private:
     Pipe            _pipe;
     popsift::Config _config;
+    std::mutex      _config_mutex;
+    bool            _configuration_locked{false};
 
     /* Keep a copy of the config to avoid unnecessary re-configurations
      * in configure()

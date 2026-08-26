@@ -6,6 +6,33 @@ endif()
 set(DISABLE_GRID_FILTER 0)
 
 set(_popsift_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+set(KFCORE_SOURCE_REVISION "" CACHE STRING
+  "Immutable KFCore tag or commit used in installed source provenance")
+set(_kfcore_source_revision "${KFCORE_SOURCE_REVISION}")
+if(_kfcore_source_revision STREQUAL "")
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    RESULT_VARIABLE _kfcore_revision_result
+    OUTPUT_VARIABLE _kfcore_source_revision
+    ERROR_VARIABLE _kfcore_revision_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT _kfcore_revision_result EQUAL 0 OR _kfcore_source_revision STREQUAL "")
+    message(FATAL_ERROR
+      "CUDA SIFT requires an immutable KFCore source revision for MPL provenance. "
+      "Set KFCORE_SOURCE_REVISION to the release tag or commit. Git error: "
+      "${_kfcore_revision_error}")
+  endif()
+endif()
+set(KFCORE_POPSIFT_SOURCE_REVISION "${_kfcore_source_revision}" PARENT_SCOPE)
+set(KFCORE_POPSIFT_SOURCE_URL
+  "https://github.com/qigao/KFCore/tree/${_kfcore_source_revision}/sift/vendor/popsift")
+set(KFCORE_SOURCE_REVISION_RESOLVED "${_kfcore_source_revision}")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/UPSTREAM.md"
+  "${_popsift_generated_dir}/UPSTREAM.md"
+  @ONLY)
+
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sift_config.h.in"
   "${_popsift_generated_dir}/popsift/sift_config.h"
@@ -63,4 +90,8 @@ set_target_properties(kfcore_popsift_internal PROPERTIES
 if(MSVC)
   target_compile_options(kfcore_popsift_internal PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>)
+endif()
+if(BUILD_TESTS)
+  target_compile_definitions(kfcore_popsift_internal PUBLIC
+    KFCORE_POPSIFT_TESTING=1)
 endif()

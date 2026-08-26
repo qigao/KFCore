@@ -10,9 +10,13 @@
 #include "popsift.h"
 
 #include "gauss_filter.h"
+#include "scale_geometry.h"
 #include "sift_config.h"
 #include "sift_pyramid.h"
 #include "common/debug_macros.h"
+#if defined(KFCORE_POPSIFT_TESTING)
+#include "common/test_hooks.h"
+#endif
 
 #include <cmath>
 #include <cstring>
@@ -160,7 +164,8 @@ PopSift::~PopSift()
 
 bool PopSift::configure( const popsift::Config& config, bool /*force*/ )
 {
-    if( _pipe._pyramid != nullptr ) {
+    std::lock_guard<std::mutex> lock(_config_mutex);
+    if( _configuration_locked ) {
         return false;
     }
 
@@ -190,21 +195,22 @@ bool PopSift::applyConfiguration(bool force)
 
 void PopSift::private_apply_scale_factor( int& w, int& h )
 {
-    /* up=-1 -> scale factor=2
-     * up= 0 -> scale factor=1
-     * up= 1 -> scale factor=0.5
-     */
-    float upscaleFactor = _config.getUpscaleFactor();
-    float scaleFactor = 1.0f / powf( 2.0f, -upscaleFactor );
+    const popsift::ScaledImageGeometry geometry =
+        popsift::scaleImageGeometry(_config, w, h);
+    w = geometry.width;
+    h = geometry.height;
+}
 
-    if( _config.octaves < 0 ) {
-        int oct = max(int (floor( logf( (float)min( w, h ) )
-                            / logf( 2.0f ) ) - 3.0f + scaleFactor ), 1);
-        _config.octaves = oct;
+void PopSift::lockConfigurationForImage(int w, int h)
+{
+    std::lock_guard<std::mutex> lock(_config_mutex);
+    if (!_configuration_locked)
+    {
+        const popsift::ScaledImageGeometry geometry =
+            popsift::scaleImageGeometry(_config, w, h);
+        _config.octaves = geometry.octaves;
+        _configuration_locked = true;
     }
-
-    w = ceilf( w * scaleFactor );
-    h = ceilf( h * scaleFactor );
 }
 
 bool PopSift::private_init( int w, int h )
@@ -250,6 +256,11 @@ void PopSift::uninit( )
 
 PopSift::AllocTest PopSift::testTextureFit( int width, int height )
 {
+    popsift::Config config;
+    {
+        std::lock_guard<std::mutex> lock(_config_mutex);
+        config = _config;
+    }
     const bool warn = popsift::cuda::device_prop_t::dont_warn;
     bool retval = _device_properties.checkLimit_2DtexLinear( width,
                                                         height,
@@ -262,13 +273,16 @@ PopSift::AllocTest PopSift::testTextureFit( int width, int height )
 
     /* Scale the width and height - we need that size for the largest
      * octave. */
-    private_apply_scale_factor( width, height );
+    const popsift::ScaledImageGeometry geometry =
+        popsift::scaleImageGeometry(config, width, height);
+    width = geometry.width;
+    height = geometry.height;
 
     /* _config.level does not contain the 3 blur levels beyond the first
      * that is required for downscaling to the following octave.
      * We need all layers to check if we can support enough layers.
      */
-    int depth = _config.levels + 3;
+    int depth = config.levels + 3;
 
     retval = _device_properties.checkLimit_2DsurfLayered( width,
                                                           height,
@@ -349,6 +363,7 @@ SiftJob* PopSift::enqueue( int                  w,
         throw std::runtime_error("PopSift pipeline is closed and cannot accept a byte image");
     }
     std::unique_ptr<SiftJob> job(new SiftJob( w, h, imageData ));
+    lockConfigurationForImage(w, h);
     if (!reservation.commit(job.get()))
     {
         throw std::runtime_error("PopSift pipeline closed while accepting a byte image");
@@ -382,6 +397,7 @@ SiftJob* PopSift::enqueue( int          w,
         throw std::runtime_error("PopSift pipeline is closed and cannot accept a float image");
     }
     std::unique_ptr<SiftJob> job(new SiftJob( w, h, imageData ));
+    lockConfigurationForImage(w, h);
     if (!reservation.commit(job.get()))
     {
         throw std::runtime_error("PopSift pipeline closed while accepting a float image");
@@ -395,6 +411,10 @@ void PopSift::uploadImages( )
     try
     {
         selectCudaDevice(_device);
+#if defined(KFCORE_POPSIFT_TESTING)
+        popsift::testing::throwIfWorkerFailureInjected(
+            popsift::testing::WorkerFailureStage::UploadStartup);
+#endif
     }
     catch (...)
     {
@@ -418,6 +438,10 @@ void PopSift::uploadImages( )
             {
                 throw std::runtime_error("PopSift staging image pool closed during upload");
             }
+#if defined(KFCORE_POPSIFT_TESTING)
+            popsift::testing::throwIfWorkerFailureInjected(
+                popsift::testing::WorkerFailureStage::UploadJob);
+#endif
             job->setImg(image);
             if (!_pipe._queue_stage2.push(job))
             {
@@ -441,7 +465,10 @@ void PopSift::extractDownloadLoop( )
     try
     {
         selectCudaDevice(_device);
-        applyConfiguration(true);
+#if defined(KFCORE_POPSIFT_TESTING)
+        popsift::testing::throwIfWorkerFailureInjected(
+            popsift::testing::WorkerFailureStage::ExtractStartup);
+#endif
     }
     catch (...)
     {
@@ -464,6 +491,10 @@ void PopSift::extractDownloadLoop( )
         std::unique_ptr<popsift::FeaturesHost> features;
         try
         {
+#if defined(KFCORE_POPSIFT_TESTING)
+            popsift::testing::throwIfWorkerFailureInjected(
+                popsift::testing::WorkerFailureStage::ExtractJob);
+#endif
             applyConfiguration();
             private_init(image->getWidth(), image->getHeight());
 
@@ -500,7 +531,10 @@ void PopSift::matchPrepareLoop( )
     try
     {
         selectCudaDevice(_device);
-        applyConfiguration(true);
+#if defined(KFCORE_POPSIFT_TESTING)
+        popsift::testing::throwIfWorkerFailureInjected(
+            popsift::testing::WorkerFailureStage::ExtractStartup);
+#endif
     }
     catch (...)
     {
@@ -523,6 +557,10 @@ void PopSift::matchPrepareLoop( )
         std::unique_ptr<popsift::FeaturesDev> features;
         try
         {
+#if defined(KFCORE_POPSIFT_TESTING)
+            popsift::testing::throwIfWorkerFailureInjected(
+                popsift::testing::WorkerFailureStage::ExtractJob);
+#endif
             applyConfiguration();
             private_init(image->getWidth(), image->getHeight());
             p._pyramid->step1(_config, image);

@@ -64,7 +64,7 @@ class Octave
 
 public:
     Octave( );
-    ~Octave( ) { this->free(); }
+    ~Octave( ) noexcept;
 
     void resetDimensions( const Config& conf, int w, int h );
 
@@ -149,6 +149,7 @@ public:
     void download_and_save_array( const char* basename, int octave );
 
 private:
+    void releaseNoexcept() noexcept;
     void alloc_data_planes( );
     void alloc_data_tex( );
     void alloc_interm_array( );

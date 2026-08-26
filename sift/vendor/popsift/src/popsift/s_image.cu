@@ -6,6 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 #include "common/assist.h"
+#include "common/cuda_cleanup.h"
 #include "common/debug_macros.h"
 #include "s_image.h"
 #include "sift_config.h"
@@ -54,9 +55,24 @@ Image::~Image( )
 {
     if( _max_w == 0 ) return;
 
-    destroyTexture( );
-    _input_image_d.freeDev( );
-    _input_image_h.freeHost( popsift::CudaAllocated );
+    popsift::cuda::CleanupStatus status;
+    if (_input_image_tex != 0)
+    {
+        status.record(cudaDestroyTextureObject(_input_image_tex), "destroy byte image texture");
+        _input_image_tex = 0;
+    }
+    if (_input_image_d.data != nullptr)
+    {
+        status.record(cudaFree(_input_image_d.data), "free byte image device plane");
+        _input_image_d.data = nullptr;
+    }
+    if (_input_image_h.data != nullptr)
+    {
+        status.record(cudaFreeHost(_input_image_h.data), "free byte image host plane");
+        _input_image_h.data = nullptr;
+    }
+    _max_w = _max_h = 0;
+    status.report();
 }
 
 void Image::load( void* input )
@@ -170,9 +186,24 @@ ImageFloat::~ImageFloat( )
 {
     if( _max_w == 0 ) return;
 
-    destroyTexture( );
-    _input_image_d.freeDev( );
-    _input_image_h.freeHost( popsift::CudaAllocated );
+    popsift::cuda::CleanupStatus status;
+    if (_input_image_tex != 0)
+    {
+        status.record(cudaDestroyTextureObject(_input_image_tex), "destroy float image texture");
+        _input_image_tex = 0;
+    }
+    if (_input_image_d.data != nullptr)
+    {
+        status.record(cudaFree(_input_image_d.data), "free float image device plane");
+        _input_image_d.data = nullptr;
+    }
+    if (_input_image_h.data != nullptr)
+    {
+        status.record(cudaFreeHost(_input_image_h.data), "free float image host plane");
+        _input_image_h.data = nullptr;
+    }
+    _max_w = _max_h = 0;
+    status.report();
 }
 
 void ImageFloat::load( void* input )

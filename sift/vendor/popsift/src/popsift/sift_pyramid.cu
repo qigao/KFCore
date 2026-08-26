@@ -8,6 +8,7 @@
 
 #include "common/assist.h"
 #include "common/debug_macros.h"
+#include "common/cuda_cleanup.h"
 #include "sift_config.h"
 #include "sift_extremum.h"
 #include "sift_pyramid.h"
@@ -203,18 +204,30 @@ void Pyramid::reallocExtrema( int numExtrema )
 
 Pyramid::~Pyramid()
 {
-    cudaStreamDestroy( _download_stream );
+    popsift::cuda::CleanupStatus status;
+    status.record(cudaStreamDestroy(_download_stream), "destroy pyramid download stream");
+    _download_stream = nullptr;
 
-    cudaFree(     _d_extrema_num_blocks );
-    cudaFree(     dobuf_shadow.i_ext_dat[0] );
-    cudaFree(     dobuf_shadow.i_ext_off[0] );
-    cudaFree(     dobuf_shadow.features );
-    cudaFree(     dobuf_shadow.extrema );
-    cudaFreeHost( hbuf        .desc );
-    cudaFree(     dbuf_shadow .desc );
-    cudaFree(     dobuf_shadow.feat_to_ext_map );
+    status.record(cudaFree(_d_extrema_num_blocks), "free pyramid block counters");
+    status.record(cudaFree(dobuf_shadow.i_ext_dat[0]), "free pyramid extrema offsets");
+    status.record(cudaFree(dobuf_shadow.i_ext_off[0]), "free pyramid extrema indices");
+    status.record(cudaFree(dobuf_shadow.features), "free pyramid features");
+    status.record(cudaFree(dobuf_shadow.extrema), "free pyramid extrema");
+    status.record(cudaFreeHost(hbuf.desc), "free pyramid host descriptors");
+    status.record(cudaFree(dbuf_shadow.desc), "free pyramid device descriptors");
+    status.record(cudaFree(dobuf_shadow.feat_to_ext_map), "free pyramid feature map");
+    _d_extrema_num_blocks = nullptr;
+    dobuf_shadow.i_ext_dat[0] = nullptr;
+    dobuf_shadow.i_ext_off[0] = nullptr;
+    dobuf_shadow.features = nullptr;
+    dobuf_shadow.extrema = nullptr;
+    hbuf.desc = nullptr;
+    dbuf_shadow.desc = nullptr;
+    dobuf_shadow.feat_to_ext_map = nullptr;
 
     delete[] _octaves;
+    _octaves = nullptr;
+    status.report();
 }
 
 void Pyramid::step1( const Config& conf, popsift::ImageBase* img )

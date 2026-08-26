@@ -40,7 +40,8 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
     FOLDER "sift")
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/COPYING.md"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/UPSTREAM.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor/popsift/generated/UPSTREAM.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
 endif()
 
@@ -77,6 +78,7 @@ if(BUILD_TESTS)
       CXX_EXTENSIONS OFF
       FOLDER "sift/tests")
     add_test(NAME test_popsift_internal COMMAND test_popsift_internal)
+    set_tests_properties(test_popsift_internal PROPERTIES TIMEOUT 30)
 
     add_executable(test_popsift_result_validation tests/test_popsift_result_validation.cpp)
     target_include_directories(test_popsift_result_validation PRIVATE
@@ -126,6 +128,7 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
         "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
         "-DKFCORE_EXPECT_SIFT_POPSIFT=${KFCORE_BUILD_SIFT_POPSIFT}"
+        "-DKFCORE_EXPECTED_SOURCE_REVISION=${KFCORE_POPSIFT_SOURCE_REVISION}"
         -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_sift_installed_consumer.cmake")
   endif()
 endif()

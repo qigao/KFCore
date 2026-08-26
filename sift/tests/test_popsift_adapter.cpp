@@ -25,16 +25,17 @@ constexpr std::uint8_t kDarkPixel   = 16;
 constexpr std::uint8_t kLightPixel  = 240;
 constexpr std::size_t  kMaxFeatures = 2048;
 
-std::vector<std::uint8_t> checkerboard()
+std::vector<std::uint8_t> checkerboard(std::int32_t width = kImageWidth,
+                                       std::int32_t height = kImageHeight)
 {
     std::vector<std::uint8_t> pixels(
-        static_cast<std::size_t>(kImageWidth) * static_cast<std::size_t>(kImageHeight));
-    for (std::int32_t row = 0; row < kImageHeight; ++row)
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    for (std::int32_t row = 0; row < height; ++row)
     {
-        for (std::int32_t column = 0; column < kImageWidth; ++column)
+        for (std::int32_t column = 0; column < width; ++column)
         {
             const bool light = ((row / kTileSize) + (column / kTileSize)) % 2 == 0;
-            pixels[static_cast<std::size_t>(row) * static_cast<std::size_t>(kImageWidth) +
+            pixels[static_cast<std::size_t>(row) * static_cast<std::size_t>(width) +
                    static_cast<std::size_t>(column)] = light ? kLightPixel : kDarkPixel;
         }
     }
@@ -106,6 +107,34 @@ spec("PopSift adapter")
         {
             check(!result.get().features.empty());
         }
+    }
+
+    it("completes concurrent jobs with different image dimensions")
+    {
+        constexpr std::int32_t kSmallWidth = 96;
+        constexpr std::int32_t kSmallHeight = 80;
+        PopSiftExtractor extractor;
+        const std::vector<std::uint8_t> small_pixels =
+            checkerboard(kSmallWidth, kSmallHeight);
+        const std::vector<std::uint8_t> large_pixels = checkerboard();
+        const kfcore::image::ImageView small_image = {
+            small_pixels.data(), small_pixels.size(), kSmallWidth, kSmallHeight,
+            static_cast<std::size_t>(kSmallWidth), kfcore::image::PixelFormat::Gray8,
+            kfcore::image::MemoryKind::Host,
+        };
+        const kfcore::image::ImageView large_image = {
+            large_pixels.data(), large_pixels.size(), kImageWidth, kImageHeight,
+            static_cast<std::size_t>(kImageWidth), kfcore::image::PixelFormat::Gray8,
+            kfcore::image::MemoryKind::Host,
+        };
+
+        std::future<FeatureSet> small_result =
+            std::async(std::launch::async, [&] { return extractor.extract(small_image); });
+        std::future<FeatureSet> large_result =
+            std::async(std::launch::async, [&] { return extractor.extract(large_image); });
+
+        check(!small_result.get().features.empty());
+        check(!large_result.get().features.empty());
     }
 
     it("coordinates concurrent first construction and final release")

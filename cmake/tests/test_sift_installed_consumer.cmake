@@ -34,6 +34,24 @@ if(KFCORE_EXPECT_SIFT_POPSIFT)
       message(FATAL_ERROR "Installed CUDA SIFT metadata is missing: ${_required_metadata}")
     endif()
   endforeach()
+  if(NOT DEFINED KFCORE_EXPECTED_SOURCE_REVISION OR
+     "${KFCORE_EXPECTED_SOURCE_REVISION}" STREQUAL "")
+    message(FATAL_ERROR "Expected CUDA SIFT source revision is required")
+  endif()
+  set(_popsift_upstream
+    "${KFCORE_CONSUMER_INSTALL_PREFIX}/share/licenses/KFCore/popsift/UPSTREAM.md")
+  file(READ "${_popsift_upstream}" _popsift_upstream_content)
+  string(FIND "${_popsift_upstream_content}"
+    "KFCore source revision: `${KFCORE_EXPECTED_SOURCE_REVISION}`"
+    _popsift_revision_index)
+  string(FIND "${_popsift_upstream_content}"
+    "/tree/${KFCORE_EXPECTED_SOURCE_REVISION}/sift/vendor/popsift"
+    _popsift_url_index)
+  if(_popsift_revision_index EQUAL -1 OR _popsift_url_index EQUAL -1 OR
+     "${_popsift_upstream_content}" MATCHES "<KFCORE|@KFCORE")
+    message(FATAL_ERROR
+      "Installed CUDA SIFT provenance does not contain the configured immutable revision")
+  endif()
   if(EXISTS "${KFCORE_CONSUMER_INSTALL_PREFIX}/bin/popsift.dll")
     message(FATAL_ERROR "Installed CUDA SIFT backend unexpectedly deploys popsift.dll")
   endif()
