@@ -203,7 +203,7 @@ public PopSift headers do not.
 Use identical image, options, warm-up, and iteration count before/after. Report measured median/per-image time; do not infer GPU
 saturation from functional tests.
 
-- [ ] **Step 5: Inspect, push, and update tracking**
+- [x] **Step 5: Inspect, push, and update tracking**
 
 Run `git diff --check origin/master...HEAD`, inspect status/log, push `feature/sift-extractor`, then update PR #12 and issue #11
 with upstream commit, one-native-backend/device limit, test evidence, artifact change, and remaining performance risk.
