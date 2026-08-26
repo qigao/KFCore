@@ -54,9 +54,10 @@ worker 失败通过 `std::promise::set_exception` 传回 `getHost()`/`getDev()`�
 
 ## 并发、容量、背压与关闭
 
-拓扑是多 producer -> 单 upload worker -> 单 CUDA extract worker。stage-1 容量为
-`max_pending_jobs`，stage-2 和 staging image pool 容量均为 2。队列在构造期预分配固定存储，push/pull
-期间不分配；满队列的 producer 阻塞，队列关闭后立即失败并被唤醒。
+拓扑是多 producer -> 共享 admission gate -> 单 upload worker -> 单 CUDA extract worker。gate 和
+stage-1 容量均为 `max_pending_jobs`，stage-2 与 staging image pool 容量均为 2。permit 在灰度 staging
+前取得并持有到结果复制完成；队列在构造期预分配固定存储，push/pull 期间不分配。满载 producer 阻塞，
+队列关闭后立即失败并被唤醒。
 
 关闭顺序为：禁止新提交并关闭 stage-1 -> upload worker 排空已有任务并关闭 stage-2 -> extract worker
 排空并完成 promise -> join 两个 worker -> 释放 staging image 与 pyramid。调用者仍必须保证析构时没有线程

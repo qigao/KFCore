@@ -15,10 +15,10 @@
 
 #include <cuda_runtime.h>
 
+#include <cstddef>
 #include <exception>
 #include <future>
-#include <queue>
-#include <stack>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -40,9 +40,8 @@ class SiftJob
     std::future <popsift::FeaturesBase*> _f;
     int                 _w;
     int                 _h;
-    unsigned char*      _imageData;
+    std::vector<unsigned char> _imageData;
     popsift::ImageBase* _img;
-    std::exception_ptr _err;
 
 public:
 
@@ -94,8 +93,18 @@ public:
  */
 class PopSift
 {
+    static constexpr std::size_t kImagePoolCapacity = 2;
+    static constexpr std::size_t kDefaultPendingJobs = 8;
+
     struct Pipe
     {
+        explicit Pipe(std::size_t pending_jobs)
+            : _queue_stage1(pending_jobs)
+            , _queue_stage2(kImagePoolCapacity)
+            , _unused(kImagePoolCapacity)
+        {
+        }
+
         std::unique_ptr<std::thread>            _thread_stage1;
         std::unique_ptr<std::thread>            _thread_stage2;
         popsift::SyncQueue<SiftJob*>            _queue_stage1;
@@ -107,7 +116,7 @@ class PopSift
         /**
          * @brief Release the allocated resources, if any.
          */
-        void uninit();
+        void uninit() noexcept;
     };
 
 public:
@@ -145,7 +154,8 @@ public:
      * @brief We support more than 1 streams, but we support only one sigma and one
      * level parameters.
      */
-    explicit PopSift( ImageMode imode = ByteImages, int device = 0 );
+    explicit PopSift( ImageMode imode = ByteImages, int device = 0,
+                      std::size_t max_pending_jobs = kDefaultPendingJobs );
 
     /**
      * @brief
@@ -155,7 +165,8 @@ public:
      */
     explicit PopSift(const popsift::Config& config,
                      popsift::Config::ProcessingMode mode = popsift::Config::ExtractingMode,
-                     ImageMode imode = ByteImages, int device = 0);
+                     ImageMode imode = ByteImages, int device = 0,
+                     std::size_t max_pending_jobs = kDefaultPendingJobs);
 
     /**
      * @brief Release all the resources.

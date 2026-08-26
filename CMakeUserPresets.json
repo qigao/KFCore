@@ -103,9 +103,6 @@
             "name": "win-sift-release-user",
             "displayName": "SIFT PopSift Release Build (Windows, User)",
             "inherits": "win-image-processor-release-user",
-            "environment": {
-                "POPSIFT_ROOT": "$env{PROJECT_ROOT}/KFCore/popsift-develop"
-            },
             "cacheVariables": {
                 "CMAKE_CUDA_ARCHITECTURES": "native",
                 "KFCORE_BUILD_SIFT": "ON",

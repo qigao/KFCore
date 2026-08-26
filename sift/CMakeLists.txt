@@ -17,43 +17,16 @@ cmake_config_target(kfcore_sift
   FOLDER "sift")
 
 if(KFCORE_BUILD_SIFT_POPSIFT)
-  if(NOT DEFINED ENV{POPSIFT_ROOT} OR "$ENV{POPSIFT_ROOT}" STREQUAL "")
-    message(FATAL_ERROR
-      "KFCORE_BUILD_SIFT_POPSIFT requires POPSIFT_ROOT to name the PopSift source tree")
-  endif()
-  file(TO_CMAKE_PATH "$ENV{POPSIFT_ROOT}" _popsift_root)
-  if(NOT EXISTS "${_popsift_root}/CMakeLists.txt")
-    message(FATAL_ERROR
-      "POPSIFT_ROOT does not contain a PopSift source tree: ${_popsift_root}")
-  endif()
-
-  set(PopSift_BUILD_EXAMPLES OFF CACHE BOOL "Build PopSift applications" FORCE)
-  set(PopSift_BUILD_DOCS OFF CACHE BOOL "Build PopSift documentation" FORCE)
-  set(PopSift_USE_TEST_CMD OFF CACHE BOOL "Build PopSift functional tests" FORCE)
-  set(_kfcore_saved_build_shared_libs "${BUILD_SHARED_LIBS}")
-  set(BUILD_SHARED_LIBS ON)
-  add_subdirectory("${_popsift_root}" "${CMAKE_BINARY_DIR}/third_party/popsift"
-    EXCLUDE_FROM_ALL)
-  set(BUILD_SHARED_LIBS "${_kfcore_saved_build_shared_libs}")
-  if(NOT TARGET PopSift::popsift)
-    add_library(PopSift::popsift ALIAS popsift)
-  endif()
-  get_target_property(_popsift_version popsift VERSION)
-  if(NOT _popsift_version VERSION_EQUAL "0.10.1")
-    message(FATAL_ERROR
-      "KFCore PopSift adapter requires PopSift 0.10.1, found '${_popsift_version}'")
-  endif()
+  add_subdirectory(vendor/popsift)
 
   add_library(kfcore_sift_popsift SHARED src/popsift_extractor.cpp)
   target_include_directories(kfcore_sift_popsift PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "$<TARGET_PROPERTY:popsift,INTERFACE_INCLUDE_DIRECTORIES>")
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   target_compile_features(kfcore_sift_popsift PUBLIC cxx_std_17)
   target_link_libraries(kfcore_sift_popsift
     PUBLIC KFCore::sift
-    PRIVATE "$<TARGET_LINKER_FILE:popsift>" CUDA::cudart)
-  add_dependencies(kfcore_sift_popsift popsift)
+    PRIVATE kfcore_popsift_internal CUDA::cudart)
   set_target_properties(kfcore_sift_popsift PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
@@ -65,14 +38,9 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
     EXPORT_NAME sift_popsift
     EXPORT_SET KFCoreTargets
     FOLDER "sift")
-  add_custom_command(TARGET kfcore_sift_popsift POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-      "$<TARGET_FILE:popsift>" "$<TARGET_FILE_DIR:kfcore_sift_popsift>"
-    VERBATIM)
-  install(TARGETS popsift
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-  install(FILES "${_popsift_root}/COPYING.md"
+  install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/COPYING.md"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/UPSTREAM.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
 endif()
 
@@ -96,6 +64,20 @@ if(BUILD_TESTS)
   add_test(NAME test_popsift_options COMMAND test_popsift_options)
 
   if(KFCORE_BUILD_SIFT_POPSIFT)
+    add_executable(test_popsift_internal tests/test_popsift_internal.cpp)
+    target_include_directories(test_popsift_internal PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/src")
+    target_link_libraries(test_popsift_internal PRIVATE
+      kfcore_popsift_internal
+      Threads::Threads
+      TurboUtils::TinyTest)
+    set_target_properties(test_popsift_internal PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "sift/tests")
+    add_test(NAME test_popsift_internal COMMAND test_popsift_internal)
+
     add_executable(test_popsift_result_validation tests/test_popsift_result_validation.cpp)
     target_include_directories(test_popsift_result_validation PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/src")

@@ -18,54 +18,136 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <sstream>
 #include <stdexcept>
 
 using namespace std;
 
-PopSift::PopSift( const popsift::Config& config, popsift::Config::ProcessingMode mode, ImageMode imode, int device )
-    : _image_mode( imode )
-    , _device(device)
+namespace
 {
-    cudaSetDevice(_device);
-    configure(config);
 
-    if( imode == ByteImages )
-    {
-        _pipe._unused.push( new popsift::Image);
-        _pipe._unused.push( new popsift::Image);
-    }
-    else
-    {
-        _pipe._unused.push( new popsift::ImageFloat );
-        _pipe._unused.push( new popsift::ImageFloat );
-    }
-
-    _pipe._thread_stage1.reset( new std::thread( &PopSift::uploadImages, this ));
-    if( mode == popsift::Config::ExtractingMode )
-        _pipe._thread_stage2.reset( new std::thread( &PopSift::extractDownloadLoop, this ));
-    else
-        _pipe._thread_stage2.reset( new std::thread( &PopSift::matchPrepareLoop, this ));
+void selectCudaDevice(int device)
+{
+    const cudaError_t error = cudaSetDevice(device);
+    std::ostringstream message;
+    message << "Cannot set CUDA device " << device;
+    POP_CUDA_FATAL_TEST(error, message.str());
 }
 
-PopSift::PopSift( ImageMode imode, int device )
-    : _image_mode( imode )
+std::size_t checkedImageBytes(int width, int height, std::size_t element_size,
+                              const void* image_data)
+{
+    if (width <= 0 || height <= 0 || image_data == nullptr)
+    {
+        throw std::invalid_argument("PopSift job requires positive dimensions and image data");
+    }
+    const std::size_t w = static_cast<std::size_t>(width);
+    const std::size_t h = static_cast<std::size_t>(height);
+    if (w > (std::numeric_limits<std::size_t>::max)() / h)
+    {
+        throw std::overflow_error("PopSift job dimensions overflow the host byte count");
+    }
+    const std::size_t pixels = w * h;
+    if (pixels > (std::numeric_limits<std::size_t>::max)() / element_size)
+    {
+        throw std::overflow_error("PopSift job element size overflows the host byte count");
+    }
+    return pixels * element_size;
+}
+
+template <typename ImageType>
+void populateImagePool(popsift::SyncQueue<popsift::ImageBase*>& pool,
+                       std::size_t image_count)
+{
+    for (std::size_t index = 0; index < image_count; ++index)
+    {
+        std::unique_ptr<popsift::ImageBase> image(new ImageType);
+        if (!pool.push(image.get()))
+        {
+            throw std::runtime_error("PopSift image pool closed during initialization");
+        }
+        image.release();
+    }
+}
+
+void returnImage(popsift::SyncQueue<popsift::ImageBase*>& pool,
+                 popsift::ImageBase*& image) noexcept
+{
+    if (image == nullptr)
+    {
+        return;
+    }
+    if (!pool.push(image))
+    {
+        delete image;
+    }
+    image = nullptr;
+}
+
+} // namespace
+
+PopSift::PopSift( const popsift::Config& config, popsift::Config::ProcessingMode mode,
+                  ImageMode imode, int device, std::size_t max_pending_jobs )
+    : _pipe(max_pending_jobs)
+    , _image_mode( imode )
     , _device(device)
 {
-    cudaSetDevice(_device);
-
-    if( imode == ByteImages )
+    try
     {
-        _pipe._unused.push( new popsift::Image);
-        _pipe._unused.push( new popsift::Image);
-    }
-    else
-    {
-        _pipe._unused.push( new popsift::ImageFloat );
-        _pipe._unused.push( new popsift::ImageFloat );
-    }
+        selectCudaDevice(_device);
+        configure(config);
 
-    _pipe._thread_stage1.reset( new std::thread( &PopSift::uploadImages, this ));
-    _pipe._thread_stage2.reset( new std::thread( &PopSift::extractDownloadLoop, this ));
+        if( imode == ByteImages )
+        {
+            populateImagePool<popsift::Image>(_pipe._unused, kImagePoolCapacity);
+        }
+        else
+        {
+            populateImagePool<popsift::ImageFloat>(_pipe._unused, kImagePoolCapacity);
+        }
+
+        _pipe._thread_stage1.reset( new std::thread( &PopSift::uploadImages, this ));
+        if( mode == popsift::Config::ExtractingMode )
+            _pipe._thread_stage2.reset( new std::thread( &PopSift::extractDownloadLoop, this ));
+        else
+            _pipe._thread_stage2.reset( new std::thread( &PopSift::matchPrepareLoop, this ));
+    }
+    catch (...)
+    {
+        _pipe.uninit();
+        _isInit = false;
+        throw;
+    }
+}
+
+PopSift::PopSift( ImageMode imode, int device, std::size_t max_pending_jobs )
+    : _pipe(max_pending_jobs)
+    , _image_mode( imode )
+    , _device(device)
+{
+    try
+    {
+        selectCudaDevice(_device);
+        if( imode == ByteImages )
+        {
+            populateImagePool<popsift::Image>(_pipe._unused, kImagePoolCapacity);
+        }
+        else
+        {
+            populateImagePool<popsift::ImageFloat>(_pipe._unused, kImagePoolCapacity);
+        }
+
+        _pipe._thread_stage1.reset( new std::thread( &PopSift::uploadImages, this ));
+        _pipe._thread_stage2.reset( new std::thread( &PopSift::extractDownloadLoop, this ));
+    }
+    catch (...)
+    {
+        _pipe.uninit();
+        _isInit = false;
+        throw;
+    }
 }
 
 PopSift::~PopSift()
@@ -138,7 +220,8 @@ bool PopSift::private_init( int w, int h )
 
     p._pyramid = new popsift::Pyramid( _config, w, h );
 
-    cudaDeviceSynchronize();
+    const cudaError_t sync_error = cudaDeviceSynchronize();
+    POP_CUDA_FATAL_TEST(sync_error, "Cannot synchronize CUDA SIFT pyramid initialization");
 
     return true;
 }
@@ -260,9 +343,17 @@ SiftJob* PopSift::enqueue( int                  w,
         return nullptr;
     }
 
-    SiftJob* job = new SiftJob( w, h, imageData );
-    _pipe._queue_stage1.push( job );
-    return job;
+    auto reservation = _pipe._queue_stage1.reserve();
+    if (!reservation)
+    {
+        throw std::runtime_error("PopSift pipeline is closed and cannot accept a byte image");
+    }
+    std::unique_ptr<SiftJob> job(new SiftJob( w, h, imageData ));
+    if (!reservation.commit(job.get()))
+    {
+        throw std::runtime_error("PopSift pipeline closed while accepting a byte image");
+    }
+    return job.release();
 }
 
 SiftJob* PopSift::enqueue( int          w,
@@ -285,59 +376,118 @@ SiftJob* PopSift::enqueue( int          w,
         return nullptr;
     }
 
-    SiftJob* job = new SiftJob( w, h, imageData );
-    _pipe._queue_stage1.push( job );
-    return job;
+    auto reservation = _pipe._queue_stage1.reserve();
+    if (!reservation)
+    {
+        throw std::runtime_error("PopSift pipeline is closed and cannot accept a float image");
+    }
+    std::unique_ptr<SiftJob> job(new SiftJob( w, h, imageData ));
+    if (!reservation.commit(job.get()))
+    {
+        throw std::runtime_error("PopSift pipeline closed while accepting a float image");
+    }
+    return job.release();
 }
 
 void PopSift::uploadImages( )
 {
-    cudaSetDevice(_device);
-
-    SiftJob* job;
-    while( ( job = _pipe._queue_stage1.pull() ) != nullptr ) {
-        popsift::ImageBase* img = _pipe._unused.pull();
-        job->setImg( img );
-        _pipe._queue_stage2.push( job );
+    std::exception_ptr startup_error;
+    try
+    {
+        selectCudaDevice(_device);
     }
-    _pipe._queue_stage2.push( nullptr );
+    catch (...)
+    {
+        startup_error = std::current_exception();
+        _pipe._queue_stage1.close();
+    }
+
+    SiftJob* job = nullptr;
+    while (_pipe._queue_stage1.pull(job))
+    {
+        if (startup_error != nullptr)
+        {
+            job->setError(startup_error);
+            continue;
+        }
+
+        popsift::ImageBase* image = nullptr;
+        try
+        {
+            if (!_pipe._unused.pull(image))
+            {
+                throw std::runtime_error("PopSift staging image pool closed during upload");
+            }
+            job->setImg(image);
+            if (!_pipe._queue_stage2.push(job))
+            {
+                throw std::runtime_error("PopSift extraction stage closed during upload");
+            }
+            image = nullptr;
+        }
+        catch (...)
+        {
+            returnImage(_pipe._unused, image);
+            job->setError(std::current_exception());
+        }
+    }
+    _pipe._queue_stage2.close();
 }
 
 void PopSift::extractDownloadLoop( )
 {
-    cudaSetDevice(_device);
-    applyConfiguration(true);
-
     Pipe& p = _pipe;
+    std::exception_ptr startup_error;
+    try
+    {
+        selectCudaDevice(_device);
+        applyConfiguration(true);
+    }
+    catch (...)
+    {
+        startup_error = std::current_exception();
+        p._queue_stage1.close();
+        p._queue_stage2.close();
+    }
 
-    SiftJob* job;
-    while( ( job = p._queue_stage2.pull() ) != nullptr ) {
-        applyConfiguration();
-
-        popsift::ImageBase* img = job->getImg();
-
-        private_init( img->getWidth(), img->getHeight() );
-
-        p._pyramid->step1( _config, img );
-        p._unused.push( img ); // uploaded input image no longer needed, release for reuse
-
-        p._pyramid->step2( _config );
-
-        popsift::FeaturesHost* features = p._pyramid->get_descriptors( _config );
-
-        cudaDeviceSynchronize();
-
-        bool log_to_file = ( _config.getLogMode() == popsift::Config::All );
-        if( log_to_file ) {
-            // int octaves = p._pyramid->getNumOctaves();
-            // for( int o=0; o<octaves; o++ ) { p._pyramid->download_descriptors( _config, o ); }
-            // int levels  = p._pyramid->getNumLevels();
-
-            p._pyramid->download_and_save_array( "pyramid" );
-            p._pyramid->save_descriptors( _config, features, "pyramid" );
+    SiftJob* job = nullptr;
+    while (p._queue_stage2.pull(job))
+    {
+        popsift::ImageBase* image = job->getImg();
+        if (startup_error != nullptr)
+        {
+            returnImage(p._unused, image);
+            job->setError(startup_error);
+            continue;
         }
 
-        job->setFeatures( features );
+        std::unique_ptr<popsift::FeaturesHost> features;
+        try
+        {
+            applyConfiguration();
+            private_init(image->getWidth(), image->getHeight());
+
+            p._pyramid->step1(_config, image);
+            returnImage(p._unused, image);
+            p._pyramid->step2(_config);
+
+            features.reset(p._pyramid->get_descriptors(_config));
+            const cudaError_t sync_error = cudaDeviceSynchronize();
+            POP_CUDA_FATAL_TEST(sync_error, "Cannot synchronize CUDA SIFT extraction");
+
+            if (_config.getLogMode() == popsift::Config::All)
+            {
+                p._pyramid->download_and_save_array("pyramid");
+                p._pyramid->save_descriptors(_config, features.get(), "pyramid");
+            }
+
+            job->setFeatures(features.release());
+        }
+        catch (...)
+        {
+            returnImage(p._unused, image);
+            job->setError(std::current_exception());
+        }
     }
 
     private_uninit();
@@ -345,38 +495,51 @@ void PopSift::extractDownloadLoop( )
 
 void PopSift::matchPrepareLoop( )
 {
-    cudaSetDevice(_device);
-    applyConfiguration(true);
-
     Pipe& p = _pipe;
+    std::exception_ptr startup_error;
+    try
+    {
+        selectCudaDevice(_device);
+        applyConfiguration(true);
+    }
+    catch (...)
+    {
+        startup_error = std::current_exception();
+        p._queue_stage1.close();
+        p._queue_stage2.close();
+    }
 
-    SiftJob* job;
-    while( ( job = p._queue_stage2.pull() ) != nullptr ) {
-        popsift::FeaturesDev* features;
+    SiftJob* job = nullptr;
+    while (p._queue_stage2.pull(job))
+    {
+        popsift::ImageBase* image = job->getImg();
+        if (startup_error != nullptr)
+        {
+            returnImage(p._unused, image);
+            job->setError(startup_error);
+            continue;
+        }
+
+        std::unique_ptr<popsift::FeaturesDev> features;
         try
         {
             applyConfiguration();
-
-            popsift::ImageBase* img = job->getImg();
-
-            private_init(img->getWidth(), img->getHeight());
-
-            p._pyramid->step1(_config, img);
-            p._unused.push(img); // uploaded input image no longer needed, release for reuse
-
+            private_init(image->getWidth(), image->getHeight());
+            p._pyramid->step1(_config, image);
+            returnImage(p._unused, image);
             p._pyramid->step2(_config);
 
-            features = p._pyramid->clone_device_descriptors(_config);
-            cudaDeviceSynchronize();
-        }
-        catch(const std::exception& e)
-        {
-            job->setError(std::current_exception());
-            job->setFeatures(nullptr);
-            break;
-        }
+            features.reset(p._pyramid->clone_device_descriptors(_config));
+            const cudaError_t sync_error = cudaDeviceSynchronize();
+            POP_CUDA_FATAL_TEST(sync_error, "Cannot synchronize CUDA SIFT descriptor cloning");
 
-        job->setFeatures( features );
+            job->setFeatures(features.release());
+        }
+        catch (...)
+        {
+            returnImage(p._unused, image);
+            job->setError(std::current_exception());
+        }
     }
 
     private_uninit();
@@ -385,54 +548,29 @@ void PopSift::matchPrepareLoop( )
 SiftJob::SiftJob( int w, int h, const unsigned char* imageData )
     : _w(w)
     , _h(h)
+    , _imageData(checkedImageBytes(w, h, sizeof(unsigned char), imageData))
     , _img(nullptr)
 {
     _f = _p.get_future();
-
-    _imageData = (unsigned char*)malloc( w*h );
-    if( _imageData != nullptr )
-    {
-        memcpy( _imageData, imageData, w*h );
-    }
-    else
-    {
-        stringstream ss;
-        ss << "Memory limitation" << endl
-           << "E    Failed to allocate memory for SiftJob";
-        POP_FATAL(ss.str());
-    }
+    memcpy(_imageData.data(), imageData, _imageData.size());
 }
 
 SiftJob::SiftJob( int w, int h, const float* imageData )
     : _w(w)
     , _h(h)
+    , _imageData(checkedImageBytes(w, h, sizeof(float), imageData))
     , _img(nullptr)
 {
     _f = _p.get_future();
-
-    _imageData = (unsigned char*)malloc( w*h*sizeof(float) );
-    if( _imageData != nullptr )
-    {
-        memcpy( _imageData, imageData, w*h*sizeof(float) );
-    }
-    else
-    {
-        stringstream ss;
-        ss << "Memory limitation" << endl
-           << "E    Failed to allocate memory for SiftJob";
-        POP_FATAL(ss.str());
-    }
+    memcpy(_imageData.data(), imageData, _imageData.size());
 }
 
-SiftJob::~SiftJob( )
-{
-    free( _imageData );
-}
+SiftJob::~SiftJob( ) = default;
 
 void SiftJob::setImg( popsift::ImageBase* img )
 {
     img->resetDimensions( _w, _h );
-    img->load( _imageData );
+    img->load( _imageData.data() );
     _img = img;
 }
 
@@ -463,35 +601,49 @@ popsift::FeaturesHost* SiftJob::getHost()
 
 popsift::FeaturesDev* SiftJob::getDev()
 {
-    popsift::FeaturesBase* features = _f.get();
-    if(this->_err != nullptr) {
-        std::rethrow_exception(this->_err);
-    }
-    return dynamic_cast<popsift::FeaturesDev*>(features);
+    return dynamic_cast<popsift::FeaturesDev*>(_f.get());
 }
 
 void SiftJob::setError(std::exception_ptr ptr)
 {
-    this->_err = ptr;
+    if (ptr == nullptr)
+    {
+        ptr = std::make_exception_ptr(
+            std::runtime_error("PopSift worker reported an unspecified failure"));
+    }
+    _p.set_exception(ptr);
 }
 
-void PopSift::Pipe::uninit()
+void PopSift::Pipe::uninit() noexcept
 {
-    _queue_stage1.push( nullptr );
-    if(_thread_stage2 != nullptr)
+    _queue_stage1.close();
+    if (_thread_stage1 != nullptr)
     {
-        _thread_stage2->join();
-        _thread_stage2.reset(nullptr);
-    }
-    if(_thread_stage1 != nullptr)
-    {
-        _thread_stage1->join();
+        if (_thread_stage1->joinable())
+        {
+            _thread_stage1->join();
+        }
         _thread_stage1.reset(nullptr);
     }
-
-    while( !_unused.empty() )
+    else
     {
-        popsift::ImageBase* img = _unused.pull();
-        delete img;
+        _queue_stage2.close();
+    }
+
+    if (_thread_stage2 != nullptr)
+    {
+        if (_thread_stage2->joinable())
+        {
+            _thread_stage2->join();
+        }
+        _thread_stage2.reset(nullptr);
+    }
+
+    _queue_stage2.close();
+    _unused.close();
+    popsift::ImageBase* image = nullptr;
+    while (_unused.pull(image))
+    {
+        delete image;
     }
 }

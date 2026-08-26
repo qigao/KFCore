@@ -27,6 +27,21 @@ if(NOT _install_result EQUAL 0)
   message(FATAL_ERROR "KFCore install failed:\n${_install_output}\n${_install_error}")
 endif()
 
+if(KFCORE_EXPECT_SIFT_POPSIFT)
+  foreach(_required_metadata COPYING.md UPSTREAM.md)
+    if(NOT EXISTS
+       "${KFCORE_CONSUMER_INSTALL_PREFIX}/share/licenses/KFCore/popsift/${_required_metadata}")
+      message(FATAL_ERROR "Installed CUDA SIFT metadata is missing: ${_required_metadata}")
+    endif()
+  endforeach()
+  if(EXISTS "${KFCORE_CONSUMER_INSTALL_PREFIX}/bin/popsift.dll")
+    message(FATAL_ERROR "Installed CUDA SIFT backend unexpectedly deploys popsift.dll")
+  endif()
+  if(EXISTS "${KFCORE_CONSUMER_INSTALL_PREFIX}/include/popsift")
+    message(FATAL_ERROR "Installed CUDA SIFT backend unexpectedly exposes internal headers")
+  endif()
+endif()
+
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -S "${KFCORE_CONSUMER_SOURCE_DIR}"
     -B "${KFCORE_CONSUMER_BINARY_DIR}"

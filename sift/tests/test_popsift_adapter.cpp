@@ -82,6 +82,32 @@ spec("PopSift adapter")
         check(!second_result.get().features.empty());
     }
 
+    it("completes concurrent jobs with a single pending slot")
+    {
+        constexpr std::size_t kConcurrentJobs = 6;
+        PopSiftOptions options;
+        options.max_pending_jobs = 1;
+        PopSiftExtractor extractor(options);
+        const std::vector<std::uint8_t> pixels = checkerboard();
+        const kfcore::image::ImageView image = {
+            pixels.data(), pixels.size(), kImageWidth, kImageHeight,
+            static_cast<std::size_t>(kImageWidth), kfcore::image::PixelFormat::Gray8,
+            kfcore::image::MemoryKind::Host,
+        };
+
+        std::vector<std::future<FeatureSet>> results;
+        results.reserve(kConcurrentJobs);
+        for (std::size_t index = 0; index < kConcurrentJobs; ++index)
+        {
+            results.emplace_back(
+                std::async(std::launch::async, [&] { return extractor.extract(image); }));
+        }
+        for (std::future<FeatureSet>& result : results)
+        {
+            check(!result.get().features.empty());
+        }
+    }
+
     it("coordinates concurrent first construction and final release")
     {
         constexpr int kRaceIterations = 8;
@@ -170,6 +196,23 @@ spec("PopSift adapter")
         PopSiftExtractor first;
         PopSiftOptions options;
         options.normalization = PopSiftDescriptorNormalization::Classic;
+        try
+        {
+            PopSiftExtractor second(options);
+            check(false);
+        }
+        catch (const SiftError& error)
+        {
+            check(error.code() == SiftErrorCode::ResourceLimitExceeded);
+            check(std::string(error.what()).find("active configuration") != std::string::npos);
+        }
+    }
+
+    it("rejects conflicting pending-job capacities on the same active device")
+    {
+        PopSiftExtractor first;
+        PopSiftOptions options;
+        options.max_pending_jobs = PopSiftOptions::kDefaultMaxPendingJobs + 1U;
         try
         {
             PopSiftExtractor second(options);

@@ -133,16 +133,91 @@ popsift::Config make_config(const PopSiftOptions& options)
     return config;
 }
 
+class PendingGate
+{
+public:
+    class Permit
+    {
+    public:
+        Permit(const Permit&)            = delete;
+        Permit& operator=(const Permit&) = delete;
+
+        Permit(Permit&& other) noexcept
+            : gate_(std::exchange(other.gate_, nullptr))
+        {
+        }
+
+        ~Permit()
+        {
+            if (gate_ != nullptr)
+            {
+                gate_->release();
+            }
+        }
+
+    private:
+        friend class PendingGate;
+
+        explicit Permit(PendingGate& gate) noexcept
+            : gate_(&gate)
+        {
+        }
+
+        PendingGate* gate_;
+    };
+
+    explicit PendingGate(std::size_t capacity)
+        : capacity_(capacity)
+    {
+        if (capacity_ == 0)
+        {
+            throw std::invalid_argument("PopSift pending gate capacity must be positive");
+        }
+    }
+
+    PendingGate(const PendingGate&)            = delete;
+    PendingGate& operator=(const PendingGate&) = delete;
+
+    Permit acquire()
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        available_.wait(lock, [this] { return in_use_ < capacity_; });
+        ++in_use_;
+        return Permit(*this);
+    }
+
+private:
+    void release() noexcept
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (in_use_ == 0)
+            {
+                std::terminate();
+            }
+            --in_use_;
+        }
+        available_.notify_one();
+    }
+
+    std::mutex mutex_;
+    std::condition_variable available_;
+    std::size_t capacity_;
+    std::size_t in_use_ = 0;
+};
+
 struct BackendState
 {
     explicit BackendState(const PopSiftOptions& options)
         : device(options.device)
         , max_features(options.max_features)
         , max_pending_jobs(options.max_pending_jobs)
+        , pending(options.max_pending_jobs)
         , normalization(options.normalization)
         , backend(std::make_unique<PopSift>(make_config(options),
                                             popsift::Config::ExtractingMode,
-                                            PopSift::ByteImages, options.device))
+                                            PopSift::ByteImages, options.device,
+                                            options.max_pending_jobs))
     {
     }
 
@@ -164,6 +239,7 @@ struct BackendState
     std::int32_t device;
     std::size_t max_features;
     std::size_t max_pending_jobs;
+    PendingGate pending;
     PopSiftDescriptorNormalization normalization;
     std::unique_ptr<PopSift> backend;
 };
@@ -389,6 +465,7 @@ FeatureSet PopSiftExtractor::extract(const image::ImageView& image)
 {
     try
     {
+        PendingGate::Permit pending_permit = impl_->backend->pending.acquire();
         const std::size_t grayscale_bytes = image::ImageProcessor::packed_grayscale_bytes(
             image, impl_->options.max_image_bytes);
         if (grayscale_bytes > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
@@ -408,6 +485,8 @@ FeatureSet PopSiftExtractor::extract(const image::ImageView& image)
             device_scope.restore();
             throw_backend("PopSift extraction stage: backend rejected the image dimensions");
         }
+        // SiftJob owns its copy; do not retain a second full image while waiting on the GPU.
+        std::vector<std::uint8_t>().swap(grayscale);
 
         std::unique_ptr<popsift::FeaturesHost> native_features(job->getHost());
         // A submitted SiftJob must remain alive until the worker has fulfilled its future.

@@ -36,6 +36,17 @@ are applied, the second command must produce no content diff.
 
 ## KFCore modifications
 
-The import commit contains no source modifications. Later commits update this
-section with every locally modified MPL-covered file, the behavioral reason,
-and the corresponding KFCore tests.
+- `src/popsift/common/sync_queue.h`: replaces the allocation-growing
+  `std::queue` with a constructor-sized ring, explicit close/drain semantics,
+  producer backpressure, and waiter wake-up. Covered by
+  `test_popsift_internal`.
+- `src/popsift/popsift.h` and `src/popsift/popsift.cu`: add configurable pending
+  capacity, checked CUDA device selection, RAII job image storage, promise-based
+  worker exceptions, per-job cleanup, and ordered close/drain/join. Covered by
+  `test_popsift_internal` and the real-CUDA `test_popsift_adapter`.
+- `CMakeLists.txt` in this directory is KFCore-owned build integration. It
+  compiles only the imported library sources into a private static target; it
+  is not an upstream file.
+
+The algorithm kernels, configuration types, descriptor layout, and
+`cmake/sift_config.h.in` remain unchanged from the recorded upstream commit.

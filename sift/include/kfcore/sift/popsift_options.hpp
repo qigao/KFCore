@@ -28,6 +28,7 @@ struct PopSiftOptions
     std::int32_t device          = 0;
     std::size_t  max_image_bytes = kDefaultMaxImageBytes;
     std::size_t  max_features    = kDefaultMaxFeatures;
+    /** Maximum complete in-flight jobs sharing the same native device backend. */
     std::size_t  max_pending_jobs = kDefaultMaxPendingJobs;
     PopSiftDescriptorNormalization normalization = PopSiftDescriptorNormalization::RootSift;
 
