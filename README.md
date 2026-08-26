@@ -631,6 +631,14 @@ find_package(trackers CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE KFCore::trackers)
 ```
 
+### 可选 TensorRT YOLO 跟踪
+
+`tensorrt_yolo/` 提供可安装的 `KFCore::yolo_tracking`、
+`KFCore::tensorrt_yolo` 和 `KFCore::yolo_opencv`。它们默认关闭；TensorRT
+profile 从继承环境的 `TENSORRT_ROOT` 查找 SDK，不会把开发机路径或运行时 DLL
+复制进工程。部署契约、容量限制、图片序列示例和 tracking-only/full/install 命令见
+[tensorrt_yolo/README.md](tensorrt_yolo/README.md)。
+
 When building from this repository, the important options are:
 
 - `KFCORE_BUILD_APRILTAG`: build the vendored AprilTag detector.
@@ -638,6 +646,8 @@ When building from this repository, the important options are:
 - `KFCORE_BUILD_APRILTAG_EXAMPLES`: build AprilTag examples.
 - `KFCORE_BUILD_NAVIGATION_TOOLS`: build frame transform and navigation fusion
   helpers.
+- `KFCORE_BUILD_IMAGE_PROCESSOR`: build the reusable CUDA BGR/RGB image-to-tensor
+  processor without requiring TensorRT or OpenCV.
 - `KFCORE_BUILD_TESTS`: build local tests.
 
 The full repository depends on TurboNet and vcpkg packages such as SIMDe, STC,

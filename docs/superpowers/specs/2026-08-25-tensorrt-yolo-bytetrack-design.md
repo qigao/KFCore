@@ -1,7 +1,7 @@
 # TensorRT YOLO 与 KFCore ByteTrack 集成设计
 
-日期：2026-08-25  
-状态：已批准，待实现计划
+日期：2026-08-25
+状态：已实现并验证
 
 ## 1. 背景与目标
 
@@ -43,7 +43,7 @@ KFCore README 声明 modified BSD-3-Clause；本地 `TensorRT-YOLO` 使用 GPL-3
 ImageView
    |
    v
-TensorRtDetector ---> DetectionFrame
+ImageProcessor ---> TensorRtDetector ---> DetectionFrame
                            |
                            v
                     ByteTrackSession
@@ -63,7 +63,7 @@ TensorRtDetector ---> DetectionFrame
 
 - 读取受信来源的序列化 TensorRT engine；
 - 校验 engine 输入输出契约；
-- 管理 CUDA 预处理、I/O 缓冲、推理和后处理；
+- 通过独立 `KFCore::image_processor` 管理 CUDA 预处理，并管理 TensorRT I/O、推理和后处理；
 - 返回原图坐标系中的 `DetectionFrame`。
 
 所有权：
@@ -236,8 +236,9 @@ struct TrackFrame {
 预处理流程固定为：
 
 1. 校验 `ImageView`；
-2. 将 host 输入异步复制到 detector 工作区，或直接读取同 device 的 CUDA 输入；
-3. 在 detector stream 上执行 letterbox、BGR/RGB 排列和归一化；
+2. 由 `KFCore::image_processor` 将 host 输入打包并异步复制到 detector 工作区，或直接读取同
+   device 的 CUDA 输入；
+3. 由同一处理器在 detector stream 上执行 letterbox、BGR/RGB 排列、归一化和 NCHW 输出；
 4. 设置动态输入 shape 和全部命名张量地址；
 5. `enqueueV3()`；
 6. 仅将四个小型 NMS 输出复制回 host；
@@ -336,11 +337,12 @@ global_id = (uint64(class_id) << 32) | uint32(local_tracker_id)
 新增选项：
 
 - `KFCORE_BUILD_YOLO_TRACKING=OFF`；
+- `KFCORE_BUILD_IMAGE_PROCESSOR=OFF`；
 - `KFCORE_BUILD_TENSORRT_YOLO=OFF`；
 - `KFCORE_BUILD_YOLO_OPENCV=OFF`；
 - `KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=OFF`。
 
-`KFCORE_BUILD_YOLO_TRACKING` 只启用公共类型和跟踪会话，依赖 C++17 与 `KFCore::trackers`，不查找 CUDA、TensorRT 或 OpenCV。`KFCORE_BUILD_TENSORRT_YOLO` 和 `KFCORE_BUILD_YOLO_OPENCV` 均要求 tracking 已启用；若调用方只打开后者，configure 直接给出依赖错误，不隐式改写用户选项。
+`KFCORE_BUILD_YOLO_TRACKING` 只启用公共类型和跟踪会话，依赖 C++17 与 `KFCore::trackers`，不查找 CUDA、TensorRT 或 OpenCV。`KFCORE_BUILD_IMAGE_PROCESSOR` 可独立启用 CUDA 图像处理而不查找 TensorRT。`KFCORE_BUILD_TENSORRT_YOLO` 自动构建 ImageProcessor，且它与 `KFCORE_BUILD_YOLO_OPENCV` 均要求 tracking 已启用。
 
 默认 C-only KFCore 构建不变。启用 TensorRT YOLO 后：
 
@@ -406,6 +408,48 @@ TensorRT engine 一般不跨平台、TensorRT 版本或 GPU 任意移植，因�
 
 - <https://docs.nvidia.com/deeplearning/tensorrt/latest/getting-started/support-matrix.html>
 
+`KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE` 是第二个 configure-time `FILEPATH` cache：空值为明确
+opt-out，不注册额外测试；非空但无效的值在 configure 阶段失败。值有效时，
+`test_tensorrt_integration_yolo11_face` 复用 `test_tensorrt_integration` 二进制，并仅为该 CTest
+注入已验证 face 路径的 `KFCORE_TENSORRT_TEST_ENGINE` 环境变量。这样不新增运行时路径、API 或
+engine 契约。
+
+**事实（2026-08-26 本地验证）**：通用 `yolo11n` 与单类别 `yolov11n-face` engine 均在真实
+TensorRT 11.2 / CUDA 12.8 上运行。face 直接集成测试为 8/8 cases、25 assertions；单独 CTest
+为 1/1；相邻范围为 66 cases、2087 assertions；合并 focused 范围为 74 cases、2112 assertions。
+face engine 使用 `images`、`num_dets`、`boxes`、`scores`、`labels`，其中 `num_dets`/`labels` 为
+INT32，其他为 FP32，全部 `kLINEAR`；profile 为 min `1x3x320x320`、opt `2x3x640x640`、max
+`4x3x960x960`。其动态性以 tensor shapes/profile 为证据，不宣称 raw ONNX metadata 含
+`dynamic=True`。该 strongly typed FP32 engine 为 TensorRT 11.2 与当前 RTX 4060 本地生成，不是
+可移植 fixture，且未提交。
+
+**事实（图片序列）**：6 帧 `zidane` 序列中两个确认轨迹自第 2 帧起保持 `id=0`、`id=1`。静态图片
+重复不能覆盖运动、遮挡或重新关联，因此不把此结果外推为这些时序行为已验证。
+
+可复现命令（本地路径须由部署者替换）：
+
+```powershell
+$env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
+$env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
+$env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
+$env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
+cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
+cmake --build --preset win-yolo-release-user
+ctest --preset win-yolo-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
+ctest --preset win-yolo-tracking-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
+```
+
+### 10.4 YOLO11-face 来源与许可证边界
+
+**事实**：源模型由用户在本地 `yolo-models/yolov11n-face.pt` 提供；上游项目为
+[`akanametov/yolo-face`](https://github.com/akanametov/yolo-face)，规范发布资产为
+[`yolov11n-face.pt`](https://github.com/akanametov/yolo-face/releases/download/1.0.0/yolov11n-face.pt)，
+源码许可证见 [upstream LICENSE](https://github.com/akanametov/yolo-face/blob/dev/LICENSE)。本验证不复制、
+编译或链接上游源码。
+
+`.pt`、ONNX、TensorRT engine、图片和输出均为本地验证产物，不提交。本验证未建立发布资产的单独
+权重再分发授权；任何部署或再分发必须先自行核实适用条款，本文不声明再分发权。
+
 ## 11. 兼容性、迁移与回滚
 
 兼容性：
@@ -432,7 +476,11 @@ TensorRT engine 一般不跨平台、TensorRT 版本或 GPU 任意移植，因�
 
 ## 12. 已知实施约束
 
-当前开发环境尚未发现 TensorRT SDK 或可用于集成测试的 engine。因此可以先完整验证 tracker、数据契约、CMake 关闭路径和 OpenCV 适配；在获得与目标部署环境一致的 TensorRT SDK 和可信 engine 前，不得宣称 TensorRT 编译或 GPU 推理验证完成。
+**事实（2026-08-26）**：此前“当前开发环境尚未发现 TensorRT SDK 或可用于集成测试的 engine”的
+限制已不适用；已在 TensorRT 11.2 / CUDA 12.8 与当前 RTX 4060 上完成本地 `yolo11n` 和
+`yolov11n-face` 验证，具体范围见 10.3。该结论不改变部署边界：序列化 engine 与目标 GPU、
+TensorRT/CUDA 版本绑定，TensorRT/CUDA DLL 仍由部署环境提供；缺少匹配且可信 engine 时，GPU
+推理测试仍是明确阻塞项，不能以其他后端替代。
 
 ## 13. GitHub issue 跟踪
 

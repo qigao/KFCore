@@ -1,5 +1,34 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+set(KFCore_HAS_IMAGE_PROCESSOR "@KFCORE_IMAGE_PROCESSOR_ENABLED@")
+set(KFCore_HAS_SIFT "@KFCORE_BUILD_SIFT@")
+set(KFCore_HAS_SIFT_POPSIFT "@KFCORE_BUILD_SIFT_POPSIFT@")
+set(KFCore_HAS_YOLO_TRACKING "@KFCORE_BUILD_YOLO_TRACKING@")
+set(KFCore_HAS_TENSORRT_YOLO "@KFCORE_BUILD_TENSORRT_YOLO@")
+set(KFCore_HAS_YOLO_OPENCV "@KFCORE_BUILD_YOLO_OPENCV@")
+
+if(KFCore_HAS_IMAGE_PROCESSOR)
+  find_dependency(CUDAToolkit)
+endif()
+
+if(KFCore_HAS_TENSORRT_YOLO)
+  list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_package(TensorRT REQUIRED MODULE)
+endif()
+
+if(KFCore_HAS_YOLO_OPENCV)
+  list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_package(OpenCVLite REQUIRED MODULE COMPONENTS core imgproc)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/KFCoreTargets.cmake")
+
+if(KFCore_HAS_YOLO_TRACKING)
+  find_dependency(trackers CONFIG
+    PATHS "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/cmake/trackers"
+    NO_DEFAULT_PATH)
+endif()
 
 check_required_components(KFCore)

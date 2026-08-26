@@ -27,6 +27,32 @@ include(CMakeOptions.cmake)
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
+include(ValidateTensorRtIntegrationEngine)
+
+if(KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_TRACKING)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_TENSORRT_YOLO requires KFCORE_BUILD_YOLO_TRACKING=ON")
+endif()
+
+if(KFCORE_BUILD_YOLO_OPENCV AND NOT KFCORE_BUILD_YOLO_TRACKING)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_YOLO_OPENCV requires KFCORE_BUILD_YOLO_TRACKING=ON")
+endif()
+
+if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS AND NOT KFCORE_BUILD_TENSORRT_YOLO)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS requires KFCORE_BUILD_TENSORRT_YOLO=ON")
+endif()
+
+if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
+  kfcore_validate_tensorrt_integration_engine(
+    "${KFCORE_TENSORRT_TEST_ENGINE}"
+    KFCORE_TENSORRT_TEST_ENGINE_VALIDATED)
+  kfcore_validate_optional_tensorrt_integration_engine(
+    "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE}"
+    KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_VALIDATED
+    KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE)
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -39,8 +65,56 @@ find_package(TurboNet CONFIG REQUIRED
 
 include(CTest)
 
+if(BUILD_TESTS)
+  add_test(NAME test_find_tensorrt
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_find_tensorrt.cmake")
+  add_test(NAME test_find_opencv_lite
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_find_opencv_lite.cmake")
+  add_test(NAME test_tensorrt_integration_engine_config
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_integration_engine_config.cmake")
+  add_test(NAME test_safe_test_directory
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_safe_test_directory.cmake")
+endif()
+
 add_subdirectory(vendor)
 add_subdirectory(trackers)
+
+set(KFCORE_IMAGE_PROCESSOR_ENABLED OFF)
+if(KFCORE_BUILD_IMAGE_PROCESSOR OR KFCORE_BUILD_TENSORRT_YOLO OR KFCORE_BUILD_SIFT)
+  set(KFCORE_IMAGE_PROCESSOR_ENABLED ON)
+  enable_language(CXX)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  add_subdirectory(image_processor)
+endif()
+
+if(KFCORE_BUILD_SIFT_POPSIFT AND NOT KFCORE_BUILD_SIFT)
+  message(FATAL_ERROR "KFCORE_BUILD_SIFT_POPSIFT requires KFCORE_BUILD_SIFT=ON")
+endif()
+
+if(KFCORE_BUILD_SIFT)
+  add_subdirectory(sift)
+endif()
+
+if(KFCORE_BUILD_YOLO_TRACKING)
+  enable_language(CXX)
+  if(KFCORE_BUILD_TENSORRT_YOLO)
+    find_package(TensorRT REQUIRED)
+  endif()
+  add_subdirectory(tensorrt_yolo)
+endif()
 
 if(KFCORE_BUILD_APRILTAG)
   set(APRILTAG_BUILD_EXAMPLES "${KFCORE_BUILD_APRILTAG_EXAMPLES}" CACHE BOOL
@@ -74,6 +148,16 @@ if(KFCORE_INSTALL)
                   kalman/navigation_tools/nav_fusion2d.h
                   kalman/navigation_tools/nav_fusion3d.h
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
+  endif()
+
+  if(KFCORE_BUILD_TENSORRT_YOLO)
+    install(FILES cmake/FindTensorRT.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+  endif()
+
+  if(KFCORE_BUILD_YOLO_OPENCV)
+    install(FILES cmake/FindOpenCVLite.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
   endif()
 
   install(

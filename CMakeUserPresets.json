@@ -10,6 +10,7 @@
             "environment": {
                 "PROJECT_ROOT": "C:/projects/cpp",
                 "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
+                "CUDA_TOOLKIT_ROOT": "$penv{CUDA_PATH_V12_8}",
                 "VCPKG_ROOT": "C:/tools/vcpkg",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
             }
@@ -20,6 +21,8 @@
             "inherits": "win-toolchain",
             "cacheVariables": {
                 "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "CMAKE_CUDA_COMPILER": "$env{CUDA_TOOLKIT_ROOT}/bin/nvcc.exe",
+                "CUDAToolkit_ROOT": "$env{CUDA_TOOLKIT_ROOT}",
                 "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
@@ -59,7 +62,7 @@
                 "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
                 "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
-                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-dev-user",
@@ -77,12 +80,57 @@
                 "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
                 "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
-                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
                 "win-paths"
             ]
+        },
+        {
+            "name": "win-image-processor-release-user",
+            "displayName": "ImageProcessor CUDA Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "cacheVariables": {
+                "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
+                "KFCORE_BUILD_YOLO_TRACKING": "OFF",
+                "KFCORE_BUILD_TENSORRT_YOLO": "OFF",
+                "KFCORE_BUILD_YOLO_OPENCV": "OFF",
+                "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "win-sift-release-user",
+            "displayName": "SIFT PopSift Release Build (Windows, User)",
+            "inherits": "win-image-processor-release-user",
+            "cacheVariables": {
+                "CMAKE_CUDA_ARCHITECTURES": "native",
+                "KFCORE_BUILD_SIFT": "ON",
+                "KFCORE_BUILD_SIFT_POPSIFT": "ON"
+            }
+        },
+        {
+            "name": "win-yolo-tracking-dev-user",
+            "displayName": "YOLO Tracking Developer Build (Windows, User)",
+            "inherits": "win-dev-user",
+            "cacheVariables": {
+                "KFCORE_BUILD_YOLO_TRACKING": "ON"
+            }
+        },
+        {
+            "name": "win-yolo-release-user",
+            "displayName": "YOLO TensorRT Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "environment": {
+                "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
+                "OPENCV_LITE_ROOT": "$env{PKG_ROOT}/opencv-lite",
+                "PATH": "$env{TENSORRT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_YOLO_TRACKING": "ON",
+                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
+                "KFCORE_BUILD_YOLO_OPENCV": "ON"
+            }
         },
         {
             "name": "linux-dev-user",
@@ -134,6 +182,26 @@
             "configurePreset": "win-release-user"
         },
         {
+            "name": "win-image-processor-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-image-processor-release-user"
+        },
+        {
+            "name": "win-sift-release-user",
+            "inherits": "win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user"
+        },
+        {
+            "name": "win-yolo-tracking-dev-user",
+            "inherits": "win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user"
+        },
+        {
+            "name": "win-yolo-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-yolo-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -151,6 +219,38 @@
         {
             "name": "install-win-release-user",
             "configurePreset": "win-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-image-processor-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-image-processor-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-sift-release-user",
+            "inherits": "install-win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-yolo-tracking-dev-user",
+            "inherits": "install-win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-yolo-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-yolo-release-user",
             "targets": [
                 "install"
             ]
@@ -180,6 +280,26 @@
             "name": "win-release-user",
             "inherits": "base-test",
             "configurePreset": "win-release-user"
+        },
+        {
+            "name": "win-image-processor-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-image-processor-release-user"
+        },
+        {
+            "name": "win-sift-release-user",
+            "inherits": "win-image-processor-release-user",
+            "configurePreset": "win-sift-release-user"
+        },
+        {
+            "name": "win-yolo-tracking-dev-user",
+            "inherits": "win-dev-user",
+            "configurePreset": "win-yolo-tracking-dev-user"
+        },
+        {
+            "name": "win-yolo-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-yolo-release-user"
         },
         {
             "name": "linux-dev-user",
