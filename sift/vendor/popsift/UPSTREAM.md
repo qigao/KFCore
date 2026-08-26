@@ -14,9 +14,11 @@
   @KFCORE_POPSIFT_SOURCE_URL@
 
 The configured revision and URL above are installed with the executable. A
-source-archive build without Git metadata must set `KFCORE_SOURCE_REVISION` to
-its immutable release tag or commit; configuration fails when neither source is
-available.
+source-archive build without matching KFCore Git metadata must set
+`KFCORE_SOURCE_REVISION` to its full 40-hex commit; configuration fails when it
+is absent or malformed. In a KFCore Git checkout the value must match `HEAD`,
+and install fails if `HEAD` changed since configuration or the MPL source tree
+is dirty.
 
 ## Imported scope
 
@@ -71,6 +73,8 @@ are applied, the second command must produce no content diff.
   compiles only the imported library sources into a private static target and
   generates installed provenance with the exact KFCore revision; it is not an
   upstream file.
+- `cmake/verify_source_revision.cmake.in` is KFCore-owned install-time checking
+  that rejects stale configured provenance and uncommitted MPL source changes.
 
 The extraction kernels, configuration types, descriptor layout, and
 `cmake/sift_config.h.in` remain unchanged from the recorded upstream commit.

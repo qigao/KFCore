@@ -8,19 +8,73 @@ set(DISABLE_GRID_FILTER 0)
 set(_popsift_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 set(KFCORE_SOURCE_REVISION "" CACHE STRING
-  "Immutable KFCore tag or commit used in installed source provenance")
+  "Full KFCore commit used in installed source provenance when Git metadata is unavailable")
 set(_kfcore_source_revision "${KFCORE_SOURCE_REVISION}")
-if(_kfcore_source_revision STREQUAL "")
+execute_process(
+  COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse --verify HEAD
+  RESULT_VARIABLE _kfcore_revision_result
+  OUTPUT_VARIABLE _kfcore_git_revision
+  ERROR_VARIABLE _kfcore_revision_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(_kfcore_matching_git_checkout FALSE)
+if(_kfcore_revision_result EQUAL 0 AND NOT _kfcore_git_revision STREQUAL "")
   execute_process(
-    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
-    RESULT_VARIABLE _kfcore_revision_result
-    OUTPUT_VARIABLE _kfcore_source_revision
-    ERROR_VARIABLE _kfcore_revision_error
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse --show-toplevel
+    RESULT_VARIABLE _kfcore_toplevel_result
+    OUTPUT_VARIABLE _kfcore_git_toplevel
     OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(NOT _kfcore_revision_result EQUAL 0 OR _kfcore_source_revision STREQUAL "")
+  if(_kfcore_toplevel_result EQUAL 0)
+    file(REAL_PATH "${PROJECT_SOURCE_DIR}" _kfcore_source_real_path)
+    file(REAL_PATH "${_kfcore_git_toplevel}" _kfcore_git_real_path)
+    if(_kfcore_source_real_path STREQUAL _kfcore_git_real_path)
+      set(_kfcore_matching_git_checkout TRUE)
+    endif()
+  endif()
+endif()
+if(_kfcore_matching_git_checkout)
+  string(LENGTH "${_kfcore_git_revision}" _kfcore_git_revision_length)
+  if(NOT _kfcore_git_revision_length EQUAL 40 OR
+     NOT _kfcore_git_revision MATCHES "^[0-9A-Fa-f]+$")
+    message(FATAL_ERROR "Git returned a non-full KFCore commit: ${_kfcore_git_revision}")
+  endif()
+  if(NOT _kfcore_source_revision STREQUAL "" AND
+     NOT _kfcore_source_revision STREQUAL _kfcore_git_revision)
     message(FATAL_ERROR
-      "CUDA SIFT requires an immutable KFCore source revision for MPL provenance. "
-      "Set KFCORE_SOURCE_REVISION to the release tag or commit. Git error: "
+      "KFCORE_SOURCE_REVISION (${_kfcore_source_revision}) does not match "
+      "the current Git HEAD (${_kfcore_git_revision})")
+  endif()
+  set(_kfcore_source_revision "${_kfcore_git_revision}")
+
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse --git-path HEAD
+    OUTPUT_VARIABLE _kfcore_git_head_path
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  file(REAL_PATH "${_kfcore_git_head_path}" _kfcore_git_head_path
+    BASE_DIRECTORY "${PROJECT_SOURCE_DIR}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${_kfcore_git_head_path}")
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" symbolic-ref -q HEAD
+    RESULT_VARIABLE _kfcore_symbolic_ref_result
+    OUTPUT_VARIABLE _kfcore_symbolic_ref
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(_kfcore_symbolic_ref_result EQUAL 0 AND NOT _kfcore_symbolic_ref STREQUAL "")
+    execute_process(
+      COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse --git-path "${_kfcore_symbolic_ref}"
+      OUTPUT_VARIABLE _kfcore_git_ref_path
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    file(REAL_PATH "${_kfcore_git_ref_path}" _kfcore_git_ref_path
+      BASE_DIRECTORY "${PROJECT_SOURCE_DIR}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${_kfcore_git_ref_path}")
+  endif()
+else()
+  string(LENGTH "${_kfcore_source_revision}" _kfcore_revision_length)
+  if(NOT _kfcore_revision_length EQUAL 40 OR
+     NOT _kfcore_source_revision MATCHES "^[0-9A-Fa-f]+$")
+    message(FATAL_ERROR
+      "CUDA SIFT requires a full 40-hex KFCore commit for MPL provenance. "
+      "Set KFCORE_SOURCE_REVISION when matching KFCore Git metadata is unavailable. Git error: "
       "${_kfcore_revision_error}")
   endif()
 endif()
@@ -32,6 +86,13 @@ configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/UPSTREAM.md"
   "${_popsift_generated_dir}/UPSTREAM.md"
   @ONLY)
+set(KFCORE_CONFIGURED_SOURCE_REVISION "${_kfcore_source_revision}")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_source_revision.cmake.in"
+  "${_popsift_generated_dir}/verify_source_revision.cmake"
+  @ONLY)
+set(KFCORE_POPSIFT_REVISION_VERIFY_SCRIPT
+  "${_popsift_generated_dir}/verify_source_revision.cmake" PARENT_SCOPE)
 
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sift_config.h.in"

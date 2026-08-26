@@ -41,6 +41,7 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/COPYING.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
+  install(SCRIPT "${KFCORE_POPSIFT_REVISION_VERIFY_SCRIPT}")
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor/popsift/generated/UPSTREAM.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
 endif()
