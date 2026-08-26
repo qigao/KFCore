@@ -72,7 +72,7 @@ $env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
 $env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
 cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
 cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user -R "test_tensorrt_integration(_yolo11_face)?"
+ctest --preset win-yolo-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
 ```
 
 `KFCORE_TENSORRT_TEST_ENGINE` 是 configure-time `FILEPATH` cache 变量（同名环境变量仅用于初始化
