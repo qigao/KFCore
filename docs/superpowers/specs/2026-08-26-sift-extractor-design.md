@@ -2,67 +2,86 @@
 
 ## 背景与目标
 
-本地 `sift-cpp-master` 缺少可验证的构建、测试和许可证信息，且审查发现 Hessian 偏移计算错误；
-`popsift-develop` 提供 CUDA SIFT，但公开 API 使用原始指针、内部异步队列，并只接受紧密排列的
-Host 灰度图。KFCore 不复制这两份源码。本次新增自有 SIFT 契约和可选 PopSift 薄适配层，复用
-`KFCore::image_processor` 的图像视图与灰度转换。
+KFCore 需要可复用、可多实例调用的 CUDA SIFT，同时不能把第三方 ABI、原始指针或生命周期规则扩散给调用者。
+原先 PR 只对本机 `popsift-develop` 做薄适配，构建依赖 `POPSIFT_ROOT`，且继承了上游无界队列、worker
+异常无法可靠传回调用线程、未检查 worker 设备选择等问题。这不满足“开发我们自己的版本”的目标。
+
+本设计保留已建立的 `KFCore::sift` 和 `KFCore::sift_popsift` 公共契约，把 PopSift 0.10.1 的算法源码
+作为可追溯的内部 fork 纳入 `sift/vendor/popsift`，由 KFCore 直接构建、测试和维护。外部模型或应用代码
+不进入该目录。
+
+## 上游来源与许可证
+
+- 上游：`https://github.com/alicevision/popsift.git`
+- 基线分支/提交：`develop` / `36d704d39b4cc065839d84f3706b3fa88eff2518`
+- 上游项目版本：`0.10.1`
+- 许可证：MPL-2.0
+- 导入范围：`src/popsift` 的 63 个算法/运行时文件、`cmake/sift_config.h.in` 和 `COPYING.md`
+- 不导入：application、sample、文档站点、独立包导出文件和上游测试命令
+
+`sift/vendor/popsift/UPSTREAM.md` 记录来源、commit、导入范围、本地修改和复验命令。所有上游文件保留
+原 MPL 头；修改过的 MPL 文件仍作为源码随仓库提供。安装产物附带许可证和来源说明。
 
 ## 候选方案
 
-1. 直接暴露 PopSift 类型：改动少，但把第三方 ABI、所有权和错误模型扩散给调用者，拒绝。
-2. 将 PopSift vendor 进仓库：可直接补丁，但引入 MPL-2.0 源码、CUDA 构建和长期维护成本，拒绝。
-3. 自有策略接口加可选薄适配器：公共契约稳定，依赖可选，后续可增加其他实现，采用。
+1. 继续依赖外部 `POPSIFT_ROOT`：改动最小，但构建不可复现，修复与 KFCore 版本脱节，拒绝。
+2. 重新实现完整 CUDA SIFT：控制力最高，但算法验证、性能回归和迁移成本过高，拒绝。
+3. 维护精简 PopSift fork，并以 KFCore 契约隔离：复用已验证算法，同时拥有构建、并发和错误语义，采用。
 
 ## 结构与依赖
 
-- `KFCore::sift`：公共 `SiftExtractor` 策略接口、自有 Feature/错误类型，公开依赖
-  `KFCore::image_processor` 的 `ImageView`。
-- `KFCore::sift_popsift`：可选 PopSift 实现，使用 Pimpl 隔离第三方头文件；仅在
-  `KFCORE_BUILD_SIFT_POPSIFT=ON` 且 `POPSIFT_ROOT` 指向 PopSift 源码树时，以隔离 binary dir
-  参与开发构建。
-- `ImageProcessor::stage_host_grayscale`：将 Host Gray8/BGR8/RGB8 视图转换为紧密 Gray8；不接受
-  CUDA-device 输入，也不做隐式 device-to-host fallback。
+- `KFCore::sift`：公共同步策略接口、自有 Feature/错误类型，依赖 `KFCore::image_processor` 的 `ImageView`。
+- `KFCore::sift_popsift`：公开的 CUDA 实现，继续用 Pimpl 隐藏内部 fork 类型。
+- `kfcore_popsift_internal`：仅构建树可见的静态 CUDA 目标，不安装头文件、不导出 CMake target。
+- `sift/vendor/popsift`：MPL-2.0 算法 fork、内部有界队列和来源记录。
 
-依赖保持单向：调用者 -> SIFT 契约 -> ImageProcessor 类型；PopSift 细节只存在于适配器实现。
+依赖单向为：调用者 -> KFCore SIFT 契约 -> PopSift 适配器 -> 内部 CUDA 算法。删除 `POPSIFT_ROOT`，
+启用 `KFCORE_BUILD_SIFT_POPSIFT=ON` 时只额外要求项目已有的 CUDAToolkit。
 
 ## 数据、所有权与错误
 
-`ImageView` 在 `extract()` 调用期间借用，适配器先验证尺寸、stride、容量和上限，再生成自持有的
-紧密灰度缓冲。返回的 `FeatureSet` 完全拥有特征和 128 维 descriptor，不保留 PopSift 指针。
-每个 PopSift extremum 的每个 orientation 展开为一个 KFCore feature。
-方向以弧度表达；descriptor 归一化模式由显式选项控制，默认 RootSift。
+`ImageView` 仅在 `extract()` 调用期间借用。适配器先验证尺寸、stride、源跨度和容量，再生成自持有的紧密
+Gray8 缓冲。`SiftJob` 拥有该次提交的图像副本；队列只持有非 owning 指针处理租约，调用线程在 future
+完成后销毁 job。返回的 `FeatureSet` 完全拥有特征和 128 维 descriptor，不保留内部指针。
 
-`max_image_bytes` 限制可访问源跨度和灰度工作区，`max_features` 同时传给 PopSift 的 extrema
-过滤器并作为返回 descriptor 的硬上限。非法契约报 `InvalidArgument`，容量/溢出报
-`ResourceLimitExceeded`，第三方异常、空结果或畸形结果报 `BackendFailure`。错误不被静默吞掉。
+`max_image_bytes` 限制源跨度与灰度工作区，`max_features` 同时限制算法过滤与结果，`max_pending_jobs`
+限制 stage-1 待处理队列。所有乘法在分配前检查溢出。非法契约报 `InvalidArgument`，容量/溢出报
+`ResourceLimitExceeded`，CUDA、worker 或畸形结果报 `BackendFailure`，不返回部分成功结果。
 
-## 并发、背压与关闭
+worker 失败通过 `std::promise::set_exception` 传回 `getHost()`/`getDev()`。单 job 的上传或提取异常必须
+归还已取得的 staging image、释放局部 result 并完成该 job；不得导致调用线程永久等待。worker 启动失败
+会关闭输入队列、唤醒 producer，并使未完成 job 以同一错误结束。
 
-PopSift 0.10.1 的常量和 pyramid 缓冲指针是 device-global 状态，同一 CUDA context/device 上创建
-多个原生对象会产生竞态。适配器按 device 注册共享后端：同进程、同 device 且算法配置相同的多个
-逻辑实例共享一个原生对象，并发调用进入 PopSift 自带的线程安全队列；不同进程由独立 CUDA context
-隔离。`max_features` 或 descriptor normalization 不一致时拒绝复用，待旧后端全部释放后才能创建
-新配置。`max_image_bytes` 不影响原生状态，仍由每个逻辑实例独立持有。
+## 并发、容量、背压与关闭
 
-同步 `extract()` 在调用线程等待对应 job，队列和上游两张 image staging buffer 形成自然背压。
-析构前调用者必须确保没有继续访问该逻辑实例；这是常规 C++ 对象生命周期约束。
+拓扑是多 producer -> 单 upload worker -> 单 CUDA extract worker。stage-1 容量为
+`max_pending_jobs`，stage-2 和 staging image pool 容量均为 2。队列在构造期预分配固定存储，push/pull
+期间不分配；满队列的 producer 阻塞，队列关闭后立即失败并被唤醒。
 
-PopSift 自己仍拥有工作线程和队列，其 worker 异常模型属于上游实现；适配器会处理同步可观察到的
-异常、null job 和 null result，但无法恢复第三方进程级终止。这一残余风险必须在 README 中披露。
+关闭顺序为：禁止新提交并关闭 stage-1 -> upload worker 排空已有任务并关闭 stage-2 -> extract worker
+排空并完成 promise -> join 两个 worker -> 释放 staging image 与 pyramid。调用者仍必须保证析构时没有线程
+继续使用同一个逻辑 extractor，这是 C++ 对象生命周期边界。
+
+PopSift 的高斯常量和 pyramid 指针是 device-global 状态。因此同进程同 device 只保留一个原生后端；
+相同 `max_features`、normalization 和 `max_pending_jobs` 的多个逻辑实例共享它，不同配置在旧后端释放前
+fail fast。多个调用线程可并发提交，但单 device 的 CUDA 算法按内部 pipeline 顺序执行。真正的同 device
+多 stream 并行必须先移除 device-global 状态并以 benchmark 证明收益，不在本次迁移中伪称支持。
 
 ## 兼容性、迁移与回滚
 
-`PixelFormat::Gray8` 是枚举的向后兼容扩展；现有 Tensor 预处理仍只接受 BGR8/RGB8，Gray8 只用于
-新的 Host 灰度 API。默认选项关闭，所以现有构建与部署不增加 PopSift 依赖。启用适配器时，安装
-规则会部署本地源码构建所得的 PopSift 动态库及其 `COPYING.md`，但不会把上游源码复制进 KFCore。
-使用者通过链接 `KFCore::sift` 或
-`KFCore::sift_popsift` 渐进迁移。回滚可删除新模块和枚举/API 扩展，不改变已有
-YOLO、AprilTag 或 Kalman 数据格式。
+现有 `SiftExtractor`、`PopSiftExtractor`、Feature 和错误类型保持不变。`PopSiftOptions` 只新增有默认值的
+`max_pending_jobs`，源兼容已有聚合默认构造；不同值参与后端兼容性判断。构建不再读取
+`POPSIFT_ROOT`，安装也不再部署独立 `popsift.dll`，因此部署产物减少一个运行时 DLL。
+
+默认选项仍关闭，未启用 SIFT 的 YOLO、AprilTag 和 Kalman 构建不增加依赖。回滚可以恢复外部适配提交，
+不会改变这些模块的数据格式。MPL 源码与 KFCore 适配器保持文件边界，避免许可证语义扩散到公共头文件。
 
 ## 验证范围
 
-- TinyTest：灰度精确值、padding、Gray8 复制、输入/容量/溢出/内存类型拒绝。
-- TinyTest：SIFT 错误契约和公共类型基本行为。
-- 条件构建：PopSift 适配器编译与真实 API 对齐。
-- 安装消费测试：`KFCore::sift` 导出和运行；启用 PopSift 时从隔离安装前缀加载动态库并构造适配器。
-- 相邻回归：ImageProcessor CPU/CUDA 测试和完整 CTest。
+- TinyTest：`max_pending_jobs` 默认值、零值和上限校验。
+- TinyTest：有界队列 FIFO、满队列背压、close 唤醒、关闭后 push 失败与排空语义。
+- TinyTest：`SiftJob::getHost()` 和 `getDev()` 都能收到 worker exception。
+- CUDA 实测：真实 checkerboard 提取、多逻辑实例、并发提交、冲突配置拒绝及重复构造销毁。
+- CMake：清除 `POPSIFT_ROOT` 后 preset 配置、构建、安装和独立 consumer 运行。
+- 回归：SIFT 最小测试后运行完整 `ctest --preset win-sift-release-user`。
+- 性能：同一持久 extractor 上记录内部化前后多次提取耗时；若出现显著回退，先定位再优化。
