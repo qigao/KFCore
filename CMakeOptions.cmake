@@ -4,6 +4,16 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 option(KFCORE_BUILD_TESTS "Build KFCore C tests" ON)
 option(KFCORE_BUILD_NAVIGATION_TOOLS "Build navigation helper functions" ON)
+option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
+option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
+option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
+option(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS
+       "Build TensorRT YOLO SDK integration tests" OFF)
+set(KFCORE_TENSORRT_TEST_ENGINE "$ENV{KFCORE_TENSORRT_TEST_ENGINE}" CACHE FILEPATH
+    "Trusted TensorRT engine used by the opt-in integration CTest")
+set(KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE
+    "$ENV{KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE}" CACHE FILEPATH
+    "Optional trusted YOLO11-face TensorRT engine used by the opt-in integration CTest")
 option(KFCORE_BUILD_APRILTAG "Build the vendored AprilTag detector library" ON)
 option(KFCORE_BUILD_APRILTAG_EXAMPLES "Build the vendored AprilTag example programs" OFF)
 option(KFCORE_BUILD_APRILTAG_TESTS "Build the vendored AprilTag upstream tests" OFF)

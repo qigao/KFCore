@@ -45,6 +45,26 @@ if(BUILD_TESTS)
   add_test(NAME test_tracker COMMAND test_tracker)
   set_target_properties(test_tracker PROPERTIES
     FOLDER "trackers" )
+
+  add_executable(test_bytetrack_status
+    tests/test_bytetrack_status.c
+    tests/tracker_test_alloc.c
+    src/tracker.c)
+  target_compile_definitions(test_bytetrack_status PRIVATE KFCORE_TRACKERS_TEST_ALLOCATOR)
+  target_include_directories(test_bytetrack_status PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_link_libraries(test_bytetrack_status PRIVATE KFCore::kfcore miniblas TurboUtils::TinyTest)
+  if(WIN32)
+    add_custom_command(
+      TARGET test_bytetrack_status
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:test_bytetrack_status>)
+  endif()
+  add_test(NAME test_bytetrack_status COMMAND test_bytetrack_status)
+  set_target_properties(test_bytetrack_status PROPERTIES
+    FOLDER "trackers" )
 endif()
 
 install(

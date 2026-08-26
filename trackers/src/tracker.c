@@ -1,8 +1,17 @@
 #include "trackers/tracker.h"
 
 #include <math.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+#include "tracker_test_alloc.h"
+#define malloc trackers_test_malloc
+#define calloc trackers_test_calloc
+#define realloc trackers_test_realloc
+#endif
 
 #include "kalman_takasu.h"
 #include "linalg.h"
@@ -22,6 +31,29 @@ typedef struct assignment_result {
     size_t unmatched_col_count;
     int status;
 } assignment_result_t;
+
+typedef struct byte_frame_scratch {
+    int* high_indices;
+    int* low_indices;
+    box_t* track_boxes;
+    box_t* high_boxes;
+    box_t* remaining_boxes;
+    box_t* low_boxes;
+    float* high_iou;
+    float* low_iou;
+    int* high_row_used;
+    int* high_col_used;
+    int* high_match_rows;
+    int* high_match_cols;
+    int* high_unmatched_rows;
+    int* high_unmatched_cols;
+    int* low_row_used;
+    int* low_col_used;
+    int* low_match_rows;
+    int* low_match_cols;
+    int* low_unmatched_rows;
+    int* low_unmatched_cols;
+} byte_frame_scratch_t;
 
 typedef struct kf_xyxy {
     float x[8];
@@ -151,8 +183,19 @@ static int confidence_passes(detection_t detection, float threshold) {
     return !detection.has_confidence || detection.confidence >= threshold;
 }
 
-static int scaled_lost_buffer(int lost_track_buffer, float frame_rate) {
-    return (int)(frame_rate / 30.0f * (float)lost_track_buffer);
+static int scaled_lost_buffer_checked(
+    int lost_track_buffer,
+    float frame_rate,
+    int* result
+) {
+    const float scaled = frame_rate / 30.0f * (float)lost_track_buffer;
+    const double range_checked = (double)scaled;
+    if (!result || !isfinite(scaled) ||
+        range_checked < (double)INT_MIN || range_checked > (double)INT_MAX) {
+        return 0;
+    }
+    *result = (int)scaled;
+    return 1;
 }
 
 static void set_identity(float* matrix, int dim) {
@@ -359,6 +402,155 @@ static assignment_result_t assign_greedy(
     return result;
 }
 
+static void assign_greedy_into(
+    const float* scores,
+    size_t rows,
+    size_t cols,
+    float min_score,
+    int* row_used,
+    int* col_used,
+    assignment_result_t* result
+) {
+    result->match_count = 0;
+    result->unmatched_row_count = 0;
+    result->unmatched_col_count = 0;
+    result->status = 0;
+    if (rows) {
+        memset(row_used, 0, sizeof(*row_used) * rows);
+    }
+    if (cols) {
+        memset(col_used, 0, sizeof(*col_used) * cols);
+    }
+
+    for (;;) {
+        int best_row = -1;
+        int best_col = -1;
+        float best_score = -INFINITY;
+        for (size_t row = 0; row < rows; ++row) {
+            if (row_used[row]) {
+                continue;
+            }
+            for (size_t col = 0; col < cols; ++col) {
+                if (col_used[col]) {
+                    continue;
+                }
+                const float score = scores[row * cols + col];
+                if (score > best_score) {
+                    best_score = score;
+                    best_row = (int)row;
+                    best_col = (int)col;
+                }
+            }
+        }
+        if (best_row < 0 || best_col < 0 || best_score < min_score) {
+            break;
+        }
+        row_used[best_row] = 1;
+        col_used[best_col] = 1;
+        result->match_rows[result->match_count] = best_row;
+        result->match_cols[result->match_count] = best_col;
+        ++result->match_count;
+    }
+
+    for (size_t row = 0; row < rows; ++row) {
+        if (!row_used[row]) {
+            result->unmatched_rows[result->unmatched_row_count++] = (int)row;
+        }
+    }
+    for (size_t col = 0; col < cols; ++col) {
+        if (!col_used[col]) {
+            result->unmatched_cols[result->unmatched_col_count++] = (int)col;
+        }
+    }
+
+    for (size_t i = 1; i < result->match_count; ++i) {
+        const int row = result->match_rows[i];
+        const int col = result->match_cols[i];
+        size_t j = i;
+        while (j > 0 && result->match_rows[j - 1] > row) {
+            result->match_rows[j] = result->match_rows[j - 1];
+            result->match_cols[j] = result->match_cols[j - 1];
+            --j;
+        }
+        result->match_rows[j] = row;
+        result->match_cols[j] = col;
+    }
+}
+
+static int checked_multiply_size(size_t left, size_t right, size_t* result) {
+    if (left != 0 && right > SIZE_MAX / left) {
+        return 0;
+    }
+    *result = left * right;
+    return 1;
+}
+
+static int checked_add_size(size_t left, size_t right, size_t* result) {
+    if (right > SIZE_MAX - left) {
+        return 0;
+    }
+    *result = left + right;
+    return 1;
+}
+
+static tracker_status_t allocate_array(void** data, size_t count, size_t element_size) {
+    size_t bytes = 0;
+    if (!checked_multiply_size(count, element_size, &bytes)) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+    *data = count ? malloc(bytes) : NULL;
+    return count && !*data ? TRACKER_STATUS_ALLOCATION_FAILED : TRACKER_STATUS_OK;
+}
+
+static void byte_frame_scratch_release(byte_frame_scratch_t* scratch) {
+    free(scratch->high_indices);
+    free(scratch->low_indices);
+    free(scratch->track_boxes);
+    free(scratch->high_boxes);
+    free(scratch->remaining_boxes);
+    free(scratch->low_boxes);
+    free(scratch->high_iou);
+    free(scratch->low_iou);
+    free(scratch->high_row_used);
+    free(scratch->high_col_used);
+    free(scratch->high_match_rows);
+    free(scratch->high_match_cols);
+    free(scratch->high_unmatched_rows);
+    free(scratch->high_unmatched_cols);
+    free(scratch->low_row_used);
+    free(scratch->low_col_used);
+    free(scratch->low_match_rows);
+    free(scratch->low_match_cols);
+    free(scratch->low_unmatched_rows);
+    free(scratch->low_unmatched_cols);
+    memset(scratch, 0, sizeof(*scratch));
+}
+
+static void gather_boxes_into(
+    box_t* boxes,
+    const detection_t* detections,
+    const int* indices,
+    size_t count
+) {
+    for (size_t i = 0; i < count; ++i) {
+        boxes[i] = detections[indices[i]].box;
+    }
+}
+
+static void build_iou_matrix_into(
+    float* matrix,
+    const box_t* rows,
+    size_t row_count,
+    const box_t* cols,
+    size_t col_count
+) {
+    for (size_t row = 0; row < row_count; ++row) {
+        for (size_t col = 0; col < col_count; ++col) {
+            matrix[row * col_count + col] = compute_iou(rows[row], cols[col]);
+        }
+    }
+}
+
 static float* build_iou_matrix(const box_t* rows, size_t row_count,
                                const box_t* cols, size_t col_count) {
     const size_t count = row_count * col_count;
@@ -523,12 +715,16 @@ ocsort_config_t ocsort_default_config(void) {
 sort_t* sort_create(const sort_config_t* config_in) {
     const sort_config_t config =
         config_in ? *config_in : sort_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     sort_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -670,12 +866,16 @@ size_t sort_update(sort_t* tracker, const detection_t* detections,
 bytetrack_t* bytetrack_create(const bytetrack_config_t* config_in) {
     const bytetrack_config_t config =
         config_in ? *config_in : bytetrack_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     bytetrack_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -699,17 +899,40 @@ void bytetrack_reset(bytetrack_t* tracker) {
     tracker->next_id = 0;
 }
 
-static byte_track_t* byte_add_track(bytetrack_t* tracker, box_t box) {
-    if (!ensure_capacity((void**)&tracker->tracks, &tracker->track_capacity,
-                         sizeof(tracker->tracks[0]), tracker->track_count + 1)) {
-        return NULL;
+tracker_status_t bytetrack_clone(const bytetrack_t* source, bytetrack_t** output) {
+    bytetrack_t* clone;
+    size_t track_bytes = 0;
+
+    if (!source || !output) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
     }
-    byte_track_t* track = &tracker->tracks[tracker->track_count++];
-    memset(track, 0, sizeof(*track));
-    track->tracker_id = -1;
-    track->number_of_successful_updates = 1;
-    kf_xyxy_init(&track->estimator, box);
-    return track;
+    *output = NULL;
+    if (source->track_count > source->track_capacity ||
+        (source->track_capacity && !source->tracks) ||
+        !checked_multiply_size(source->track_capacity, sizeof(*source->tracks), &track_bytes)) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
+    clone = calloc(1, sizeof(*clone));
+    if (!clone) {
+        return TRACKER_STATUS_ALLOCATION_FAILED;
+    }
+    *clone = *source;
+    clone->tracks = NULL;
+    if (source->track_capacity) {
+        clone->tracks = malloc(track_bytes);
+        if (!clone->tracks) {
+            free(clone);
+            return TRACKER_STATUS_ALLOCATION_FAILED;
+        }
+        if (source->track_count) {
+            memcpy(clone->tracks, source->tracks,
+                   sizeof(*clone->tracks) * source->track_count);
+        }
+    }
+
+    *output = clone;
+    return TRACKER_STATUS_OK;
 }
 
 static void byte_retain_alive(bytetrack_t* tracker) {
@@ -740,69 +963,188 @@ static box_t* gather_boxes(const detection_t* detections, const int* indices, si
     return boxes;
 }
 
-size_t bytetrack_update(bytetrack_t* tracker,
-                                 const detection_t* detections,
-                                 size_t detection_count,
-                                 tracked_detection_t* output,
-                                 size_t output_capacity) {
-    if (!tracker || (!detections && detection_count)) {
-        return 0;
-    }
-    if (tracker->track_count == 0 && detection_count == 0) {
-        return 0;
+static tracker_status_t byte_reserve_tracks(bytetrack_t* tracker, size_t required_capacity) {
+    if (tracker->track_capacity >= required_capacity) {
+        return TRACKER_STATUS_OK;
     }
 
-    size_t output_count = 0;
-    int* high_indices = detection_count ? malloc(sizeof(int) * detection_count) : NULL;
-    int* low_indices = detection_count ? malloc(sizeof(int) * detection_count) : NULL;
-    box_t* track_boxes = tracker->track_count ? malloc(sizeof(*track_boxes) * tracker->track_count) : NULL;
-    if ((detection_count && (!high_indices || !low_indices)) ||
-        (tracker->track_count && !track_boxes)) {
-        free(high_indices);
-        free(low_indices);
-        free(track_boxes);
-        return 0;
+    size_t new_capacity = tracker->track_capacity == 0 ? 4 : tracker->track_capacity;
+    while (new_capacity < required_capacity) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = required_capacity;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(*tracker->tracks)) {
+        return TRACKER_STATUS_OVERFLOW;
     }
 
-    for (size_t i = 0; i < tracker->track_count; ++i) {
-        kf_xyxy_predict(&tracker->tracks[i].estimator);
-        ++tracker->tracks[i].time_since_update;
-        track_boxes[i] = kf_xyxy_box(&tracker->tracks[i].estimator);
+    byte_track_t* tracks = realloc(tracker->tracks, sizeof(*tracks) * new_capacity);
+    if (!tracks) {
+        return TRACKER_STATUS_ALLOCATION_FAILED;
+    }
+    tracker->tracks = tracks;
+    tracker->track_capacity = new_capacity;
+    return TRACKER_STATUS_OK;
+}
+
+static byte_track_t* byte_add_track_prepared(bytetrack_t* tracker, box_t box) {
+    if (tracker->track_count == tracker->track_capacity) {
+        return NULL;
+    }
+    byte_track_t* track = &tracker->tracks[tracker->track_count++];
+    memset(track, 0, sizeof(*track));
+    track->tracker_id = -1;
+    track->number_of_successful_updates = 1;
+    kf_xyxy_init(&track->estimator, box);
+    return track;
+}
+
+static void push_tracked_ex(
+    tracked_detection_ex_t* output,
+    size_t* count,
+    detection_t detection,
+    size_t detection_index,
+    int tracker_id
+) {
+    output[*count].tracked.detection = detection;
+    output[*count].tracked.tracker_id = tracker_id;
+    output[*count].detection_index = detection_index;
+    ++(*count);
+}
+
+static tracker_status_t byte_allocate_frame_scratch(
+    byte_frame_scratch_t* scratch,
+    size_t track_count,
+    size_t high_count,
+    size_t low_count
+) {
+    const size_t high_matches = track_count < high_count ? track_count : high_count;
+    const size_t low_matches = track_count < low_count ? track_count : low_count;
+    size_t high_iou_count = 0;
+    size_t low_iou_count = 0;
+    tracker_status_t status;
+
+    if (!checked_multiply_size(track_count, high_count, &high_iou_count) ||
+        !checked_multiply_size(track_count, low_count, &low_iou_count)) {
+        return TRACKER_STATUS_OVERFLOW;
     }
 
+#define BYTE_ALLOCATE(member, count) \
+    do { \
+        status = allocate_array((void**)&scratch->member, (count), sizeof(*scratch->member)); \
+        if (status != TRACKER_STATUS_OK) { \
+            return status; \
+        } \
+    } while (0)
+    BYTE_ALLOCATE(track_boxes, track_count);
+    BYTE_ALLOCATE(high_boxes, high_count);
+    BYTE_ALLOCATE(remaining_boxes, track_count);
+    BYTE_ALLOCATE(low_boxes, low_count);
+    BYTE_ALLOCATE(high_iou, high_iou_count);
+    BYTE_ALLOCATE(low_iou, low_iou_count);
+    BYTE_ALLOCATE(high_row_used, track_count);
+    BYTE_ALLOCATE(high_col_used, high_count);
+    BYTE_ALLOCATE(high_match_rows, high_matches);
+    BYTE_ALLOCATE(high_match_cols, high_matches);
+    BYTE_ALLOCATE(high_unmatched_rows, track_count);
+    BYTE_ALLOCATE(high_unmatched_cols, high_count);
+    BYTE_ALLOCATE(low_row_used, track_count);
+    BYTE_ALLOCATE(low_col_used, low_count);
+    BYTE_ALLOCATE(low_match_rows, low_matches);
+    BYTE_ALLOCATE(low_match_cols, low_matches);
+    BYTE_ALLOCATE(low_unmatched_rows, track_count);
+    BYTE_ALLOCATE(low_unmatched_cols, low_count);
+#undef BYTE_ALLOCATE
+    return TRACKER_STATUS_OK;
+}
+
+tracker_status_t bytetrack_update_ex(
+    bytetrack_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+) {
+    byte_frame_scratch_t scratch;
+    assignment_result_t high;
+    assignment_result_t low;
     size_t high_count = 0;
     size_t low_count = 0;
+    size_t required_capacity = 0;
+    tracker_status_t status;
+
+    if (output_count) {
+        *output_count = 0;
+    }
+    if (!tracker || !output_count || (!detections && detection_count)) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
+    }
+    if (detection_count > output_capacity || (detection_count && !output)) {
+        return TRACKER_STATUS_CAPACITY;
+    }
+    if (detection_count > INT_MAX || tracker->track_count > INT_MAX || tracker->next_id < 0 ||
+        tracker->track_count > (size_t)INT_MAX - (size_t)tracker->next_id ||
+        detection_count > SIZE_MAX / sizeof(int) ||
+        detection_count > SIZE_MAX / sizeof(tracked_detection_ex_t) ||
+        !checked_add_size(tracker->track_count, detection_count, &required_capacity)) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
+    memset(&scratch, 0, sizeof(scratch));
+    memset(&high, 0, sizeof(high));
+    memset(&low, 0, sizeof(low));
+    status = allocate_array((void**)&scratch.high_indices, detection_count,
+                            sizeof(*scratch.high_indices));
+    if (status == TRACKER_STATUS_OK) {
+        status = allocate_array((void**)&scratch.low_indices, detection_count,
+                                sizeof(*scratch.low_indices));
+    }
+    if (status != TRACKER_STATUS_OK) {
+        byte_frame_scratch_release(&scratch);
+        return status;
+    }
+
     for (size_t i = 0; i < detection_count; ++i) {
-        const float conf = confidence_or(detections[i], 0.0f);
-        if (conf >= tracker->high_conf_det_threshold) {
-            high_indices[high_count++] = (int)i;
+        if (confidence_or(detections[i], 0.0f) >= tracker->high_conf_det_threshold) {
+            scratch.high_indices[high_count++] = (int)i;
         } else {
-            low_indices[low_count++] = (int)i;
+            scratch.low_indices[low_count++] = (int)i;
         }
     }
 
-    box_t* high_boxes = gather_boxes(detections, high_indices, high_count);
-    float* high_iou = build_iou_matrix(track_boxes, tracker->track_count, high_boxes, high_count);
-    assignment_result_t high = assign_greedy(
-        high_iou,
-        tracker->track_count,
-        high_count,
-        tracker->minimum_iou_threshold
-    );
-
-    if (high.status == -1 || (high_count && !high_boxes)) {
-        free_assignment(&high);
-        free(high_iou);
-        free(high_boxes);
-        free(track_boxes);
-        free(high_indices);
-        free(low_indices);
-        return 0;
+    status = byte_allocate_frame_scratch(&scratch, tracker->track_count, high_count, low_count);
+    if (status == TRACKER_STATUS_OK) {
+        status = byte_reserve_tracks(tracker, required_capacity);
     }
+    if (status != TRACKER_STATUS_OK) {
+        byte_frame_scratch_release(&scratch);
+        return status;
+    }
+
+    gather_boxes_into(scratch.high_boxes, detections, scratch.high_indices, high_count);
+    gather_boxes_into(scratch.low_boxes, detections, scratch.low_indices, low_count);
+    for (size_t i = 0; i < tracker->track_count; ++i) {
+        kf_xyxy_predict(&tracker->tracks[i].estimator);
+        ++tracker->tracks[i].time_since_update;
+        scratch.track_boxes[i] = kf_xyxy_box(&tracker->tracks[i].estimator);
+    }
+    build_iou_matrix_into(scratch.high_iou, scratch.track_boxes, tracker->track_count,
+                          scratch.high_boxes, high_count);
+
+    high.match_rows = scratch.high_match_rows;
+    high.match_cols = scratch.high_match_cols;
+    high.unmatched_rows = scratch.high_unmatched_rows;
+    high.unmatched_cols = scratch.high_unmatched_cols;
+    assign_greedy_into(scratch.high_iou, tracker->track_count, high_count,
+                       tracker->minimum_iou_threshold, scratch.high_row_used,
+                       scratch.high_col_used, &high);
 
     for (size_t i = 0; i < high.match_count; ++i) {
         const int row = high.match_rows[i];
-        const int det_idx = high_indices[high.match_cols[i]];
+        const int det_idx = scratch.high_indices[high.match_cols[i]];
         byte_track_t* track = &tracker->tracks[row];
         kf_xyxy_update(&track->estimator, detections[det_idx].box);
         ++track->number_of_successful_updates;
@@ -811,42 +1153,28 @@ size_t bytetrack_update(bytetrack_t* tracker,
             track->tracker_id == -1) {
             track->tracker_id = tracker->next_id++;
         }
-        push_tracked(output, output_capacity, &output_count, detections[det_idx], track->tracker_id);
+        push_tracked_ex(output, output_count, detections[det_idx], (size_t)det_idx,
+                        track->tracker_id);
     }
 
-    box_t* remaining_boxes =
-        high.unmatched_row_count ? malloc(sizeof(*remaining_boxes) * high.unmatched_row_count) : NULL;
     for (size_t i = 0; i < high.unmatched_row_count; ++i) {
-        remaining_boxes[i] = kf_xyxy_box(&tracker->tracks[high.unmatched_rows[i]].estimator);
+        scratch.remaining_boxes[i] =
+            kf_xyxy_box(&tracker->tracks[high.unmatched_rows[i]].estimator);
     }
-    box_t* low_boxes = gather_boxes(detections, low_indices, low_count);
-    float* low_iou = build_iou_matrix(remaining_boxes, high.unmatched_row_count, low_boxes, low_count);
-    assignment_result_t low = assign_greedy(
-        low_iou,
-        high.unmatched_row_count,
-        low_count,
-        tracker->minimum_iou_threshold
-    );
+    build_iou_matrix_into(scratch.low_iou, scratch.remaining_boxes, high.unmatched_row_count,
+                          scratch.low_boxes, low_count);
 
-    if (low.status == -1 || 
-        (high.unmatched_row_count && !remaining_boxes) ||
-        (low_count && !low_boxes)) {
-        free_assignment(&low);
-        free(low_iou);
-        free(low_boxes);
-        free(remaining_boxes);
-        free_assignment(&high);
-        free(high_iou);
-        free(high_boxes);
-        free(track_boxes);
-        free(high_indices);
-        free(low_indices);
-        return 0;
-    }
+    low.match_rows = scratch.low_match_rows;
+    low.match_cols = scratch.low_match_cols;
+    low.unmatched_rows = scratch.low_unmatched_rows;
+    low.unmatched_cols = scratch.low_unmatched_cols;
+    assign_greedy_into(scratch.low_iou, high.unmatched_row_count, low_count,
+                       tracker->minimum_iou_threshold, scratch.low_row_used,
+                       scratch.low_col_used, &low);
 
     for (size_t i = 0; i < low.match_count; ++i) {
         const int track_idx = high.unmatched_rows[low.match_rows[i]];
-        const int det_idx = low_indices[low.match_cols[i]];
+        const int det_idx = scratch.low_indices[low.match_cols[i]];
         byte_track_t* track = &tracker->tracks[track_idx];
         kf_xyxy_update(&track->estimator, detections[det_idx].box);
         ++track->number_of_successful_updates;
@@ -855,44 +1183,72 @@ size_t bytetrack_update(bytetrack_t* tracker,
             track->tracker_id == -1) {
             track->tracker_id = tracker->next_id++;
         }
-        push_tracked(output, output_capacity, &output_count, detections[det_idx], track->tracker_id);
+        push_tracked_ex(output, output_count, detections[det_idx], (size_t)det_idx,
+                        track->tracker_id);
     }
 
     for (size_t i = 0; i < low.unmatched_col_count; ++i) {
-        const int det_idx = low_indices[low.unmatched_cols[i]];
-        push_tracked(output, output_capacity, &output_count, detections[det_idx], -1);
+        const int det_idx = scratch.low_indices[low.unmatched_cols[i]];
+        push_tracked_ex(output, output_count, detections[det_idx], (size_t)det_idx, -1);
     }
     for (size_t i = 0; i < high.unmatched_col_count; ++i) {
-        const int det_idx = high_indices[high.unmatched_cols[i]];
+        const int det_idx = scratch.high_indices[high.unmatched_cols[i]];
         if (confidence_or(detections[det_idx], 0.0f) >= tracker->track_activation_threshold) {
-            (void)byte_add_track(tracker, detections[det_idx].box);
+            (void)byte_add_track_prepared(tracker, detections[det_idx].box);
         }
-        push_tracked(output, output_capacity, &output_count, detections[det_idx], -1);
+        push_tracked_ex(output, output_count, detections[det_idx], (size_t)det_idx, -1);
     }
 
     byte_retain_alive(tracker);
-    free_assignment(&low);
-    free(low_iou);
-    free(low_boxes);
-    free(remaining_boxes);
-    free_assignment(&high);
-    free(high_iou);
-    free(high_boxes);
-    free(track_boxes);
-    free(high_indices);
-    free(low_indices);
+    byte_frame_scratch_release(&scratch);
+    return TRACKER_STATUS_OK;
+}
+
+size_t bytetrack_update(
+    bytetrack_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_t* output,
+    size_t output_capacity
+) {
+    tracked_detection_ex_t* indexed_output;
+    size_t output_count = 0;
+    if (!tracker || (!detections && detection_count) ||
+        detection_count > SIZE_MAX / sizeof(*indexed_output)) {
+        return 0;
+    }
+
+    indexed_output = detection_count ? malloc(sizeof(*indexed_output) * detection_count) : NULL;
+    if (detection_count && !indexed_output) {
+        return 0;
+    }
+    if (bytetrack_update_ex(tracker, detections, detection_count, indexed_output,
+                            detection_count, &output_count) != TRACKER_STATUS_OK) {
+        free(indexed_output);
+        return 0;
+    }
+    for (size_t i = 0; i < output_count && i < output_capacity; ++i) {
+        if (output) {
+            output[i] = indexed_output[i].tracked;
+        }
+    }
+    free(indexed_output);
     return output_count;
 }
 
 cbiou_t* cbiou_create(const cbiou_config_t* config_in) {
     const cbiou_config_t config =
         config_in ? *config_in : cbiou_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     cbiou_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_biou_threshold = config.minimum_biou_threshold;
     tracker->track_activation_threshold = config.track_activation_threshold;
@@ -1123,12 +1479,16 @@ static void ocsort_track_free(ocsort_track_t* track) {
 ocsort_t* ocsort_create(const ocsort_config_t* config_in) {
     const ocsort_config_t config =
         config_in ? *config_in : ocsort_default_config();
+    int maximum_frames_without_update = 0;
+    if (!scaled_lost_buffer_checked(config.lost_track_buffer, config.frame_rate,
+                                    &maximum_frames_without_update)) {
+        return NULL;
+    }
     ocsort_t* tracker = calloc(1, sizeof(*tracker));
     if (!tracker) {
         return NULL;
     }
-    tracker->maximum_frames_without_update =
-        scaled_lost_buffer(config.lost_track_buffer, config.frame_rate);
+    tracker->maximum_frames_without_update = maximum_frames_without_update;
     tracker->minimum_consecutive_frames = config.minimum_consecutive_frames;
     tracker->minimum_iou_threshold = config.minimum_iou_threshold;
     tracker->direction_consistency_weight = config.direction_consistency_weight;

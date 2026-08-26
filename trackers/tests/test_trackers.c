@@ -132,6 +132,49 @@ spec("trackers c") {
         bytetrack_destroy(tracker);
     }
 
+    it("reports indexed detections without changing legacy output") {
+        bytetrack_config_t config = bytetrack_default_config();
+        config.minimum_consecutive_frames = 1;
+        bytetrack_t* tracker = bytetrack_create(&config);
+        detection_t detections[2] = {
+            make_detection(100.0f, 0.0f, 110.0f, 10.0f, 0.95f),
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f),
+        };
+        tracked_detection_ex_t output[2];
+        size_t written = 99;
+
+        check_equal(bytetrack_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_less(output[0].detection_index, (size_t)2);
+        check_less(output[1].detection_index, (size_t)2);
+        check_not_equal(output[0].detection_index, output[1].detection_index);
+        bytetrack_destroy(tracker);
+    }
+
+    it("rejects short output capacity without advancing tracker state") {
+        bytetrack_config_t config = bytetrack_default_config();
+        config.minimum_consecutive_frames = 1;
+        bytetrack_t* tracker = bytetrack_create(&config);
+        detection_t detections[1] = {
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f),
+        };
+        size_t written = 99;
+
+        check_equal(bytetrack_update_ex(tracker, detections, 1, NULL, 0, &written),
+                    TRACKER_STATUS_CAPACITY);
+        check_equal(written, (size_t)0);
+
+        tracked_detection_ex_t output[1];
+        check_equal(bytetrack_update_ex(tracker, detections, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(output[0].tracked.tracker_id, -1);
+        check_equal(bytetrack_update_ex(tracker, detections, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(output[0].tracked.tracker_id, 0);
+        bytetrack_destroy(tracker);
+    }
+
     it("bytetrack promotes mature ids on the second match") {
         bytetrack_t* tracker = bytetrack_create(NULL);
         detection_t frame1[1] = {
