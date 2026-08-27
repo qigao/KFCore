@@ -154,7 +154,7 @@
             "name": "win-face-applications-release-user",
             "displayName": "TensorRT Face Applications Release Build (Windows, User)",
             "inherits": "win-yolo-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Face-Applications-Release",
+            "binaryDir": "${sourceDir}/build/Msvc-Face",
             "cacheVariables": {
                 "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
                 "KFCORE_BUILD_FACE_MODELS": "ON",

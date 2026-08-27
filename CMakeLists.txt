@@ -223,7 +223,7 @@ if(KFCORE_INSTALL)
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
   endif()
 
-  if(KFCORE_BUILD_YOLO_OPENCV)
+  if(KFCORE_BUILD_YOLO_OPENCV OR KFCORE_BUILD_FACE_APPLICATIONS)
     install(FILES cmake/FindOpenCVLite.cmake
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
   endif()

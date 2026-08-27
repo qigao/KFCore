@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <functional>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -116,5 +117,14 @@ spec("face swap CLI arguments")
         values = required_arguments(file.path);
         values[8] = "this-face-swap-engine-must-not-exist.engine";
         expect_failure(values, "--detector");
+    }
+
+    it("rejects an output alias that resolves to an input file")
+    {
+        TempFile file;
+        std::vector<std::string> values = required_arguments(file.path);
+        const std::filesystem::path input(file.path);
+        values[6] = (input.parent_path() / "." / input.filename()).string();
+        expect_failure(values, "--output");
     }
 }

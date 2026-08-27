@@ -653,6 +653,8 @@ profile 从继承环境的 `TENSORRT_ROOT` 查找 SDK，不会把开发机路径
 | Face68 (`TensorRtFace68`) | 已准备的 FP32 `[N,3,256,256]` | FP32 `[N,68,3]`，以及 engine 中存在时仍须绑定的 heatmap | 68 个 raw `(x,y,score)`；`x/y` 位于模型 256 像素坐标系 | 基于 bbox 的 affine crop 到 256×256、BGR、除以 255；调用方还需把输出坐标映射回原图 |
 | ArcFace (`TensorRtArcFace`) | 已准备的 FP32 `[N,3,112,112]` | FP32 `[N,512]` | 512 个 raw embedding 值，不隐式 L2 normalize | 基于 5 点人脸关键点的 similarity align 到 112×112、RGB、`value / 127.5 - 1` |
 | Age/Gender (`TensorRtAgeGender`) | 已准备的 FP32 `[N,3,224,224]` | FP32 `[N,2]` | 两个 raw logits；语义顺序不命名 | face ROI resize 到 224×224、RGB、ImageNet mean `[0.485,0.456,0.406]` / std `[0.229,0.224,0.225]` normalize |
+| InSwapper (`TensorRtInSwapper`) | target FP32 `[1,3,128,128]` + projected source FP32 `[1,512]` | FP32 `[1,3,128,128]` | 拥有内存的 RGB CHW `[0,1]` 输出 | 5 点对齐、RGB `/255`；ArcFace embedding 还须经 512×512 sidecar matrix 投影并 L2 normalize |
+| GFPGAN (`TensorRtGfpGan`) | 已准备的 FP32 `[1,3,512,512]` | FP32 `[1,3,512,512]` | 拥有内存的 RGB CHW `[-1,1]` 输出 | 5 点对齐、RGB、`value / 127.5 - 1`；paste-back 与 blend 属于应用层 |
 
 这些 face adapter 不会替调用方完成上述预处理。真实 engine 的 zero-input smoke 只验证
 TensorRT/CUDA 绑定、执行、输出有限值与结果尺寸；raw outputs 也只保留模型输出语义。两者都不是
@@ -665,6 +667,14 @@ Windows 可从父环境提供 `TENSORRT_ROOT`，以及可选的同名
 `win-tensorrt-models-release-user` 的 configure/build/test 入口及
 `install-win-tensorrt-models-release-user` 安装入口。engine 变量为空时只报告对应真实 engine
 测试未注册；普通 preset 与普通安装路径仍保持 integration option 为 `OFF`。
+
+### TensorRT 12face 换脸应用
+
+`KFCore::face_applications` 把上述 prepared-tensor adapters 组成同步单脸应用：
+YOLOv12-face（唯一检测入口）→ Face68 → ArcFace → InSwapper，并可显式启用
+GFPGAN 与 Age/Gender。它依赖 OpenCV Lite 的 `core/imgproc`，命令行示例另外依赖
+`imgcodecs`。模型 I/O、matrix sidecar、所有权、非重入约束、构建和真实模型验证命令见
+[face_applications/README.md](face_applications/README.md)。
 
 When building from this repository, the important options are:
 

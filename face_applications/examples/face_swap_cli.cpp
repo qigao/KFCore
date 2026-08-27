@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -96,6 +97,28 @@ void require_readable_file(const std::string& path, const char* option)
     }
 }
 
+bool resolves_to_same_file(const std::string& left, const std::string& right)
+{
+    namespace fs = std::filesystem;
+    std::error_code error;
+    if (fs::equivalent(fs::path(left), fs::path(right), error))
+    {
+        return true;
+    }
+    error.clear();
+    const fs::path normalized_left = fs::weakly_canonical(fs::path(left), error);
+    if (error)
+    {
+        fail("cannot resolve path: " + left);
+    }
+    const fs::path normalized_right = fs::weakly_canonical(fs::path(right), error);
+    if (error)
+    {
+        fail("cannot resolve path: " + right);
+    }
+    return normalized_left == normalized_right;
+}
+
 } // namespace
 
 Arguments parse_arguments(const std::vector<std::string>& values)
@@ -129,7 +152,8 @@ Arguments parse_arguments(const std::vector<std::string>& values)
             require_readable_file(value_of(arguments, binding), binding.name);
         }
     }
-    if (arguments.output == arguments.source || arguments.output == arguments.target)
+    if (resolves_to_same_file(arguments.output, arguments.source) ||
+        resolves_to_same_file(arguments.output, arguments.target))
     {
         fail("--output must differ from --source and --target");
     }

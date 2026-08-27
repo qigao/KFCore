@@ -106,6 +106,7 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_tensorrt_runtime_consumer_ninja}"
         "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
         "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
+        "-DKFCORE_CONSUMER_TURBOUTILS_ROOT=$ENV{TURBOUTILS_ROOT}"
         -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer.cmake")
   endif()
 
