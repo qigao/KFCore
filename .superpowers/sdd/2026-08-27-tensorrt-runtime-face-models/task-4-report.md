@@ -278,3 +278,73 @@ selection，不改变 runtime、adapter、模型输入或输出解释。
   missing/unknown 均 exit 1，三个合法 selector 均为 `1 passed / 0 filtered`。
 - `LOW`：CMake helper fixture ledger 未扩展，按 review 明确留给 final review。
 - 生产影响：无；本轮只修改 opt-in integration 测试源码、CTest 注册与 Task 4 报告。
+
+## Fix round 2（scoped re-review）
+
+### Root cause 与最小修复
+
+`InitializationStream::close()` 在 checked `cudaStreamDestroy` 成功前把成员 handle 清空；若
+destroy 返回错误，析构看不到原 handle，无法再执行 RAII cleanup，而
+`ZeroedDeviceBuffer` 的构造异常路径会先释放 device buffer。该测试专用 stream abstraction
+因此产生了不必要且错误语义含混的双资源清理顺序。
+
+最小修复删除该 abstraction。device buffer 仍由 `ZeroedDeviceBuffer` 独占并通过
+`cudaMalloc`/`cudaFree` 管理；初始化改为 checked
+`cudaMemsetAsync(data, 0, bytes, nullptr)`，紧接 checked
+`cudaStreamSynchronize(nullptr)`。只有 default stream 同步成功，构造才完成并允许后续
+executor 的 non-blocking stream 读取，因而建立明确 happens-before，且不再拥有额外 stream
+handle。device input 构造后、executor 返回后、buffer 析构后以及 runtime teardown 后的 caller
+CUDA device 复验均保留。
+
+### 合法 selector + 缺失 engine transcript
+
+在 TensorRT/CUDA runtime 已加入 `PATH` 的 VS developer environment 中运行：
+
+```text
+set KFCORE_FACE_MODEL_TEST_KIND=arcface
+set KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE=
+build\Msvc-Release\bin\test_face_models_integration.exe
+```
+
+实测输出与进程状态：
+
+```text
+TensorRT face model real-engine integration
+  executes exactly one adapter selected by an exact model kind
+  [ FAIL  ]
+    Unhandled C++ exception: KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE must name a trusted TensorRT engine
+
+Total tests [PASSED]: 0
+Total tests [FAILED]: 1
+Total tests [FILTERED]: 0
+0 passed, 1 failed, 0 skipped, 0 filtered, 0 todo, 1 assertions.
+process_exit_code=1
+```
+
+这证明合法 selector 确实进入唯一 ArcFace adapter 路径；缺少该路径所需的 engine 时不会零匹配
+假绿，也不会执行另外两个 adapter。
+
+### Round 2 GREEN 与回归
+
+```text
+cmake --build --preset win-release-user --target
+  test_tensorrt_runtime_integration test_face_models_integration
+ctest --preset win-release-user -V -R
+  "^(test_tensorrt_runtime_integration_arcface|test_face_models_integration_(arcface|age_gender|face68))$"
+ctest --preset win-release-user -R
+  "^(test_tensorrt_runtime_(contract|engine_file|cuda_buffer|control)|test_face_model_(contracts|results))$"
+ctest --preset win-release-user
+```
+
+最新结果：
+
+```text
+real-engine integration: 4/4 passed, 0 failed (2.27 sec)
+each face command: 1 passed, 0 failed, 0 filtered
+generic Host/CUDA output max abs diff: 0; assertions: 1036 passed
+adjacent runtime/face: 6/6 passed, 0 failed (0.25 sec)
+full configured CTest: 18/18 passed, 0 failed (10.59 sec)
+```
+
+本轮生产影响仍为无；只简化 opt-in generic integration test 的 CUDA 初始化所有权并补充真实
+失败证据。聚焦 commit subject：`fix(tests): simplify CUDA integration setup`。
