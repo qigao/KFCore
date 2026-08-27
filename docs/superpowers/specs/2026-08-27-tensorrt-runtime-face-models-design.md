@@ -110,4 +110,3 @@ rolls back the feature without data migration.
   outputs and exact result sizes, and exercise both host and CUDA input views.
 - Installed-consumer CTest verifies target export and transitive dependency discovery.
 - Existing YOLO, ImageProcessor, SIFT, and package tests remain green.
-
