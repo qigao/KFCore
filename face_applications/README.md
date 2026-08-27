@@ -1,8 +1,21 @@
-# TensorRT Face Applications
+# Face Applications
 
 `KFCore::face_applications` 提供单脸分析和换脸应用层。检测器固定为
 [YOLOv12-face](https://github.com/akanametov/yolo-face)；本模块没有 MediaPipe、YOLO11-face
 或其他 detector fallback，也不会扫描默认 weights 目录。
+
+另有 `KFCore::face_applications_cpu`，使用相同模型语义和 `model_matrix.bin`，但直接执行本地
+ONNX：图像处理、仿射对齐、mask、paste 与 blend 均由 `KFCore::image_core` 完成，不依赖
+OpenCV、TensorRT 或 CUDA。两个后端由调用方显式选择，不会在运行失败后自动切换。
+
+CPU 入口接收 `kfcore::image::BgrImage`，同步且单实例不可重入；不同任务可以各自创建应用
+实例并行运行。`analyze()` 返回检测框、68/5 点、ArcFace embedding 和可选 Age/Gender
+logits；`swap()` 返回拥有像素内存的 BGR 图，`swap_profiled()` 额外返回逐阶段 wall time。
+
+```cpp
+auto application = kfcore::face_applications::OnnxFaceSwapApplication::load(paths);
+const auto result = application->swap_profiled(source_bgr, target_bgr);
+```
 
 ## 数据流与状态边界
 
@@ -21,8 +34,9 @@ BGR source/target (borrowed CV_8UC3)
 
 `TensorRtFaceSwapApplication` 通过 `KFCore::image_processor` 为每个 CUDA device 每帧只做一次
 上传。YOLO 检测复用该 device image，Face68、ArcFace、InSwapper 和 GFPGAN 直接消费 CUDA
-生成的 FP32 NCHW tensor；模型输出和最终合成仍由 host 持有。可选 Age/Gender 保留参考
-CPU ROI resize，以维持 OpenCV 边界语义。
+生成的 FP32 NCHW tensor。InSwapper 与可选 GFPGAN 的输出、仿射 mask 合成和两模型之间的 image
+保持在同一 CUDA device，只有最终 packed BGR 图像回传 host；两模型配置为不同 device 时加载即
+失败。可选 Age/Gender 保留参考 CPU ROI resize，以维持 OpenCV 边界语义。
 
 `TensorRtFaceSwapApplication` 同步且单实例不可重入。输入 `cv::Mat` 只在调用期间借用且不被
 修改，成功结果拥有自己的像素内存；任一阶段失败时抛出带阶段上下文的
@@ -47,7 +61,8 @@ InSwapper 预处理/执行/合成。启用 Age/Gender 或 GFPGAN 时，相应
 `std::optional` 字段有值；未配置模型时字段为空，而不是伪造 0 ms。
 
 TensorRT executor 与 CUDA image processor 都在阶段调用返回前同步，因此这些数值包含等待
-GPU 完成的时间，也包含 adapter 校验、输出 decode 和对应 CPU 合成。它们不是 CUDA kernel
+GPU 完成的时间，也包含 adapter 校验；为兼容已有 API，`*_inference_and_decode` 字段名保留，
+但 InSwapper/GFPGAN 已不执行 host decode。终端模型的 composition 时间包含最终 BGR 下载。它们不是 CUDA kernel
 独占时间，不能换算为 FLOPS、GPU 利用率或功耗；这些指标应由 Nsight Systems/Compute 或
 设备遥测独立采集。`swap()` 不创建报告且不读取时钟，常规调用不会承担逐阶段计时开销。
 
@@ -85,6 +100,19 @@ ctest --preset win-face-applications-release-user -R '^test_face_' --output-on-f
 对应配置开启 `KFCORE_BUILD_TENSORRT_RUNTIME`、`KFCORE_BUILD_FACE_MODELS`、
 `KFCORE_BUILD_TENSORRT_YOLO`、`KFCORE_BUILD_YOLO_OPENCV`、
 `KFCORE_BUILD_FACE_APPLICATIONS` 和 `KFCORE_BUILD_FACE_APPLICATION_EXAMPLES`。
+
+无 GPU 的 CPU 路线使用独立 preset；`ONNXRUNTIME_ROOT` 必须包含匹配版本的 `include/`、
+import library 和 runtime DLL：
+
+```powershell
+cmake --preset win-face-cpu-release-user
+cmake --build --preset win-face-cpu-release-user
+ctest --preset win-face-cpu-release-user --output-on-failure
+```
+
+Windows 部署时应把 finder 选中的 `onnxruntime.dll` 放在最终可执行文件目录。仅修改 `PATH`
+不足以覆盖 System32 中可能存在的同名旧版本 DLL；真实模型集成测试会为其测试目标做 app-local
+staging。CPU preset 显式要求六个 ONNX、矩阵和两张测试图存在，配置错误会立即失败。
 
 ## 命令行应用
 

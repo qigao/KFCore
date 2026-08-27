@@ -535,6 +535,26 @@ BorrowedInputGuard::~BorrowedInputGuard() noexcept
     target_.memory_kind = kfcore::tensorrt::MemoryKind::Host;
 }
 
+BorrowedOutputGuard::BorrowedOutputGuard(
+    kfcore::tensorrt::MutableTensorView& target,
+    const kfcore::tensorrt::MutableTensorView& source) noexcept
+    : target_(target)
+    , previous_data_(target.data)
+    , previous_byte_size_(target.byte_size)
+    , previous_memory_kind_(target.memory_kind)
+{
+    target_.data        = source.data;
+    target_.byte_size   = source.byte_size;
+    target_.memory_kind = source.memory_kind;
+}
+
+BorrowedOutputGuard::~BorrowedOutputGuard() noexcept
+{
+    target_.data        = previous_data_;
+    target_.byte_size   = previous_byte_size_;
+    target_.memory_kind = previous_memory_kind_;
+}
+
 Face68Contract validate_face68_contract(const std::vector<TensorDescriptor>& tensors,
                                         const Face68Options& options)
 {
@@ -748,6 +768,56 @@ void validate_prepared_vector_input(const kfcore::tensorrt::TensorView& input,
     if (input.byte_size < required_bytes)
     {
         throw_view(model, "prepared tensor capacity is smaller than its shape");
+    }
+}
+
+void validate_prepared_output(const kfcore::tensorrt::MutableTensorView& output,
+                              const std::string& expected_name, std::int64_t expected_batch,
+                              const std::array<std::int64_t, 3>& fixed_dimensions,
+                              const char* model_name)
+{
+    const std::string model(model_name);
+    if (output.name != expected_name)
+    {
+        throw_view(model, "expected exact output tensor name " + expected_name);
+    }
+    if (output.data_type != DataType::Float32)
+    {
+        throw_view(model, "prepared output tensor must use FP32 elements");
+    }
+    if (output.memory_kind != MemoryKind::Host && output.memory_kind != MemoryKind::CudaDevice)
+    {
+        throw_view(model, "prepared output tensor memory kind is invalid");
+    }
+    if (output.data == nullptr)
+    {
+        throw_view(model, "prepared output tensor data must not be null");
+    }
+    if (expected_batch <= 0)
+    {
+        throw_view(model, "prepared output tensor batch must be positive");
+    }
+    if (output.shape.size() != fixed_dimensions.size() + 1U ||
+        output.shape[0] != expected_batch)
+    {
+        throw_view(model, "prepared output tensor has incorrect batch or rank");
+    }
+    std::size_t required_elements = static_cast<std::size_t>(expected_batch);
+    for (std::size_t index = 0; index < fixed_dimensions.size(); ++index)
+    {
+        if (output.shape[index + 1U] != fixed_dimensions[index])
+        {
+            throw_view(model, "prepared output tensor has incorrect fixed dimensions");
+        }
+        required_elements = checked_multiply(required_elements,
+                                             static_cast<std::size_t>(fixed_dimensions[index]),
+                                             model, "prepared output tensor element count");
+    }
+    const std::size_t required_bytes = checked_multiply(
+        required_elements, kFloatBytes, model, "prepared output tensor bytes");
+    if (output.byte_size < required_bytes)
+    {
+        throw_view(model, "prepared output tensor capacity is smaller than its shape");
     }
 }
 

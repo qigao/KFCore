@@ -307,17 +307,6 @@ namespace
 
 } // namespace
 
-ImageProcessorError::ImageProcessorError(ImageProcessorErrorCode code, std::string message)
-    : std::runtime_error(std::move(message))
-    , code_(code)
-{
-}
-
-ImageProcessorErrorCode ImageProcessorError::code() const noexcept
-{
-    return code_;
-}
-
 std::size_t ImageProcessor::packed_grayscale_bytes(const ImageView& image,
                                                    std::size_t max_source_bytes)
 {

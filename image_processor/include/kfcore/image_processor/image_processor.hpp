@@ -66,6 +66,25 @@ public:
                    const PreprocessOptions& options      = {},
                    TensorElementType        element_type = TensorElementType::Float32);
 
+    // Returns writable owned CUDA NCHW storage for an inference backend. The view is borrowed until
+    // the next acquire_tensor call or processor destruction; other processor operations do not
+    // invalidate it.
+    [[nodiscard]] TensorView acquire_tensor(
+        std::int32_t batch, std::int32_t channels, std::int32_t height, std::int32_t width,
+        TensorElementType element_type = TensorElementType::Float32);
+
+    // Affinely samples an RGB NCHW tensor and FP32 one-channel alpha tensor into a CUDA RGB/BGR
+    // base image. The transform maps destination image coordinates to aligned tensor coordinates.
+    // The returned packed CUDA image is borrowed until the next composite_affine call or processor
+    // destruction. Passing the previous composite result as base is supported.
+    [[nodiscard]] ImageView composite_affine(
+        const ImageView& base, const TensorView& aligned_rgb, const TensorView& aligned_alpha,
+        const AffineTransform& transform,
+        const TensorCompositeOptions& options = {});
+
+    // Synchronously downloads a packed CUDA BGR image into caller-owned host storage.
+    void download_bgr(const ImageView& source, MutableBufferView destination);
+
 private:
     struct Impl;
     explicit CudaImageProcessor(std::unique_ptr<Impl> impl);

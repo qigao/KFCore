@@ -1,12 +1,31 @@
+add_library(kfcore_face_model_core STATIC
+  src/error.cpp
+  src/inswapper_embedding.cpp)
+target_include_directories(kfcore_face_model_core
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_features(kfcore_face_model_core PUBLIC cxx_std_17)
+target_link_libraries(kfcore_face_model_core PRIVATE TurboUtils::Core)
+set_target_properties(kfcore_face_model_core PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  FOLDER "face_models")
+cmake_config_target(kfcore_face_model_core
+  ALIAS KFCore::face_model_core
+  EXPORT_NAME face_model_core
+  EXPORT_SET KFCoreTargets
+  FOLDER "face_models")
+
+if(KFCORE_BUILD_FACE_MODELS)
 add_library(kfcore_face_models SHARED
   src/age_gender.cpp
   src/arcface.cpp
   src/contracts.cpp
-  src/error.cpp
   src/face68.cpp
   src/gfpgan.cpp
-  src/inswapper.cpp
-  src/inswapper_embedding.cpp)
+  src/inswapper.cpp)
 target_include_directories(kfcore_face_models
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -15,7 +34,7 @@ target_include_directories(kfcore_face_models
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(kfcore_face_models PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_models
-  PUBLIC KFCore::tensorrt_runtime
+  PUBLIC KFCore::face_model_core KFCore::tensorrt_runtime
   PRIVATE TurboUtils::Core)
 set_target_properties(kfcore_face_models PROPERTIES
   CXX_STANDARD 17
@@ -175,6 +194,7 @@ if(BUILD_TESTS)
           "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
     endif()
   endif()
+endif()
 endif()
 
 cmake_install_headers(

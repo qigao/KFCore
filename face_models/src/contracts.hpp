@@ -38,6 +38,24 @@ private:
     kfcore::tensorrt::TensorView& target_;
 };
 
+class BorrowedOutputGuard final
+{
+public:
+    BorrowedOutputGuard(kfcore::tensorrt::MutableTensorView&       target,
+                        const kfcore::tensorrt::MutableTensorView& source) noexcept;
+    ~BorrowedOutputGuard() noexcept;
+
+    BorrowedOutputGuard(const BorrowedOutputGuard&)            = delete;
+    BorrowedOutputGuard& operator=(const BorrowedOutputGuard&) = delete;
+
+private:
+    kfcore::tensorrt::MutableTensorView& target_;
+    void*                                previous_data_ = nullptr;
+    std::size_t                          previous_byte_size_ = 0;
+    kfcore::tensorrt::MemoryKind         previous_memory_kind_ =
+        kfcore::tensorrt::MemoryKind::Host;
+};
+
 struct BatchBounds
 {
     std::size_t minimum = 0;
@@ -108,6 +126,11 @@ void validate_prepared_vector_input(const kfcore::tensorrt::TensorView& input,
                                     const BatchBounds& batch,
                                     const std::vector<std::int64_t>& fixed_dimensions,
                                     const char* model_name);
+
+void validate_prepared_output(const kfcore::tensorrt::MutableTensorView& output,
+                              const std::string& expected_name, std::int64_t expected_batch,
+                              const std::array<std::int64_t, 3>& fixed_dimensions,
+                              const char* model_name);
 
 std::vector<Face68Result> decode_face68(const float* values, std::size_t element_count,
                                         std::size_t batch);

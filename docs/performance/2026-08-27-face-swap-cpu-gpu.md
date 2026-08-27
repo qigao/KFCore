@@ -5,8 +5,9 @@
 本记录区分两类路径：
 
 1. ImageProcessor 的 CPU/OpenCV reference 与 CUDA production 预处理；
-2. 完整 face swap production pipeline。完整 pipeline 只有 TensorRT GPU 推理，没有 CPU
-   inference backend；其中 embedding projection、mask/paste/blend 和部分 decode 是 CPU 工作。
+2. TensorRT GPU 与 ONNX Runtime CPU 两条完整 face swap pipeline。GPU 路线中的 embedding
+   projection、mask/paste/blend 和部分 decode 仍是 CPU 工作；CPU 路线不依赖 CUDA、TensorRT
+   或 OpenCV。
 
 所有结果都是当前机器的 Release 实测，不是跨设备延迟保证。`swap_profiled()` 记录同步 wall
 time：CUDA/TensorRT 调用返回前已同步，因此包含 GPU 完成等待和相邻 CPU adapter 工作，不是
@@ -113,6 +114,40 @@ P95 并在目标功耗模式下重新采样。
 `89.30%` 延迟。无 GFPGAN 时，InSwapper inference/decode 与 CPU composition 合计
 `70.951 ms`，占 P50 total 的约 `61.68%`；这两项比进一步压缩几十微秒的预处理更值得优化。
 
+### 2026-08-28 device-resident 合成复测（事实）
+
+以上表格保留为优化前基线。实现 caller-owned TensorRT CUDA output 和通用 CUDA affine alpha
+composition 后，InSwapper→可选 GFPGAN 不再下载/解码/CPU paste/restage；中间 image 与模型
+tensor 保持在同一 device，只在终端 composition 中下载一次 packed BGR。每次 composition 仍有
+一个 4-byte finite-validation 状态回传，Host static mask 会上传到复用的 device buffer；因此“单次
+下载”特指不再发生中间 pixel/tensor device→host 回传。
+
+同一 benchmark、模型、图片、warmup 和 50 次采样配置复测如下：
+
+| 配置 | avg | min | max | P50 | P95 | 吞吐（计算） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 无 GFPGAN | 86.014 ms | 79.427 ms | 101.630 ms | 84.584 ms | 86.833 ms | 11.63 frame/s |
+| 有 GFPGAN | 142.212 ms | 136.282 ms | 150.932 ms | 140.209 ms | 154.989 ms | 7.03 frame/s |
+
+主要 P50 stage：
+
+| stage | 无 GFPGAN | 有 GFPGAN |
+| --- | ---: | ---: |
+| source analysis total | 23.459 ms | 23.540 ms |
+| target analysis total | 22.808 ms | 22.724 ms |
+| InSwapper inference（字段名兼容保留 `inference_and_decode`） | 36.345 ms | 36.374 ms |
+| InSwapper CUDA composition（无 GFPGAN 时含最终下载） | 1.484 ms | 0.325 ms |
+| GFPGAN preprocess | 未运行 | 0.051 ms |
+| GFPGAN inference（字段名兼容保留 `inference_and_decode`） | 未运行 | 54.760 ms |
+| GFPGAN CUDA composition + 最终下载 | 未运行 | 1.753 ms |
+
+**计算：** warmed average 相对优化前基线分别减少
+`(112.116 - 86.014) / 112.116 = 23.28%`（无 GFPGAN）和
+`(212.234 - 142.212) / 212.234 = 32.99%`（有 GFPGAN）。GFPGAN 的平均增量从
+`100.118 ms` 降为 `142.212 - 86.014 = 56.198 ms`。这些比较来自同机不同时段，仍受笔记本
+功耗/频率状态影响；接口收益由 stage 级下降与真实模型回归共同验证，容量规划仍应在目标功耗
+模式下复测 P95。
+
 ## 冷启动分解（事实）
 
 同一 benchmark 单次记录如下。`load` 包含 TensorRT engine、InSwapper matrix、execution
@@ -152,10 +187,46 @@ GFPGAN 两段持续负载。
 约增加 2164 MiB，即 GFPGAN 额外约 717 MiB。Windows WDDM 下这里是整卡 global 指标，可能
 混入桌面和其他进程；CPU private bytes 也可能包含驱动映射，不能当作纯 host heap。
 
+## 完整 ONNX Runtime CPU pipeline（事实）
+
+CPU 路线使用同一组本地 ONNX、`model_matrix.bin` 与 source/target 图，启用 YOLOv12-face、
+Face68、ArcFace、InSwapper、GFPGAN 和 Age/Gender。ORT 线程数保持默认；图片解码仅属于
+benchmark 输入准备，生产库内部只接收有所有权的 BGR buffer，不使用 OpenCV。
+
+```powershell
+build\Msvc-Face-CPU\bin\benchmark_cpu_face_pipeline.exe
+```
+
+| 阶段 | 本机 Release 实测 |
+| --- | ---: |
+| source + target 图片解码 | 33.649 ms |
+| 六个 ONNX session + matrix 加载 | 2645.614 ms |
+| 首次完整换脸 | 1898.763 ms |
+| 热态完整换脸（3 样本平均） | 1947.598 ms |
+| 热态吞吐（计算：`1000 / 1947.598`） | 0.513 frame/s |
+
+代表性热态 stage（最后一个测量样本）：
+
+| stage | 耗时 |
+| --- | ---: |
+| source analysis total（含 Age/Gender） | 224.114 ms |
+| target analysis total（含 Age/Gender） | 232.810 ms |
+| InSwapper inference + decode | 416.682 ms |
+| InSwapper composition | 84.999 ms |
+| GFPGAN preprocess | 10.063 ms |
+| GFPGAN inference + decode | 753.669 ms |
+| GFPGAN composition | 215.700 ms |
+| total | 1939.960 ms |
+
+**计算：** CPU 热态平均相对上文启用 GFPGAN 的 TensorRT 平均耗时为
+`1947.598 / 212.234 = 9.18×`。这不是严格同配置加速比：CPU 样本还对 source/target 各执行
+一次 Age/Gender（代表性样本合计 132.171 ms），而 GPU 表中的配置没有启用该可选模型；它只
+用于说明当前机器上的端到端量级。严格比较应让两端使用相同可选模型，并分别重新采样 P50/P95。
+
 ## 结论边界
 
-- **事实：** production inference 是 TensorRT GPU 路线；仓库没有完整 CPU inference 路线，
-  所以不能声称“CPU 完整换脸需要多少 ms”。
+- **事实：** 当前同时提供 TensorRT GPU 和 ONNX Runtime CPU 两条显式后端；不做运行时自动
+  fallback。CPU 路线完整耗时已由上述真实模型 benchmark 记录。
 - **事实：** CPU/OpenCV 路线是算法 reference 和数值校验路径；production CUDA preprocess
   复用 detector 已需要的 staged frame，避免重复 CPU affine/planar 和 host tensor upload。
 - **推论：** 当前优化优先级应是 InSwapper/GFPGAN inference 与 CPU composition；预处理已

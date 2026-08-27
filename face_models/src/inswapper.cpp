@@ -53,6 +53,34 @@ struct TensorRtInSwapper::Impl final
                        kfcore::tensorrt::MemoryKind::Host };
     }
 
+    void execute(const kfcore::tensorrt::TensorView& prepared_target,
+                 const kfcore::tensorrt::TensorView& projected_source,
+                 const kfcore::tensorrt::MutableTensorView& output_view)
+    {
+        detail::validate_prepared_input(
+            prepared_target, contract.target_input_name, contract.batch,
+            { kFaceModelInputChannels, kInSwapperInputExtent, kInSwapperInputExtent },
+            kModelName);
+        detail::validate_prepared_vector_input(
+            projected_source, contract.source_input_name, contract.batch,
+            { static_cast<std::int64_t>(kInSwapperEmbeddingLength) }, kModelName);
+        if (prepared_target.shape[0] != projected_source.shape[0])
+        {
+            throw FaceModelError(FaceModelErrorCode::InvalidTensorView,
+                                 "InSwapper input validation stage: target and source batch "
+                                 "dimensions must match");
+        }
+        detail::validate_prepared_output(
+            output_view, contract.output_name, prepared_target.shape[0],
+            { kFaceModelInputChannels, kInSwapperInputExtent, kInSwapperInputExtent },
+            kModelName);
+
+        detail::BorrowedInputGuard target_guard(inputs[0], prepared_target);
+        detail::BorrowedInputGuard source_guard(inputs[1], projected_source);
+        detail::BorrowedOutputGuard output_guard(outputs[0], output_view);
+        executor->run(inputs, outputs);
+    }
+
     std::shared_ptr<const kfcore::tensorrt::Engine> engine;
     std::unique_ptr<kfcore::tensorrt::Executor> executor;
     detail::InSwapperContract contract;
@@ -109,23 +137,7 @@ InSwapperResult TensorRtInSwapper::infer(
     try
     {
         detail::AdapterCallGuard guard(impl_->in_use, kModelName);
-        detail::validate_prepared_input(
-            prepared_target, impl_->contract.target_input_name, impl_->contract.batch,
-            { kFaceModelInputChannels, kInSwapperInputExtent, kInSwapperInputExtent },
-            kModelName);
-        detail::validate_prepared_vector_input(
-            projected_source, impl_->contract.source_input_name, impl_->contract.batch,
-            { static_cast<std::int64_t>(kInSwapperEmbeddingLength) }, kModelName);
-        if (prepared_target.shape[0] != projected_source.shape[0])
-        {
-            throw FaceModelError(FaceModelErrorCode::InvalidTensorView,
-                                 "InSwapper input validation stage: target and source batch "
-                                 "dimensions must match");
-        }
-
-        detail::BorrowedInputGuard target_guard(impl_->inputs[0], prepared_target);
-        detail::BorrowedInputGuard source_guard(impl_->inputs[1], projected_source);
-        impl_->executor->run(impl_->inputs, impl_->outputs);
+        impl_->execute(prepared_target, projected_source, impl_->outputs[0]);
 
         InSwapperResult result;
         result.values.assign(impl_->output.begin(), impl_->output.end());
@@ -146,6 +158,34 @@ InSwapperResult TensorRtInSwapper::infer(
     catch (const std::length_error&)
     {
         detail::throw_capacity_failure(kModelName, "inference result");
+    }
+}
+
+void TensorRtInSwapper::infer_into(
+    const kfcore::tensorrt::TensorView& prepared_target,
+    const kfcore::tensorrt::TensorView& projected_source,
+    const kfcore::tensorrt::MutableTensorView& output)
+{
+    try
+    {
+        detail::AdapterCallGuard guard(impl_->in_use, kModelName);
+        impl_->execute(prepared_target, projected_source, output);
+    }
+    catch (const FaceModelError&)
+    {
+        throw;
+    }
+    catch (const kfcore::tensorrt::TensorRtError& error)
+    {
+        detail::rethrow_tensorrt(error, kModelName, "inference");
+    }
+    catch (const std::bad_alloc&)
+    {
+        detail::throw_allocation_failure(kModelName, "inference");
+    }
+    catch (const std::length_error&)
+    {
+        detail::throw_capacity_failure(kModelName, "inference");
     }
 }
 

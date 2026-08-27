@@ -12,6 +12,22 @@ option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
 option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
+option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
+       "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
+  "Build real-model ONNX Runtime CPU face application integration tests"
+  OFF
+  "KFCORE_BUILD_FACE_APPLICATIONS_CPU"
+  OFF)
+set(KFCORE_FACE_CPU_TEST_MODEL_DIR "" CACHE PATH
+    "Directory containing trusted CPU face ONNX integration models")
+set(KFCORE_FACE_CPU_TEST_MATRIX "" CACHE FILEPATH
+    "Trusted InSwapper projection matrix for the CPU integration test")
+set(KFCORE_FACE_CPU_TEST_SOURCE_IMAGE "" CACHE FILEPATH
+    "Source face image for the CPU integration test")
+set(KFCORE_FACE_CPU_TEST_TARGET_IMAGE "" CACHE FILEPATH
+    "Target face image for the CPU integration test")
 cmake_dependent_option(
   KFCORE_BUILD_FACE_APPLICATION_EXAMPLES
   "Build TensorRT face application examples"

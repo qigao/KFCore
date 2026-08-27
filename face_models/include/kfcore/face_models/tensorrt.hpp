@@ -144,6 +144,12 @@ public:
     infer(const kfcore::tensorrt::TensorView& prepared_target,
           const kfcore::tensorrt::TensorView& projected_source);
 
+    // Writes the synchronous result into caller-owned host or CUDA storage. All views are borrowed
+    // only for this call and must match the validated engine contract exactly.
+    void infer_into(const kfcore::tensorrt::TensorView&        prepared_target,
+                    const kfcore::tensorrt::TensorView&        projected_source,
+                    const kfcore::tensorrt::MutableTensorView& output);
+
 private:
     struct Impl;
     explicit TensorRtInSwapper(std::unique_ptr<Impl> impl);
@@ -163,6 +169,10 @@ public:
 
     // The prepared FP32 view is borrowed only for this synchronous call. Batch is fixed at one.
     [[nodiscard]] GfpGanResult infer(const kfcore::tensorrt::TensorView& prepared_input);
+
+    // Writes the synchronous result into caller-owned host or CUDA storage.
+    void infer_into(const kfcore::tensorrt::TensorView&        prepared_input,
+                    const kfcore::tensorrt::MutableTensorView& output);
 
 private:
     struct Impl;

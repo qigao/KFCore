@@ -36,6 +36,12 @@ FaceApplicationModelPaths empty_paths()
     return {};
 }
 
+FaceApplicationModelPaths complete_dummy_paths()
+{
+    return { "detector.engine", "face68.engine", "arcface.engine", "inswapper.engine",
+             "matrix.bin", "gfpgan.engine", std::nullopt };
+}
+
 } // namespace
 
 spec("TensorRT face application validation")
@@ -90,6 +96,19 @@ spec("TensorRT face application validation")
         expect_invalid(
             [&] { (void)TensorRtFaceSwapApplication::load(empty_paths(), FaceSwapOptions {}); },
             "detector");
+    }
+
+    it("requires the final TensorRT chain to share one CUDA device")
+    {
+        FaceSwapOptions options;
+        options.inswapper.engine.device_id = 0;
+        options.gfpgan.engine.device_id = 1;
+        expect_invalid(
+            [&]
+            {
+                (void)TensorRtFaceSwapApplication::load(complete_dummy_paths(), options);
+            },
+            "same CUDA device");
     }
 
     it("exposes a move-only non-copying facade")

@@ -45,6 +45,20 @@ struct TensorRtGfpGan::Impl final
                        kfcore::tensorrt::MemoryKind::Host };
     }
 
+    void execute(const kfcore::tensorrt::TensorView& prepared_input,
+                 const kfcore::tensorrt::MutableTensorView& output_view)
+    {
+        detail::validate_prepared_input(
+            prepared_input, contract.input_name, contract.batch,
+            { kFaceModelInputChannels, kGfpGanInputExtent, kGfpGanInputExtent }, kModelName);
+        detail::validate_prepared_output(
+            output_view, contract.output_name, prepared_input.shape[0],
+            { kFaceModelInputChannels, kGfpGanInputExtent, kGfpGanInputExtent }, kModelName);
+        detail::BorrowedInputGuard input_guard(inputs[0], prepared_input);
+        detail::BorrowedOutputGuard output_guard(outputs[0], output_view);
+        executor->run(inputs, outputs);
+    }
+
     std::shared_ptr<const kfcore::tensorrt::Engine> engine;
     std::unique_ptr<kfcore::tensorrt::Executor> executor;
     detail::SingleOutputContract contract;
@@ -98,11 +112,7 @@ GfpGanResult TensorRtGfpGan::infer(const kfcore::tensorrt::TensorView& prepared_
     try
     {
         detail::AdapterCallGuard guard(impl_->in_use, kModelName);
-        detail::validate_prepared_input(
-            prepared_input, impl_->contract.input_name, impl_->contract.batch,
-            { kFaceModelInputChannels, kGfpGanInputExtent, kGfpGanInputExtent }, kModelName);
-        detail::BorrowedInputGuard input_guard(impl_->inputs[0], prepared_input);
-        impl_->executor->run(impl_->inputs, impl_->outputs);
+        impl_->execute(prepared_input, impl_->outputs[0]);
 
         GfpGanResult result;
         result.values.assign(impl_->output.begin(), impl_->output.end());
@@ -123,6 +133,32 @@ GfpGanResult TensorRtGfpGan::infer(const kfcore::tensorrt::TensorView& prepared_
     catch (const std::length_error&)
     {
         detail::throw_capacity_failure(kModelName, "inference result");
+    }
+}
+
+void TensorRtGfpGan::infer_into(const kfcore::tensorrt::TensorView& prepared_input,
+                                const kfcore::tensorrt::MutableTensorView& output)
+{
+    try
+    {
+        detail::AdapterCallGuard guard(impl_->in_use, kModelName);
+        impl_->execute(prepared_input, output);
+    }
+    catch (const FaceModelError&)
+    {
+        throw;
+    }
+    catch (const kfcore::tensorrt::TensorRtError& error)
+    {
+        detail::rethrow_tensorrt(error, kModelName, "inference");
+    }
+    catch (const std::bad_alloc&)
+    {
+        detail::throw_allocation_failure(kModelName, "inference");
+    }
+    catch (const std::length_error&)
+    {
+        detail::throw_capacity_failure(kModelName, "inference");
     }
 }
 

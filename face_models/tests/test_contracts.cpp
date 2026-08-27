@@ -166,6 +166,26 @@ spec("strict TensorRT face model contracts")
         check(bound.memory_kind == MemoryKind::Host);
     }
 
+    it("restores owned output storage after a borrowed output binding")
+    {
+        float owned_value = 0.0F;
+        float borrowed_value = 1.0F;
+        MutableTensorView bound { "output", DataType::Float32, { 1, 1 }, &owned_value,
+                                  sizeof(owned_value), MemoryKind::Host };
+        const MutableTensorView borrowed { "output", DataType::Float32, { 1, 1 },
+                                           &borrowed_value, sizeof(borrowed_value),
+                                           MemoryKind::CudaDevice };
+        {
+            detail::BorrowedOutputGuard guard(bound, borrowed);
+            check(bound.data == borrowed.data);
+            check(bound.byte_size == borrowed.byte_size);
+            check(bound.memory_kind == MemoryKind::CudaDevice);
+        }
+        check(bound.data == &owned_value);
+        check(bound.byte_size == sizeof(owned_value));
+        check(bound.memory_kind == MemoryKind::Host);
+    }
+
     it("rejects invalid adapter limits and tensor names before engine loading")
     {
         Face68Options face68;
@@ -429,6 +449,23 @@ spec("strict TensorRT face model contracts")
                                                 { 3, 112, 112 }, "ArcFace");
             },
             FaceModelErrorCode::InvalidTensorView, "input.1");
+    }
+
+    it("validates caller-owned output views before runtime execution")
+    {
+        float values[3 * 2 * 2] {};
+        MutableTensorView output { "output", DataType::Float32, { 1, 3, 2, 2 }, values,
+                                   sizeof(values), MemoryKind::CudaDevice };
+        detail::validate_prepared_output(output, "output", 1, { 3, 2, 2 }, "TestModel");
+
+        output.byte_size = sizeof(values) - 1U;
+        expect_error(
+            [&]
+            {
+                detail::validate_prepared_output(output, "output", 1, { 3, 2, 2 },
+                                                 "TestModel");
+            },
+            FaceModelErrorCode::InvalidTensorView, "capacity");
     }
 
     it("classifies a non-positive prepared batch as an invalid caller view")

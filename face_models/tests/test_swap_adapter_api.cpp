@@ -41,6 +41,24 @@ spec("TensorRT face swap adapter API")
         check_false(std::is_copy_assignable_v<TensorRtGfpGan>);
     }
 
+    it("exposes caller-owned output inference for device-resident pipelines")
+    {
+        using InSwapperInferInto = void (TensorRtInSwapper::*)(
+            const kfcore::tensorrt::TensorView&, const kfcore::tensorrt::TensorView&,
+            const kfcore::tensorrt::MutableTensorView&);
+        using GfpGanInferInto = void (TensorRtGfpGan::*)(
+            const kfcore::tensorrt::TensorView&,
+            const kfcore::tensorrt::MutableTensorView&);
+
+        constexpr bool has_inswapper_infer_into = std::is_same_v<
+            decltype(static_cast<InSwapperInferInto>(&TensorRtInSwapper::infer_into)),
+            InSwapperInferInto>;
+        constexpr bool has_gfpgan_infer_into = std::is_same_v<
+            decltype(static_cast<GfpGanInferInto>(&TensorRtGfpGan::infer_into)), GfpGanInferInto>;
+        check_true(has_inswapper_infer_into);
+        check_true(has_gfpgan_infer_into);
+    }
+
     it("validates InSwapper options before engine loading")
     {
         InSwapperOptions options;

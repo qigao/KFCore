@@ -40,6 +40,7 @@ if(NOT _install_result EQUAL 0)
   message(FATAL_ERROR "KFCore install failed:\n${_install_output}\n${_install_error}")
 endif()
 
+set(ENV{TURBOUTILS_ROOT} "${KFCORE_CONSUMER_TURBOUTILS_ROOT}")
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -G Ninja -S "${KFCORE_CONSUMER_SOURCE_DIR}"
     -B "${KFCORE_CONSUMER_BINARY_DIR}"

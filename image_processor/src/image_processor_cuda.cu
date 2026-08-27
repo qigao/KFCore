@@ -430,6 +430,215 @@ namespace
         check_cuda(cudaGetLastError(), "affine_preprocess_kernel", "CUDA affine preprocessing");
     }
 
+    template <typename Value>
+    __device__ float tensor_float(Value value)
+    {
+        return static_cast<float>(value);
+    }
+
+    template <>
+    __device__ float tensor_float<__half>(__half value)
+    {
+        return __half2float(value);
+    }
+
+    template <typename Value>
+    __global__ void validate_finite_kernel(const Value* values, std::size_t count,
+                                           int* invalid_value)
+    {
+        const std::size_t start =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        const std::size_t step = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+        for (std::size_t index = start; index < count; index += step)
+        {
+            if (!isfinite(tensor_float(values[index])))
+            {
+                atomicExch(invalid_value, 1);
+            }
+        }
+    }
+
+    template <typename Value>
+    __device__ float decoded_tensor_pixel(const Value* rgb, std::size_t plane, int x, int y,
+                                          int width, int height, int rgb_channel,
+                                          TensorValueRange input_range)
+    {
+        if (x < 0 || x >= width || y < 0 || y >= height)
+        {
+            return 0.0F;
+        }
+        float value = tensor_float(
+            rgb[static_cast<std::size_t>(rgb_channel) * plane +
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                static_cast<std::size_t>(x)]);
+        if (input_range == TensorValueRange::SignedUnit)
+        {
+            value = (value + 1.0F) * 0.5F;
+        }
+        value = fminf(fmaxf(value, 0.0F), 1.0F) * 255.0F;
+        return static_cast<float>(static_cast<std::uint8_t>(value));
+    }
+
+    template <typename Value>
+    __device__ float bilinear_tensor_channel(const Value* rgb, int width, int height,
+                                             float source_x, float source_y, int rgb_channel,
+                                             TensorValueRange input_range)
+    {
+        const int   x0       = static_cast<int>(floorf(source_x));
+        const int   y0       = static_cast<int>(floorf(source_y));
+        const int   x1       = x0 + 1;
+        const int   y1       = y0 + 1;
+        const float x_weight = source_x - static_cast<float>(x0);
+        const float y_weight = source_y - static_cast<float>(y0);
+        const std::size_t plane = static_cast<std::size_t>(width) * height;
+        const float top_left =
+            decoded_tensor_pixel(rgb, plane, x0, y0, width, height, rgb_channel, input_range);
+        const float top_right =
+            decoded_tensor_pixel(rgb, plane, x1, y0, width, height, rgb_channel, input_range);
+        const float bottom_left =
+            decoded_tensor_pixel(rgb, plane, x0, y1, width, height, rgb_channel, input_range);
+        const float bottom_right =
+            decoded_tensor_pixel(rgb, plane, x1, y1, width, height, rgb_channel, input_range);
+        const float top    = top_left + (top_right - top_left) * x_weight;
+        const float bottom = bottom_left + (bottom_right - bottom_left) * x_weight;
+        return top + (bottom - top) * y_weight;
+    }
+
+    __device__ float mask_pixel(const float* alpha, int width, int height, int x, int y)
+    {
+        if (x < 0 || x >= width || y < 0 || y >= height)
+        {
+            return 0.0F;
+        }
+        return alpha[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                     static_cast<std::size_t>(x)];
+    }
+
+    __device__ float bilinear_mask(const float* alpha, int width, int height, float source_x,
+                                   float source_y)
+    {
+        const int   x0       = static_cast<int>(floorf(source_x));
+        const int   y0       = static_cast<int>(floorf(source_y));
+        const int   x1       = x0 + 1;
+        const int   y1       = y0 + 1;
+        const float x_weight = source_x - static_cast<float>(x0);
+        const float y_weight = source_y - static_cast<float>(y0);
+        const float top_left = mask_pixel(alpha, width, height, x0, y0);
+        const float top_right = mask_pixel(alpha, width, height, x1, y0);
+        const float bottom_left = mask_pixel(alpha, width, height, x0, y1);
+        const float bottom_right = mask_pixel(alpha, width, height, x1, y1);
+        const float top    = top_left + (top_right - top_left) * x_weight;
+        const float bottom = bottom_left + (bottom_right - bottom_left) * x_weight;
+        return top + (bottom - top) * y_weight;
+    }
+
+    template <typename Value>
+    __global__ void composite_affine_kernel(
+        const std::uint8_t* base, std::size_t base_stride, PixelFormat base_format,
+        std::int32_t destination_width, std::int32_t destination_height, const Value* aligned_rgb,
+        const float* aligned_alpha, std::int32_t aligned_width, std::int32_t aligned_height,
+        float transform0, float transform1, float transform2, float transform3, float transform4,
+        float transform5, TensorValueRange input_range, float strength, std::uint8_t* destination)
+    {
+        const std::size_t total_pixels =
+            static_cast<std::size_t>(destination_width) * destination_height;
+        const std::size_t start =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        const std::size_t step = static_cast<std::size_t>(gridDim.x) * blockDim.x;
+        const std::size_t destination_stride = static_cast<std::size_t>(destination_width) * 3U;
+        for (std::size_t pixel_index = start; pixel_index < total_pixels; pixel_index += step)
+        {
+            const int x =
+                static_cast<int>(pixel_index % static_cast<std::size_t>(destination_width));
+            const int y =
+                static_cast<int>(pixel_index / static_cast<std::size_t>(destination_width));
+            const float source_x = transform0 * static_cast<float>(x) +
+                                   transform1 * static_cast<float>(y) + transform2;
+            const float source_y = transform3 * static_cast<float>(x) +
+                                   transform4 * static_cast<float>(y) + transform5;
+            const float alpha = fminf(fmaxf(bilinear_mask(aligned_alpha, aligned_width,
+                                                          aligned_height, source_x, source_y),
+                                             0.0F),
+                                      1.0F) *
+                                strength;
+            const std::size_t base_offset =
+                static_cast<std::size_t>(y) * base_stride + static_cast<std::size_t>(x) * 3U;
+            const std::size_t output_offset =
+                static_cast<std::size_t>(y) * destination_stride +
+                static_cast<std::size_t>(x) * 3U;
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const int rgb_channel = base_format == PixelFormat::Bgr8 ? 2 - channel : channel;
+                const float foreground = bilinear_tensor_channel(
+                    aligned_rgb, aligned_width, aligned_height, source_x, source_y, rgb_channel,
+                    input_range);
+                const float background = static_cast<float>(base[base_offset + channel]);
+                const float value = alpha * foreground + (1.0F - alpha) * background;
+                destination[output_offset + channel] = static_cast<std::uint8_t>(
+                    fminf(fmaxf(value, 0.0F), 255.0F));
+            }
+        }
+    }
+
+    dim3 kernel_grid(std::size_t element_count)
+    {
+        const std::size_t required_blocks =
+            element_count / kThreadsPerBlock +
+            (element_count % kThreadsPerBlock == 0 ? 0U : 1U);
+        return dim3(static_cast<std::uint32_t>(
+            (std::min)(required_blocks, std::size_t { kMaximumBlocks })));
+    }
+
+    void launch_finite_validation(const TensorView& rgb, const float* alpha,
+                                  std::size_t alpha_elements, int* invalid_value,
+                                  cudaStream_t stream)
+    {
+        const std::size_t rgb_elements = static_cast<std::size_t>(rgb.batch) * rgb.channels *
+                                         rgb.height * rgb.width;
+        const dim3 block(kThreadsPerBlock);
+        if (rgb.element_type == TensorElementType::Float32)
+        {
+            validate_finite_kernel<<<kernel_grid(rgb_elements), block, 0, stream>>>(
+                static_cast<const float*>(rgb.data), rgb_elements, invalid_value);
+        }
+        else
+        {
+            validate_finite_kernel<<<kernel_grid(rgb_elements), block, 0, stream>>>(
+                static_cast<const __half*>(rgb.data), rgb_elements, invalid_value);
+        }
+        validate_finite_kernel<<<kernel_grid(alpha_elements), block, 0, stream>>>(
+            alpha, alpha_elements, invalid_value);
+        check_cuda(cudaGetLastError(), "validate_finite_kernel", "CUDA affine composition");
+    }
+
+    void launch_composite(const ImageView& base, const TensorView& rgb, const float* alpha,
+                          const AffineTransform& transform,
+                          const TensorCompositeOptions& options, void* destination,
+                          cudaStream_t stream)
+    {
+        const std::size_t pixels = static_cast<std::size_t>(base.width) * base.height;
+        const dim3 block(kThreadsPerBlock);
+        const dim3 grid = kernel_grid(pixels);
+        const auto& matrix = transform.destination_to_source;
+        if (rgb.element_type == TensorElementType::Float32)
+        {
+            composite_affine_kernel<<<grid, block, 0, stream>>>(
+                static_cast<const std::uint8_t*>(base.data), base.row_stride, base.pixel_format,
+                base.width, base.height, static_cast<const float*>(rgb.data), alpha, rgb.width,
+                rgb.height, matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
+                options.input_range, options.strength, static_cast<std::uint8_t*>(destination));
+        }
+        else
+        {
+            composite_affine_kernel<<<grid, block, 0, stream>>>(
+                static_cast<const std::uint8_t*>(base.data), base.row_stride, base.pixel_format,
+                base.width, base.height, static_cast<const __half*>(rgb.data), alpha, rgb.width,
+                rgb.height, matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
+                options.input_range, options.strength, static_cast<std::uint8_t*>(destination));
+        }
+        check_cuda(cudaGetLastError(), "composite_affine_kernel", "CUDA affine composition");
+    }
+
     std::size_t checked_multiply(std::size_t left, std::size_t right, const char* stage)
     {
         if (left != 0 && right > (std::numeric_limits<std::size_t>::max)() / left)
@@ -590,13 +799,18 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
     }
 }
 
-struct CudaImageProcessor::Impl final
+    struct CudaImageProcessor::Impl final
 {
     explicit Impl(CudaImageProcessorOptions configured_options)
         : options(std::move(configured_options))
         , pinned_source(true)
         , device_source(false)
         , device_tensor(false)
+        , device_inference_tensor(false)
+        , pinned_mask(true)
+        , device_mask(false)
+        , device_composite(false)
+        , device_status(false)
     {
         int previous_device = 0;
         check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice",
@@ -641,6 +855,11 @@ struct CudaImageProcessor::Impl final
             pinned_source.abandon();
             device_source.abandon();
             device_tensor.abandon();
+            device_inference_tensor.abandon();
+            pinned_mask.abandon();
+            device_mask.abandon();
+            device_composite.abandon();
+            device_status.abandon();
             stream = nullptr;
             return;
         }
@@ -651,7 +870,12 @@ struct CudaImageProcessor::Impl final
             stream = nullptr;
         }
         device_tensor.release();
+        device_inference_tensor.release();
+        device_composite.release();
+        device_mask.release();
+        device_status.release();
         device_source.release();
+        pinned_mask.release();
         pinned_source.release();
         if (previous_device != options.device_id)
         {
@@ -663,6 +887,11 @@ struct CudaImageProcessor::Impl final
     OwnedCudaAllocation       pinned_source;
     OwnedCudaAllocation       device_source;
     OwnedCudaAllocation       device_tensor;
+    OwnedCudaAllocation       device_inference_tensor;
+    OwnedCudaAllocation       pinned_mask;
+    OwnedCudaAllocation       device_mask;
+    OwnedCudaAllocation       device_composite;
+    OwnedCudaAllocation       device_status;
     cudaStream_t              stream = nullptr;
 };
 
@@ -945,6 +1174,343 @@ TensorView CudaImageProcessor::process_affine(const ImageView&         source,
         {
             (void)cudaStreamSynchronize(impl_->stream);
         }
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+        throw;
+    }
+}
+
+TensorView CudaImageProcessor::acquire_tensor(std::int32_t batch, std::int32_t channels,
+                                              std::int32_t height, std::int32_t width,
+                                              TensorElementType element_type)
+{
+    if (!impl_)
+    {
+        throw_invalid("CUDA inference tensor acquisition stage: processor state is unavailable");
+    }
+    if (batch <= 0 || channels <= 0 || height <= 0 || width <= 0)
+    {
+        throw_invalid("CUDA inference tensor acquisition stage: dimensions must be positive");
+    }
+    if (element_type != TensorElementType::Float16 &&
+        element_type != TensorElementType::Float32)
+    {
+        throw_invalid(
+            "CUDA inference tensor acquisition stage: tensor element type is unsupported");
+    }
+    const std::size_t element_bytes =
+        element_type == TensorElementType::Float16 ? sizeof(__half) : sizeof(float);
+    std::size_t elements = checked_multiply(static_cast<std::size_t>(batch),
+                                            static_cast<std::size_t>(channels),
+                                            "inference tensor batch and channels");
+    elements = checked_multiply(elements, static_cast<std::size_t>(height),
+                                "inference tensor height");
+    elements = checked_multiply(elements, static_cast<std::size_t>(width),
+                                "inference tensor width");
+    const std::size_t bytes =
+        checked_multiply(elements, element_bytes, "inference tensor bytes");
+    if (bytes > impl_->options.max_tensor_bytes)
+    {
+        throw ImageProcessorError(
+            ImageProcessorErrorCode::ResourceLimitExceeded,
+            "CUDA inference tensor acquisition stage: tensor limit exceeded");
+    }
+
+    int previous_device = 0;
+    check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice",
+               "CUDA inference tensor acquisition");
+    const bool restore = previous_device != impl_->options.device_id;
+    if (restore)
+    {
+        check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice",
+                   "CUDA inference tensor acquisition");
+    }
+    try
+    {
+        impl_->device_inference_tensor.reserve(bytes, impl_->options.max_tensor_bytes);
+        TensorView result { impl_->device_inference_tensor.data(), bytes, batch, channels, height,
+                            width, element_type, TensorLayout::Nchw,
+                            MemoryKind::CudaDevice };
+        if (restore)
+        {
+            check_cuda(cudaSetDevice(previous_device), "cudaSetDevice",
+                       "CUDA inference tensor acquisition device restoration");
+        }
+        return result;
+    }
+    catch (...)
+    {
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+        throw;
+    }
+}
+
+ImageView CudaImageProcessor::composite_affine(const ImageView& base,
+                                               const TensorView& aligned_rgb,
+                                               const TensorView& aligned_alpha,
+                                               const AffineTransform& transform,
+                                               const TensorCompositeOptions& options)
+{
+    if (!impl_)
+    {
+        throw_invalid("CUDA affine composition stage: processor state is unavailable");
+    }
+    validate_pixel_format(base.pixel_format, "composition base");
+    if (base.memory_kind != MemoryKind::CudaDevice || base.data == nullptr || base.width <= 0 ||
+        base.height <= 0)
+    {
+        throw_invalid("CUDA affine composition stage: base must be a valid CUDA image");
+    }
+    const std::size_t base_row_bytes =
+        checked_multiply(static_cast<std::size_t>(base.width), 3U, "composition base row");
+    if (base.row_stride < base_row_bytes)
+    {
+        throw_invalid("CUDA affine composition stage: base row stride is too small");
+    }
+    const std::size_t base_span = checked_add(
+        checked_multiply(static_cast<std::size_t>(base.height - 1), base.row_stride,
+                         "composition base span"),
+        base_row_bytes, "composition base span");
+    const std::size_t packed_bytes = checked_multiply(
+        base_row_bytes, static_cast<std::size_t>(base.height), "composition output bytes");
+    if (base_span > base.byte_size)
+    {
+        throw_invalid("CUDA affine composition stage: base capacity is too small");
+    }
+    if (base_span > impl_->options.max_source_bytes ||
+        packed_bytes > impl_->options.max_source_bytes)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA affine composition stage: image limit exceeded");
+    }
+    if (aligned_rgb.data == nullptr || aligned_rgb.batch != 1 || aligned_rgb.channels != 3 ||
+        aligned_rgb.width <= 0 || aligned_rgb.height <= 0 ||
+        aligned_rgb.layout != TensorLayout::Nchw ||
+        aligned_rgb.memory_kind != MemoryKind::CudaDevice ||
+        (aligned_rgb.element_type != TensorElementType::Float16 &&
+         aligned_rgb.element_type != TensorElementType::Float32))
+    {
+        throw_invalid(
+            "CUDA affine composition stage: RGB input must be a CUDA NCHW float tensor [1,3,H,W]");
+    }
+    if (aligned_alpha.data == nullptr || aligned_alpha.batch != 1 ||
+        aligned_alpha.channels != 1 || aligned_alpha.width != aligned_rgb.width ||
+        aligned_alpha.height != aligned_rgb.height ||
+        aligned_alpha.layout != TensorLayout::Nchw ||
+        aligned_alpha.element_type != TensorElementType::Float32 ||
+        (aligned_alpha.memory_kind != MemoryKind::Host &&
+         aligned_alpha.memory_kind != MemoryKind::CudaDevice))
+    {
+        throw_invalid("CUDA affine composition stage: alpha input must be an FP32 NCHW tensor "
+                      "[1,1,H,W] matching the RGB extent");
+    }
+    if (options.input_range != TensorValueRange::Unit &&
+        options.input_range != TensorValueRange::SignedUnit)
+    {
+        throw_invalid("CUDA affine composition stage: tensor value range is unsupported");
+    }
+    if (!std::isfinite(options.strength) || options.strength < 0.0F ||
+        options.strength > 1.0F)
+    {
+        throw_invalid("CUDA affine composition stage: strength must be within [0,1]");
+    }
+    for (float coefficient : transform.destination_to_source)
+    {
+        if (!std::isfinite(coefficient))
+        {
+            throw_invalid("CUDA affine composition stage: transform must be finite");
+        }
+    }
+
+    const std::size_t aligned_pixels = checked_multiply(
+        static_cast<std::size_t>(aligned_rgb.width),
+        static_cast<std::size_t>(aligned_rgb.height), "composition aligned pixels");
+    const std::size_t rgb_element_bytes =
+        aligned_rgb.element_type == TensorElementType::Float16 ? sizeof(__half) : sizeof(float);
+    const std::size_t rgb_bytes = checked_multiply(
+        checked_multiply(aligned_pixels, 3U, "composition RGB channels"), rgb_element_bytes,
+        "composition RGB bytes");
+    const std::size_t alpha_bytes =
+        checked_multiply(aligned_pixels, sizeof(float), "composition alpha bytes");
+    if (aligned_rgb.byte_size < rgb_bytes || aligned_alpha.byte_size < alpha_bytes)
+    {
+        throw_invalid("CUDA affine composition stage: tensor capacity is too small");
+    }
+    if (rgb_bytes > impl_->options.max_tensor_bytes ||
+        alpha_bytes > impl_->options.max_tensor_bytes)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA affine composition stage: tensor limit exceeded");
+    }
+
+    int previous_device = 0;
+    check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice", "CUDA affine composition");
+    const bool restore = previous_device != impl_->options.device_id;
+    if (restore)
+    {
+        check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice",
+                   "CUDA affine composition");
+    }
+    bool work_pending = false;
+    try
+    {
+        validate_device_pointer(base.data, impl_->options.device_id,
+                                "composition base validation");
+        validate_device_pointer(aligned_rgb.data, impl_->options.device_id,
+                                "composition RGB tensor validation");
+        impl_->device_composite.reserve(packed_bytes, impl_->options.max_source_bytes);
+        const auto overlaps_output = [&](const void* data, std::size_t bytes)
+        {
+            const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(data);
+            if (bytes > (std::numeric_limits<std::uintptr_t>::max)() - begin)
+            {
+                throw_invalid("CUDA affine composition stage: address range overflows");
+            }
+            const std::uintptr_t end = begin + bytes;
+            const std::uintptr_t output_begin =
+                reinterpret_cast<std::uintptr_t>(impl_->device_composite.data());
+            if (packed_bytes > (std::numeric_limits<std::uintptr_t>::max)() - output_begin)
+            {
+                throw_invalid("CUDA affine composition stage: output address range overflows");
+            }
+            const std::uintptr_t output_end = output_begin + packed_bytes;
+            return begin < output_end && output_begin < end;
+        };
+        const bool base_overlaps_output = overlaps_output(base.data, base_span);
+        if (base_overlaps_output &&
+            (base.data != impl_->device_composite.data() || base.row_stride != base_row_bytes))
+        {
+            throw_invalid("CUDA affine composition stage: base partially overlaps output storage");
+        }
+        if (overlaps_output(aligned_rgb.data, rgb_bytes))
+        {
+            throw_invalid("CUDA affine composition stage: RGB input overlaps output storage");
+        }
+
+        const float* device_alpha = static_cast<const float*>(aligned_alpha.data);
+        if (aligned_alpha.memory_kind == MemoryKind::Host)
+        {
+            impl_->pinned_mask.reserve(alpha_bytes, impl_->options.max_tensor_bytes);
+            impl_->device_mask.reserve(alpha_bytes, impl_->options.max_tensor_bytes);
+            std::memcpy(impl_->pinned_mask.data(), aligned_alpha.data, alpha_bytes);
+            check_cuda(cudaMemcpyAsync(impl_->device_mask.data(), impl_->pinned_mask.data(),
+                                       alpha_bytes, cudaMemcpyHostToDevice, impl_->stream),
+                       "cudaMemcpyAsync", "CUDA affine alpha upload");
+            device_alpha = static_cast<const float*>(impl_->device_mask.data());
+            work_pending = true;
+        }
+        else
+        {
+            validate_device_pointer(aligned_alpha.data, impl_->options.device_id,
+                                    "composition alpha tensor validation");
+            if (overlaps_output(aligned_alpha.data, alpha_bytes))
+            {
+                throw_invalid("CUDA affine composition stage: alpha input overlaps output storage");
+            }
+        }
+
+        impl_->device_status.reserve(sizeof(int), sizeof(int));
+        check_cuda(cudaMemsetAsync(impl_->device_status.data(), 0, sizeof(int), impl_->stream),
+                   "cudaMemsetAsync", "CUDA affine finite validation");
+        launch_finite_validation(aligned_rgb, device_alpha, aligned_pixels,
+                                 static_cast<int*>(impl_->device_status.data()), impl_->stream);
+        launch_composite(base, aligned_rgb, device_alpha, transform, options,
+                         impl_->device_composite.data(), impl_->stream);
+        int invalid_value = 0;
+        check_cuda(cudaMemcpyAsync(&invalid_value, impl_->device_status.data(), sizeof(int),
+                                   cudaMemcpyDeviceToHost, impl_->stream),
+                   "cudaMemcpyAsync", "CUDA affine finite validation result");
+        work_pending = true;
+        check_cuda(cudaStreamSynchronize(impl_->stream), "cudaStreamSynchronize",
+                   "CUDA affine composition completion");
+        work_pending = false;
+        if (invalid_value != 0)
+        {
+            throw_invalid("CUDA affine composition stage: tensor values must be finite");
+        }
+        if (restore)
+        {
+            check_cuda(cudaSetDevice(previous_device), "cudaSetDevice",
+                       "CUDA affine composition device restoration");
+        }
+        return { impl_->device_composite.data(), packed_bytes, base.width, base.height,
+                 base_row_bytes, base.pixel_format, MemoryKind::CudaDevice };
+    }
+    catch (...)
+    {
+        if (work_pending)
+        {
+            (void)cudaStreamSynchronize(impl_->stream);
+        }
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+        throw;
+    }
+}
+
+void CudaImageProcessor::download_bgr(const ImageView& source, MutableBufferView destination)
+{
+    if (!impl_)
+    {
+        throw_invalid("CUDA BGR download stage: processor state is unavailable");
+    }
+    if (source.data == nullptr || source.width <= 0 || source.height <= 0 ||
+        source.pixel_format != PixelFormat::Bgr8 ||
+        source.memory_kind != MemoryKind::CudaDevice)
+    {
+        throw_invalid("CUDA BGR download stage: source must be a valid CUDA BGR8 image");
+    }
+    const std::size_t row_bytes =
+        checked_multiply(static_cast<std::size_t>(source.width), 3U, "BGR download row");
+    if (source.row_stride < row_bytes)
+    {
+        throw_invalid("CUDA BGR download stage: source row stride is too small");
+    }
+    const std::size_t source_span = checked_add(
+        checked_multiply(static_cast<std::size_t>(source.height - 1), source.row_stride,
+                         "BGR download source span"),
+        row_bytes, "BGR download source span");
+    const std::size_t packed_bytes = checked_multiply(
+        row_bytes, static_cast<std::size_t>(source.height), "BGR download bytes");
+    if (source_span > source.byte_size)
+    {
+        throw_invalid("CUDA BGR download stage: source capacity is too small");
+    }
+    if (destination.data == nullptr || destination.byte_size < packed_bytes)
+    {
+        throw_invalid("CUDA BGR download stage: destination capacity is too small");
+    }
+
+    int previous_device = 0;
+    check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice", "CUDA BGR download");
+    const bool restore = previous_device != impl_->options.device_id;
+    if (restore)
+    {
+        check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice", "CUDA BGR download");
+    }
+    try
+    {
+        validate_device_pointer(source.data, impl_->options.device_id,
+                                "BGR download source validation");
+        check_cuda(cudaMemcpy2D(destination.data, row_bytes, source.data, source.row_stride,
+                                row_bytes, static_cast<std::size_t>(source.height),
+                                cudaMemcpyDeviceToHost),
+                   "cudaMemcpy2D", "CUDA BGR download");
+        if (restore)
+        {
+            check_cuda(cudaSetDevice(previous_device), "cudaSetDevice",
+                       "CUDA BGR download device restoration");
+        }
+    }
+    catch (...)
+    {
         if (restore)
         {
             (void)cudaSetDevice(previous_device);
