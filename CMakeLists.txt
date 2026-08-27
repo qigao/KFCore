@@ -165,6 +165,11 @@ if(KFCORE_IMAGE_CORE_ENABLED)
   add_subdirectory(image_processor)
 endif()
 
+if(KFCORE_BUILD_THIG)
+  enable_language(CXX)
+  add_subdirectory(thig)
+endif()
+
 if(KFCORE_BUILD_SIFT_POPSIFT AND NOT KFCORE_BUILD_SIFT)
   message(FATAL_ERROR "KFCORE_BUILD_SIFT_POPSIFT requires KFCORE_BUILD_SIFT=ON")
 endif()
