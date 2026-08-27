@@ -3,7 +3,9 @@ add_library(kfcore_face_models SHARED
   src/arcface.cpp
   src/contracts.cpp
   src/error.cpp
-  src/face68.cpp)
+  src/face68.cpp
+  src/gfpgan.cpp
+  src/inswapper.cpp)
 target_include_directories(kfcore_face_models
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -51,8 +53,20 @@ if(BUILD_TESTS)
     FOLDER "face_models/tests")
   add_test(NAME test_face_model_results COMMAND test_face_model_results)
 
+  add_executable(test_face_swap_adapter_api tests/test_swap_adapter_api.cpp)
+  target_link_libraries(test_face_swap_adapter_api PRIVATE
+    KFCore::face_models
+    TurboUtils::TinyTest)
+  set_target_properties(test_face_swap_adapter_api PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "face_models/tests")
+  add_test(NAME test_face_swap_adapter_api COMMAND test_face_swap_adapter_api)
+
   if(WIN32)
-    set_tests_properties(test_face_model_contracts test_face_model_results PROPERTIES
+    set_tests_properties(test_face_model_contracts test_face_model_results
+      test_face_swap_adapter_api PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
   endif()
@@ -84,7 +98,9 @@ if(BUILD_TESTS)
   if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
      (NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "" OR
       NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}" STREQUAL "" OR
-      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}" STREQUAL ""))
+      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}" STREQUAL "" OR
+      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER_VALIDATED}" STREQUAL "" OR
+      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN_VALIDATED}" STREQUAL ""))
     add_executable(test_face_models_integration
       tests/test_face_models_integration.cpp)
     target_link_libraries(test_face_models_integration PRIVATE
@@ -120,6 +136,22 @@ if(BUILD_TESTS)
         "KFCORE_FACE_MODEL_TEST_KIND=face68"
         "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}")
       list(APPEND _kfcore_face_integration_tests test_face_models_integration_face68)
+    endif()
+    if(NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER_VALIDATED}" STREQUAL "")
+      add_test(NAME test_face_models_integration_inswapper
+        COMMAND test_face_models_integration)
+      set_property(TEST test_face_models_integration_inswapper PROPERTY ENVIRONMENT
+        "KFCORE_FACE_MODEL_TEST_KIND=inswapper"
+        "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER_VALIDATED}")
+      list(APPEND _kfcore_face_integration_tests test_face_models_integration_inswapper)
+    endif()
+    if(NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN_VALIDATED}" STREQUAL "")
+      add_test(NAME test_face_models_integration_gfpgan
+        COMMAND test_face_models_integration)
+      set_property(TEST test_face_models_integration_gfpgan PROPERTY ENVIRONMENT
+        "KFCORE_FACE_MODEL_TEST_KIND=gfpgan"
+        "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN_VALIDATED}")
+      list(APPEND _kfcore_face_integration_tests test_face_models_integration_gfpgan)
     endif()
 
     if(WIN32)

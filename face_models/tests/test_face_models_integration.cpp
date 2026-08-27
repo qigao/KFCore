@@ -29,7 +29,9 @@ enum class SelectedModel
 {
     ArcFace,
     AgeGender,
-    Face68
+    Face68,
+    InSwapper,
+    GfpGan
 };
 
 std::optional<SelectedModel> selected_model()
@@ -38,7 +40,7 @@ std::optional<SelectedModel> selected_model()
     const char* value = std::getenv(kVariable);
     if (value == nullptr || *value == '\0')
     {
-        info("%s must be arcface, age_gender, or face68", kVariable);
+        info("%s must be arcface, age_gender, face68, inswapper, or gfpgan", kVariable);
         check(false);
         return std::nullopt;
     }
@@ -55,6 +57,14 @@ std::optional<SelectedModel> selected_model()
     if (kind == "face68")
     {
         return SelectedModel::Face68;
+    }
+    if (kind == "inswapper")
+    {
+        return SelectedModel::InSwapper;
+    }
+    if (kind == "gfpgan")
+    {
+        return SelectedModel::GfpGan;
     }
 
     info("%s has unsupported value: %s", kVariable, value);
@@ -219,6 +229,54 @@ void run_face68_integration()
               << " max=" << maximum << " sum=" << sum << '\n';
 }
 
+void check_finite_vector(const std::vector<float>& values, std::size_t expected_size)
+{
+    check(values.size() == expected_size);
+    for (float value : values)
+    {
+        check_true(std::isfinite(value));
+    }
+}
+
+void run_inswapper_integration()
+{
+    constexpr char kEngineVariable[] =
+        "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER";
+    const InSwapperOptions options;
+    auto model = TensorRtInSwapper::load(required_engine_path(kEngineVariable), options);
+    const std::vector<float> target = zero_input(kInSwapperInputExtent);
+    std::vector<float> source(kInSwapperEmbeddingLength, 0.0F);
+    source.front() = 1.0F;
+    const TensorView source_view { options.source_input_name,
+                                   DataType::Float32,
+                                   { 1, static_cast<std::int64_t>(source.size()) },
+                                   source.data(),
+                                   source.size() * sizeof(float),
+                                   MemoryKind::Host };
+
+    const InSwapperResult first = model->infer(
+        prepared_input(options.target_input_name, kInSwapperInputExtent, target), source_view);
+    const InSwapperResult second = model->infer(
+        prepared_input(options.target_input_name, kInSwapperInputExtent, target), source_view);
+    check_finite_vector(first.values, kInSwapperOutputElementCount);
+    check(first.values == second.values);
+}
+
+void run_gfpgan_integration()
+{
+    constexpr char kEngineVariable[] = "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN";
+    const GfpGanOptions options;
+    auto model = TensorRtGfpGan::load(required_engine_path(kEngineVariable), options);
+    const std::vector<float> input = zero_input(kGfpGanInputExtent);
+
+    const GfpGanResult first =
+        model->infer(prepared_input(options.input_name, kGfpGanInputExtent, input));
+    const GfpGanResult second =
+        model->infer(prepared_input(options.input_name, kGfpGanInputExtent, input));
+    check_finite_vector(first.values, kGfpGanOutputElementCount);
+    check(first.values == second.values);
+}
+
 } // namespace
 
 spec("TensorRT face model real-engine integration")
@@ -241,6 +299,12 @@ spec("TensorRT face model real-engine integration")
             break;
         case SelectedModel::Face68:
             run_face68_integration();
+            break;
+        case SelectedModel::InSwapper:
+            run_inswapper_integration();
+            break;
+        case SelectedModel::GfpGan:
+            run_gfpgan_integration();
             break;
         }
     }

@@ -681,6 +681,17 @@ void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
                              const std::array<std::int64_t, 3>& fixed_dimensions,
                              const char* model_name)
 {
+    validate_prepared_vector_input(
+        input, expected_name, batch,
+        std::vector<std::int64_t>(fixed_dimensions.begin(), fixed_dimensions.end()), model_name);
+}
+
+void validate_prepared_vector_input(const kfcore::tensorrt::TensorView& input,
+                                    const std::string& expected_name,
+                                    const BatchBounds& batch,
+                                    const std::vector<std::int64_t>& fixed_dimensions,
+                                    const char* model_name)
+{
     const std::string model(model_name);
     if (input.name != expected_name)
     {
@@ -698,9 +709,10 @@ void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
     {
         throw_view(model, "prepared tensor data must not be null");
     }
-    if (input.shape.size() != 4)
+    const std::size_t expected_rank = fixed_dimensions.size() + 1U;
+    if (input.shape.size() != expected_rank)
     {
-        throw_view(model, "prepared tensor rank must be 4");
+        throw_view(model, "prepared tensor rank must be " + std::to_string(expected_rank));
     }
     if (input.shape[0] <= 0)
     {

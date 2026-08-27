@@ -103,6 +103,12 @@ void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
                              const std::array<std::int64_t, 3>& fixed_dimensions,
                              const char* model_name);
 
+void validate_prepared_vector_input(const kfcore::tensorrt::TensorView& input,
+                                    const std::string& expected_name,
+                                    const BatchBounds& batch,
+                                    const std::vector<std::int64_t>& fixed_dimensions,
+                                    const char* model_name);
+
 std::vector<Face68Result> decode_face68(const float* values, std::size_t element_count,
                                         std::size_t batch);
 std::vector<ArcFaceResult> decode_arcface(const float* values, std::size_t element_count,

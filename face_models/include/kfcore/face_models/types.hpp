@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace kfcore::face_models
 {
@@ -25,6 +26,8 @@ inline constexpr std::size_t  kInSwapperOutputElementCount =
 inline constexpr std::size_t kGfpGanOutputElementCount =
     static_cast<std::size_t>(kFaceModelInputChannels * kGfpGanInputExtent *
                              kGfpGanInputExtent);
+inline constexpr std::size_t kLargeFaceModelMaxSerializedEngineBytes =
+    1024U * 1024U * 1024U;
 
 struct Face68Landmark
 {
@@ -37,7 +40,14 @@ struct Face68Landmark
 using Face68Result    = std::array<Face68Landmark, kFace68LandmarkCount>;
 using ArcFaceResult   = std::array<float, kArcFaceEmbeddingLength>;
 using AgeGenderResult = std::array<float, kAgeGenderLogitCount>;
-using InSwapperResult = std::array<float, kInSwapperOutputElementCount>;
-using GfpGanResult    = std::array<float, kGfpGanOutputElementCount>;
+struct InSwapperResult
+{
+    std::vector<float> values;
+};
+
+struct GfpGanResult
+{
+    std::vector<float> values;
+};
 
 } // namespace kfcore::face_models

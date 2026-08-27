@@ -39,6 +39,11 @@ struct AgeGenderOptions
 
 struct InSwapperOptions
 {
+    InSwapperOptions()
+    {
+        engine.max_serialized_engine_bytes = kLargeFaceModelMaxSerializedEngineBytes;
+    }
+
     std::string                     target_input_name = "target";
     std::string                     source_input_name = "source";
     std::string                     output_name       = "output";
@@ -48,6 +53,11 @@ struct InSwapperOptions
 
 struct GfpGanOptions
 {
+    GfpGanOptions()
+    {
+        engine.max_serialized_engine_bytes = kLargeFaceModelMaxSerializedEngineBytes;
+    }
+
     std::string                     input_name  = "input";
     std::string                     output_name = "output";
     std::size_t                     max_batch   = 1;
@@ -115,6 +125,48 @@ public:
 private:
     struct Impl;
     explicit TensorRtAgeGender(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+class TensorRtInSwapper final
+{
+public:
+    ~TensorRtInSwapper();
+
+    TensorRtInSwapper(const TensorRtInSwapper&)            = delete;
+    TensorRtInSwapper& operator=(const TensorRtInSwapper&) = delete;
+
+    [[nodiscard]] static std::unique_ptr<TensorRtInSwapper>
+    load(const std::filesystem::path& engine_path, const InSwapperOptions& options = {});
+
+    // Both FP32 views are borrowed only for this synchronous call. Batch is fixed at one.
+    [[nodiscard]] InSwapperResult
+    infer(const kfcore::tensorrt::TensorView& prepared_target,
+          const kfcore::tensorrt::TensorView& projected_source);
+
+private:
+    struct Impl;
+    explicit TensorRtInSwapper(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+class TensorRtGfpGan final
+{
+public:
+    ~TensorRtGfpGan();
+
+    TensorRtGfpGan(const TensorRtGfpGan&)            = delete;
+    TensorRtGfpGan& operator=(const TensorRtGfpGan&) = delete;
+
+    [[nodiscard]] static std::unique_ptr<TensorRtGfpGan>
+    load(const std::filesystem::path& engine_path, const GfpGanOptions& options = {});
+
+    // The prepared FP32 view is borrowed only for this synchronous call. Batch is fixed at one.
+    [[nodiscard]] GfpGanResult infer(const kfcore::tensorrt::TensorView& prepared_input);
+
+private:
+    struct Impl;
+    explicit TensorRtGfpGan(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 

@@ -22,6 +22,12 @@ set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}" CACHE FILEPATH
     "Trusted Face68 TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}" CACHE FILEPATH
+    "Trusted InSwapper TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}" CACHE FILEPATH
+    "Trusted GFPGAN TensorRT engine used by opt-in runtime integration tests")
 option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
 option(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS
        "Build TensorRT YOLO SDK integration tests" OFF)
