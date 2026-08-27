@@ -182,6 +182,24 @@
             }
         },
         {
+            "name": "win-vision-models-cpu-release-user",
+            "displayName": "Vision Models ONNX Runtime CPU Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Vision-CPU",
+            "environment": {
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/Msvc-Vision-CPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_VISION_MODELS": "ON",
+                "KFCORE_BUILD_VISION_MODELS_CPU": "ON",
+                "KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS": "ON",
+                "KFCORE_VISION_MODEL_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
+                "KFCORE_VISION_MODEL_TEST_HAND_IMAGE": "C:/projects/cpp/learnopencv/HandPose/hand.jpg",
+                "KFCORE_VISION_MODEL_TEST_FACE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -264,6 +282,11 @@
             "name": "win-face-cpu-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-face-cpu-release-user"
+        },
+        {
+            "name": "win-vision-models-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-vision-models-cpu-release-user"
         },
         {
             "name": "linux-dev-user",
@@ -403,6 +426,11 @@
             "name": "win-face-cpu-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-face-cpu-release-user"
+        },
+        {
+            "name": "win-vision-models-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-vision-models-cpu-release-user"
         },
         {
             "name": "linux-dev-user",

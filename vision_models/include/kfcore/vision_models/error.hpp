@@ -9,6 +9,7 @@ namespace kfcore::vision_models
 enum class VisionModelErrorCode
 {
     InvalidArgument,
+    InvalidModelAsset,
     ModelContractMismatch,
     ResourceLimitExceeded,
     RuntimeFailure,

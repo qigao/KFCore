@@ -16,6 +16,20 @@ option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
        "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
 option(KFCORE_BUILD_VISION_MODELS
        "Build shared hand and MediaPipe landmark model contracts" OFF)
+option(KFCORE_BUILD_VISION_MODELS_CPU
+       "Build OpenCV-free ONNX Runtime hand and MediaPipe landmark models" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS
+  "Build real-model ONNX Runtime vision-model integration tests"
+  OFF
+  "KFCORE_BUILD_VISION_MODELS_CPU"
+  OFF)
+set(KFCORE_VISION_MODEL_TEST_MODEL_DIR "" CACHE PATH
+    "Directory containing trusted hand and MediaPipe face landmark ONNX models")
+set(KFCORE_VISION_MODEL_TEST_HAND_IMAGE "" CACHE FILEPATH
+    "Trusted hand image used by CPU vision-model integration tests")
+set(KFCORE_VISION_MODEL_TEST_FACE_IMAGE "" CACHE FILEPATH
+    "Trusted face image used by CPU vision-model integration tests")
 cmake_dependent_option(
   KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
   "Build real-model ONNX Runtime CPU face application integration tests"
