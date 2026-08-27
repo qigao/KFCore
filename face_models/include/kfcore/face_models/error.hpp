@@ -13,6 +13,7 @@ enum class FaceModelErrorCode
     InvalidTensorView,
     ResourceLimitExceeded,
     RuntimeFailure,
+    InvalidModelAsset,
 };
 
 class FaceModelError final : public std::runtime_error

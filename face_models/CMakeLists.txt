@@ -5,7 +5,8 @@ add_library(kfcore_face_models SHARED
   src/error.cpp
   src/face68.cpp
   src/gfpgan.cpp
-  src/inswapper.cpp)
+  src/inswapper.cpp
+  src/inswapper_embedding.cpp)
 target_include_directories(kfcore_face_models
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -13,7 +14,9 @@ target_include_directories(kfcore_face_models
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(kfcore_face_models PUBLIC cxx_std_17)
-target_link_libraries(kfcore_face_models PUBLIC KFCore::tensorrt_runtime)
+target_link_libraries(kfcore_face_models
+  PUBLIC KFCore::tensorrt_runtime
+  PRIVATE TurboUtils::Core)
 set_target_properties(kfcore_face_models PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
@@ -64,9 +67,20 @@ if(BUILD_TESTS)
     FOLDER "face_models/tests")
   add_test(NAME test_face_swap_adapter_api COMMAND test_face_swap_adapter_api)
 
+  add_executable(test_inswapper_embedding tests/test_inswapper_embedding.cpp)
+  target_link_libraries(test_inswapper_embedding PRIVATE
+    KFCore::face_models
+    TurboUtils::TinyTest)
+  set_target_properties(test_inswapper_embedding PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "face_models/tests")
+  add_test(NAME test_inswapper_embedding COMMAND test_inswapper_embedding)
+
   if(WIN32)
     set_tests_properties(test_face_model_contracts test_face_model_results
-      test_face_swap_adapter_api PROPERTIES
+      test_face_swap_adapter_api test_inswapper_embedding PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
   endif()
