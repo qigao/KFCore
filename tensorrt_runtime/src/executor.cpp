@@ -1,6 +1,7 @@
 #include "executor.hpp"
 
 #include "cuda_device.hpp"
+#include "shared_lifetime.hpp"
 #include "tensor_validation.hpp"
 
 #include "kfcore/tensorrt/error.hpp"
@@ -420,8 +421,7 @@ namespace
 
 Executor::Impl::Impl(std::shared_ptr<const Engine::Impl> engine_state,
                      detail::TensorRtOwner<nvinfer1::IExecutionContext> execution_context)
-    : engine_owner(
-          std::make_unique<std::shared_ptr<const Engine::Impl>>(std::move(engine_state)))
+    : engine_owner(detail::make_shared_lifetime_anchor(std::move(engine_state)))
     , engine(engine_owner->get())
     , context(std::move(execution_context))
     , stream(std::make_unique<detail::CudaStream>())
@@ -474,7 +474,7 @@ Executor::Impl::~Impl() noexcept
                 self.stream.reset();
             }
             self.engine = nullptr;
-            (void)self.engine_owner.release();
+            (void)detail::abandon_shared_lifetime_anchor(self.engine_owner);
         },
     };
     detail::cleanup_on_cuda_device_or_abandon(device_id, actions);

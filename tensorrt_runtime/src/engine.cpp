@@ -2,6 +2,7 @@
 
 #include "engine_file.hpp"
 #include "cuda_device.hpp"
+#include "shared_lifetime.hpp"
 #include "tensor_validation.hpp"
 #include "tensorrt_version.hpp"
 
@@ -251,8 +252,26 @@ namespace
 } // namespace
 
 Engine::Engine(std::shared_ptr<const Impl> impl)
-    : impl_(std::make_unique<std::shared_ptr<const Impl>>(std::move(impl)))
+    : impl_(detail::make_shared_lifetime_anchor(std::move(impl)))
 {
+}
+
+Engine::Engine(const Engine& other)
+    : impl_(detail::copy_shared_lifetime_anchor(other.impl_))
+{
+}
+
+Engine& Engine::operator=(const Engine& other)
+{
+    if (this != &other)
+    {
+        // Constructing the replacement first gives allocation failure the strong guarantee.
+        // After the noexcept swap, its destructor releases the old state through the same
+        // device-scope/abandon protocol as every other Engine destruction.
+        Engine replacement(other);
+        impl_.swap(replacement.impl_);
+    }
+    return *this;
 }
 
 Engine::~Engine()
@@ -272,7 +291,8 @@ Engine::~Engine()
         [](void* opaque) noexcept
         {
             // Preserve the shared count so Impl cannot be destroyed on an unconfirmed device.
-            (void)static_cast<EngineAnchor*>(opaque)->release();
+            (void)detail::abandon_shared_lifetime_anchor(
+                *static_cast<EngineAnchor*>(opaque));
         },
     };
     detail::cleanup_on_cuda_device_or_abandon(device_id, actions);

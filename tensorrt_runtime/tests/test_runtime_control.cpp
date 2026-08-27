@@ -1,16 +1,22 @@
 #include "cuda_device.hpp"
+#include "shared_lifetime.hpp"
 #include "tensorrt_version.hpp"
 
 #include "kfcore/tensorrt/error.hpp"
+#include "kfcore/tensorrt/runtime.hpp"
 #include "tinytest.hpp"
 
 #include <cstddef>
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 using namespace kfcore::tensorrt;
 using namespace kfcore::tensorrt::detail;
+
+static_assert(std::is_copy_constructible_v<Engine>, "Engine must remain copy constructible");
+static_assert(std::is_copy_assignable_v<Engine>, "Engine must remain copy assignable");
 
 namespace
 {
@@ -25,6 +31,21 @@ struct FakeCudaState
     int            pointer_device = 2;
     cudaError_t    get_result     = cudaSuccess;
     cudaError_t    query_result   = cudaSuccess;
+};
+
+struct LifetimeProbe
+{
+    explicit LifetimeProbe(int& destructions)
+        : destructions(&destructions)
+    {
+    }
+
+    ~LifetimeProbe()
+    {
+        ++*destructions;
+    }
+
+    int* destructions;
 };
 
 FakeCudaState state;
@@ -132,6 +153,23 @@ spec("TensorRT runtime CUDA control")
         check(state.cleanup_calls == 0);
         check(state.abandon_calls == 1);
         check(state.set_calls == 0);
+    }
+
+    it("copies lifetime anchors by retaining one immutable state")
+    {
+        int destructions = 0;
+        std::shared_ptr<const LifetimeProbe> state_owner =
+            std::make_shared<const LifetimeProbe>(destructions);
+        auto first = make_shared_lifetime_anchor(state_owner);
+        auto copy  = copy_shared_lifetime_anchor(first);
+
+        check(first->get() == copy->get());
+        state_owner.reset();
+        first.reset();
+        check(destructions == 0);
+
+        copy.reset();
+        check(destructions == 1);
     }
 
     it("accepts only a device allocation on the configured device")

@@ -16,6 +16,8 @@ class Engine final
 {
 public:
     ~Engine();
+    Engine(const Engine& other);
+    Engine& operator=(const Engine& other);
 
     static std::shared_ptr<const Engine> load(const std::filesystem::path& engine_path,
                                               const EngineOptions&         options = {});

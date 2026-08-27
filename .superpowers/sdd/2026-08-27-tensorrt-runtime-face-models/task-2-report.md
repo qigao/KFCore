@@ -314,3 +314,112 @@ Total Test time (real) = 10.43 sec
 - `LOW`：报告 resource-limit 名称已与实际 `EngineOptions` 对齐。
 - 残余风险：device-selection failure 的 abandon 路径按 review ruling 有意泄漏资源，以避免在
   错误 device 上释放；进程恢复资源需要退出。真实 inference integration 仍属于 Task 4。
+
+## Fix round 3（Engine copy API re-review）
+
+### 修复与所有权协议
+
+- 在公开 `Engine` API 显式恢复 copy constructor 与 copy assignment；没有声明新的 move
+  overload，rvalue 继续由既有 copy 语义处理。
+- 每个 Engine copy 拥有独立 heap lifetime anchor，但 anchor 中的
+  `shared_ptr<const Engine::Impl>` retain 同一个 immutable Impl/control block。
+- copy construction 先分配新 anchor，再复制 shared owner；分配失败不会改变 source。
+- copy assignment 使用 replacement/copy-and-swap：replacement 完整构造后，以 noexcept
+  `unique_ptr::swap` 作为唯一提交点。旧 state 转移给 replacement，并由 replacement 的
+  `Engine::~Engine()` 进入既有目标 device scope/abandon 协议；不会由裸 unique_ptr
+  replacement 在 caller 当前 device 自动 cleanup。
+- 新增内部 `shared_lifetime.hpp`，统一 Engine/Executor 的 anchor create/copy/abandon 操作。
+  无 engine 单测确认两个 anchor retain 同一个 immutable object，释放一个副本不会提前销毁。
+
+涉及文件：
+
+- `tensorrt_runtime/include/kfcore/tensorrt/runtime.hpp`
+- `tensorrt_runtime/src/engine.cpp`
+- `tensorrt_runtime/src/executor.cpp`
+- 新增 `tensorrt_runtime/src/shared_lifetime.hpp`
+- `tensorrt_runtime/tests/test_runtime_control.cpp`
+
+### TDD RED
+
+第一轮先锁定公开 API compile-time contract：
+
+```text
+cmake --build --preset win-release-user --target test_tensorrt_runtime_control
+```
+
+预期失败：
+
+```text
+error C2338: static_assert failed: 'Engine must remain copy constructible'
+error C2338: static_assert failed: 'Engine must remain copy assignable'
+ninja: build stopped: subcommand failed.
+```
+
+第二轮加入无真实 engine 的 ownership helper test，预期失败：
+
+```text
+fatal error C1083: Cannot open include file: 'shared_lifetime.hpp'
+ninja: build stopped: subcommand failed.
+```
+
+### TDD GREEN 与 covering runtime tests
+
+focused 命令：
+
+```text
+cmake --build --preset win-release-user --target
+  test_tensorrt_runtime_control kfcore_tensorrt_runtime
+ctest --preset win-release-user -R "test_tensorrt_runtime_control$" --output-on-failure
+```
+
+关键输出：
+
+```text
+1/1 test passed, 0 tests failed
+Total Test time (real) = 0.05 sec
+```
+
+covering runtime 命令：
+
+```text
+cmake --build --preset win-release-user --target
+  kfcore_tensorrt_runtime test_tensorrt_runtime_contract
+  test_tensorrt_runtime_engine_file test_tensorrt_runtime_cuda_buffer
+  test_tensorrt_runtime_control
+ctest --preset win-release-user -R "test_tensorrt_runtime" --output-on-failure
+```
+
+关键输出：
+
+```text
+4/4 tests passed, 0 tests failed
+Total Test time (real) = 0.27 sec
+```
+
+### 完整相邻验证
+
+环境：VS 2022 Professional DevCmd，`TENSORRT_ROOT=C:\projects\TensorRT-11.2.1.2`，
+`win-release-user` preset。
+
+命令：
+
+```text
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
+```
+
+关键输出：
+
+```text
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 12.31 sec
+```
+
+### 自审与残余风险
+
+- `MED`：`std::is_copy_constructible_v<Engine>` 与
+  `std::is_copy_assignable_v<Engine>` 均由 static_assert 锁定；copy assignment 的 old-state
+  last-owner release 只发生在 replacement Engine 的 device-safe 析构中。
+- `LOW`：未新增不同的 move overload 或 move-only state transition。
+- 残余风险：Engine copy 需要为 heap lifetime anchor 分配内存；allocation failure 向调用方
+  传播且不改变 source/assignment target。真实 inference integration 仍属于 Task 4。
