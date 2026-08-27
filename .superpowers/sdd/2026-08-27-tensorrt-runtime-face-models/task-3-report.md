@@ -217,3 +217,102 @@ focused-test marker 或占位实现。
   ArcFace、AgeGender 分别为每 item `68*3*4=816` bytes、`512*4=2048` bytes、`2*4=8`
   bytes（不含 vector allocator 元数据）。这是公开按值返回合同允许的成本，中间 decoded
   storage 未另行分配。
+
+## Fix round 1（review NEEDS CHANGES）
+
+### 修复
+
+- 新增内部 `BorrowedInputGuard`，在构造时只把 caller view 的 `data`、`byte_size`、
+  `memory_kind` 绑定到 adapter-owned reusable input view，在 noexcept 析构时统一恢复为
+  `nullptr`、`0`、`MemoryKind::Host`。长期复用的 exact name、dtype 与 shape storage 不变。
+- Face68、ArcFace、AgeGender 三处 infer 均先构造 `AdapterCallGuard`，完成 input validation 和
+  batch shape 更新后再构造 `BorrowedInputGuard`。声明逆序保证成功返回和异常展开都先清除
+  caller pointer，再释放 adapter overlap guard。
+- borrowed guard 的作用域覆盖 `Executor::run()` 与 decode return-expression；因此最后一次
+  可能使用 input storage 的 runtime 调用完成后才清理，decode 成功或失败也不会留下借用地址。
+- Face68 decode 在任何坐标缩放前检查每个 `(x,y,score)` 均为 finite；随后执行 `x/y * 4`，
+  并再次检查 scaled x/y 为 finite。任一失败以 `RuntimeFailure` 和
+  `Face68 result decoding stage` 上下文 fail fast；不 clamp、不猜坐标范围。
+
+涉及文件：
+
+- `face_models/src/contracts.{hpp,cpp}`
+- `face_models/src/{face68,arcface,age_gender}.cpp`
+- `face_models/tests/test_{contracts,results}.cpp`
+
+### Borrowed pointer cleanup TDD RED
+
+命令：
+
+```text
+cmake --build --preset win-release-user --target test_face_model_contracts
+```
+
+关键预期失败：
+
+```text
+error C2039: 'BorrowedInputGuard': is not a member of
+  'kfcore::face_models::detail'
+ninja: build stopped: subcommand failed.
+```
+
+新增无需真实 engine 的 lifecycle tests 分别覆盖正常 scope exit 与 exception unwinding；两条
+路径都要求 `data == nullptr`、`byte_size == 0`、memory kind 恢复 Host。
+
+### Face68 finite TDD RED
+
+命令：
+
+```text
+cmake --build --preset win-release-user --target test_face_model_results
+ctest --preset win-release-user -R "test_face_model_results" --output-on-failure
+```
+
+关键预期失败：
+
+```text
+rejects NaN in every Face68 landmark triple field       [FAIL]
+rejects infinity in every Face68 landmark triple field  [FAIL]
+rejects finite Face68 coordinates that overflow during scaling [FAIL]
+6 passed, 3 failed
+```
+
+NaN/Inf fixture 分别遍历 x、y、score 三个字段；缩放溢出 fixture 使用 finite
+`numeric_limits<float>::max()` 坐标，证明 post-scale finite check 必须存在。既有正常用例继续
+验证 `(10,20,0.75)` 解码为 `(40,80,0.75)`。
+
+### GREEN 与 covering tests
+
+环境：VS 2022 Professional DevCmd，`TENSORRT_ROOT=C:\projects\TensorRT-11.2.1.2`，
+`win-release-user` preset。
+
+命令：
+
+```text
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R "test_face_model_" --output-on-failure
+ctest --preset win-release-user -R "test_tensorrt_runtime" --output-on-failure
+ctest --preset win-release-user --output-on-failure
+```
+
+关键输出：
+
+```text
+face models: 2/2 passed, 0 failed (0.13 sec)
+TensorRT runtime adjacent: 4/4 passed, 0 failed (0.21 sec)
+full configured CTest: 14/14 passed, 0 failed (11.52 sec)
+```
+
+另执行 `git diff --check`、CodeGraph affected 检查与禁止占位符/focused-test marker 检索；未
+发现 whitespace error、TODO/FIXME/HACK、占位实现或遗留 focused marker。
+
+### Fix 自审与残余风险
+
+- `HIGH`：未发现。事实：runtime `Executor::run()` 为同步边界；borrowed guard 覆盖整个 run，
+  且 runtime 返回/抛出后才清除 adapter view 的 caller storage 字段。
+- `MED`：review 两项均已修复并有 focused RED/GREEN。事实：三个 adapter 共用同一 cleanup
+  helper；正常和异常析构路径均测试。Face68 raw 与 scaled finite 两层检查均由独立 fixture
+  锁定。
+- `LOW`：broad prepared-view 枚举覆盖按 reviewer ledger 留给 final review，本轮未扩展范围。
+- 残余风险不变：本 task 没有 trusted serialized face engine，因此真实 Host/CUDA face
+  inference 与 golden output 仍由后续 opt-in integration task 验证。

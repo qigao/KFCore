@@ -3,6 +3,7 @@
 #include "kfcore/face_models/error.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -444,6 +445,22 @@ AdapterCallGuard::~AdapterCallGuard()
     in_use_.clear(std::memory_order_release);
 }
 
+BorrowedInputGuard::BorrowedInputGuard(kfcore::tensorrt::TensorView&       target,
+                                       const kfcore::tensorrt::TensorView& source) noexcept
+    : target_(target)
+{
+    target_.data        = source.data;
+    target_.byte_size   = source.byte_size;
+    target_.memory_kind = source.memory_kind;
+}
+
+BorrowedInputGuard::~BorrowedInputGuard() noexcept
+{
+    target_.data        = nullptr;
+    target_.byte_size   = 0;
+    target_.memory_kind = kfcore::tensorrt::MemoryKind::Host;
+}
+
 Face68Contract validate_face68_contract(const std::vector<TensorDescriptor>& tensors,
                                         const Face68Options& options)
 {
@@ -596,9 +613,21 @@ std::vector<Face68Result> decode_face68(const float* values, std::size_t element
         for (std::size_t point = 0; point < kFace68LandmarkCount; ++point)
         {
             const std::size_t offset = image * kFace68ValuesPerImage + point * 3U;
-            results[image][point] = { values[offset] * kFace68CoordinateScale,
-                                      values[offset + 1U] * kFace68CoordinateScale,
-                                      values[offset + 2U] };
+            const float raw_x = values[offset];
+            const float raw_y = values[offset + 1U];
+            const float score = values[offset + 2U];
+            if (!std::isfinite(raw_x) || !std::isfinite(raw_y) || !std::isfinite(score))
+            {
+                throw_decode(kFace68ModelName, "landmark x, y, and score must be finite");
+            }
+            const float scaled_x = raw_x * kFace68CoordinateScale;
+            const float scaled_y = raw_y * kFace68CoordinateScale;
+            if (!std::isfinite(scaled_x) || !std::isfinite(scaled_y))
+            {
+                throw_decode(kFace68ModelName,
+                             "scaled landmark coordinates must remain finite");
+            }
+            results[image][point] = { scaled_x, scaled_y, score };
         }
     }
     return results;

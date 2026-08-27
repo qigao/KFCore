@@ -108,9 +108,7 @@ TensorRtAgeGender::infer(const kfcore::tensorrt::TensorView& prepared_input)
                                         kModelName);
         const std::size_t batch = static_cast<std::size_t>(prepared_input.shape[0]);
         impl_->inputs[0].shape[0] = static_cast<std::int64_t>(batch);
-        impl_->inputs[0].data = prepared_input.data;
-        impl_->inputs[0].byte_size = prepared_input.byte_size;
-        impl_->inputs[0].memory_kind = prepared_input.memory_kind;
+        detail::BorrowedInputGuard borrowed_input(impl_->inputs[0], prepared_input);
         impl_->outputs[0].shape[0] = static_cast<std::int64_t>(batch);
         impl_->executor->run(impl_->inputs, impl_->outputs);
         return detail::decode_age_gender(impl_->output.data(), batch * kAgeGenderLogitCount,

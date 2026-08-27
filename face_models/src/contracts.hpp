@@ -24,6 +24,20 @@ private:
     std::atomic_flag& in_use_;
 };
 
+class BorrowedInputGuard final
+{
+public:
+    BorrowedInputGuard(kfcore::tensorrt::TensorView&       target,
+                       const kfcore::tensorrt::TensorView& source) noexcept;
+    ~BorrowedInputGuard() noexcept;
+
+    BorrowedInputGuard(const BorrowedInputGuard&)            = delete;
+    BorrowedInputGuard& operator=(const BorrowedInputGuard&) = delete;
+
+private:
+    kfcore::tensorrt::TensorView& target_;
+};
+
 struct BatchBounds
 {
     std::size_t minimum = 0;

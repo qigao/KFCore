@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,6 +83,48 @@ void expect_error(const std::function<void()>& operation, FaceModelErrorCode cod
 
 spec("strict TensorRT face model contracts")
 {
+    it("clears borrowed input storage when its binding scope ends")
+    {
+        float source_value = 1.0f;
+        TensorView source { "input", DataType::Float32, { 1, 1 }, &source_value,
+                            sizeof(source_value), MemoryKind::CudaDevice };
+        TensorView bound { "input", DataType::Float32, { 1, 1 }, nullptr, 0,
+                           MemoryKind::Host };
+
+        {
+            detail::BorrowedInputGuard guard(bound, source);
+            check(bound.data == source.data);
+            check(bound.byte_size == source.byte_size);
+            check(bound.memory_kind == MemoryKind::CudaDevice);
+        }
+
+        check_null(bound.data);
+        check(bound.byte_size == std::size_t { 0 });
+        check(bound.memory_kind == MemoryKind::Host);
+    }
+
+    it("clears borrowed input storage during exception unwinding")
+    {
+        float source_value = 1.0f;
+        TensorView source { "input", DataType::Float32, { 1, 1 }, &source_value,
+                            sizeof(source_value), MemoryKind::CudaDevice };
+        TensorView bound { "input", DataType::Float32, { 1, 1 }, nullptr, 0,
+                           MemoryKind::Host };
+
+        try
+        {
+            detail::BorrowedInputGuard guard(bound, source);
+            throw std::runtime_error("simulated inference failure");
+        }
+        catch (const std::runtime_error&)
+        {
+        }
+
+        check_null(bound.data);
+        check(bound.byte_size == std::size_t { 0 });
+        check(bound.memory_kind == MemoryKind::Host);
+    }
+
     it("rejects invalid adapter limits and tensor names before engine loading")
     {
         Face68Options face68;
