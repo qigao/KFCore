@@ -1,0 +1,139 @@
+#include "face_swap_cli.hpp"
+
+#include "turbo_fs.h"
+
+#include <array>
+#include <cstddef>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace kfcore::face_applications::cli
+{
+namespace
+{
+
+struct OptionBinding
+{
+    const char* name;
+    std::string Arguments::*required_member;
+    std::optional<std::string> Arguments::*optional_member;
+    bool input_file;
+};
+
+constexpr std::array<OptionBinding, 10> kBindings = {
+    OptionBinding { "--source", &Arguments::source, nullptr, true },
+    OptionBinding { "--target", &Arguments::target, nullptr, true },
+    OptionBinding { "--output", &Arguments::output, nullptr, false },
+    OptionBinding { "--detector", &Arguments::detector, nullptr, true },
+    OptionBinding { "--face68", &Arguments::face68, nullptr, true },
+    OptionBinding { "--arcface", &Arguments::arcface, nullptr, true },
+    OptionBinding { "--inswapper", &Arguments::inswapper, nullptr, true },
+    OptionBinding { "--matrix", &Arguments::matrix, nullptr, true },
+    OptionBinding { "--gfpgan", nullptr, &Arguments::gfpgan, true },
+    OptionBinding { "--age-gender", nullptr, &Arguments::age_gender, true },
+};
+
+[[noreturn]] void fail(const std::string& message)
+{
+    throw std::invalid_argument("face_swap_image arguments: " + message);
+}
+
+const OptionBinding& find_binding(const std::string& option)
+{
+    for (const OptionBinding& binding : kBindings)
+    {
+        if (option == binding.name)
+        {
+            return binding;
+        }
+    }
+    fail("unknown option: " + option);
+}
+
+bool is_set(const Arguments& arguments, const OptionBinding& binding)
+{
+    if (binding.required_member != nullptr)
+    {
+        return !(arguments.*binding.required_member).empty();
+    }
+    return (arguments.*binding.optional_member).has_value();
+}
+
+void assign(Arguments& arguments, const OptionBinding& binding, std::string value)
+{
+    if (is_set(arguments, binding))
+    {
+        fail(std::string("duplicate option: ") + binding.name);
+    }
+    if (binding.required_member != nullptr)
+    {
+        arguments.*binding.required_member = std::move(value);
+    }
+    else
+    {
+        arguments.*binding.optional_member = std::move(value);
+    }
+}
+
+const std::string& value_of(const Arguments& arguments, const OptionBinding& binding)
+{
+    if (binding.required_member != nullptr)
+    {
+        return arguments.*binding.required_member;
+    }
+    return *(arguments.*binding.optional_member);
+}
+
+void require_readable_file(const std::string& path, const char* option)
+{
+    turbo_fs_stat_t status {};
+    if (turbo_fs_stat(path.c_str(), &status) != 0 || !status.is_file ||
+        turbo_fs_access(path.c_str(), TURBO_FS_ACCESS_READ) != 0)
+    {
+        fail(std::string(option) + " is not a readable file: " + path);
+    }
+}
+
+} // namespace
+
+Arguments parse_arguments(const std::vector<std::string>& values)
+{
+    if (values.empty())
+    {
+        fail("program name is missing");
+    }
+
+    Arguments arguments;
+    for (std::size_t index = 1; index < values.size(); index += 2U)
+    {
+        const std::string& option = values[index];
+        if (index + 1U >= values.size() || values[index + 1U].empty() ||
+            values[index + 1U].rfind("--", 0U) == 0U)
+        {
+            fail("missing value for " + option);
+        }
+        const OptionBinding& binding = find_binding(option);
+        assign(arguments, binding, values[index + 1U]);
+    }
+
+    for (const OptionBinding& binding : kBindings)
+    {
+        if (binding.optional_member == nullptr && !is_set(arguments, binding))
+        {
+            fail(std::string("missing required option: ") + binding.name);
+        }
+        if (binding.input_file && is_set(arguments, binding))
+        {
+            require_readable_file(value_of(arguments, binding), binding.name);
+        }
+    }
+    if (arguments.output == arguments.source || arguments.output == arguments.target)
+    {
+        fail("--output must differ from --source and --target");
+    }
+    return arguments;
+}
+
+} // namespace kfcore::face_applications::cli

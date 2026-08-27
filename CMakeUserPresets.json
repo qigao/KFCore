@@ -151,6 +151,18 @@
             }
         },
         {
+            "name": "win-face-applications-release-user",
+            "displayName": "TensorRT Face Applications Release Build (Windows, User)",
+            "inherits": "win-yolo-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Face-Applications-Release",
+            "cacheVariables": {
+                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
+                "KFCORE_BUILD_FACE_MODELS": "ON",
+                "KFCORE_BUILD_FACE_APPLICATIONS": "ON",
+                "KFCORE_BUILD_FACE_APPLICATION_EXAMPLES": "ON"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -225,6 +237,11 @@
             "configurePreset": "win-tensorrt-models-release-user"
         },
         {
+            "name": "win-face-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -287,6 +304,14 @@
             ]
         },
         {
+            "name": "install-win-face-applications-release-user",
+            "inherits": "install-win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
             "name": "install-linux-dev-user",
             "configurePreset": "linux-dev-user",
             "targets": [
@@ -336,6 +361,11 @@
             "name": "win-tensorrt-models-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-tensorrt-models-release-user"
+        },
+        {
+            "name": "win-face-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user"
         },
         {
             "name": "linux-dev-user",
