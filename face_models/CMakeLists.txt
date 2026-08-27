@@ -56,6 +56,54 @@ if(BUILD_TESTS)
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
   endif()
+
+  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+     (NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "" OR
+      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}" STREQUAL "" OR
+      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}" STREQUAL ""))
+    add_executable(test_face_models_integration
+      tests/test_face_models_integration.cpp)
+    target_link_libraries(test_face_models_integration PRIVATE
+      KFCore::face_models
+      TurboUtils::TinyTest)
+    set_target_properties(test_face_models_integration PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "face_models/tests")
+
+    set(_kfcore_face_integration_tests)
+    if(NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "")
+      add_test(NAME test_face_models_integration_arcface
+        COMMAND test_face_models_integration --filter "ArcFace executes")
+      set_tests_properties(test_face_models_integration_arcface PROPERTIES
+        ENVIRONMENT
+          "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}")
+      list(APPEND _kfcore_face_integration_tests test_face_models_integration_arcface)
+    endif()
+    if(NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}" STREQUAL "")
+      add_test(NAME test_face_models_integration_age_gender
+        COMMAND test_face_models_integration --filter "AgeGender executes")
+      set_tests_properties(test_face_models_integration_age_gender PROPERTIES
+        ENVIRONMENT
+          "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}")
+      list(APPEND _kfcore_face_integration_tests test_face_models_integration_age_gender)
+    endif()
+    if(NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}" STREQUAL "")
+      add_test(NAME test_face_models_integration_face68
+        COMMAND test_face_models_integration --filter "Face68 binds")
+      set_tests_properties(test_face_models_integration_face68 PROPERTIES
+        ENVIRONMENT
+          "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}")
+      list(APPEND _kfcore_face_integration_tests test_face_models_integration_face68)
+    endif()
+
+    if(WIN32)
+      set_tests_properties(${_kfcore_face_integration_tests} PROPERTIES
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
+    endif()
+  endif()
 endif()
 
 cmake_install_headers(

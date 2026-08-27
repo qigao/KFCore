@@ -102,6 +102,31 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
     FOLDER "tensorrt_runtime/tests")
   add_test(NAME test_tensorrt_runtime_control COMMAND test_tensorrt_runtime_control)
+
+  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+     NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "")
+    add_executable(test_tensorrt_runtime_integration
+      tests/test_tensorrt_runtime_integration.cpp)
+    target_link_libraries(test_tensorrt_runtime_integration PRIVATE
+      KFCore::tensorrt_runtime
+      CUDA::cudart
+      TurboUtils::TinyTest)
+    set_target_properties(test_tensorrt_runtime_integration PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_runtime/tests")
+    add_test(NAME test_tensorrt_runtime_integration_arcface
+      COMMAND test_tensorrt_runtime_integration)
+    set_tests_properties(test_tensorrt_runtime_integration_arcface PROPERTIES
+      ENVIRONMENT
+        "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}")
+    if(WIN32)
+      set_tests_properties(test_tensorrt_runtime_integration_arcface PROPERTIES
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
+    endif()
+  endif()
 endif()
 
 cmake_install_headers(
