@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -61,18 +62,70 @@ int current_cuda_device()
 
 class ZeroedDeviceBuffer final
 {
+    class InitializationStream final
+    {
+    public:
+        InitializationStream()
+        {
+            check_cuda(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking),
+                       "cudaStreamCreateWithFlags");
+        }
+
+        ~InitializationStream()
+        {
+            if (stream_ != nullptr)
+            {
+                // Cleanup failure means the test can no longer guarantee that CUDA work is gone.
+                if (cudaStreamDestroy(stream_) != cudaSuccess)
+                {
+                    std::terminate();
+                }
+            }
+        }
+
+        InitializationStream(const InitializationStream&)            = delete;
+        InitializationStream& operator=(const InitializationStream&) = delete;
+
+        cudaStream_t get() const noexcept
+        {
+            return stream_;
+        }
+
+        void synchronize()
+        {
+            check_cuda(cudaStreamSynchronize(stream_), "cudaStreamSynchronize");
+        }
+
+        void close()
+        {
+            cudaStream_t stream = stream_;
+            stream_ = nullptr;
+            check_cuda(cudaStreamDestroy(stream), "cudaStreamDestroy");
+        }
+
+    private:
+        cudaStream_t stream_ = nullptr;
+    };
+
 public:
     explicit ZeroedDeviceBuffer(std::size_t byte_size)
         : byte_size_(byte_size)
         , device_(current_cuda_device())
     {
+        InitializationStream initialization_stream;
         check_cuda(cudaMalloc(&data_, byte_size_), "cudaMalloc");
-        const cudaError_t memset_result = cudaMemset(data_, 0, byte_size_);
-        if (memset_result != cudaSuccess)
+        try
+        {
+            check_cuda(cudaMemsetAsync(data_, 0, byte_size_, initialization_stream.get()),
+                       "cudaMemsetAsync");
+            initialization_stream.synchronize();
+            initialization_stream.close();
+        }
+        catch (...)
         {
             (void)cudaFree(data_);
             data_ = nullptr;
-            throw_cuda(memset_result, "cudaMemset");
+            throw;
         }
     }
 
@@ -196,6 +249,7 @@ spec("TensorRT runtime real-engine integration")
         float max_reference_magnitude = 0.0F;
         {
             ZeroedDeviceBuffer device_input(host_input.size() * sizeof(float));
+            check(current_cuda_device() == caller_device);
             executor->run({ { input.name, DataType::Float32, input_shape, device_input.data(),
                               device_input.byte_size(), MemoryKind::CudaDevice } },
                           { { output.name, DataType::Float32, output_shape,
