@@ -11,6 +11,7 @@ option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
 option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
+option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
 option(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS
        "Build real-engine TensorRT runtime and face model integration tests" OFF)
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
