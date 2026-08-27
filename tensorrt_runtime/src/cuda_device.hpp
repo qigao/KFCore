@@ -14,6 +14,13 @@ struct CudaRuntimeApi
     cudaError_t (*get_pointer_attributes)(cudaPointerAttributes*, const void*);
 };
 
+struct DeviceCleanupActions
+{
+    void* state;
+    void (*cleanup)(void*) noexcept;
+    void (*abandon)(void*) noexcept;
+};
+
 const CudaRuntimeApi& default_cuda_runtime_api() noexcept;
 
 class CudaDeviceScope final
@@ -38,5 +45,11 @@ void validate_cuda_device_pointer(const void* pointer, int expected_device,
                                   std::string_view tensor_name);
 void validate_cuda_device_pointer(const void* pointer, int expected_device,
                                   std::string_view tensor_name, const CudaRuntimeApi& api);
+
+void cleanup_on_cuda_device_or_abandon(int requested_device,
+                                       const DeviceCleanupActions& actions) noexcept;
+void cleanup_on_cuda_device_or_abandon(int requested_device,
+                                       const DeviceCleanupActions& actions,
+                                       const CudaRuntimeApi& api) noexcept;
 
 } // namespace kfcore::tensorrt::detail

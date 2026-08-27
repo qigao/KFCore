@@ -67,6 +67,12 @@ public:
         return stream_;
     }
 
+    // Relinquishes the stream without CUDA cleanup after device selection has failed.
+    void abandon() noexcept
+    {
+        stream_ = nullptr;
+    }
+
 private:
     cudaStream_t stream_ = nullptr;
 };

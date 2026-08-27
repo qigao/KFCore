@@ -19,8 +19,11 @@ struct FakeCudaState
 {
     int            current_device = 1;
     int            set_calls      = 0;
+    int            cleanup_calls  = 0;
+    int            abandon_calls  = 0;
     cudaMemoryType pointer_type   = cudaMemoryTypeDevice;
     int            pointer_device = 2;
+    cudaError_t    get_result     = cudaSuccess;
     cudaError_t    query_result   = cudaSuccess;
 };
 
@@ -28,6 +31,10 @@ FakeCudaState state;
 
 cudaError_t fake_get_device(int* device)
 {
+    if (state.get_result != cudaSuccess)
+    {
+        return state.get_result;
+    }
     *device = state.current_device;
     return cudaSuccess;
 }
@@ -51,6 +58,18 @@ const CudaRuntimeApi fake_api {
     fake_set_device,
     fake_get_pointer_attributes,
 };
+
+void fake_cleanup(void* opaque) noexcept
+{
+    auto& fake = *static_cast<FakeCudaState*>(opaque);
+    ++fake.cleanup_calls;
+}
+
+void fake_abandon(void* opaque) noexcept
+{
+    auto& fake = *static_cast<FakeCudaState*>(opaque);
+    ++fake.abandon_calls;
+}
 
 void check_view_error(const std::function<void()>& operation, const char* message)
 {
@@ -101,6 +120,18 @@ spec("TensorRT runtime CUDA control")
 
         check(state.current_device == 1);
         check(state.set_calls == 2);
+    }
+
+    it("abandons resources without cleanup when target device scope cannot be established")
+    {
+        state.get_result = cudaErrorInvalidDevice;
+        const DeviceCleanupActions actions { &state, fake_cleanup, fake_abandon };
+
+        cleanup_on_cuda_device_or_abandon(2, actions, fake_api);
+
+        check(state.cleanup_calls == 0);
+        check(state.abandon_calls == 1);
+        check(state.set_calls == 0);
     }
 
     it("accepts only a device allocation on the configured device")

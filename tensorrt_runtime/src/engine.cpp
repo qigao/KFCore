@@ -251,7 +251,7 @@ namespace
 } // namespace
 
 Engine::Engine(std::shared_ptr<const Impl> impl)
-    : impl_(std::move(impl))
+    : impl_(std::make_unique<std::shared_ptr<const Impl>>(std::move(impl)))
 {
 }
 
@@ -261,17 +261,21 @@ Engine::~Engine()
     {
         return;
     }
-    const int device_id = impl_->options.device_id;
-    try
-    {
-        detail::CudaDeviceScope device_scope(device_id);
-        impl_.reset();
-        device_scope.restore();
-    }
-    catch (...)
-    {
-        impl_.reset();
-    }
+    using EngineAnchor = std::unique_ptr<std::shared_ptr<const Impl>>;
+    const int device_id = (*impl_)->options.device_id;
+    const detail::DeviceCleanupActions actions {
+        &impl_,
+        [](void* opaque) noexcept
+        {
+            static_cast<EngineAnchor*>(opaque)->reset();
+        },
+        [](void* opaque) noexcept
+        {
+            // Preserve the shared count so Impl cannot be destroyed on an unconfirmed device.
+            (void)static_cast<EngineAnchor*>(opaque)->release();
+        },
+    };
+    detail::cleanup_on_cuda_device_or_abandon(device_id, actions);
 }
 
 std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_path,
@@ -283,9 +287,11 @@ std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_p
 
     try
     {
+        // Declaring the device scope first guarantees that every later TensorRT owner is destroyed
+        // before the caller's original CUDA device is restored on an exceptional exit.
+        detail::CudaDeviceScope device_scope(options.device_id);
         auto impl     = std::make_shared<Impl>();
         impl->options = options;
-        detail::CudaDeviceScope device_scope(options.device_id);
         initialize_plugins_once();
         impl->runtime.reset(nvinfer1::createInferRuntime(impl->logger));
         if (!impl->runtime)
@@ -314,7 +320,7 @@ std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_p
 
 const std::vector<TensorDescriptor>& Engine::tensors() const noexcept
 {
-    return impl_->tensors;
+    return (*impl_)->tensors;
 }
 
 } // namespace kfcore::tensorrt

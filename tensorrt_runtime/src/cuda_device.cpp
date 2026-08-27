@@ -94,4 +94,30 @@ void validate_cuda_device_pointer(const void* pointer, int expected_device,
     }
 }
 
+void cleanup_on_cuda_device_or_abandon(int requested_device,
+                                       const DeviceCleanupActions& actions) noexcept
+{
+    cleanup_on_cuda_device_or_abandon(requested_device, actions,
+                                      default_cuda_runtime_api());
+}
+
+void cleanup_on_cuda_device_or_abandon(int requested_device,
+                                       const DeviceCleanupActions& actions,
+                                       const CudaRuntimeApi& api) noexcept
+{
+    try
+    {
+        CudaDeviceScope device_scope(requested_device, api);
+        actions.cleanup(actions.state);
+        device_scope.restore();
+    }
+    catch (...)
+    {
+        // Cleanup on an unconfirmed device can corrupt CUDA/TensorRT ownership. The owners must
+        // instead relinquish their handles; leaking is the only noexcept-safe outcome after an
+        // unrecoverable device-selection failure.
+        actions.abandon(actions.state);
+    }
+}
+
 } // namespace kfcore::tensorrt::detail

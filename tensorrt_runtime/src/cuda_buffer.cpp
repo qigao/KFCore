@@ -181,6 +181,12 @@ std::size_t CudaBuffer::capacity() const noexcept
     return capacity_;
 }
 
+void CudaBuffer::abandon() noexcept
+{
+    data_     = nullptr;
+    capacity_ = 0;
+}
+
 #if defined(KFCORE_TENSORRT_RUNTIME_CUDA_BUFFER_TESTING)
 PinnedHostBuffer::PinnedHostBuffer() noexcept
     : PinnedHostBuffer(default_memory_api())
@@ -278,6 +284,12 @@ const void* PinnedHostBuffer::data() const noexcept
 std::size_t PinnedHostBuffer::capacity() const noexcept
 {
     return capacity_;
+}
+
+void PinnedHostBuffer::abandon() noexcept
+{
+    data_     = nullptr;
+    capacity_ = 0;
 }
 
 } // namespace kfcore::tensorrt::detail

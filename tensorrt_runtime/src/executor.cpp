@@ -420,7 +420,9 @@ namespace
 
 Executor::Impl::Impl(std::shared_ptr<const Engine::Impl> engine_state,
                      detail::TensorRtOwner<nvinfer1::IExecutionContext> execution_context)
-    : engine(std::move(engine_state))
+    : engine_owner(
+          std::make_unique<std::shared_ptr<const Engine::Impl>>(std::move(engine_state)))
+    , engine(engine_owner->get())
     , context(std::move(execution_context))
     , stream(std::make_unique<detail::CudaStream>())
     , staging(engine->tensors.size())
@@ -429,38 +431,53 @@ Executor::Impl::Impl(std::shared_ptr<const Engine::Impl> engine_state,
 
 Executor::Impl::~Impl() noexcept
 {
-    const auto destroy_resources = [this]() noexcept
-    {
-        context.reset();
-        staging.clear();
-        stream.reset();
-        engine.reset();
-    };
     if (!engine)
     {
-        destroy_resources();
         return;
     }
 
     const int device_id = engine->options.device_id;
-    try
-    {
-        detail::CudaDeviceScope device_scope(device_id);
-        if (stream)
+    const detail::DeviceCleanupActions actions {
+        this,
+        [](void* opaque) noexcept
         {
-            (void)cudaStreamSynchronize(stream->get());
-        }
-        if (context)
+            auto& self = *static_cast<Impl*>(opaque);
+            if (self.stream)
+            {
+                (void)cudaStreamSynchronize(self.stream->get());
+            }
+            if (self.context)
+            {
+                (void)clear_tensor_addresses(*self.context, self.engine->tensors);
+            }
+            self.context.reset();
+            self.staging.clear();
+            self.stream.reset();
+            self.engine = nullptr;
+            self.engine_owner.reset();
+        },
+        [](void* opaque) noexcept
         {
-            (void)clear_tensor_addresses(*context, engine->tensors);
-        }
-        destroy_resources();
-        device_scope.restore();
-    }
-    catch (...)
-    {
-        destroy_resources();
-    }
+            auto& self = *static_cast<Impl*>(opaque);
+            // Device selection failed, so calling any CUDA/TensorRT destructor would be unsafe.
+            // Relinquish every owner; this intentionally leaks only on this unrecoverable path.
+            (void)self.context.release();
+            for (detail::ExecutorStagingBuffers& buffers : self.staging)
+            {
+                buffers.device.abandon();
+                buffers.host.abandon();
+            }
+            self.staging.clear();
+            if (self.stream)
+            {
+                self.stream->abandon();
+                self.stream.reset();
+            }
+            self.engine = nullptr;
+            (void)self.engine_owner.release();
+        },
+    };
+    detail::cleanup_on_cuda_device_or_abandon(device_id, actions);
 }
 
 Executor::Executor(std::unique_ptr<Impl> impl)
@@ -472,15 +489,15 @@ Executor::~Executor() = default;
 
 std::unique_ptr<Executor> Engine::create_executor() const
 {
-    if (!impl_ || !impl_->engine)
+    if (!impl_ || !*impl_ || !(*impl_)->engine)
     {
         throw TensorRtError(TensorRtErrorCode::InvalidArgument,
                             "executor creation stage: engine state is unavailable");
     }
 
-    detail::CudaDeviceScope device_scope(impl_->options.device_id);
+    detail::CudaDeviceScope device_scope((*impl_)->options.device_id);
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context(
-        impl_->engine->createExecutionContext());
+        (*impl_)->engine->createExecutionContext());
     if (!context)
     {
         throw_tensorrt("executor creation stage: createExecutionContext returned null");
@@ -488,7 +505,7 @@ std::unique_ptr<Executor> Engine::create_executor() const
 
     try
     {
-        auto executor_impl = std::make_unique<Executor::Impl>(impl_, std::move(context));
+        auto executor_impl = std::make_unique<Executor::Impl>(*impl_, std::move(context));
         std::unique_ptr<Executor> result(new Executor(std::move(executor_impl)));
         device_scope.restore();
         return result;

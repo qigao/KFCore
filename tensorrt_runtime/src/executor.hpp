@@ -26,7 +26,10 @@ struct Executor::Impl final
          detail::TensorRtOwner<nvinfer1::IExecutionContext> execution_context);
     ~Impl() noexcept;
 
-    std::shared_ptr<const Engine::Impl>              engine;
+    // Keeping the shared_ptr in a heap anchor permits a deliberate safe leak when the target CUDA
+    // device cannot be established during noexcept destruction.
+    std::unique_ptr<std::shared_ptr<const Engine::Impl>> engine_owner;
+    const Engine::Impl*                                 engine = nullptr;
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context;
     std::unique_ptr<detail::CudaStream>              stream;
     std::vector<detail::ExecutorStagingBuffers>      staging;

@@ -29,7 +29,9 @@ private:
 
     explicit Engine(std::shared_ptr<const Impl> impl);
 
-    std::shared_ptr<const Impl> impl_;
+    // The heap anchor can be relinquished without decrementing the shared count when CUDA device
+    // selection fails during noexcept destruction.
+    std::unique_ptr<std::shared_ptr<const Impl>> impl_;
 };
 
 class Executor final

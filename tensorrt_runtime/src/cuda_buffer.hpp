@@ -41,6 +41,8 @@ public:
     void*       data() noexcept;
     const void* data() const noexcept;
     std::size_t capacity() const noexcept;
+    // Relinquishes the allocation without CUDA cleanup after device selection has failed.
+    void        abandon() noexcept;
 
 private:
 #if defined(KFCORE_TENSORRT_RUNTIME_CUDA_BUFFER_TESTING)
@@ -69,6 +71,8 @@ public:
     void*       data() noexcept;
     const void* data() const noexcept;
     std::size_t capacity() const noexcept;
+    // Relinquishes the allocation without CUDA cleanup after device selection has failed.
+    void        abandon() noexcept;
 
 private:
 #if defined(KFCORE_TENSORRT_RUNTIME_CUDA_BUFFER_TESTING)
