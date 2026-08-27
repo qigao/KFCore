@@ -14,6 +14,35 @@ option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
        "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
+option(KFCORE_BUILD_VISION_MODELS
+       "Build shared hand and MediaPipe landmark model contracts" OFF)
+option(KFCORE_BUILD_VISION_MODELS_CPU
+       "Build OpenCV-free ONNX Runtime hand and MediaPipe landmark models" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS
+  "Build real-model ONNX Runtime vision-model integration tests"
+  OFF
+  "KFCORE_BUILD_VISION_MODELS_CPU"
+  OFF)
+set(KFCORE_VISION_MODEL_TEST_MODEL_DIR "" CACHE PATH
+    "Directory containing trusted hand and MediaPipe face landmark ONNX models")
+set(KFCORE_VISION_MODEL_TEST_HAND_IMAGE "" CACHE FILEPATH
+    "Trusted hand image used by CPU vision-model integration tests")
+set(KFCORE_VISION_MODEL_TEST_FACE_IMAGE "" CACHE FILEPATH
+    "Trusted face image used by CPU vision-model integration tests")
+option(KFCORE_BUILD_VISION_MODELS_TENSORRT
+       "Build TensorRT CUDA hand and MediaPipe landmark models" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS
+  "Build real-engine TensorRT vision-model integration tests"
+  OFF
+  "KFCORE_BUILD_VISION_MODELS_TENSORRT"
+  OFF)
+foreach(_vision_engine IN ITEMS PALM HAND CLASSIFIER FACE)
+  set(KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}
+      "$ENV{KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}}" CACHE FILEPATH
+      "Trusted ${_vision_engine} engine used by TensorRT vision-model integration tests")
+endforeach()
 cmake_dependent_option(
   KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
   "Build real-model ONNX Runtime CPU face application integration tests"
@@ -57,6 +86,9 @@ option(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}" CACHE FILEPATH
     "Trusted ArcFace TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}" CACHE FILEPATH
+    "Trusted Palm TensorRT engine used by dynamic-output integration tests")
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}" CACHE FILEPATH
     "Trusted age/gender TensorRT engine used by opt-in runtime integration tests")

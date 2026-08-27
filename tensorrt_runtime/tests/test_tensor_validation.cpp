@@ -3,6 +3,7 @@
 #include "tinytest.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <string>
@@ -203,5 +204,85 @@ spec("TensorRT runtime tensor validation")
         check_error(
             [&] { detail::validate_output_views({ output_descriptor() }, { view }, 100); },
             TensorRtErrorCode::ResourceLimitExceeded, "aggregate tensor view bytes");
+    }
+
+    it("requires one bounded dynamic request for every output")
+    {
+        const std::vector<TensorDescriptor> expected = { output_descriptor("detections"),
+                                                         output_descriptor("scores") };
+        const DynamicOutputRequest detections { "detections", DataType::Float32, 4096 };
+        const DynamicOutputRequest scores { "scores", DataType::Float32, 1024 };
+
+        detail::validate_dynamic_output_requests(expected, { detections, scores }, 8192);
+
+        check_error(
+            [&] { detail::validate_dynamic_output_requests(expected, { detections }, 8192); },
+            TensorRtErrorCode::InvalidTensorView, "missing");
+        check_error(
+            [&]
+            {
+                detail::validate_dynamic_output_requests(expected, { detections, detections },
+                                                         8192);
+            },
+            TensorRtErrorCode::InvalidTensorView, "duplicate");
+    }
+
+    it("rejects invalid dynamic output capacities and contracts")
+    {
+        const std::vector<TensorDescriptor> expected = { output_descriptor("detections") };
+
+        check_error(
+            [&]
+            {
+                detail::validate_dynamic_output_requests(
+                    expected, { { "detections", DataType::Float32, 0 } }, 4096);
+            },
+            TensorRtErrorCode::ResourceLimitExceeded, "positive");
+        check_error(
+            [&]
+            {
+                detail::validate_dynamic_output_requests(
+                    expected, { { "detections", DataType::Int64, 4096 } }, 4096);
+            },
+            TensorRtErrorCode::InvalidTensorView, "data type");
+        check_error(
+            [&]
+            {
+                detail::validate_dynamic_output_requests(
+                    expected, { { "detections", DataType::Float32, 4097 } }, 4096);
+            },
+            TensorRtErrorCode::ResourceLimitExceeded, "aggregate");
+    }
+
+    it("copies HostTensor values only through the matching checked type")
+    {
+        HostTensor tensor;
+        tensor.name      = "detections";
+        tensor.data_type = DataType::Float32;
+        tensor.shape     = { 1, 2 };
+        tensor.bytes.resize(2 * sizeof(float));
+        const float expected[2] = { 0.25F, 0.75F };
+        std::memcpy(tensor.bytes.data(), expected, sizeof(expected));
+
+        const std::vector<float> actual = tensor.float32_values();
+        check(actual.size() == 2);
+        check(actual[0] == expected[0]);
+        check(actual[1] == expected[1]);
+        check_error([&] { (void)tensor.int64_values(); },
+                    TensorRtErrorCode::InvalidTensorView, "data type");
+
+        tensor.shape = { 2, 2 };
+        check_error([&] { (void)tensor.float32_values(); },
+                    TensorRtErrorCode::InvalidTensorView, "byte size");
+    }
+
+    it("accepts an empty data-dependent HostTensor")
+    {
+        HostTensor tensor;
+        tensor.name      = "detections";
+        tensor.data_type = DataType::Float32;
+        tensor.shape     = { 0, 8 };
+
+        check(tensor.float32_values().empty());
     }
 }

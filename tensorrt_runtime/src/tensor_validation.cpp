@@ -2,6 +2,7 @@
 
 #include "kfcore/tensorrt/error.hpp"
 
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -270,6 +271,27 @@ std::size_t checked_shape_byte_size(const TensorShape& shape, DataType data_type
     return checked_multiply(element_count, scalar_byte_size(data_type), stage);
 }
 
+std::size_t checked_data_dependent_shape_byte_size(const TensorShape& shape,
+                                                   DataType data_type, const char* stage)
+{
+    std::size_t element_count = 1;
+    for (const std::int64_t dimension : shape)
+    {
+        if (dimension < 0)
+        {
+            throw_contract(stage, "data-dependent shape dimensions must be non-negative");
+        }
+        if (dimension == 0)
+        {
+            element_count = 0;
+            continue;
+        }
+        element_count = checked_multiply(
+            element_count, checked_dimension(dimension, stage), stage);
+    }
+    return checked_multiply(element_count, scalar_byte_size(data_type), stage);
+}
+
 void validate_profile_bounds(const TensorProfile& profile, const std::string& tensor_name)
 {
     const std::size_t rank = profile.minimum.size();
@@ -358,4 +380,117 @@ void validate_output_views(const std::vector<TensorDescriptor>&  expected,
                         "output view validation");
 }
 
+void validate_dynamic_output_requests(
+    const std::vector<TensorDescriptor>& expected,
+    const std::vector<DynamicOutputRequest>& requests, std::size_t max_aggregate_bytes)
+{
+    validate_expected_descriptors(expected, TensorIoMode::Output,
+                                  "dynamic output request validation");
+    std::size_t aggregate_bytes = 0;
+    for (std::size_t index = 0; index < requests.size(); ++index)
+    {
+        const DynamicOutputRequest& request = requests[index];
+        if (request.name.empty())
+        {
+            throw_view("dynamic output request validation", "output name must not be empty");
+        }
+        for (std::size_t previous = 0; previous < index; ++previous)
+        {
+            if (requests[previous].name == request.name)
+            {
+                throw_view(request.name, "duplicate dynamic output request");
+            }
+        }
+
+        const TensorDescriptor* descriptor = nullptr;
+        for (const TensorDescriptor& candidate : expected)
+        {
+            if (candidate.name == request.name)
+            {
+                descriptor = &candidate;
+                break;
+            }
+        }
+        if (descriptor == nullptr)
+        {
+            throw_view(request.name, "unexpected dynamic output request");
+        }
+        if (request.data_type != descriptor->data_type)
+        {
+            throw_view(request.name,
+                       "dynamic output request data type does not match engine metadata");
+        }
+        if (request.max_byte_size == 0)
+        {
+            throw_resource(request.name, "dynamic output capacity must be positive");
+        }
+        aggregate_bytes = checked_add(aggregate_bytes, request.max_byte_size,
+                                      "dynamic output request validation");
+        if (aggregate_bytes > max_aggregate_bytes)
+        {
+            throw_resource("dynamic output request validation",
+                           "aggregate requested bytes exceed configured limit");
+        }
+    }
+
+    for (const TensorDescriptor& descriptor : expected)
+    {
+        bool found = false;
+        for (const DynamicOutputRequest& request : requests)
+        {
+            if (request.name == descriptor.name)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            throw_view(descriptor.name, "required dynamic output request is missing");
+        }
+    }
+}
+
 } // namespace kfcore::tensorrt::detail
+
+namespace kfcore::tensorrt
+{
+namespace
+{
+
+    template <typename Value>
+    std::vector<Value> copy_host_tensor_values(const HostTensor& tensor, DataType expected_type)
+    {
+        if (tensor.data_type != expected_type)
+        {
+            throw TensorRtError(TensorRtErrorCode::InvalidTensorView,
+                                tensor.name + " host tensor data type does not match accessor");
+        }
+        const std::size_t expected_bytes = detail::checked_data_dependent_shape_byte_size(
+            tensor.shape, tensor.data_type, "host tensor access");
+        if (tensor.bytes.size() != expected_bytes)
+        {
+            throw TensorRtError(TensorRtErrorCode::InvalidTensorView,
+                                tensor.name + " host tensor byte size does not match shape");
+        }
+        std::vector<Value> values(expected_bytes / sizeof(Value));
+        if (!values.empty())
+        {
+            std::memcpy(values.data(), tensor.bytes.data(), expected_bytes);
+        }
+        return values;
+    }
+
+} // namespace
+
+std::vector<float> HostTensor::float32_values() const
+{
+    return copy_host_tensor_values<float>(*this, DataType::Float32);
+}
+
+std::vector<std::int64_t> HostTensor::int64_values() const
+{
+    return copy_host_tensor_values<std::int64_t>(*this, DataType::Int64);
+}
+
+} // namespace kfcore::tensorrt
