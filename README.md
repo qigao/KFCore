@@ -673,7 +673,9 @@ Windows 可从父环境提供 `TENSORRT_ROOT`，以及可选的同名
 `KFCore::face_applications` 把上述 prepared-tensor adapters 组成同步单脸应用：
 YOLOv12-face（唯一检测入口）→ Face68 → ArcFace → InSwapper，并可显式启用
 GFPGAN 与 Age/Gender。它依赖 OpenCV Lite 的 `core/imgproc`，命令行示例另外依赖
-`imgcodecs`。模型 I/O、matrix sidecar、所有权、非重入约束、构建和真实模型验证命令见
+`imgcodecs`。每帧由 ImageProcessor 上传一次后供检测与 Face68/ArcFace/InSwapper/GFPGAN
+CUDA 预处理复用，随后以 device tensor 直接进入 TensorRT；Age/Gender 保留 CPU ROI resize。
+模型 I/O、matrix sidecar、所有权、非重入约束、构建和真实模型验证命令见
 [face_applications/README.md](face_applications/README.md)。
 
 When building from this repository, the important options are:

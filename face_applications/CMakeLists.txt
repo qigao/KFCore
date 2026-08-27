@@ -12,6 +12,8 @@ target_include_directories(kfcore_face_applications
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(kfcore_face_applications PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_applications
+  PRIVATE
+    KFCore::image_processor
   PUBLIC
     KFCore::face_models
     KFCore::tensorrt_yolo
@@ -75,6 +77,16 @@ if(BUILD_TESTS)
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
     FOLDER "face_applications/tests")
   add_test(NAME test_face_preprocess COMMAND test_face_preprocess)
+
+  add_executable(benchmark_face_preprocess tests/benchmark_preprocess.cpp)
+  target_link_libraries(benchmark_face_preprocess PRIVATE
+    KFCore::face_applications
+    KFCore::image_processor
+    CUDA::cudart
+    TurboUtils::TinyTest)
+  set_target_properties(benchmark_face_preprocess PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "face_applications/benchmarks")
 
   add_executable(test_face_composer tests/test_composer.cpp)
   target_link_libraries(test_face_composer PRIVATE

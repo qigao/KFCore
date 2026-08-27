@@ -117,9 +117,8 @@ cv::Point2f transform_point(const cv::Matx23f& transform, const cv::Point2f& poi
     return result;
 }
 
-AlignedFace crop_face68(const cv::Mat& bgr_image, const FaceBox& box)
+FaceTransform face68_transform(const FaceBox& box)
 {
-    validate_image(bgr_image);
     if (!std::isfinite(box.left) || !std::isfinite(box.top) || !std::isfinite(box.right) ||
         !std::isfinite(box.bottom) || box.right <= box.left || box.bottom <= box.top)
     {
@@ -131,10 +130,17 @@ AlignedFace crop_face68(const cv::Mat& bgr_image, const FaceBox& box)
     const float center_y = (box.top + box.bottom) * 0.5F;
     const cv::Matx23f source_to_aligned(scale, 0.0F, 128.0F - scale * center_x,
                                         0.0F, scale, 128.0F - scale * center_y);
+    return { source_to_aligned, inverse_affine(source_to_aligned) };
+}
+
+AlignedFace crop_face68(const cv::Mat& bgr_image, const FaceBox& box)
+{
+    validate_image(bgr_image);
+    const FaceTransform transform = face68_transform(box);
     AlignedFace result;
-    result.source_to_aligned = source_to_aligned;
-    result.aligned_to_source = inverse_affine(source_to_aligned);
-    cv::warpAffine(bgr_image, result.image, cv::Mat(source_to_aligned),
+    result.source_to_aligned = transform.source_to_aligned;
+    result.aligned_to_source = transform.aligned_to_source;
+    cv::warpAffine(bgr_image, result.image, cv::Mat(result.source_to_aligned),
                    cv::Size(kFace68Extent, kFace68Extent), cv::INTER_LINEAR,
                    cv::BORDER_CONSTANT, cv::Scalar::all(0));
     return result;
@@ -224,6 +230,13 @@ cv::Matx23f similarity_transform(const FiveLandmarks& source,
                        static_cast<float>(ty));
 }
 
+FaceTransform alignment_transform(const FiveLandmarks& source,
+                                  const FiveLandmarks& target)
+{
+    const cv::Matx23f source_to_aligned = similarity_transform(source, target);
+    return { source_to_aligned, inverse_affine(source_to_aligned) };
+}
+
 AlignedFace align_face(const cv::Mat& bgr_image, const FiveLandmarks& source,
                        const FiveLandmarks& target, int extent)
 {
@@ -232,9 +245,10 @@ AlignedFace align_face(const cv::Mat& bgr_image, const FiveLandmarks& source,
     {
         throw_invalid("aligned extent must be in [1,4096]");
     }
+    const FaceTransform transform = alignment_transform(source, target);
     AlignedFace result;
-    result.source_to_aligned = similarity_transform(source, target);
-    result.aligned_to_source = inverse_affine(result.source_to_aligned);
+    result.source_to_aligned = transform.source_to_aligned;
+    result.aligned_to_source = transform.aligned_to_source;
     cv::warpAffine(bgr_image, result.image, cv::Mat(result.source_to_aligned),
                    cv::Size(extent, extent), cv::INTER_LINEAR, cv::BORDER_CONSTANT,
                    cv::Scalar::all(0));

@@ -19,6 +19,12 @@ struct FaceBox
 
 using FiveLandmarks = std::array<cv::Point2f, 5>;
 
+struct FaceTransform
+{
+    cv::Matx23f source_to_aligned;
+    cv::Matx23f aligned_to_source;
+};
+
 struct AlignedFace
 {
     cv::Mat     image;
@@ -28,6 +34,7 @@ struct AlignedFace
 
 [[nodiscard]] cv::Point2f transform_point(const cv::Matx23f& transform,
                                           const cv::Point2f& point);
+[[nodiscard]] FaceTransform face68_transform(const FaceBox& box);
 [[nodiscard]] AlignedFace crop_face68(const cv::Mat& bgr_image, const FaceBox& box);
 [[nodiscard]] kfcore::face_models::Face68Result map_face68_to_source(
     const kfcore::face_models::Face68Result& landmarks,
@@ -36,6 +43,8 @@ struct AlignedFace
     const kfcore::face_models::Face68Result& landmarks);
 [[nodiscard]] cv::Matx23f similarity_transform(const FiveLandmarks& source,
                                                const FiveLandmarks& target);
+[[nodiscard]] FaceTransform alignment_transform(const FiveLandmarks& source,
+                                                const FiveLandmarks& target);
 [[nodiscard]] AlignedFace align_face(const cv::Mat& bgr_image,
                                      const FiveLandmarks& source,
                                      const FiveLandmarks& target, int extent);

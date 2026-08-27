@@ -19,6 +19,11 @@ BGR source/target (borrowed CV_8UC3)
   -> owned CV_8UC3 output
 ```
 
+`TensorRtFaceSwapApplication` 通过 `KFCore::image_processor` 为每个 CUDA device 每帧只做一次
+上传。YOLO 检测复用该 device image，Face68、ArcFace、InSwapper 和 GFPGAN 直接消费 CUDA
+生成的 FP32 NCHW tensor；模型输出和最终合成仍由 host 持有。可选 Age/Gender 保留参考
+CPU ROI resize，以维持 OpenCV 边界语义。
+
 `TensorRtFaceSwapApplication` 同步且单实例不可重入。输入 `cv::Mat` 只在调用期间借用且不被
 修改，成功结果拥有自己的像素内存；任一阶段失败时抛出带阶段上下文的
 `FaceApplicationError`，不会返回部分结果。若要并行处理，应为每个任务加载独立实例。
