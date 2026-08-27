@@ -104,11 +104,13 @@ struct TensorRtDetector::Impl final
     detail::CudaBuffer                                 boxes_device;
     detail::CudaBuffer                                 scores_device;
     detail::CudaBuffer                                 labels_device;
+    detail::CudaBuffer                                 detections_device;
     detail::PinnedHostBuffer                           input_host;
     detail::PinnedHostBuffer                           num_dets_host;
     detail::PinnedHostBuffer                           boxes_host;
     detail::PinnedHostBuffer                           scores_host;
     detail::PinnedHostBuffer                           labels_host;
+    detail::PinnedHostBuffer                           detections_host;
 };
 
 } // namespace kfcore::yolo

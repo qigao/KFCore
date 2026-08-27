@@ -30,6 +30,11 @@ struct DetectionBufferLayout
     std::size_t total_output_bytes;
 };
 
+struct CompactNmsBufferLayout
+{
+    std::size_t detections_bytes;
+};
+
 struct EfficientNmsOutputView
 {
     const std::int32_t* num_dets;
@@ -42,6 +47,14 @@ struct EfficientNmsOutputView
     std::size_t         labels_count;
     std::size_t         max_detections;
     TensorDataType      output_type;
+};
+
+struct CompactNmsOutputView
+{
+    const void*    detections;
+    std::size_t    detections_count;
+    std::size_t    max_detections;
+    TensorDataType output_type;
 };
 
 BatchInputPlan prepare_batch(const std::vector<ImageView>& images, std::size_t min_batch,
@@ -58,8 +71,17 @@ DetectionBufferLayout compute_detection_buffer_layout(std::size_t batch, std::si
                                                       TensorDataType output_type,
                                                       std::size_t    max_output_bytes);
 
+CompactNmsBufferLayout compute_compact_nms_buffer_layout(std::size_t batch,
+                                                         std::size_t max_detections,
+                                                         TensorDataType output_type,
+                                                         std::size_t max_output_bytes);
+
 std::vector<DetectionFrame> decode_efficient_nms(const std::vector<ImageView>&          images,
                                                  const std::vector<LetterboxTransform>& transforms,
                                                  const EfficientNmsOutputView&          outputs);
+
+std::vector<DetectionFrame> decode_compact_nms(const std::vector<ImageView>&          images,
+                                               const std::vector<LetterboxTransform>& transforms,
+                                               const CompactNmsOutputView&            outputs);
 
 } // namespace kfcore::yolo::detail

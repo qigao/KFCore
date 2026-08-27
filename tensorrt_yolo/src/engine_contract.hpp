@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace kfcore::yolo {
@@ -42,6 +43,7 @@ struct ContractNames {
     std::string boxes = "boxes";
     std::string scores = "scores";
     std::string labels = "labels";
+    std::string detections = "output0";
 };
 
 struct ContractLimits {
@@ -57,6 +59,21 @@ struct ValidatedTensor {
     std::size_t max_bytes;
 };
 
+enum class DetectionOutputLayout { EfficientNms, CompactNms };
+
+struct EfficientNmsContract {
+    ValidatedTensor num_dets;
+    ValidatedTensor boxes;
+    ValidatedTensor scores;
+    ValidatedTensor labels;
+};
+
+struct CompactNmsContract {
+    ValidatedTensor detections;
+};
+
+using DetectionOutputContract = std::variant<EfficientNmsContract, CompactNmsContract>;
+
 struct ValidatedContract {
     std::int64_t min_batch;
     std::int64_t opt_batch;
@@ -68,21 +85,21 @@ struct ValidatedContract {
     std::int64_t min_input_width;
     std::int64_t opt_input_width;
     std::int64_t max_input_width;
+    DetectionOutputLayout output_layout;
     TensorDataType input_type;
     TensorDataType output_type;
     std::size_t input_bytes;
     std::size_t output_bytes;
     ValidatedTensor images;
-    ValidatedTensor num_dets;
-    ValidatedTensor boxes;
-    ValidatedTensor scores;
-    ValidatedTensor labels;
+    DetectionOutputContract outputs;
 };
 
 struct SelectedInputSize {
     std::int32_t height;
     std::int32_t width;
 };
+
+void validate_engine_io_tensor_count(std::int32_t tensor_count);
 
 ValidatedContract validate_engine_contract(
     const EngineMetadata& metadata,

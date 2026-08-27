@@ -4,6 +4,9 @@
 Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8 的 Host 或同设备 CUDA 输入输出 CUDA
 FP16/FP32 NCHW Tensor；一次 fused kernel
 完成双线性 letterbox、RGB/BGR 通道排列、`pixel / 255`、mean/stddev 归一化和 HWC→NCHW。
+同步 facade 还可提供有界、可复用的 CUDA inference-output tensor，并把 RGB NCHW tensor 通过
+FP32 alpha mask 和仿射变换直接合成到 CUDA RGB/BGR 图像，最后按调用方明确的边界下载 packed
+BGR。它适用于 TensorRT 或其他能读写 CUDA pointer 的后端，不依赖特定推理库。
 模块不依赖 TensorRT、ONNX Runtime 或 OpenCV。
 
 ## 构建
@@ -93,6 +96,21 @@ Host 灰度输出不需要 CUDA stream 或工作区。先用
 `ImageProcessorError::{code(),what()}` 报告。Tensor 路径只接受连续 NCHW Tensor 和 BGR8/RGB8
 单平面图像；Gray8 仅用于 Host 灰度输出。NV12/YUY2 及 CUDA 图像输出需在 plane 契约扩展后实现，
 当前不会隐式 fallback。
+
+`CudaImageProcessor` 是同步、单实例不可重入的便利 facade：
+
+- `stage()` 返回 processor-owned CUDA image；下次 `stage()` 使该 view 失效。
+- `process_affine()` 返回 processor-owned preprocess tensor；下次同名调用使该 view 失效。
+- `acquire_tensor()` 返回可由任意 CUDA inference backend 写入的独立 tensor storage；下次
+  `acquire_tensor()` 使该 view 失效。
+- `composite_affine()` 接收 CUDA RGB NCHW、Host/CUDA FP32 alpha 和 destination-to-aligned
+  transform，返回独立 packed CUDA image；允许把上一次合成结果原位作为 base。下次合成会更新
+  同一 owned storage。
+- `download_bgr()` 是显式同步 device→host 边界，目标 buffer 由调用方拥有。
+
+这几类 storage 彼此独立，因此可按“预处理 → 外部推理写入 → 合成 → 再预处理”的顺序复用，
+无需中间图像回传。所有容量由 `CudaImageProcessorOptions::{max_source_bytes,max_tensor_bytes}`
+约束；跨 device pointer、重叠 tensor/output、非有限 tensor 值和容量不足都会立即失败。
 
 ## AprilTag 边界
 

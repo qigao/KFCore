@@ -127,6 +127,226 @@ void check_fp32(const std::array<float, Size>& actual, const std::array<float, S
 
 spec("ImageProcessor CUDA contract")
 {
+    it("owns bounded writable inference tensor storage")
+    {
+        CudaImageProcessorOptions options;
+        options.max_tensor_bytes = 48;
+        auto processor           = CudaImageProcessor::create(options);
+
+        const TensorView output =
+            processor->acquire_tensor(1, 3, 2, 2, TensorElementType::Float32);
+        check(output.data != nullptr);
+        check(output.byte_size == 48);
+        check(output.batch == 1);
+        check(output.channels == 3);
+        check(output.height == 2);
+        check(output.width == 2);
+        check(output.memory_kind == MemoryKind::CudaDevice);
+
+        const TensorView reused =
+            processor->acquire_tensor(1, 3, 1, 1, TensorElementType::Float32);
+        check(reused.data == output.data);
+        check_throws_as(
+            processor->acquire_tensor(1, 3, 3, 2, TensorElementType::Float32),
+            ImageProcessorError);
+    }
+
+    it("composites RGB CHW through an affine mask and downloads packed BGR once")
+    {
+        const std::array<std::uint8_t, 12> base_pixels = {
+            10, 20, 30, 10, 20, 30, 10, 20, 30, 10, 20, 30,
+        };
+        const std::array<float, 12> rgb = {
+            1.0F, 1.0F, 1.0F, 1.0F,
+            0.5F, 0.5F, 0.5F, 0.5F,
+            0.0F, 0.0F, 0.0F, 0.0F,
+        };
+        std::array<float, 4> mask = { 1.0F, 0.0F, 0.5F, 1.0F };
+
+        auto processor = CudaImageProcessor::create();
+        const ImageView base = processor->stage(
+            { base_pixels.data(), base_pixels.size(), 2, 2, 6, PixelFormat::Bgr8,
+              MemoryKind::Host });
+        const TensorView aligned =
+            processor->acquire_tensor(1, 3, 2, 2, TensorElementType::Float32);
+        check(cudaMemcpy(aligned.data, rgb.data(), aligned.byte_size, cudaMemcpyHostToDevice) ==
+              cudaSuccess);
+        const TensorView alpha = {
+            mask.data(), mask.size() * sizeof(float), 1, 1, 2, 2,
+            TensorElementType::Float32, TensorLayout::Nchw, MemoryKind::Host,
+        };
+
+        const ImageView composed = processor->composite_affine(base, aligned, alpha, {}, {});
+        check(composed.data != base.data);
+        check(composed.memory_kind == MemoryKind::CudaDevice);
+        check(composed.pixel_format == PixelFormat::Bgr8);
+
+        std::array<std::uint8_t, 12> downloaded {};
+        processor->download_bgr(composed, { downloaded.data(), downloaded.size() });
+        const std::array<std::uint8_t, 12> expected = {
+            0, 127, 255, 10, 20, 30, 5, 73, 142, 0, 127, 255,
+        };
+        check(downloaded == expected);
+
+        TensorCompositeOptions quarter;
+        quarter.strength = 0.25F;
+        const ImageView recomposed =
+            processor->composite_affine(composed, aligned, alpha, {}, quarter);
+        check(recomposed.data == composed.data);
+        processor->download_bgr(recomposed, { downloaded.data(), downloaded.size() });
+        check(downloaded[3] == std::uint8_t { 10 });
+        check(downloaded[4] == std::uint8_t { 20 });
+        check(downloaded[5] == std::uint8_t { 30 });
+    }
+
+    it("rejects malformed affine composition inputs")
+    {
+        const std::array<std::uint8_t, 3> pixel = { 0, 0, 0 };
+        std::array<float, 3> rgb = { 0.0F, 0.0F, 0.0F };
+        std::array<float, 1> mask = { 1.0F };
+        auto processor = CudaImageProcessor::create();
+        const ImageView base = processor->stage(
+            { pixel.data(), pixel.size(), 1, 1, 3, PixelFormat::Bgr8, MemoryKind::Host });
+        const TensorView aligned =
+            processor->acquire_tensor(1, 3, 1, 1, TensorElementType::Float32);
+        check(cudaMemcpy(aligned.data, rgb.data(), aligned.byte_size, cudaMemcpyHostToDevice) ==
+              cudaSuccess);
+        TensorView alpha = {
+            mask.data(), sizeof(float), 1, 1, 1, 1, TensorElementType::Float32,
+            TensorLayout::Nchw, MemoryKind::Host,
+        };
+
+        TensorCompositeOptions invalid_strength;
+        invalid_strength.strength = 1.1F;
+        check_throws_as(
+            processor->composite_affine(base, aligned, alpha, {}, invalid_strength),
+            ImageProcessorError);
+        alpha.channels = 3;
+        check_throws_as(processor->composite_affine(base, aligned, alpha, {}, {}),
+                        ImageProcessorError);
+        check_throws_as(processor->download_bgr(base, { nullptr, 0 }), ImageProcessorError);
+    }
+
+    it("uses destination-to-aligned coordinates for affine composition")
+    {
+        const std::array<std::uint8_t, 9> base_pixels {};
+        const std::array<float, 3> rgb = { 1.0F, 0.0F, 0.0F };
+        std::array<float, 1> mask = { 1.0F };
+        auto processor = CudaImageProcessor::create();
+        const ImageView base = processor->stage(
+            { base_pixels.data(), base_pixels.size(), 3, 1, 9, PixelFormat::Bgr8,
+              MemoryKind::Host });
+        const TensorView aligned =
+            processor->acquire_tensor(1, 3, 1, 1, TensorElementType::Float32);
+        check(cudaMemcpy(aligned.data, rgb.data(), aligned.byte_size, cudaMemcpyHostToDevice) ==
+              cudaSuccess);
+        const TensorView alpha = {
+            mask.data(), sizeof(float), 1, 1, 1, 1, TensorElementType::Float32,
+            TensorLayout::Nchw, MemoryKind::Host,
+        };
+        AffineTransform destination_to_aligned;
+        destination_to_aligned.destination_to_source = {
+            1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F,
+        };
+        const ImageView composed = processor->composite_affine(
+            base, aligned, alpha, destination_to_aligned);
+        std::array<std::uint8_t, 9> downloaded {};
+        processor->download_bgr(composed, { downloaded.data(), downloaded.size() });
+        const std::array<std::uint8_t, 9> expected = {
+            0, 0, 0, 0, 0, 255, 0, 0, 0,
+        };
+        check(downloaded == expected);
+    }
+
+    it("owns reusable storage for synchronous affine and normalized host preprocessing")
+    {
+        const std::array<std::uint8_t, 12> bgr = {
+            0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110,
+        };
+        const ImageView image = {
+            bgr.data(), bgr.size(), 2, 2, 6, PixelFormat::Bgr8, MemoryKind::Host,
+        };
+        CudaImageProcessorOptions processor_options;
+        processor_options.max_source_bytes = 1024;
+        processor_options.max_tensor_bytes = 1024;
+        auto processor                     = CudaImageProcessor::create(processor_options);
+
+        const ImageView staged = processor->stage(image);
+        check(staged.memory_kind == MemoryKind::CudaDevice);
+        check(staged.data != image.data);
+        check(staged.row_stride == 6);
+        check(staged.byte_size == bgr.size());
+
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.mean          = { 0.5F, 0.5F, 0.5F };
+        options.stddev        = { 0.5F, 0.5F, 0.5F };
+        options.border_value  = 0.0F;
+        const AffineTransform identity;
+        const TensorView      first =
+            processor->process_affine(staged, 2, 2, identity, options, TensorElementType::Float32);
+
+        check(first.memory_kind == MemoryKind::CudaDevice);
+        check(first.batch == 1);
+        check(first.channels == 3);
+        check(first.height == 2);
+        check(first.width == 2);
+        check(first.byte_size == 12 * sizeof(float));
+        std::array<float, 12> output {};
+        check(cudaMemcpy(output.data(), first.data, first.byte_size, cudaMemcpyDeviceToHost) ==
+              cudaSuccess);
+        const std::array<float, 12> expected = {
+            20.0F / 127.5F - 1.0F,  50.0F / 127.5F - 1.0F,  80.0F / 127.5F - 1.0F,
+            110.0F / 127.5F - 1.0F, 10.0F / 127.5F - 1.0F,  40.0F / 127.5F - 1.0F,
+            70.0F / 127.5F - 1.0F,  100.0F / 127.5F - 1.0F, 0.0F / 127.5F - 1.0F,
+            30.0F / 127.5F - 1.0F,  60.0F / 127.5F - 1.0F,  90.0F / 127.5F - 1.0F,
+        };
+        check_fp32(output, expected);
+
+        const TensorView second =
+            processor->process_affine(staged, 1, 1, identity, options, TensorElementType::Float32);
+        check(second.data == first.data);
+    }
+
+    it("uses destination-to-source affine coordinates and constant borders")
+    {
+        const std::array<std::uint8_t, 3> rgb   = { 10, 20, 30 };
+        const ImageView                   image = {
+            rgb.data(), rgb.size(), 1, 1, 3, PixelFormat::Rgb8, MemoryKind::Host,
+        };
+        auto            processor = CudaImageProcessor::create();
+        AffineTransform translated;
+        translated.destination_to_source = { 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.border_value  = 7.0F;
+        const TensorView tensor =
+            processor->process_affine(image, 2, 1, translated, options, TensorElementType::Float32);
+
+        std::array<float, 6> output {};
+        check(cudaMemcpy(output.data(), tensor.data, tensor.byte_size, cudaMemcpyDeviceToHost) ==
+              cudaSuccess);
+        const std::array<float, 6> expected = {
+            7.0F / 255.0F,  10.0F / 255.0F, 7.0F / 255.0F,
+            20.0F / 255.0F, 7.0F / 255.0F,  30.0F / 255.0F,
+        };
+        check_fp32(output, expected);
+    }
+
+    it("fails fast when affine preprocessing exceeds configured source capacity")
+    {
+        const std::array<std::uint8_t, 3> rgb   = { 1, 2, 3 };
+        const ImageView                   image = {
+            rgb.data(), rgb.size(), 1, 1, 3, PixelFormat::Rgb8, MemoryKind::Host,
+        };
+        CudaImageProcessorOptions options;
+        options.max_source_bytes = 2;
+        options.max_tensor_bytes = 1024;
+        auto processor           = CudaImageProcessor::create(options);
+        check_throws_as(processor->process_affine(image, 1, 1, {}, {}, TensorElementType::Float32),
+                        ImageProcessorError);
+    }
+
     it("letterboxes a CUDA RGB image into normalized FP32 NCHW on an explicit stream")
     {
         constexpr std::size_t                         kSourceStride = 8;

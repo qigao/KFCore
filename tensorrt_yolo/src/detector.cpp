@@ -166,13 +166,36 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
         const detail::BatchInputPlan input_plan =
             detail::prepare_batch(images, minimum_batch, maximum_batch, input_width, input_height,
                                   contract.input_type, engine_options.max_input_bytes);
-        const detail::DetectionBufferLayout output_layout = detail::compute_detection_buffer_layout(
-            images.size(), max_detections, contract.output_type, engine_options.max_output_bytes);
-        if (input_plan.input_bytes > contract.images.max_bytes ||
-            output_layout.num_dets_bytes > contract.num_dets.max_bytes ||
-            output_layout.boxes_bytes > contract.boxes.max_bytes ||
-            output_layout.scores_bytes > contract.scores.max_bytes ||
-            output_layout.labels_bytes > contract.labels.max_bytes)
+        detail::DetectionBufferLayout efficient_layout {};
+        detail::CompactNmsBufferLayout compact_layout {};
+        if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+        {
+            efficient_layout = detail::compute_detection_buffer_layout(
+                images.size(), max_detections, contract.output_type,
+                engine_options.max_output_bytes);
+            const auto& outputs = std::get<EfficientNmsContract>(contract.outputs);
+            if (efficient_layout.num_dets_bytes > outputs.num_dets.max_bytes ||
+                efficient_layout.boxes_bytes > outputs.boxes.max_bytes ||
+                efficient_layout.scores_bytes > outputs.scores.max_bytes ||
+                efficient_layout.labels_bytes > outputs.labels.max_bytes)
+            {
+                throw_tensorrt(
+                    "detection setup stage: dynamic tensor bytes exceed the validated contract");
+            }
+        }
+        else
+        {
+            compact_layout = detail::compute_compact_nms_buffer_layout(
+                images.size(), max_detections, contract.output_type,
+                engine_options.max_output_bytes);
+            const auto& outputs = std::get<CompactNmsContract>(contract.outputs);
+            if (compact_layout.detections_bytes > outputs.detections.max_bytes)
+            {
+                throw_tensorrt(
+                    "detection setup stage: dynamic tensor bytes exceed the validated contract");
+            }
+        }
+        if (input_plan.input_bytes > contract.images.max_bytes)
         {
             throw_tensorrt(
                 "detection setup stage: dynamic tensor bytes exceed the validated contract");
@@ -185,15 +208,32 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
         impl_->input_device.reserve(input_plan.input_bytes, engine_options.max_input_bytes);
         impl_->input_host.reserve(input_plan.processor.host_staging_bytes,
                                   engine_options.max_input_bytes);
-        impl_->num_dets_device.reserve(output_layout.num_dets_bytes,
+        if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+        {
+            impl_->num_dets_device.reserve(efficient_layout.num_dets_bytes,
+                                           engine_options.max_output_bytes);
+            impl_->boxes_device.reserve(efficient_layout.boxes_bytes,
+                                        engine_options.max_output_bytes);
+            impl_->scores_device.reserve(efficient_layout.scores_bytes,
+                                         engine_options.max_output_bytes);
+            impl_->labels_device.reserve(efficient_layout.labels_bytes,
+                                         engine_options.max_output_bytes);
+            impl_->num_dets_host.reserve(efficient_layout.num_dets_bytes,
+                                         engine_options.max_output_bytes);
+            impl_->boxes_host.reserve(efficient_layout.boxes_bytes,
+                                      engine_options.max_output_bytes);
+            impl_->scores_host.reserve(efficient_layout.scores_bytes,
                                        engine_options.max_output_bytes);
-        impl_->boxes_device.reserve(output_layout.boxes_bytes, engine_options.max_output_bytes);
-        impl_->scores_device.reserve(output_layout.scores_bytes, engine_options.max_output_bytes);
-        impl_->labels_device.reserve(output_layout.labels_bytes, engine_options.max_output_bytes);
-        impl_->num_dets_host.reserve(output_layout.num_dets_bytes, engine_options.max_output_bytes);
-        impl_->boxes_host.reserve(output_layout.boxes_bytes, engine_options.max_output_bytes);
-        impl_->scores_host.reserve(output_layout.scores_bytes, engine_options.max_output_bytes);
-        impl_->labels_host.reserve(output_layout.labels_bytes, engine_options.max_output_bytes);
+            impl_->labels_host.reserve(efficient_layout.labels_bytes,
+                                       engine_options.max_output_bytes);
+        }
+        else
+        {
+            impl_->detections_device.reserve(compact_layout.detections_bytes,
+                                             engine_options.max_output_bytes);
+            impl_->detections_host.reserve(compact_layout.detections_bytes,
+                                           engine_options.max_output_bytes);
+        }
 
         try
         {
@@ -254,56 +294,87 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
             }
 
             set_tensor_address(*impl_->context, names.images, impl_->input_device.data());
-            set_tensor_address(*impl_->context, names.num_dets, impl_->num_dets_device.data());
-            set_tensor_address(*impl_->context, names.boxes, impl_->boxes_device.data());
-            set_tensor_address(*impl_->context, names.scores, impl_->scores_device.data());
-            set_tensor_address(*impl_->context, names.labels, impl_->labels_device.data());
+            if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+            {
+                set_tensor_address(*impl_->context, names.num_dets,
+                                   impl_->num_dets_device.data());
+                set_tensor_address(*impl_->context, names.boxes, impl_->boxes_device.data());
+                set_tensor_address(*impl_->context, names.scores, impl_->scores_device.data());
+                set_tensor_address(*impl_->context, names.labels, impl_->labels_device.data());
+            }
+            else
+            {
+                set_tensor_address(*impl_->context, names.detections,
+                                   impl_->detections_device.data());
+            }
             if (!impl_->context->enqueueV3(stream))
             {
                 throw_tensorrt("enqueue stage: enqueueV3 failed");
             }
             stream_work_pending = true;
 
-            detail::check_cuda(
-                cudaMemcpyAsync(impl_->num_dets_host.data(), impl_->num_dets_device.data(),
-                                output_layout.num_dets_bytes, cudaMemcpyDeviceToHost, stream),
-                "cudaMemcpyAsync", "num_dets output download");
-            detail::check_cuda(cudaMemcpyAsync(impl_->boxes_host.data(), impl_->boxes_device.data(),
-                                               output_layout.boxes_bytes, cudaMemcpyDeviceToHost,
-                                               stream),
-                               "cudaMemcpyAsync", "boxes output download");
-            detail::check_cuda(
-                cudaMemcpyAsync(impl_->scores_host.data(), impl_->scores_device.data(),
-                                output_layout.scores_bytes, cudaMemcpyDeviceToHost, stream),
-                "cudaMemcpyAsync", "scores output download");
-            detail::check_cuda(
-                cudaMemcpyAsync(impl_->labels_host.data(), impl_->labels_device.data(),
-                                output_layout.labels_bytes, cudaMemcpyDeviceToHost, stream),
-                "cudaMemcpyAsync", "labels output download");
+            if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+            {
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->num_dets_host.data(), impl_->num_dets_device.data(),
+                                    efficient_layout.num_dets_bytes, cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "num_dets output download");
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->boxes_host.data(), impl_->boxes_device.data(),
+                                    efficient_layout.boxes_bytes, cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "boxes output download");
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->scores_host.data(), impl_->scores_device.data(),
+                                    efficient_layout.scores_bytes, cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "scores output download");
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->labels_host.data(), impl_->labels_device.data(),
+                                    efficient_layout.labels_bytes, cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "labels output download");
+            }
+            else
+            {
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->detections_host.data(),
+                                    impl_->detections_device.data(),
+                                    compact_layout.detections_bytes, cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "detections output download");
+            }
             detail::check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
                                "detection completion");
             stream_work_pending = false;
 
-            const std::size_t float_bytes = floating_element_size(contract.output_type);
-            const detail::EfficientNmsOutputView output_view {
-                static_cast<const std::int32_t*>(impl_->num_dets_host.data()),
-                output_layout.num_dets_bytes / sizeof(std::int32_t),
-                impl_->boxes_host.data(),
-                output_layout.boxes_bytes / float_bytes,
-                impl_->scores_host.data(),
-                output_layout.scores_bytes / float_bytes,
-                static_cast<const std::int32_t*>(impl_->labels_host.data()),
-                output_layout.labels_bytes / sizeof(std::int32_t),
-                max_detections,
-                contract.output_type,
-            };
             std::vector<detail::LetterboxTransform> transforms;
             transforms.reserve(input_plan.processor.images.size());
             for (const kfcore::image::ImagePlan& plan : input_plan.processor.images)
             {
                 transforms.push_back(plan.transform);
             }
-            return detail::decode_efficient_nms(images, transforms, output_view);
+            const std::size_t float_bytes = floating_element_size(contract.output_type);
+            if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+            {
+                const detail::EfficientNmsOutputView output_view {
+                    static_cast<const std::int32_t*>(impl_->num_dets_host.data()),
+                    efficient_layout.num_dets_bytes / sizeof(std::int32_t),
+                    impl_->boxes_host.data(),
+                    efficient_layout.boxes_bytes / float_bytes,
+                    impl_->scores_host.data(),
+                    efficient_layout.scores_bytes / float_bytes,
+                    static_cast<const std::int32_t*>(impl_->labels_host.data()),
+                    efficient_layout.labels_bytes / sizeof(std::int32_t),
+                    max_detections,
+                    contract.output_type,
+                };
+                return detail::decode_efficient_nms(images, transforms, output_view);
+            }
+
+            const detail::CompactNmsOutputView output_view {
+                impl_->detections_host.data(),
+                compact_layout.detections_bytes / float_bytes,
+                max_detections,
+                contract.output_type,
+            };
+            return detail::decode_compact_nms(images, transforms, output_view);
         }
         catch (...)
         {

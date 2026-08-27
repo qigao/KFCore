@@ -43,6 +43,25 @@ struct ImageView
     MemoryKind   memory_kind  = MemoryKind::Host;
 };
 
+struct BgrImage
+{
+    std::int32_t             width  = 0;
+    std::int32_t             height = 0;
+    std::vector<std::uint8_t> pixels;
+
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return width <= 0 || height <= 0 || pixels.empty();
+    }
+
+    [[nodiscard]] ImageView view() const noexcept
+    {
+        return { pixels.data(), pixels.size(), width, height,
+                 width > 0 ? static_cast<std::size_t>(width) * 3U : 0U,
+                 PixelFormat::Bgr8, MemoryKind::Host };
+    }
+};
+
 struct TensorView
 {
     void*             data         = nullptr;
@@ -94,6 +113,31 @@ struct PreprocessOptions
     std::array<float, 3> mean { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> stddev { 1.0f, 1.0f, 1.0f };
     float                border_value = 114.0f;
+};
+
+struct AffineTransform
+{
+    // Maps an integer destination pixel coordinate to the corresponding source coordinate.
+    std::array<float, 6> destination_to_source { 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F };
+};
+
+enum class TensorValueRange
+{
+    Unit,
+    SignedUnit,
+};
+
+struct TensorCompositeOptions
+{
+    TensorValueRange input_range = TensorValueRange::Unit;
+    float            strength    = 1.0F;
+};
+
+struct CudaImageProcessorOptions
+{
+    int         device_id        = 0;
+    std::size_t max_source_bytes = 64U * 1024U * 1024U;
+    std::size_t max_tensor_bytes = 16U * 1024U * 1024U;
 };
 
 } // namespace kfcore::image

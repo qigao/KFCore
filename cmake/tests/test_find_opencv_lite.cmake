@@ -12,7 +12,7 @@ file(MAKE_DIRECTORY "${_fixture_root}/sdk/include/opencv2/core"
 file(WRITE "${_fixture_root}/sdk/include/opencv2/core.hpp" "#pragma once\n")
 file(WRITE "${_fixture_root}/sdk/include/opencv2/core/version.hpp"
   "#define CV_VERSION_MAJOR 4\n#define CV_VERSION_MINOR 13\n#define CV_VERSION_REVISION 0\n")
-foreach(_component IN ITEMS core imgproc imgcodecs)
+foreach(_component IN ITEMS core imgproc imgcodecs highgui)
   if(WIN32)
     file(WRITE "${_fixture_root}/sdk/lib/opencv_${_component}4130.lib" "")
     file(WRITE "${_fixture_root}/sdk/bin/opencv_${_component}4130.dll" "")
@@ -57,13 +57,13 @@ function(_find_opencv_expect_failure name scenario sdk_root preseeded_root compo
 endfunction()
 
 _find_opencv_expect_success(discover discover "${_fixture_root}/sdk"
-  "${_fixture_root}/sdk" "core,imgproc,imgcodecs" "")
+  "${_fixture_root}/sdk" "core,imgproc,imgcodecs,highgui" "")
 _find_opencv_expect_success(dependency_first dependency_first "${_fixture_root}/sdk"
-  "${_fixture_root}/sdk" "core,imgproc,imgcodecs" "")
+  "${_fixture_root}/sdk" "core,imgproc,imgcodecs,highgui" "")
 _find_opencv_expect_success(repeated repeated "${_fixture_root}/sdk"
-  "${_fixture_root}/sdk" "core,imgproc,imgcodecs" "")
+  "${_fixture_root}/sdk" "core,imgproc,imgcodecs,highgui" "")
 _find_opencv_expect_failure(partial partial "${_fixture_root}/sdk"
-  "${_fixture_root}/sdk" "core,imgproc,imgcodecs" "partial imported targets")
+  "${_fixture_root}/sdk" "core,imgproc,imgcodecs,highgui" "partial imported targets")
 
 set(_poison_root "${_fixture_root}/poison")
 file(MAKE_DIRECTORY "${_poison_root}/include/opencv2/core"
@@ -71,7 +71,7 @@ file(MAKE_DIRECTORY "${_poison_root}/include/opencv2/core"
 file(WRITE "${_poison_root}/include/opencv2/core.hpp" "#pragma once\n")
 file(WRITE "${_poison_root}/include/opencv2/core/version.hpp"
   "#define CV_VERSION_MAJOR 4\n#define CV_VERSION_MINOR 13\n#define CV_VERSION_REVISION 0\n")
-foreach(_component IN ITEMS core imgproc imgcodecs)
+foreach(_component IN ITEMS core imgproc imgcodecs highgui)
   if(WIN32)
     file(WRITE "${_poison_root}/lib/opencv_${_component}4130.lib" "")
     file(WRITE "${_poison_root}/bin/opencv_${_component}4130.dll" "")
@@ -101,7 +101,7 @@ _find_opencv_expect_failure(
   "does not match OpenCV Lite header"
   -DCMAKE_SYSTEM_NAME=Linux)
 _find_opencv_expect_failure(root_mismatch root_mismatch "${_fixture_root}/sdk"
-  "${_poison_root}" "core,imgproc,imgcodecs" "resolved outside")
+  "${_poison_root}" "core,imgproc,imgcodecs,highgui" "resolved outside")
 
 function(_find_opencv_write_sdk root)
   file(MAKE_DIRECTORY "${root}/include/opencv2/core" "${root}/lib" "${root}/bin")
@@ -126,4 +126,9 @@ _find_opencv_expect_success(adapter_components discover "${_adapter_root}"
 set(_imgcodecs_root "${_fixture_root}/imgcodecs_sdk")
 _find_opencv_write_sdk("${_imgcodecs_root}" imgcodecs)
 _find_opencv_expect_success(imgcodecs_component discover "${_imgcodecs_root}"
-  "${_imgcodecs_root}" "imgcodecs" "core,imgproc")
+  "${_imgcodecs_root}" "imgcodecs" "core,imgproc,highgui")
+
+set(_highgui_root "${_fixture_root}/highgui_sdk")
+_find_opencv_write_sdk("${_highgui_root}" highgui)
+_find_opencv_expect_success(highgui_component discover "${_highgui_root}"
+  "${_highgui_root}" "highgui" "core,imgproc,imgcodecs")

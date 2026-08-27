@@ -175,6 +175,189 @@ spec("TensorRT YOLO detection helpers")
             YoloErrorCode::ResourceLimitExceeded, "overflow");
     }
 
+    it("computes bounded Compact NMS tensor byte sizes")
+    {
+        const CompactNmsBufferLayout fp32 =
+            compute_compact_nms_buffer_layout(2, 300, TensorDataType::Float32, 14'400);
+        check(fp32.detections_bytes == std::size_t { 14'400 });
+
+        const CompactNmsBufferLayout fp16 =
+            compute_compact_nms_buffer_layout(2, 300, TensorDataType::Float16, 7'200);
+        check(fp16.detections_bytes == std::size_t { 7'200 });
+
+        expect_yolo_error(
+            [&]
+            {
+                (void)compute_compact_nms_buffer_layout(2, 300, TensorDataType::Float32,
+                                                        14'399);
+            },
+            YoloErrorCode::ResourceLimitExceeded, "outputs");
+    }
+
+    it("decodes Compact NMS rows and removes zero-score padding")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = {
+            host_view(pixels, 960, 320, 2880),
+        };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(960, 320, 640, 640),
+        };
+        const float rows[] = {
+            0.0f, 640.0f / 3.0f, 640.0f, 1280.0f / 3.0f, 0.75f, 3.0f,
+            0.0f, 0.0f,          0.0f,   0.0f,           0.0f,  0.0f,
+        };
+        const CompactNmsOutputView outputs {
+            rows, 12, 2, TensorDataType::Float32,
+        };
+
+        const std::vector<DetectionFrame> results =
+            decode_compact_nms(images, transforms, outputs);
+
+        check(results.size() == std::size_t { 1 });
+        check(results[0].detections.size() == std::size_t { 1 });
+        const Detection& detection = results[0].detections[0];
+        check(std::fabs(detection.box.left) < 1.0e-4f);
+        check(std::fabs(detection.box.top) < 1.0e-4f);
+        check(std::fabs(detection.box.right - 960.0f) < 1.0e-4f);
+        check(std::fabs(detection.box.bottom - 320.0f) < 1.0e-4f);
+        check(std::fabs(detection.score - 0.75f) < 1.0e-6f);
+        check(detection.class_id == std::int32_t { 3 });
+    }
+
+    it("decodes Compact NMS batches with independent row offsets and transforms")
+    {
+        std::uint8_t wide_pixels[3] {};
+        std::uint8_t tall_pixels[3] {};
+        const std::vector<ImageView> images = {
+            host_view(wide_pixels, 960, 320, 2880),
+            host_view(tall_pixels, 320, 960, 960),
+        };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(960, 320, 640, 640),
+            compute_letterbox_transform(320, 960, 640, 640),
+        };
+        const float rows[] = {
+            0.0f,          640.0f / 3.0f, 640.0f,         1280.0f / 3.0f, 0.75f, 3.0f,
+            0.0f,          0.0f,          0.0f,           0.0f,           0.0f,  0.0f,
+            0.0f,          0.0f,          0.0f,           0.0f,           0.0f,  0.0f,
+            640.0f / 3.0f, 0.0f,          1280.0f / 3.0f, 640.0f,         0.5f,  7.0f,
+        };
+        const CompactNmsOutputView outputs {
+            rows, 24, 2, TensorDataType::Float32,
+        };
+
+        const std::vector<DetectionFrame> results =
+            decode_compact_nms(images, transforms, outputs);
+
+        check(results.size() == std::size_t { 2 });
+        check(results[0].image_width == 960);
+        check(results[0].image_height == 320);
+        check(results[0].detections.size() == std::size_t { 1 });
+        check(std::fabs(results[0].detections[0].box.right - 960.0f) < 1.0e-4f);
+        check(std::fabs(results[0].detections[0].box.bottom - 320.0f) < 1.0e-4f);
+        check(results[0].detections[0].class_id == std::int32_t { 3 });
+        check(results[1].image_width == 320);
+        check(results[1].image_height == 960);
+        check(results[1].detections.size() == std::size_t { 1 });
+        check(std::fabs(results[1].detections[0].box.right - 320.0f) < 1.0e-4f);
+        check(std::fabs(results[1].detections[0].box.bottom - 960.0f) < 1.0e-4f);
+        check(results[1].detections[0].class_id == std::int32_t { 7 });
+    }
+
+    it("decodes FP16 Compact NMS rows")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(2, 2, 2, 2),
+        };
+        const std::uint16_t rows[] = {
+            0x0000, 0x0000, 0x4000, 0x4000, 0x3800, 0x3c00,
+        };
+        const CompactNmsOutputView outputs {
+            rows, 6, 1, TensorDataType::Float16,
+        };
+
+        const Detection& detection = decode_compact_nms(images, transforms, outputs)[0].detections[0];
+        check(std::fabs(detection.box.right - 2.0f) < 1.0e-6f);
+        check(std::fabs(detection.box.bottom - 2.0f) < 1.0e-6f);
+        check(std::fabs(detection.score - 0.5f) < 1.0e-6f);
+        check(detection.class_id == std::int32_t { 1 });
+    }
+
+    it("rejects malformed Compact NMS views and element counts")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(2, 2, 2, 2),
+        };
+        float rows[] = { 0.0f, 0.0f, 1.0f, 1.0f, 0.5f, 0.0f };
+        CompactNmsOutputView outputs { rows, 6, 1, TensorDataType::Float32 };
+
+        outputs.detections = nullptr;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "pointer");
+        outputs.detections = rows;
+        outputs.detections_count = 5;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "size");
+    }
+
+    it("rejects invalid Compact NMS scores and class identifiers")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(2, 2, 2, 2),
+        };
+        float rows[] = { 0.0f, 0.0f, 1.0f, 1.0f, 0.5f, 0.0f };
+        const CompactNmsOutputView outputs { rows, 6, 1, TensorDataType::Float32 };
+
+        rows[4] = (std::numeric_limits<float>::quiet_NaN)();
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "score");
+        rows[4] = 1.01f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "score");
+        rows[4] = -0.01f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "score");
+        rows[4] = 0.5f;
+        rows[5] = 1.5f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "class");
+        rows[5] = -1.0f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "class");
+        rows[5] = 2'147'483'648.0f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "class");
+    }
+
+    it("rejects invalid Compact NMS boxes")
+    {
+        std::uint8_t pixels[3] {};
+        const std::vector<ImageView> images = { host_view(pixels, 2, 2, 6) };
+        const std::vector<LetterboxTransform> transforms = {
+            compute_letterbox_transform(2, 2, 2, 2),
+        };
+        float rows[] = { 0.0f, 0.0f, 1.0f, 1.0f, 0.5f, 0.0f };
+        const CompactNmsOutputView outputs { rows, 6, 1, TensorDataType::Float32 };
+
+        rows[0] = (std::numeric_limits<float>::infinity)();
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "box");
+        rows[0] = 2.0f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "inverted");
+        rows[0] = -2.0f;
+        rows[2] = -1.0f;
+        expect_yolo_error([&] { (void)decode_compact_nms(images, transforms, outputs); },
+                          YoloErrorCode::TensorRtFailure, "positive area");
+    }
+
     it("inverse-transforms each batch image and preserves result order")
     {
         std::uint8_t                 wide_pixels[3] {};

@@ -1,0 +1,80 @@
+#pragma once
+
+#include "cuda_buffer.hpp"
+
+#include <NvInfer.h>
+
+#include <atomic>
+#include <cstdio>
+#include <memory>
+
+namespace kfcore::tensorrt::detail
+{
+
+template <typename T> struct TensorRtDeleter
+{
+    void operator()(T* pointer) const noexcept
+    {
+        delete pointer;
+    }
+};
+
+template <typename T> using TensorRtOwner = std::unique_ptr<T, TensorRtDeleter<T>>;
+
+class TensorRtLogger final : public nvinfer1::ILogger
+{
+public:
+    void log(Severity severity, const char* message) noexcept override
+    {
+        if (severity <= Severity::kWARNING && message != nullptr)
+        {
+            while (writing_.test_and_set(std::memory_order_acquire))
+            {
+            }
+            std::fputs("TensorRT: ", stderr);
+            std::fputs(message, stderr);
+            std::fputc('\n', stderr);
+            writing_.clear(std::memory_order_release);
+        }
+    }
+
+private:
+    std::atomic_flag writing_ = ATOMIC_FLAG_INIT;
+};
+
+class CudaStream final
+{
+public:
+    CudaStream()
+    {
+        check_cuda(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking),
+                   "cudaStreamCreateWithFlags", "executor creation");
+    }
+
+    ~CudaStream() noexcept
+    {
+        if (stream_ != nullptr)
+        {
+            (void)cudaStreamDestroy(stream_);
+        }
+    }
+
+    CudaStream(const CudaStream&)            = delete;
+    CudaStream& operator=(const CudaStream&) = delete;
+
+    cudaStream_t get() const noexcept
+    {
+        return stream_;
+    }
+
+    // Relinquishes the stream without CUDA cleanup after device selection has failed.
+    void abandon() noexcept
+    {
+        stream_ = nullptr;
+    }
+
+private:
+    cudaStream_t stream_ = nullptr;
+};
+
+} // namespace kfcore::tensorrt::detail

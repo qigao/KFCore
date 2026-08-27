@@ -46,6 +46,15 @@ EngineMetadata valid_fp32_metadata() {
     }};
 }
 
+EngineMetadata valid_compact_nms_metadata() {
+    return {{
+        tensor("images", TensorIoMode::Input, TensorDataType::Float32,
+               {1, 3, 320, 480}, {2, 3, 640, 640}, {4, 3, 960, 1280}),
+        tensor("output0", TensorIoMode::Output, TensorDataType::Float32,
+               {1, 300, 6}, {2, 300, 6}, {4, 300, 6}),
+    }};
+}
+
 ContractLimits limits() {
     return {};
 }
@@ -85,9 +94,114 @@ void check_physical_error(
     check(threw);
 }
 
+const EfficientNmsContract& efficient_outputs(const ValidatedContract& contract) {
+    return std::get<EfficientNmsContract>(contract.outputs);
+}
+
 }  // namespace
 
 spec("TensorRT YOLO engine contract") {
+    it("accepts only bounded known I/O tensor counts before metadata extraction") {
+        validate_engine_io_tensor_count(2);
+        validate_engine_io_tensor_count(5);
+
+        for (const std::int32_t tensor_count : {
+                 std::int32_t{0}, std::int32_t{1}, std::int32_t{3}, std::int32_t{4},
+                 std::int32_t{6}, (std::numeric_limits<std::int32_t>::max)()}) {
+            bool threw = false;
+            try {
+                validate_engine_io_tensor_count(tensor_count);
+            } catch (const YoloError& error) {
+                threw = true;
+                check(error.code() == YoloErrorCode::EngineContractMismatch);
+                check(std::string(error.what()).find("exactly two or five") != std::string::npos);
+            }
+            check(threw);
+        }
+    }
+
+    it("accepts a named Compact NMS output and preserves its capacity") {
+        const ValidatedContract contract =
+            validate_engine_contract(valid_compact_nms_metadata(), {}, limits());
+
+        check(contract.output_layout == DetectionOutputLayout::CompactNms);
+        check(contract.min_batch == INT64_C(1));
+        check(contract.opt_batch == INT64_C(2));
+        check(contract.max_batch == INT64_C(4));
+        check(contract.max_detections == INT64_C(300));
+        check(contract.output_type == TensorDataType::Float32);
+        const CompactNmsContract& compact = std::get<CompactNmsContract>(contract.outputs);
+        check(compact.detections.descriptor.name == "output0");
+        check(compact.detections.max_elements == std::size_t{7'200});
+        check(compact.detections.max_bytes == std::size_t{28'800});
+        check(contract.output_bytes == std::size_t{28'800});
+    }
+
+    it("accepts an FP16 Compact NMS output independently of the input type") {
+        EngineMetadata metadata = valid_compact_nms_metadata();
+        metadata.tensors[1].data_type = TensorDataType::Float16;
+        metadata.tensors[1].physical_layout.bytes_per_component = 2;
+
+        const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
+
+        check(contract.output_layout == DetectionOutputLayout::CompactNms);
+        check(contract.input_type == TensorDataType::Float32);
+        check(contract.output_type == TensorDataType::Float16);
+        check(contract.output_bytes == std::size_t{14'400});
+    }
+
+    it("allows output names to overlap across mutually exclusive contracts") {
+        EngineMetadata metadata = valid_fp32_metadata();
+        metadata.tensors[4].name = "output0";
+        ContractNames names;
+        names.labels = "output0";
+
+        const ValidatedContract contract = validate_engine_contract(metadata, names, limits());
+
+        check(contract.output_layout == DetectionOutputLayout::EfficientNms);
+        check(efficient_outputs(contract).labels.descriptor.name == "output0");
+    }
+
+    it("rejects malformed Compact NMS names shapes types layouts and limits") {
+        EngineMetadata wrong_name = valid_compact_nms_metadata();
+        wrong_name.tensors[1].name = "detections";
+        check_error(wrong_name, "output0");
+
+        EngineMetadata wrong_rank = valid_compact_nms_metadata();
+        wrong_rank.tensors[1].min_shape.pop_back();
+        wrong_rank.tensors[1].opt_shape.pop_back();
+        wrong_rank.tensors[1].max_shape.pop_back();
+        check_error(wrong_rank, "rank");
+
+        EngineMetadata wrong_width = valid_compact_nms_metadata();
+        wrong_width.tensors[1].min_shape[2] = 7;
+        wrong_width.tensors[1].opt_shape[2] = 7;
+        wrong_width.tensors[1].max_shape[2] = 7;
+        check_error(wrong_width, "six values");
+
+        EngineMetadata wrong_batch = valid_compact_nms_metadata();
+        wrong_batch.tensors[1].max_shape[0] = 3;
+        check_error(wrong_batch, "images");
+
+        EngineMetadata wrong_type = valid_compact_nms_metadata();
+        wrong_type.tensors[1].data_type = TensorDataType::Int32;
+        check_error(wrong_type, "output0");
+
+        EngineMetadata wrong_layout = valid_compact_nms_metadata();
+        wrong_layout.tensors[1].physical_layout.format = TensorPhysicalFormat::Unsupported;
+        check_error(wrong_layout, "physical format");
+
+        ContractLimits limited = limits();
+        limited.max_detections = 299;
+        check_error(valid_compact_nms_metadata(), "detections",
+                    YoloErrorCode::ResourceLimitExceeded, limited);
+
+        limited = limits();
+        limited.max_output_bytes = 28'799;
+        check_error(valid_compact_nms_metadata(), "outputs",
+                    YoloErrorCode::ResourceLimitExceeded, limited);
+    }
+
     it("preserves named profile-zero dynamic batch and spatial dimensions") {
         const ValidatedContract contract = validate_engine_contract(valid_fp32_metadata(), {}, limits());
 
@@ -114,8 +228,8 @@ spec("TensorRT YOLO engine contract") {
 
         const ValidatedContract contract =
             validate_engine_contract(metadata, {}, limits());
-        check(contract.num_dets.max_elements == std::size_t{4});
-        check(contract.num_dets.max_bytes == std::size_t{16});
+        check(efficient_outputs(contract).num_dets.max_elements == std::size_t{4});
+        check(efficient_outputs(contract).num_dets.max_bytes == std::size_t{16});
     }
 
     it("rejects a non-singleton EfficientNMS count dimension") {
@@ -200,7 +314,7 @@ spec("TensorRT YOLO engine contract") {
         check(contract.input_type == TensorDataType::Float16);
         check(contract.output_type == TensorDataType::Float32);
         check(contract.images.max_bytes == std::size_t{29'491'200});
-        check(contract.boxes.max_bytes == std::size_t{19'200});
+        check(efficient_outputs(contract).boxes.max_bytes == std::size_t{19'200});
     }
 
     it("accepts FP32 input with FP16 EfficientNMS outputs") {
@@ -214,7 +328,7 @@ spec("TensorRT YOLO engine contract") {
         check(contract.input_type == TensorDataType::Float32);
         check(contract.output_type == TensorDataType::Float16);
         check(contract.images.max_bytes == std::size_t{58'982'400});
-        check(contract.boxes.max_bytes == std::size_t{9'600});
+        check(efficient_outputs(contract).boxes.max_bytes == std::size_t{9'600});
     }
 
     it("binds a valid contract by name instead of tensor vector order") {
@@ -224,10 +338,10 @@ spec("TensorRT YOLO engine contract") {
 
         const ValidatedContract contract = validate_engine_contract(metadata, {}, limits());
         check(contract.images.descriptor.name == "images");
-        check(contract.num_dets.descriptor.name == "num_dets");
-        check(contract.boxes.descriptor.name == "boxes");
-        check(contract.scores.descriptor.name == "scores");
-        check(contract.labels.descriptor.name == "labels");
+        check(efficient_outputs(contract).num_dets.descriptor.name == "num_dets");
+        check(efficient_outputs(contract).boxes.descriptor.name == "boxes");
+        check(efficient_outputs(contract).scores.descriptor.name == "scores");
+        check(efficient_outputs(contract).labels.descriptor.name == "labels");
     }
 
     it("rejects non-linear physical format on every required tensor") {

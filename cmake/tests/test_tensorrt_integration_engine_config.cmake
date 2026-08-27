@@ -123,3 +123,76 @@ if(directory_RESULT EQUAL 0 OR
   message(FATAL_ERROR
     "An engine directory should fail at configure time:\n${directory_OUTPUT}")
 endif()
+
+set(_runtime_fixture_source
+  "${KFCORE_SOURCE_DIR}/cmake/tests/TensorRtRuntimeEngineFixture")
+set(_runtime_fixture_root "${_fixture_root}/runtime")
+file(MAKE_DIRECTORY "${_runtime_fixture_root}")
+set(_runtime_valid_engine "${_runtime_fixture_root}/trusted.engine")
+set(_runtime_zero_engine "${_runtime_fixture_root}/zero.engine")
+file(WRITE "${_runtime_valid_engine}" "fixture")
+file(WRITE "${_runtime_zero_engine}" "")
+set(_runtime_relative_engine
+  "../TensorRtIntegrationEngineFixture/check_engine_environment.cmake")
+set(_runtime_relative_expected
+  "${KFCORE_SOURCE_DIR}/cmake/tests/TensorRtIntegrationEngineFixture/check_engine_environment.cmake")
+
+function(_runtime_engine_configure name engine_path)
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      -S "${_runtime_fixture_source}"
+      -B "${_runtime_fixture_root}/${name}"
+      "-DKFCORE_VALIDATION_MODULE_DIR=${KFCORE_SOURCE_DIR}/cmake"
+      "-DKFCORE_FIXTURE_RAW_ENGINE_PATH=${engine_path}"
+      ${ARGN}
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _output
+    ERROR_VARIABLE _error)
+  set(${name}_RESULT "${_result}" PARENT_SCOPE)
+  set(${name}_OUTPUT "${_output}\n${_error}" PARENT_SCOPE)
+endfunction()
+
+_runtime_engine_configure(runtime_empty "" -DKFCORE_FIXTURE_EXPECT_EMPTY=ON)
+if(NOT runtime_empty_RESULT EQUAL 0 OR
+   NOT runtime_empty_OUTPUT MATCHES "is empty.*will not be registered")
+  message(FATAL_ERROR
+    "An empty runtime engine should report and skip registration:\n${runtime_empty_OUTPUT}")
+endif()
+
+_runtime_engine_configure(runtime_directory "${_runtime_fixture_root}")
+if(runtime_directory_RESULT EQUAL 0 OR
+   NOT runtime_directory_OUTPUT MATCHES "existing non-empty regular file")
+  message(FATAL_ERROR
+    "A runtime engine directory should fail at configure time:\n${runtime_directory_OUTPUT}")
+endif()
+
+_runtime_engine_configure(runtime_zero "${_runtime_zero_engine}")
+if(runtime_zero_RESULT EQUAL 0 OR
+   NOT runtime_zero_OUTPUT MATCHES "existing non-empty regular file")
+  message(FATAL_ERROR
+    "A zero-byte runtime engine should fail at configure time:\n${runtime_zero_OUTPUT}")
+endif()
+
+_runtime_engine_configure(runtime_relative "${_runtime_relative_engine}"
+  "-DKFCORE_FIXTURE_EXPECTED_PATH=${_runtime_relative_expected}")
+if(NOT runtime_relative_RESULT EQUAL 0)
+  message(FATAL_ERROR
+    "A relative non-empty runtime engine should validate:\n${runtime_relative_OUTPUT}")
+endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env
+    "KFCORE_FIXTURE_ENGINE_PATH=${_runtime_valid_engine}"
+    "${CMAKE_COMMAND}"
+      -S "${_runtime_fixture_source}"
+      -B "${_runtime_fixture_root}/runtime_env_cache"
+      "-DKFCORE_VALIDATION_MODULE_DIR=${KFCORE_SOURCE_DIR}/cmake"
+      "-DKFCORE_FIXTURE_EXPECTED_PATH=${_runtime_valid_engine}"
+  RESULT_VARIABLE runtime_env_cache_RESULT
+  OUTPUT_VARIABLE runtime_env_cache_OUTPUT
+  ERROR_VARIABLE runtime_env_cache_ERROR)
+if(NOT runtime_env_cache_RESULT EQUAL 0)
+  message(FATAL_ERROR
+    "The same-named parent environment value should initialize the engine cache:\n"
+    "${runtime_env_cache_OUTPUT}\n${runtime_env_cache_ERROR}")
+endif()

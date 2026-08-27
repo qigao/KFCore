@@ -54,6 +54,7 @@ if(FIND_OPENCV_LITE_SCENARIO MATCHES
   if(NOT FIND_OPENCV_LITE_SCENARIO STREQUAL "partial")
     _fixture_add_opencv_target(imgproc)
     _fixture_add_opencv_target(imgcodecs)
+    _fixture_add_opencv_target(highgui)
   endif()
 endif()
 

@@ -22,6 +22,7 @@ struct TensorNames
     std::string boxes    = "boxes";
     std::string scores   = "scores";
     std::string labels   = "labels";
+    std::string detections = "output0";
 };
 
 struct EngineOptions
