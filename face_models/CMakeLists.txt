@@ -58,6 +58,13 @@ if(BUILD_TESTS)
   endif()
 
   if(KFCORE_INSTALL)
+    include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
+    kfcore_require_ninja(_tensorrt_runtime_consumer_ninja)
+
+    add_test(NAME test_tensorrt_runtime_installed_consumer_missing_ninja
+      COMMAND "${CMAKE_COMMAND}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer_missing_ninja.cmake")
+
     set(_tensorrt_runtime_consumer_root
       "${CMAKE_BINARY_DIR}/tests/tensorrt_runtime_installed_consumer")
     add_test(NAME test_tensorrt_runtime_installed_consumer
@@ -68,6 +75,7 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_tensorrt_runtime_consumer_root}/install"
         "-DKFCORE_CONSUMER_KFCORE_DIR=${_tensorrt_runtime_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
         "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
+        "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_tensorrt_runtime_consumer_ninja}"
         "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
         "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
         -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer.cmake")
