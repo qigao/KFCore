@@ -200,6 +200,29 @@
             }
         },
         {
+            "name": "win-vision-models-tensorrt-release-user",
+            "displayName": "Vision Models TensorRT CUDA Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Vision-TensorRT",
+            "environment": {
+                "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
+                "PATH": "$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Vision-TensorRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
+                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
+                "KFCORE_BUILD_VISION_MODELS": "ON",
+                "KFCORE_BUILD_VISION_MODELS_TENSORRT": "ON",
+                "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "ON",
+                "KFCORE_VISION_MODEL_TEST_ENGINE_PALM": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_PALM}",
+                "KFCORE_VISION_MODEL_TEST_ENGINE_HAND": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_HAND}",
+                "KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}",
+                "KFCORE_VISION_MODEL_TEST_ENGINE_FACE": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_FACE}",
+                "KFCORE_VISION_MODEL_TEST_HAND_IMAGE": "C:/projects/cpp/learnopencv/HandPose/hand.jpg",
+                "KFCORE_VISION_MODEL_TEST_FACE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -287,6 +310,11 @@
             "name": "win-vision-models-cpu-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-vision-models-cpu-release-user"
+        },
+        {
+            "name": "win-vision-models-tensorrt-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-vision-models-tensorrt-release-user"
         },
         {
             "name": "linux-dev-user",
@@ -431,6 +459,11 @@
             "name": "win-vision-models-cpu-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-vision-models-cpu-release-user"
+        },
+        {
+            "name": "win-vision-models-tensorrt-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-vision-models-tensorrt-release-user"
         },
         {
             "name": "linux-dev-user",

@@ -30,6 +30,19 @@ set(KFCORE_VISION_MODEL_TEST_HAND_IMAGE "" CACHE FILEPATH
     "Trusted hand image used by CPU vision-model integration tests")
 set(KFCORE_VISION_MODEL_TEST_FACE_IMAGE "" CACHE FILEPATH
     "Trusted face image used by CPU vision-model integration tests")
+option(KFCORE_BUILD_VISION_MODELS_TENSORRT
+       "Build TensorRT CUDA hand and MediaPipe landmark models" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS
+  "Build real-engine TensorRT vision-model integration tests"
+  OFF
+  "KFCORE_BUILD_VISION_MODELS_TENSORRT"
+  OFF)
+foreach(_vision_engine IN ITEMS PALM HAND CLASSIFIER FACE)
+  set(KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}
+      "$ENV{KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}}" CACHE FILEPATH
+      "Trusted ${_vision_engine} engine used by TensorRT vision-model integration tests")
+endforeach()
 cmake_dependent_option(
   KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
   "Build real-model ONNX Runtime CPU face application integration tests"
