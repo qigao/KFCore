@@ -23,7 +23,6 @@ namespace
     constexpr std::uintmax_t kMaxSerializedEngineBytes =
         UINTMAX_C(1024) * UINTMAX_C(1024) * UINTMAX_C(1024);
     constexpr std::size_t  kTensorNameStorageLimit = 4096;
-    constexpr std::int32_t kExpectedTensorCount    = 5;
     constexpr float        kMinimumBorderValue     = 0.0f;
     constexpr float        kMaximumBorderValue     = 255.0f;
 
@@ -69,31 +68,44 @@ namespace
             throw_invalid("engine options stage: all resource limits must be positive");
         }
 
-        const std::array<const std::string*, 5> names = { {
+        const std::array<const std::string*, 6> names = { {
             &options.tensor_names.images,
             &options.tensor_names.num_dets,
             &options.tensor_names.boxes,
             &options.tensor_names.scores,
             &options.tensor_names.labels,
+            &options.tensor_names.detections,
         } };
-        for (std::size_t index = 0; index < names.size(); ++index)
+        for (const std::string* name : names)
         {
-            if (names[index]->empty())
+            if (name->empty())
             {
                 throw_invalid("engine options stage: tensor names must not be empty");
             }
-            if (names[index]->size() >= kTensorNameStorageLimit)
+            if (name->size() >= kTensorNameStorageLimit)
             {
                 throw_invalid("engine options stage: tensor name exceeds TensorRT limit");
             }
-            for (std::size_t other = index + 1; other < names.size(); ++other)
+        }
+        const auto require_unique = [](const auto& contract_names)
+        {
+            for (std::size_t index = 0; index < contract_names.size(); ++index)
             {
-                if (*names[index] == *names[other])
+                for (std::size_t previous = 0; previous < index; ++previous)
                 {
-                    throw_invalid("engine options stage: tensor names must be unique");
+                    if (*contract_names[index] == *contract_names[previous])
+                    {
+                        throw_invalid("engine options stage: tensor names must be unique");
+                    }
                 }
             }
-        }
+        };
+        require_unique(std::array<const std::string*, 5> {
+            &options.tensor_names.images, &options.tensor_names.num_dets,
+            &options.tensor_names.boxes, &options.tensor_names.scores,
+            &options.tensor_names.labels });
+        require_unique(std::array<const std::string*, 2> {
+            &options.tensor_names.images, &options.tensor_names.detections });
     }
 
     SelectedInputSize validate_detector_options(const DetectorOptions&   options,
@@ -290,11 +302,7 @@ namespace
         const BatchProfile batches = input_batch_profile(engine, options.tensor_names.images);
 
         const std::int32_t tensor_count = engine.getNbIOTensors();
-        if (tensor_count != kExpectedTensorCount)
-        {
-            throw_contract(
-                "metadata extraction stage: engine must expose exactly five named I/O tensors");
-        }
+        validate_engine_io_tensor_count(tensor_count);
 
         EngineMetadata metadata;
         metadata.tensors.reserve(static_cast<std::size_t>(tensor_count));
@@ -345,7 +353,8 @@ namespace
 
     ContractNames contract_names(const TensorNames& names)
     {
-        return { names.images, names.num_dets, names.boxes, names.scores, names.labels };
+        return { names.images, names.num_dets, names.boxes, names.scores, names.labels,
+                 names.detections };
     }
 
     ContractLimits contract_limits(const EngineOptions& options)
@@ -432,15 +441,36 @@ std::unique_ptr<TensorRtDetector> Engine::create_detector(const DetectorOptions&
         impl->input_device.reserve(contract.images.max_bytes, state_->options.max_input_bytes);
         impl->input_host.reserve(contract.images.max_bytes, state_->options.max_input_bytes);
 
-        impl->num_dets_device.reserve(contract.num_dets.max_bytes,
+        if (contract.output_layout == DetectionOutputLayout::EfficientNms)
+        {
+            const EfficientNmsContract& outputs =
+                std::get<EfficientNmsContract>(contract.outputs);
+            impl->num_dets_device.reserve(outputs.num_dets.max_bytes,
+                                          state_->options.max_output_bytes);
+            impl->boxes_device.reserve(outputs.boxes.max_bytes,
+                                       state_->options.max_output_bytes);
+            impl->scores_device.reserve(outputs.scores.max_bytes,
+                                        state_->options.max_output_bytes);
+            impl->labels_device.reserve(outputs.labels.max_bytes,
+                                        state_->options.max_output_bytes);
+            impl->num_dets_host.reserve(outputs.num_dets.max_bytes,
+                                        state_->options.max_output_bytes);
+            impl->boxes_host.reserve(outputs.boxes.max_bytes,
+                                     state_->options.max_output_bytes);
+            impl->scores_host.reserve(outputs.scores.max_bytes,
                                       state_->options.max_output_bytes);
-        impl->boxes_device.reserve(contract.boxes.max_bytes, state_->options.max_output_bytes);
-        impl->scores_device.reserve(contract.scores.max_bytes, state_->options.max_output_bytes);
-        impl->labels_device.reserve(contract.labels.max_bytes, state_->options.max_output_bytes);
-        impl->num_dets_host.reserve(contract.num_dets.max_bytes, state_->options.max_output_bytes);
-        impl->boxes_host.reserve(contract.boxes.max_bytes, state_->options.max_output_bytes);
-        impl->scores_host.reserve(contract.scores.max_bytes, state_->options.max_output_bytes);
-        impl->labels_host.reserve(contract.labels.max_bytes, state_->options.max_output_bytes);
+            impl->labels_host.reserve(outputs.labels.max_bytes,
+                                      state_->options.max_output_bytes);
+        }
+        else
+        {
+            const CompactNmsContract& outputs =
+                std::get<CompactNmsContract>(contract.outputs);
+            impl->detections_device.reserve(outputs.detections.max_bytes,
+                                            state_->options.max_output_bytes);
+            impl->detections_host.reserve(outputs.detections.max_bytes,
+                                          state_->options.max_output_bytes);
+        }
         return std::unique_ptr<TensorRtDetector>(new TensorRtDetector(std::move(impl)));
     }
     catch (const std::bad_alloc&)

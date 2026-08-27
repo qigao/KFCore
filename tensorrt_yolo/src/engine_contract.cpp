@@ -16,8 +16,10 @@ constexpr std::size_t kFlatCountRank = 1;
 constexpr std::size_t kEfficientNmsCountRank = 2;
 constexpr std::size_t kBoxesRank = 3;
 constexpr std::size_t kDetectionsRank = 2;
+constexpr std::size_t kCompactDetectionsRank = 3;
 constexpr std::int64_t kImageChannels = 3;
 constexpr std::int64_t kBoxCoordinates = 4;
+constexpr std::int64_t kCompactDetectionValues = 6;
 
 [[noreturn]] void contract_error(const std::string& stage, const std::string& detail) {
     throw YoloError(YoloErrorCode::EngineContractMismatch, stage + " stage: " + detail);
@@ -43,18 +45,26 @@ std::size_t element_size(TensorDataType data_type, const std::string& name) {
 }
 
 void validate_names(const ContractNames& names) {
-    const std::array<const std::string*, 5> all_names = {
-        &names.images, &names.num_dets, &names.boxes, &names.scores, &names.labels};
-    for (std::size_t index = 0; index < all_names.size(); ++index) {
-        if (all_names[index]->empty()) {
+    const std::array<const std::string*, 6> all_names = {
+        &names.images, &names.num_dets, &names.boxes,
+        &names.scores, &names.labels, &names.detections};
+    for (const std::string* name : all_names) {
+        if (name->empty()) {
             contract_error("names", "required tensor name must not be empty");
         }
-        for (std::size_t previous = 0; previous < index; ++previous) {
-            if (*all_names[index] == *all_names[previous]) {
-                contract_error("names", "required tensor names must be unique");
+    }
+    const auto require_unique = [](const auto& contract_names) {
+        for (std::size_t index = 0; index < contract_names.size(); ++index) {
+            for (std::size_t previous = 0; previous < index; ++previous) {
+                if (*contract_names[index] == *contract_names[previous]) {
+                    contract_error("names", "required tensor names must be unique");
+                }
             }
         }
-    }
+    };
+    require_unique(std::array<const std::string*, 5> {
+        &names.images, &names.num_dets, &names.boxes, &names.scores, &names.labels});
+    require_unique(std::array<const std::string*, 2> {&names.images, &names.detections});
 }
 
 struct RequiredTensor {
@@ -63,9 +73,10 @@ struct RequiredTensor {
     const TensorDesc* descriptor = nullptr;
 };
 
+template <std::size_t TensorCount>
 void bind_required_tensors(
     const EngineMetadata& metadata,
-    std::array<RequiredTensor, 5>* required
+    std::array<RequiredTensor, TensorCount>* required
 ) {
     const TensorDesc* unexpected = nullptr;
     for (const TensorDesc& tensor : metadata.tensors) {
@@ -105,7 +116,7 @@ void validate_profile_shape(
 ) {
     if (tensor.min_shape.size() != rank || tensor.opt_shape.size() != rank ||
         tensor.max_shape.size() != rank) {
-        contract_error(tensor.name, "profile rank does not match the EfficientNMS contract");
+        contract_error(tensor.name, "profile rank does not match the detection contract");
     }
     for (std::size_t index = 0; index < rank; ++index) {
         const std::int64_t minimum = tensor.min_shape[index];
@@ -129,7 +140,7 @@ void validate_profile_shape(
 void validate_count_profile_shape(const TensorDesc& tensor) {
     const std::size_t rank = tensor.min_shape.size();
     if (rank != kFlatCountRank && rank != kEfficientNmsCountRank) {
-        contract_error(tensor.name, "profile rank does not match the EfficientNMS contract");
+        contract_error(tensor.name, "profile rank does not match the detection contract");
     }
     validate_profile_shape(tensor, rank);
     if (rank == kEfficientNmsCountRank &&
@@ -205,7 +216,63 @@ void validate_limits(const ContractLimits& limits) {
     }
 }
 
+const TensorDesc& validate_common_input(const EngineMetadata& metadata,
+                                        const ContractNames& names,
+                                        const ContractLimits& limits) {
+    const TensorDesc* images = nullptr;
+    for (const TensorDesc& tensor : metadata.tensors) {
+        if (tensor.name == names.images) {
+            if (images != nullptr) {
+                contract_error(tensor.name, "duplicate tensor name");
+            }
+            images = &tensor;
+        }
+    }
+    if (images == nullptr) {
+        contract_error(names.images, "required tensor is missing");
+    }
+    if (images->mode != TensorIoMode::Input) {
+        contract_error(images->name, "unexpected tensor I/O mode");
+    }
+    validate_profile_shape(*images, kImageRank, true);
+    if (images->data_type != TensorDataType::Float16 &&
+        images->data_type != TensorDataType::Float32) {
+        contract_error(images->name, "input data type must be Float16 or Float32");
+    }
+    validate_physical_layout(*images);
+    if (images->min_shape[1] != kImageChannels) {
+        contract_error(images->name, "input channel dimension must be 3");
+    }
+    const std::size_t max_batch = checked_dimension(images->max_shape[0], images->name);
+    if (max_batch > limits.max_batch) {
+        resource_error(images->name, "maximum batch exceeds configured batch limit");
+    }
+    return *images;
+}
+
+ValidatedContract make_contract(const TensorDesc& images,
+                                DetectionOutputLayout output_layout,
+                                TensorDataType output_type,
+                                std::int64_t max_detections,
+                                std::size_t output_bytes,
+                                ValidatedTensor validated_images,
+                                DetectionOutputContract outputs) {
+    return {
+        images.min_shape[0], images.opt_shape[0], images.max_shape[0], max_detections,
+        images.min_shape[2], images.opt_shape[2], images.max_shape[2],
+        images.min_shape[3], images.opt_shape[3], images.max_shape[3],
+        output_layout, images.data_type, output_type, validated_images.max_bytes, output_bytes,
+        std::move(validated_images), std::move(outputs)};
+}
+
 }  // namespace
+
+void validate_engine_io_tensor_count(std::int32_t tensor_count) {
+    if (tensor_count != 2 && tensor_count != 5) {
+        contract_error("metadata extraction",
+                       "engine must expose exactly two or five named I/O tensors");
+    }
+}
 
 ValidatedContract validate_engine_contract(
     const EngineMetadata& metadata,
@@ -215,6 +282,47 @@ ValidatedContract validate_engine_contract(
     try {
         validate_names(names);
         validate_limits(limits);
+        const TensorDesc& images = validate_common_input(metadata, names, limits);
+        ValidatedTensor validated_images = validate_capacity(images);
+        if (validated_images.max_bytes > limits.max_input_bytes) {
+            resource_error(images.name, "maximum input buffer exceeds configured byte limit");
+        }
+
+        if (metadata.tensors.size() == 2) {
+            std::array<RequiredTensor, 2> required = {{
+                {names.images, TensorIoMode::Input},
+                {names.detections, TensorIoMode::Output},
+            }};
+            bind_required_tensors(metadata, &required);
+            const TensorDesc& detections = *required[1].descriptor;
+            validate_profile_shape(detections, kCompactDetectionsRank);
+            if (detections.data_type != TensorDataType::Float16 &&
+                detections.data_type != TensorDataType::Float32) {
+                contract_error(detections.name, "output data type must be Float16 or Float32");
+            }
+            validate_physical_layout(detections);
+            if (detections.min_shape[2] != kCompactDetectionValues) {
+                contract_error(detections.name, "each Compact NMS row must contain six values");
+            }
+            require_same_profile_dimension(images, detections, 0);
+
+            const std::size_t max_detections =
+                checked_dimension(detections.max_shape[1], detections.name);
+            if (max_detections > limits.max_detections) {
+                resource_error(detections.name,
+                               "maximum detections exceeds configured detection limit");
+            }
+            ValidatedTensor validated_detections = validate_capacity(detections);
+            if (validated_detections.max_bytes > limits.max_output_bytes) {
+                resource_error("outputs", "maximum output buffers exceed configured byte limit");
+            }
+            const std::size_t output_bytes = validated_detections.max_bytes;
+            return make_contract(
+                images, DetectionOutputLayout::CompactNms, detections.data_type,
+                detections.max_shape[1], output_bytes, std::move(validated_images),
+                CompactNmsContract {std::move(validated_detections)});
+        }
+
         std::array<RequiredTensor, 5> required = {{
             {names.images, TensorIoMode::Input},
             {names.num_dets, TensorIoMode::Output},
@@ -224,21 +332,16 @@ ValidatedContract validate_engine_contract(
         }};
         bind_required_tensors(metadata, &required);
 
-        const TensorDesc& images = *required[0].descriptor;
         const TensorDesc& num_dets = *required[1].descriptor;
         const TensorDesc& boxes = *required[2].descriptor;
         const TensorDesc& scores = *required[3].descriptor;
         const TensorDesc& labels = *required[4].descriptor;
 
-        validate_profile_shape(images, kImageRank, true);
         validate_count_profile_shape(num_dets);
         validate_profile_shape(boxes, kBoxesRank);
         validate_profile_shape(scores, kDetectionsRank);
         validate_profile_shape(labels, kDetectionsRank);
 
-        if (images.data_type != TensorDataType::Float16 && images.data_type != TensorDataType::Float32) {
-            contract_error(images.name, "input data type must be Float16 or Float32");
-        }
         require_type(num_dets, TensorDataType::Int32);
         require_type(labels, TensorDataType::Int32);
         if (boxes.data_type != TensorDataType::Float16 &&
@@ -246,11 +349,8 @@ ValidatedContract validate_engine_contract(
             contract_error(boxes.name, "output data type must be Float16 or Float32");
         }
         require_type(scores, boxes.data_type);
-        for (const TensorDesc* tensor : {&images, &num_dets, &boxes, &scores, &labels}) {
+        for (const TensorDesc* tensor : {&num_dets, &boxes, &scores, &labels}) {
             validate_physical_layout(*tensor);
-        }
-        if (images.min_shape[1] != kImageChannels) {
-            contract_error(images.name, "input channel dimension must be 3");
         }
         if (boxes.min_shape[2] != kBoxCoordinates) {
             contract_error(boxes.name, "box coordinate dimension must be 4");
@@ -262,23 +362,15 @@ ValidatedContract validate_engine_contract(
         require_same_profile_dimension(boxes, scores, 1);
         require_same_profile_dimension(boxes, labels, 1);
 
-        const std::size_t max_batch = checked_dimension(images.max_shape[0], images.name);
         const std::size_t max_detections = checked_dimension(boxes.max_shape[1], boxes.name);
-        if (max_batch > limits.max_batch) {
-            resource_error(images.name, "maximum batch exceeds configured batch limit");
-        }
         if (max_detections > limits.max_detections) {
             resource_error(boxes.name, "maximum detections exceeds configured detection limit");
         }
 
-        ValidatedTensor validated_images = validate_capacity(images);
         ValidatedTensor validated_num_dets = validate_capacity(num_dets);
         ValidatedTensor validated_boxes = validate_capacity(boxes);
         ValidatedTensor validated_scores = validate_capacity(scores);
         ValidatedTensor validated_labels = validate_capacity(labels);
-        if (validated_images.max_bytes > limits.max_input_bytes) {
-            resource_error(images.name, "maximum input buffer exceeds configured byte limit");
-        }
         std::size_t output_bytes = 0;
         for (const ValidatedTensor* tensor : {
                  &validated_num_dets, &validated_boxes, &validated_scores, &validated_labels}) {
@@ -292,13 +384,11 @@ ValidatedContract validate_engine_contract(
             resource_error("outputs", "maximum output buffers exceed configured byte limit");
         }
 
-        return {
-            images.min_shape[0], images.opt_shape[0], images.max_shape[0], boxes.max_shape[1],
-            images.min_shape[2], images.opt_shape[2], images.max_shape[2],
-            images.min_shape[3], images.opt_shape[3], images.max_shape[3],
-            images.data_type, boxes.data_type, validated_images.max_bytes, output_bytes,
-            std::move(validated_images), std::move(validated_num_dets),
-            std::move(validated_boxes), std::move(validated_scores), std::move(validated_labels)};
+        return make_contract(
+            images, DetectionOutputLayout::EfficientNms, boxes.data_type, boxes.max_shape[1],
+            output_bytes, std::move(validated_images),
+            EfficientNmsContract {std::move(validated_num_dets), std::move(validated_boxes),
+                                  std::move(validated_scores), std::move(validated_labels)});
     } catch (const std::bad_alloc&) {
         resource_error("metadata", "metadata validation allocation failed");
     } catch (const std::length_error&) {

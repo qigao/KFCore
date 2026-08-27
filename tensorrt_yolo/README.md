@@ -1,20 +1,26 @@
 # TensorRT YOLO 与 ByteTrack
 
-本模块把可信的 TensorRT EfficientNMS engine 接到 KFCore 自有 ByteTrack。它使用独立的
+本模块把可信的 TensorRT YOLO engine 接到 KFCore 自有 ByteTrack。它使用独立的
 `KFCore::image_processor` 完成通用 CUDA 图像到 Tensor 处理，并提供三个 YOLO target：
 `KFCore::yolo_tracking`、`KFCore::tensorrt_yolo` 与
 `KFCore::yolo_opencv`。默认 KFCore C 构建不会发现 CUDA、TensorRT 或 OpenCV。
 
 ## 运行契约
 
-只加载部署方生成或经可信渠道认证的序列化 engine。首期 engine 必须有一个 NCHW 三通道
-`images` 输入，以及 `num_dets`（INT32）、`boxes`、`scores` 和 `labels`（INT32）四个输出。
-`images` 可独立为 FP16 或 FP32；`boxes` 和 `scores` 也可为 FP16 或 FP32，但二者必须同型。
-输入与 EfficientNMS 浮点输出不要求同型。名称可在 `TensorNames` 中显式覆盖。不合约的
-engine 会失败，绝不改走 raw-head 解码、CPU NMS、ONNX Runtime 或 OpenCV DNN。
-`num_dets` 可使用 `[batch]`，也可使用 TensorRT EfficientNMS 的 `[batch, 1]`；后一种形式的尾维必须固定为 1。
+只加载部署方生成或经可信渠道认证的序列化 engine。engine 必须有一个 FP16 或 FP32、NCHW
+三通道 `images` 输入，并精确匹配以下一种最终检测输出契约：
 
-五个张量都必须使用线性、非向量化的标量物理布局：TensorRT format 为 `kLINEAR`、
+- EfficientNMS：`num_dets`（INT32）、`boxes`、`scores` 和 `labels`（INT32）。`boxes` 与
+  `scores` 为 FP16 或 FP32 且必须同型；输入与输出浮点类型可以不同。`num_dets` 可使用
+  `[batch]` 或 `[batch, 1]`，后一种形式的尾维必须固定为 1。
+- Compact NMS：单个 FP16 或 FP32 `output0`，shape 必须为 `[batch, max_detections, 6]`，列语义
+  固定为 `left, top, right, bottom, score, class_id`。模型图内必须已完成 NMS；`score == 0`
+  的全零行作为 padding 跳过。
+
+名称可在 `TensorNames` 中显式覆盖，其中 Compact NMS 名称字段为 `detections`。不合约的 engine
+会失败，绝不改走 raw-head 解码、CPU NMS、ONNX Runtime 或 OpenCV DNN。
+
+全部输入输出张量都必须使用线性、非向量化的标量物理布局：TensorRT format 为 `kLINEAR`、
 vectorized dimension 为 `-1`、components per element 为 `1`，且 bytes per component 与逻辑
 dtype 一致。engine 必须只有 profile 0；`images` 可在 profile 0 中动态改变 batch、height 和
 width，其余轴与所有输出的非 batch 轴必须固定。`DetectorOptions::input_size` 按
@@ -112,6 +118,17 @@ CUDA buffer、engine-file 与 CMake 配置测试合计 66 cases、2087 assertion
 安装消费端、YOLO helper、tracking、OpenCV 和真实 GPU kernel 测试。此前本地 engine 随参考目录
 清理，故本次重构后没有重跑需要 `.engine` 的 opt-in TensorRT runtime/YOLO11-face 测试；上段数据
 只作为重构前行为基线，不作为本次 engine 级复验结果。
+
+**事实（2026-08-27 Compact NMS 扩展验证）**：本地 `yolov12n-face.onnx` 与
+`yolov8n-drone.onnx` 的 TensorRT I/O 均为 `images + output0`，输出 shape 为 `[1,300,6]`。
+其中 `yolov12n-face.engine` 已在 TensorRT 11.2 / CUDA 12.8 / RTX 4060 上通过
+`track_image_sequence` 执行仓库内 3 张图片并写出 3/3 张结果。测试图片不含可确认的人脸，因此
+该结果只证明 GPU 预处理、Tensor 绑定、推理、Compact NMS 解码与写出链路可执行，不外推为模型
+精度验证。
+
+**边界**：`TensorRtDetector` 是最终目标检测适配器，不是任意 TensorRT 图执行器。ArcFace
+`[batch,512]` embedding、年龄/性别 `[batch,2]` 分类、关键点 `[batch,42]` 等模型可使用 TensorRT
+Tensor，但需要各自的输入/输出契约和后处理适配器，不能作为 YOLO 检测结果加载。
 
 **事实（engine 契约）**：face engine 是单类别 EfficientNMS engine，张量为 `images`、`num_dets`、
 `boxes`、`scores`、`labels`；`num_dets` 与 `labels` 为 INT32，`images`、`boxes`、`scores` 为 FP32，

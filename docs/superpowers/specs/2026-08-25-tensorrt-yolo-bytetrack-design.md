@@ -200,23 +200,26 @@ struct TrackFrame {
 
 ## 5. TensorRT engine 契约
 
-首期只支持已经集成 EfficientNMS、可直接返回最终检测结果的序列化 engine。
+首期只支持已经集成 EfficientNMS、可直接返回最终检测结果的序列化 engine。2026-08-27 的
+Compact NMS 扩展在不改变公开检测调用的前提下，另行接受图内已完成 NMS 的 `[B,N,6]` 最终检测
+输出；完整约束见 `2026-08-27-tensorrt-compact-nms-design.md`。
 
 默认张量名：
 
 - 输入：`images`；
-- 输出：`num_dets`、`boxes`、`scores`、`labels`。
+- EfficientNMS 输出：`num_dets`、`boxes`、`scores`、`labels`；或
+- Compact NMS 输出：`output0`，列为 `left, top, right, bottom, score, class_id`。
 
-张量名称允许通过 `DetectorOptions` 显式覆盖。初始化时校验：
+张量名称允许通过 `EngineOptions::tensor_names` 显式覆盖。初始化时校验：
 
-- 恰好一个图像输入及四个所需输出；
+- 恰好一个图像输入，并精确匹配 EfficientNMS 四输出或 Compact NMS 单输出；
 - 图像输入是 rank-4 NCHW，channel 固定为 3，dtype 为 FP32 或 FP16；
-- `num_dets` 和 `labels` 为 INT32；
-- `boxes` 和 `scores` 为 FP32 或 FP16，二者 dtype 必须一致；
+- EfficientNMS 的 `num_dets` 和 `labels` 为 INT32，`boxes` 和 `scores` 为 FP32 或 FP16 且同型；
+- Compact NMS 输出为 FP32 或 FP16，shape 严格为 `[batch, max_detections, 6]`；
 - I/O mode、名称、dtype 和 rank；
 - batch、动态维度和 optimization profile；
-- `boxes` 最后一维为 4；
-- 四个输出的 batch 和最大检测数一致；
+- EfficientNMS 的 `boxes` 最后一维为 4，四个输出的 batch 和最大检测数一致；
+- Compact NMS 的 batch 与输入 profile 一致，最大检测数固定且受资源上限约束；
 - 所有维度到字节数的计算无整数溢出；
 - 配置的输入尺寸位于 engine profile 范围内。
 
@@ -241,7 +244,7 @@ struct TrackFrame {
 3. 由同一处理器在 detector stream 上执行 letterbox、BGR/RGB 排列、归一化和 NCHW 输出；
 4. 设置动态输入 shape 和全部命名张量地址；
 5. `enqueueV3()`；
-6. 仅将四个小型 NMS 输出复制回 host；
+6. 仅将已验证契约对应的四个 EfficientNMS 输出或一个 Compact NMS 输出复制回 host；
 7. 同步 detector stream；
 8. 按该图自己的 letterbox transform 恢复原图坐标。
 
