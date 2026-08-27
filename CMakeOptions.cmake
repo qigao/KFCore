@@ -14,6 +14,8 @@ option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
        "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
+option(KFCORE_BUILD_VISION_MODELS
+       "Build shared hand and MediaPipe landmark model contracts" OFF)
 cmake_dependent_option(
   KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
   "Build real-model ONNX Runtime CPU face application integration tests"
