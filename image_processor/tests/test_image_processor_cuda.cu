@@ -127,6 +127,95 @@ void check_fp32(const std::array<float, Size>& actual, const std::array<float, S
 
 spec("ImageProcessor CUDA contract")
 {
+    it("owns reusable storage for synchronous affine and normalized host preprocessing")
+    {
+        const std::array<std::uint8_t, 12> bgr = {
+            0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110,
+        };
+        const ImageView image = {
+            bgr.data(), bgr.size(), 2, 2, 6, PixelFormat::Bgr8, MemoryKind::Host,
+        };
+        CudaImageProcessorOptions processor_options;
+        processor_options.max_source_bytes = 1024;
+        processor_options.max_tensor_bytes = 1024;
+        auto processor                     = CudaImageProcessor::create(processor_options);
+
+        const ImageView staged = processor->stage(image);
+        check(staged.memory_kind == MemoryKind::CudaDevice);
+        check(staged.data != image.data);
+        check(staged.row_stride == 6);
+        check(staged.byte_size == bgr.size());
+
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.mean          = { 0.5F, 0.5F, 0.5F };
+        options.stddev        = { 0.5F, 0.5F, 0.5F };
+        options.border_value  = 0.0F;
+        const AffineTransform identity;
+        const TensorView      first =
+            processor->process_affine(staged, 2, 2, identity, options, TensorElementType::Float32);
+
+        check(first.memory_kind == MemoryKind::CudaDevice);
+        check(first.batch == 1);
+        check(first.channels == 3);
+        check(first.height == 2);
+        check(first.width == 2);
+        check(first.byte_size == 12 * sizeof(float));
+        std::array<float, 12> output {};
+        check(cudaMemcpy(output.data(), first.data, first.byte_size, cudaMemcpyDeviceToHost) ==
+              cudaSuccess);
+        const std::array<float, 12> expected = {
+            20.0F / 127.5F - 1.0F,  50.0F / 127.5F - 1.0F,  80.0F / 127.5F - 1.0F,
+            110.0F / 127.5F - 1.0F, 10.0F / 127.5F - 1.0F,  40.0F / 127.5F - 1.0F,
+            70.0F / 127.5F - 1.0F,  100.0F / 127.5F - 1.0F, 0.0F / 127.5F - 1.0F,
+            30.0F / 127.5F - 1.0F,  60.0F / 127.5F - 1.0F,  90.0F / 127.5F - 1.0F,
+        };
+        check_fp32(output, expected);
+
+        const TensorView second =
+            processor->process_affine(staged, 1, 1, identity, options, TensorElementType::Float32);
+        check(second.data == first.data);
+    }
+
+    it("uses destination-to-source affine coordinates and constant borders")
+    {
+        const std::array<std::uint8_t, 3> rgb   = { 10, 20, 30 };
+        const ImageView                   image = {
+            rgb.data(), rgb.size(), 1, 1, 3, PixelFormat::Rgb8, MemoryKind::Host,
+        };
+        auto            processor = CudaImageProcessor::create();
+        AffineTransform translated;
+        translated.destination_to_source = { 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.border_value  = 7.0F;
+        const TensorView tensor =
+            processor->process_affine(image, 2, 1, translated, options, TensorElementType::Float32);
+
+        std::array<float, 6> output {};
+        check(cudaMemcpy(output.data(), tensor.data, tensor.byte_size, cudaMemcpyDeviceToHost) ==
+              cudaSuccess);
+        const std::array<float, 6> expected = {
+            7.0F / 255.0F,  10.0F / 255.0F, 7.0F / 255.0F,
+            20.0F / 255.0F, 7.0F / 255.0F,  30.0F / 255.0F,
+        };
+        check_fp32(output, expected);
+    }
+
+    it("fails fast when affine preprocessing exceeds configured source capacity")
+    {
+        const std::array<std::uint8_t, 3> rgb   = { 1, 2, 3 };
+        const ImageView                   image = {
+            rgb.data(), rgb.size(), 1, 1, 3, PixelFormat::Rgb8, MemoryKind::Host,
+        };
+        CudaImageProcessorOptions options;
+        options.max_source_bytes = 2;
+        options.max_tensor_bytes = 1024;
+        auto processor           = CudaImageProcessor::create(options);
+        check_throws_as(processor->process_affine(image, 1, 1, {}, {}, TensorElementType::Float32),
+                        ImageProcessorError);
+    }
+
     it("letterboxes a CUDA RGB image into normalized FP32 NCHW on an explicit stream")
     {
         constexpr std::size_t                         kSourceStride = 8;

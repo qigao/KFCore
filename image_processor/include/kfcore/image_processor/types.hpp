@@ -96,4 +96,17 @@ struct PreprocessOptions
     float                border_value = 114.0f;
 };
 
+struct AffineTransform
+{
+    // Maps an integer destination pixel coordinate to the corresponding source coordinate.
+    std::array<float, 6> destination_to_source { 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F };
+};
+
+struct CudaImageProcessorOptions
+{
+    int         device_id        = 0;
+    std::size_t max_source_bytes = 64U * 1024U * 1024U;
+    std::size_t max_tensor_bytes = 16U * 1024U * 1024U;
+};
+
 } // namespace kfcore::image
