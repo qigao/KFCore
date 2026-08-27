@@ -75,6 +75,26 @@ face_swap_image.exe `
 缺少参数、重复参数、未知参数和不可读输入/模型文件会在加载 engine 前失败。应用只在完整换脸
 成功后调用 `imwrite`；`--output` 不得与 source/target 使用同一路径。
 
+## 桌面 Demo
+
+`face_swap_demo` 使用相同参数启动 OpenCV Lite 窗口，并显示 source、target 和 TensorRT
+输出三联视图：
+
+```powershell
+face_swap_demo.exe `
+  --source source.jpg --target target.jpg --output swapped.png `
+  --detector yolov12n-face.engine --face68 2dfan4.engine `
+  --arcface arcface_w600k_r50.engine --inswapper inswapper_128.engine `
+  --matrix model_matrix.bin --gfpgan gfpgan_1.4.engine
+```
+
+- `R`：使用已加载的 engine 重新运行
+- `S`：将当前结果写入 `--output`
+- `Q` / `Esc` / 关闭窗口：退出
+
+窗口会在 engine 加载前显示状态；推理保持同步。只有显式提供 `--gfpgan` 时才运行增强，
+不会自动搜索模型、转换 ONNX 或降级到 CPU。
+
 ## 真实模型 opt-in 测试
 
 `KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS=ON` 时，必须同时提供下列绝对路径：

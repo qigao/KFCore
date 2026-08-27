@@ -33,7 +33,7 @@ cmake_config_target(kfcore_face_applications
   FOLDER "face_applications")
 
 if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
-  find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
+  find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs highgui)
   add_executable(face_swap_image
     examples/face_swap_cli.cpp
     examples/face_swap_image.cpp)
@@ -43,6 +43,20 @@ if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
     OpenCVLite::imgcodecs
     TurboUtils::Core)
   set_target_properties(face_swap_image PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "face_applications/examples")
+
+  add_executable(face_swap_demo
+    examples/face_swap_cli.cpp
+    examples/face_swap_demo.cpp
+    examples/face_swap_demo_ui.cpp)
+  target_include_directories(face_swap_demo PRIVATE examples)
+  target_link_libraries(face_swap_demo PRIVATE
+    KFCore::face_applications
+    OpenCVLite::imgcodecs
+    OpenCVLite::highgui
+    TurboUtils::Core)
+  set_target_properties(face_swap_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
     FOLDER "face_applications/examples")
 endif()
@@ -59,6 +73,19 @@ if(BUILD_TESTS)
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
     FOLDER "face_applications/tests")
   add_test(NAME test_face_swap_cli COMMAND test_face_swap_cli)
+
+  add_executable(test_face_swap_demo_ui
+    tests/test_face_swap_demo_ui.cpp
+    examples/face_swap_demo_ui.cpp)
+  target_include_directories(test_face_swap_demo_ui PRIVATE examples)
+  target_link_libraries(test_face_swap_demo_ui PRIVATE
+    OpenCVLite::core
+    OpenCVLite::imgproc
+    TurboUtils::TinyTest)
+  set_target_properties(test_face_swap_demo_ui PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "face_applications/tests")
+  add_test(NAME test_face_swap_demo_ui COMMAND test_face_swap_demo_ui)
 
   add_executable(test_face_geometry tests/test_geometry.cpp)
   target_link_libraries(test_face_geometry PRIVATE
@@ -152,7 +179,7 @@ if(BUILD_TESTS)
   endif()
 
   if(WIN32)
-    set_tests_properties(test_face_swap_cli test_face_geometry test_face_preprocess test_face_composer
+    set_tests_properties(test_face_swap_cli test_face_swap_demo_ui test_face_geometry test_face_preprocess test_face_composer
       test_face_application_validation PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin")
