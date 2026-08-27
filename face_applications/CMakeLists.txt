@@ -1,6 +1,7 @@
 find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
 
 add_library(kfcore_face_applications SHARED
+  src/composer.cpp
   src/error.cpp
   src/geometry.cpp
   src/preprocess.cpp)
@@ -47,8 +48,17 @@ if(BUILD_TESTS)
     FOLDER "face_applications/tests")
   add_test(NAME test_face_preprocess COMMAND test_face_preprocess)
 
+  add_executable(test_face_composer tests/test_composer.cpp)
+  target_link_libraries(test_face_composer PRIVATE
+    KFCore::face_applications
+    TurboUtils::TinyTest)
+  set_target_properties(test_face_composer PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "face_applications/tests")
+  add_test(NAME test_face_composer COMMAND test_face_composer)
+
   if(WIN32)
-    set_tests_properties(test_face_geometry test_face_preprocess PROPERTIES
+    set_tests_properties(test_face_geometry test_face_preprocess test_face_composer PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin")
   endif()
