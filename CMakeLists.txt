@@ -164,6 +164,12 @@ endif()
 if(KFCORE_IMAGE_CORE_ENABLED)
   add_subdirectory(image_processor)
 endif()
+if(KFCORE_BUILD_HAND_INTERACTION AND
+   (NOT KFCORE_BUILD_THIG OR NOT KFCORE_BUILD_VISION_MODELS))
+  message(FATAL_ERROR
+    "KFCORE_BUILD_HAND_INTERACTION requires KFCORE_BUILD_THIG=ON and "
+    "KFCORE_BUILD_VISION_MODELS=ON")
+endif()
 
 if(KFCORE_BUILD_THIG)
   enable_language(CXX)
@@ -207,6 +213,10 @@ endif()
 
 if(KFCORE_BUILD_VISION_MODELS)
   add_subdirectory(vision_models)
+endif()
+
+if(KFCORE_BUILD_HAND_INTERACTION)
+  add_subdirectory(hand_interaction)
 endif()
 
 if(KFCORE_BUILD_FACE_APPLICATIONS AND
