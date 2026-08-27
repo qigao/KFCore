@@ -11,6 +11,47 @@ option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
 option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
+option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
+option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
+       "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS
+  "Build real-model ONNX Runtime CPU face application integration tests"
+  OFF
+  "KFCORE_BUILD_FACE_APPLICATIONS_CPU"
+  OFF)
+set(KFCORE_FACE_CPU_TEST_MODEL_DIR "" CACHE PATH
+    "Directory containing trusted CPU face ONNX integration models")
+set(KFCORE_FACE_CPU_TEST_MATRIX "" CACHE FILEPATH
+    "Trusted InSwapper projection matrix for the CPU integration test")
+set(KFCORE_FACE_CPU_TEST_SOURCE_IMAGE "" CACHE FILEPATH
+    "Source face image for the CPU integration test")
+set(KFCORE_FACE_CPU_TEST_TARGET_IMAGE "" CACHE FILEPATH
+    "Target face image for the CPU integration test")
+cmake_dependent_option(
+  KFCORE_BUILD_FACE_APPLICATION_EXAMPLES
+  "Build TensorRT face application examples"
+  OFF
+  "KFCORE_BUILD_FACE_APPLICATIONS"
+  OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS
+  "Build real-engine TensorRT face application integration tests"
+  OFF
+  "KFCORE_BUILD_FACE_APPLICATIONS"
+  OFF)
+set(KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE
+    "$ENV{KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE}" CACHE FILEPATH
+    "Trusted YOLOv12-face TensorRT engine used by the face application integration test")
+set(KFCORE_FACE_APPLICATION_TEST_MATRIX
+    "$ENV{KFCORE_FACE_APPLICATION_TEST_MATRIX}" CACHE FILEPATH
+    "Trusted InSwapper matrix used by the face application integration test")
+set(KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE
+    "$ENV{KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE}" CACHE FILEPATH
+    "Source face image used by the face application integration test")
+set(KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE
+    "$ENV{KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE}" CACHE FILEPATH
+    "Target face image used by the face application integration test")
 option(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS
        "Build real-engine TensorRT runtime and face model integration tests" OFF)
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
@@ -22,6 +63,12 @@ set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}" CACHE FILEPATH
     "Trusted Face68 TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}" CACHE FILEPATH
+    "Trusted InSwapper TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}" CACHE FILEPATH
+    "Trusted GFPGAN TensorRT engine used by opt-in runtime integration tests")
 option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
 option(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS
        "Build TensorRT YOLO SDK integration tests" OFF)

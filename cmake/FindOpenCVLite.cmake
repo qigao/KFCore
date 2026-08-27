@@ -1,6 +1,6 @@
 include(FindPackageHandleStandardArgs)
 
-set(_OpenCVLite_supported_components core imgproc imgcodecs)
+set(_OpenCVLite_supported_components core imgproc imgcodecs highgui)
 if(OpenCVLite_FIND_COMPONENTS)
   set(_OpenCVLite_requested_components ${OpenCVLite_FIND_COMPONENTS})
 else()
@@ -27,7 +27,7 @@ foreach(_OpenCVLite_component IN LISTS _OpenCVLite_requested_components)
 endforeach()
 
 if(NOT TARGET OpenCVLite::core AND NOT TARGET OpenCVLite::imgproc AND
-   NOT TARGET OpenCVLite::imgcodecs)
+   NOT TARGET OpenCVLite::imgcodecs AND NOT TARGET OpenCVLite::highgui)
   foreach(_OpenCVLite_predefined IN ITEMS
       OpenCVLite_INCLUDE_DIR
       OpenCVLite_CORE_RELEASE_LIBRARY
@@ -35,7 +35,9 @@ if(NOT TARGET OpenCVLite::core AND NOT TARGET OpenCVLite::imgproc AND
       OpenCVLite_IMGPROC_RELEASE_LIBRARY
       OpenCVLite_IMGPROC_DEBUG_LIBRARY
       OpenCVLite_IMGCODECS_RELEASE_LIBRARY
-      OpenCVLite_IMGCODECS_DEBUG_LIBRARY)
+      OpenCVLite_IMGCODECS_DEBUG_LIBRARY
+      OpenCVLite_HIGHGUI_RELEASE_LIBRARY
+      OpenCVLite_HIGHGUI_DEBUG_LIBRARY)
     if(DEFINED ${_OpenCVLite_predefined} OR DEFINED CACHE{${_OpenCVLite_predefined}})
       message(FATAL_ERROR
         "FindOpenCVLite refuses a predefined result: ${_OpenCVLite_predefined}")

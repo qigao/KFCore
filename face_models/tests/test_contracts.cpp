@@ -63,6 +63,25 @@ std::vector<TensorDescriptor> age_gender_metadata()
     };
 }
 
+std::vector<TensorDescriptor> inswapper_metadata()
+{
+    return {
+        input("target", { 1, 3, 128, 128 }, { 1, 3, 128, 128 }, { 1, 3, 128, 128 },
+              { 1, 3, 128, 128 }),
+        input("source", { 1, 512 }, { 1, 512 }, { 1, 512 }, { 1, 512 }),
+        output("output", { 1, 3, 128, 128 }),
+    };
+}
+
+std::vector<TensorDescriptor> gfpgan_metadata()
+{
+    return {
+        input("input", { 1, 3, 512, 512 }, { 1, 3, 512, 512 }, { 1, 3, 512, 512 },
+              { 1, 3, 512, 512 }),
+        output("output", { 1, 3, 512, 512 }),
+    };
+}
+
 void expect_error(const std::function<void()>& operation, FaceModelErrorCode code,
                   const std::string& message)
 {
@@ -147,6 +166,26 @@ spec("strict TensorRT face model contracts")
         check(bound.memory_kind == MemoryKind::Host);
     }
 
+    it("restores owned output storage after a borrowed output binding")
+    {
+        float owned_value = 0.0F;
+        float borrowed_value = 1.0F;
+        MutableTensorView bound { "output", DataType::Float32, { 1, 1 }, &owned_value,
+                                  sizeof(owned_value), MemoryKind::Host };
+        const MutableTensorView borrowed { "output", DataType::Float32, { 1, 1 },
+                                           &borrowed_value, sizeof(borrowed_value),
+                                           MemoryKind::CudaDevice };
+        {
+            detail::BorrowedOutputGuard guard(bound, borrowed);
+            check(bound.data == borrowed.data);
+            check(bound.byte_size == borrowed.byte_size);
+            check(bound.memory_kind == MemoryKind::CudaDevice);
+        }
+        check(bound.data == &owned_value);
+        check(bound.byte_size == sizeof(owned_value));
+        check(bound.memory_kind == MemoryKind::Host);
+    }
+
     it("rejects invalid adapter limits and tensor names before engine loading")
     {
         Face68Options face68;
@@ -163,6 +202,103 @@ spec("strict TensorRT face model contracts")
         age_gender.max_batch = 0;
         expect_error([&] { detail::validate_age_gender_options(age_gender); },
                      FaceModelErrorCode::ResourceLimitExceeded, "max_batch");
+
+        InSwapperOptions inswapper;
+        inswapper.source_input_name = inswapper.target_input_name;
+        expect_error([&] { detail::validate_inswapper_options(inswapper); },
+                     FaceModelErrorCode::InvalidArgument, "distinct");
+
+        GfpGanOptions gfpgan;
+        gfpgan.engine.max_output_bytes = 0;
+        expect_error([&] { detail::validate_gfpgan_options(gfpgan); },
+                     FaceModelErrorCode::ResourceLimitExceeded, "max_output_bytes");
+    }
+
+    it("accepts exact fixed-batch InSwapper and GFPGAN contracts")
+    {
+        const detail::InSwapperContract inswapper =
+            detail::validate_inswapper_contract(inswapper_metadata(), InSwapperOptions {});
+        check(inswapper.batch.minimum == std::size_t { 1 });
+        check(inswapper.batch.maximum == std::size_t { 1 });
+        check(inswapper.output_float_capacity == std::size_t { 3U * 128U * 128U });
+
+        const detail::SingleOutputContract gfpgan =
+            detail::validate_gfpgan_contract(gfpgan_metadata(), GfpGanOptions {});
+        check(gfpgan.batch.minimum == std::size_t { 1 });
+        check(gfpgan.batch.maximum == std::size_t { 1 });
+        check(gfpgan.output_float_capacity == std::size_t { 3U * 512U * 512U });
+    }
+
+    it("rejects InSwapper missing inputs wrong shapes types and output limits")
+    {
+        InSwapperOptions options;
+
+        auto missing_source = inswapper_metadata();
+        missing_source.erase(missing_source.begin() + 1);
+        expect_error(
+            [&] { (void)detail::validate_inswapper_contract(missing_source, options); },
+            FaceModelErrorCode::ModelContractMismatch, "source");
+
+        auto wrong_source_rank = inswapper_metadata();
+        wrong_source_rank[1].declared_shape = { 1, 1, 512 };
+        expect_error(
+            [&] { (void)detail::validate_inswapper_contract(wrong_source_rank, options); },
+            FaceModelErrorCode::ModelContractMismatch, "rank");
+
+        auto wrong_target_type = inswapper_metadata();
+        wrong_target_type[0].data_type = DataType::Float16;
+        expect_error(
+            [&] { (void)detail::validate_inswapper_contract(wrong_target_type, options); },
+            FaceModelErrorCode::ModelContractMismatch, "FP32");
+
+        auto dynamic_source_width = inswapper_metadata();
+        dynamic_source_width[1].declared_shape[1] = -1;
+        expect_error(
+            [&] { (void)detail::validate_inswapper_contract(dynamic_source_width, options); },
+            FaceModelErrorCode::ModelContractMismatch, "512");
+
+        auto batch_two = inswapper_metadata();
+        batch_two[0].declared_shape[0] = 2;
+        batch_two[0].profile = TensorProfile { { 2, 3, 128, 128 }, { 2, 3, 128, 128 },
+                                               { 2, 3, 128, 128 } };
+        batch_two[1].declared_shape[0] = 2;
+        batch_two[1].profile = TensorProfile { { 2, 512 }, { 2, 512 }, { 2, 512 } };
+        batch_two[2].declared_shape[0] = 2;
+        expect_error([&] { (void)detail::validate_inswapper_contract(batch_two, options); },
+                     FaceModelErrorCode::ResourceLimitExceeded, "max_batch");
+
+        options.engine.max_output_bytes = 3U * 128U * 128U * sizeof(float) - 1U;
+        expect_error([&] { (void)detail::validate_inswapper_contract(inswapper_metadata(), options); },
+                     FaceModelErrorCode::ResourceLimitExceeded, "output bytes");
+    }
+
+    it("rejects GFPGAN wrong rank dimensions dtype and dynamic non-batch dimensions")
+    {
+        GfpGanOptions options;
+
+        auto wrong_output_rank = gfpgan_metadata();
+        wrong_output_rank[1].declared_shape = { 1, 3, 512 };
+        expect_error([&] { (void)detail::validate_gfpgan_contract(wrong_output_rank, options); },
+                     FaceModelErrorCode::ModelContractMismatch, "rank");
+
+        auto wrong_extent = gfpgan_metadata();
+        wrong_extent[0].declared_shape[3] = 256;
+        expect_error([&] { (void)detail::validate_gfpgan_contract(wrong_extent, options); },
+                     FaceModelErrorCode::ModelContractMismatch, "512");
+
+        auto wrong_output_type = gfpgan_metadata();
+        wrong_output_type[1].data_type = DataType::Float16;
+        expect_error([&] { (void)detail::validate_gfpgan_contract(wrong_output_type, options); },
+                     FaceModelErrorCode::ModelContractMismatch, "FP32");
+
+        auto dynamic_channel = gfpgan_metadata();
+        dynamic_channel[1].declared_shape[1] = -1;
+        expect_error([&] { (void)detail::validate_gfpgan_contract(dynamic_channel, options); },
+                     FaceModelErrorCode::ModelContractMismatch, "3");
+
+        options.engine.max_output_bytes = 3U * 512U * 512U * sizeof(float) - 1U;
+        expect_error([&] { (void)detail::validate_gfpgan_contract(gfpgan_metadata(), options); },
+                     FaceModelErrorCode::ResourceLimitExceeded, "output bytes");
     }
 
     it("accepts Face68 with or without its exact optional heatmap output")
@@ -313,6 +449,23 @@ spec("strict TensorRT face model contracts")
                                                 { 3, 112, 112 }, "ArcFace");
             },
             FaceModelErrorCode::InvalidTensorView, "input.1");
+    }
+
+    it("validates caller-owned output views before runtime execution")
+    {
+        float values[3 * 2 * 2] {};
+        MutableTensorView output { "output", DataType::Float32, { 1, 3, 2, 2 }, values,
+                                   sizeof(values), MemoryKind::CudaDevice };
+        detail::validate_prepared_output(output, "output", 1, { 3, 2, 2 }, "TestModel");
+
+        output.byte_size = sizeof(values) - 1U;
+        expect_error(
+            [&]
+            {
+                detail::validate_prepared_output(output, "output", 1, { 3, 2, 2 },
+                                                 "TestModel");
+            },
+            FaceModelErrorCode::InvalidTensorView, "capacity");
     }
 
     it("classifies a non-positive prepared batch as an invalid caller view")

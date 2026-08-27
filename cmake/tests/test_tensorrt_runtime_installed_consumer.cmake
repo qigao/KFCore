@@ -6,7 +6,8 @@ if(NOT DEFINED KFCORE_BINARY_DIR OR
    NOT DEFINED KFCORE_CONSUMER_BUILD_CONFIG OR
    NOT DEFINED KFCORE_CONSUMER_NINJA_EXECUTABLE OR
    NOT DEFINED KFCORE_CONSUMER_CUDATOOLKIT_ROOT OR
-   NOT DEFINED KFCORE_CONSUMER_TENSORRT_ROOT)
+   NOT DEFINED KFCORE_CONSUMER_TENSORRT_ROOT OR
+   NOT DEFINED KFCORE_CONSUMER_TURBOUTILS_ROOT)
   message(FATAL_ERROR "TensorRT runtime installed-consumer test paths are required")
 endif()
 if("${KFCORE_CONSUMER_NINJA_EXECUTABLE}" STREQUAL "" OR
@@ -23,7 +24,8 @@ if("${KFCORE_CONSUMER_BUILD_CONFIG}" STREQUAL "" OR
 endif()
 foreach(_dependency_root IN ITEMS
     KFCORE_CONSUMER_CUDATOOLKIT_ROOT
-    KFCORE_CONSUMER_TENSORRT_ROOT)
+    KFCORE_CONSUMER_TENSORRT_ROOT
+    KFCORE_CONSUMER_TURBOUTILS_ROOT)
   if("${${_dependency_root}}" STREQUAL "" OR
      NOT IS_DIRECTORY "${${_dependency_root}}")
     message(FATAL_ERROR
@@ -98,11 +100,11 @@ file(REAL_PATH "${KFCORE_BINARY_DIR}" _kfcore_binary_dir)
 file(REAL_PATH "${KFCORE_CONSUMER_INSTALL_PREFIX}" _consumer_install_prefix)
 if(WIN32)
   set(_consumer_runtime_path
-    "${_consumer_install_prefix}/bin;${KFCORE_CONSUMER_TENSORRT_ROOT}/bin;${KFCORE_CONSUMER_CUDATOOLKIT_ROOT}/bin;$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
+    "${_consumer_install_prefix}/bin;${KFCORE_CONSUMER_TENSORRT_ROOT}/bin;${KFCORE_CONSUMER_CUDATOOLKIT_ROOT}/bin;${KFCORE_CONSUMER_TURBOUTILS_ROOT}/bin;$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
   set(_runtime_environment "PATH=${_consumer_runtime_path}")
 else()
   set(_consumer_runtime_path
-    "${_consumer_install_prefix}/lib:${KFCORE_CONSUMER_TENSORRT_ROOT}/lib:${KFCORE_CONSUMER_TENSORRT_ROOT}/lib64:${KFCORE_CONSUMER_CUDATOOLKIT_ROOT}/lib64")
+    "${_consumer_install_prefix}/lib:${KFCORE_CONSUMER_TENSORRT_ROOT}/lib:${KFCORE_CONSUMER_TENSORRT_ROOT}/lib64:${KFCORE_CONSUMER_CUDATOOLKIT_ROOT}/lib64:${KFCORE_CONSUMER_TURBOUTILS_ROOT}/lib")
   set(_runtime_environment "LD_LIBRARY_PATH=${_consumer_runtime_path}")
 endif()
 string(FIND "${_consumer_runtime_path}" "${_kfcore_binary_dir}/bin" _build_bin_index)

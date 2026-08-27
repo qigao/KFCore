@@ -151,6 +151,36 @@
             }
         },
         {
+            "name": "win-face-applications-release-user",
+            "displayName": "TensorRT Face Applications Release Build (Windows, User)",
+            "inherits": "win-yolo-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Face",
+            "cacheVariables": {
+                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
+                "KFCORE_BUILD_FACE_MODELS": "ON",
+                "KFCORE_BUILD_FACE_APPLICATIONS": "ON",
+                "KFCORE_BUILD_FACE_APPLICATION_EXAMPLES": "ON"
+            }
+        },
+        {
+            "name": "win-face-cpu-release-user",
+            "displayName": "ONNX Runtime CPU Face Applications Release Build (Windows, User)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Face-CPU",
+            "environment": {
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/Msvc-Face-CPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_FACE_APPLICATIONS_CPU": "ON",
+                "KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS": "ON",
+                "KFCORE_FACE_CPU_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
+                "KFCORE_FACE_CPU_TEST_MATRIX": "C:/projects/project-cpp-template/faceswap/src/model_matrix.bin",
+                "KFCORE_FACE_CPU_TEST_SOURCE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg",
+                "KFCORE_FACE_CPU_TEST_TARGET_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/target.jpg"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -225,6 +255,16 @@
             "configurePreset": "win-tensorrt-models-release-user"
         },
         {
+            "name": "win-face-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user"
+        },
+        {
+            "name": "win-face-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-face-cpu-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -287,6 +327,22 @@
             ]
         },
         {
+            "name": "install-win-face-applications-release-user",
+            "inherits": "install-win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-face-cpu-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-face-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
             "name": "install-linux-dev-user",
             "configurePreset": "linux-dev-user",
             "targets": [
@@ -336,6 +392,16 @@
             "name": "win-tensorrt-models-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-tensorrt-models-release-user"
+        },
+        {
+            "name": "win-face-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-face-applications-release-user"
+        },
+        {
+            "name": "win-face-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-face-cpu-release-user"
         },
         {
             "name": "linux-dev-user",

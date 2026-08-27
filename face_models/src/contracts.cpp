@@ -31,6 +31,8 @@ namespace
     constexpr char kFace68ModelName[]    = "Face68";
     constexpr char kArcFaceModelName[]   = "ArcFace";
     constexpr char kAgeGenderModelName[] = "AgeGender";
+    constexpr char kInSwapperModelName[] = "InSwapper";
+    constexpr char kGfpGanModelName[]     = "GFPGAN";
 
     [[noreturn]] void throw_invalid(const std::string& model, const std::string& detail)
     {
@@ -264,6 +266,65 @@ namespace
         }
     }
 
+    void validate_vector_input(const TensorDescriptor& tensor, const TensorShape& fixed_tail,
+                               const std::string& model)
+    {
+        validate_common_descriptor(tensor, TensorIoMode::Input, model);
+        const std::size_t expected_rank = fixed_tail.size() + 1U;
+        if (tensor.declared_shape.size() != expected_rank)
+        {
+            throw_contract(model, tensor.name + " input rank must be " +
+                                      std::to_string(expected_rank));
+        }
+        if (!valid_batch_declaration(tensor.declared_shape[0]))
+        {
+            throw_contract(model, tensor.name + " batch must be fixed positive or declared -1");
+        }
+        for (std::size_t index = 0; index < fixed_tail.size(); ++index)
+        {
+            if (tensor.declared_shape[index + 1U] != fixed_tail[index])
+            {
+                throw_contract(model, tensor.name + " input dimension " +
+                                          std::to_string(index + 1U) + " must be " +
+                                          std::to_string(fixed_tail[index]));
+            }
+        }
+        if (!tensor.profile)
+        {
+            throw_contract(model, tensor.name + " requires profile 0 bounds");
+        }
+        const auto& profile = *tensor.profile;
+        if (profile.minimum.size() != expected_rank || profile.optimum.size() != expected_rank ||
+            profile.maximum.size() != expected_rank)
+        {
+            throw_contract(model, tensor.name + " profile rank must be " +
+                                      std::to_string(expected_rank));
+        }
+        for (std::size_t index = 0; index < fixed_tail.size(); ++index)
+        {
+            const std::size_t dimension = index + 1U;
+            if (profile.minimum[dimension] != fixed_tail[index] ||
+                profile.optimum[dimension] != fixed_tail[index] ||
+                profile.maximum[dimension] != fixed_tail[index])
+            {
+                throw_contract(model, tensor.name + " profile non-batch dimensions must be fixed");
+            }
+        }
+        const std::int64_t minimum = profile.minimum[0];
+        const std::int64_t optimum = profile.optimum[0];
+        const std::int64_t maximum = profile.maximum[0];
+        if (minimum <= 0 || optimum < minimum || maximum < optimum)
+        {
+            throw_contract(model, tensor.name + " profile batch must satisfy 0 < min <= opt <= max");
+        }
+        if (tensor.declared_shape[0] != -1 &&
+            (minimum != tensor.declared_shape[0] || optimum != tensor.declared_shape[0] ||
+             maximum != tensor.declared_shape[0]))
+        {
+            throw_contract(model, tensor.name + " fixed batch must match every profile bound");
+        }
+    }
+
     void validate_output(const TensorDescriptor& tensor, const TensorShape& fixed_tail,
                          const std::string& model)
     {
@@ -428,6 +489,19 @@ void validate_age_gender_options(const AgeGenderOptions& options)
                    options.max_batch, options.engine.max_output_bytes);
 }
 
+void validate_inswapper_options(const InSwapperOptions& options)
+{
+    validate_names(kInSwapperModelName,
+                   { options.target_input_name, options.source_input_name, options.output_name },
+                   options.max_batch, options.engine.max_output_bytes);
+}
+
+void validate_gfpgan_options(const GfpGanOptions& options)
+{
+    validate_names(kGfpGanModelName, { options.input_name, options.output_name },
+                   options.max_batch, options.engine.max_output_bytes);
+}
+
 AdapterCallGuard::AdapterCallGuard(std::atomic_flag& in_use, const char* model_name)
     : in_use_(in_use)
 {
@@ -459,6 +533,26 @@ BorrowedInputGuard::~BorrowedInputGuard() noexcept
     target_.data        = nullptr;
     target_.byte_size   = 0;
     target_.memory_kind = kfcore::tensorrt::MemoryKind::Host;
+}
+
+BorrowedOutputGuard::BorrowedOutputGuard(
+    kfcore::tensorrt::MutableTensorView& target,
+    const kfcore::tensorrt::MutableTensorView& source) noexcept
+    : target_(target)
+    , previous_data_(target.data)
+    , previous_byte_size_(target.byte_size)
+    , previous_memory_kind_(target.memory_kind)
+{
+    target_.data        = source.data;
+    target_.byte_size   = source.byte_size;
+    target_.memory_kind = source.memory_kind;
+}
+
+BorrowedOutputGuard::~BorrowedOutputGuard() noexcept
+{
+    target_.data        = previous_data_;
+    target_.byte_size   = previous_byte_size_;
+    target_.memory_kind = previous_memory_kind_;
 }
 
 Face68Contract validate_face68_contract(const std::vector<TensorDescriptor>& tensors,
@@ -538,10 +632,85 @@ SingleOutputContract validate_age_gender_contract(
                                            kAgeGenderModelName);
 }
 
+InSwapperContract validate_inswapper_contract(
+    const std::vector<TensorDescriptor>& tensors, const InSwapperOptions& options)
+{
+    const std::string model = kInSwapperModelName;
+    validate_inswapper_options(options);
+    validate_unique_metadata(tensors, model);
+    const TensorDescriptor& target = required_tensor(tensors, options.target_input_name, model);
+    const TensorDescriptor& source = required_tensor(tensors, options.source_input_name, model);
+    const TensorDescriptor& output_tensor = required_tensor(tensors, options.output_name, model);
+    reject_unexpected(tensors,
+                      { options.target_input_name, options.source_input_name, options.output_name },
+                      model);
+    validate_input(target,
+                   { kFaceModelInputChannels, kInSwapperInputExtent, kInSwapperInputExtent },
+                   model);
+    validate_vector_input(source, { static_cast<std::int64_t>(kInSwapperEmbeddingLength) }, model);
+    validate_output(output_tensor,
+                    { kFaceModelInputChannels, kInSwapperInputExtent, kInSwapperInputExtent },
+                    model);
+
+    const BatchBounds target_batch =
+        resolve_batch(target, { &output_tensor }, options.max_batch, model);
+    const BatchBounds source_batch =
+        resolve_batch(source, { &output_tensor }, options.max_batch, model);
+    if (target_batch.minimum != source_batch.minimum || target_batch.maximum != source_batch.maximum)
+    {
+        throw_contract(model, "target and source batch bounds disagree");
+    }
+
+    InSwapperContract result;
+    result.target_input_name = options.target_input_name;
+    result.source_input_name = options.source_input_name;
+    result.output_name = options.output_name;
+    result.batch = target_batch;
+    result.output_float_capacity =
+        output_capacity(result.batch.maximum, kInSwapperOutputElementCount, model);
+    enforce_output_bytes(result.output_float_capacity, options.engine.max_output_bytes, model);
+    return result;
+}
+
+SingleOutputContract validate_gfpgan_contract(const std::vector<TensorDescriptor>& tensors,
+                                              const GfpGanOptions& options)
+{
+    const std::string model = kGfpGanModelName;
+    validate_gfpgan_options(options);
+    validate_unique_metadata(tensors, model);
+    const TensorDescriptor& input_tensor = required_tensor(tensors, options.input_name, model);
+    const TensorDescriptor& output_tensor = required_tensor(tensors, options.output_name, model);
+    reject_unexpected(tensors, { options.input_name, options.output_name }, model);
+    validate_input(input_tensor,
+                   { kFaceModelInputChannels, kGfpGanInputExtent, kGfpGanInputExtent }, model);
+    validate_output(output_tensor,
+                    { kFaceModelInputChannels, kGfpGanInputExtent, kGfpGanInputExtent }, model);
+
+    SingleOutputContract result;
+    result.input_name = options.input_name;
+    result.output_name = options.output_name;
+    result.batch = resolve_batch(input_tensor, { &output_tensor }, options.max_batch, model);
+    result.output_float_capacity =
+        output_capacity(result.batch.maximum, kGfpGanOutputElementCount, model);
+    enforce_output_bytes(result.output_float_capacity, options.engine.max_output_bytes, model);
+    return result;
+}
+
 void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
                              const std::string& expected_name, const BatchBounds& batch,
                              const std::array<std::int64_t, 3>& fixed_dimensions,
                              const char* model_name)
+{
+    validate_prepared_vector_input(
+        input, expected_name, batch,
+        std::vector<std::int64_t>(fixed_dimensions.begin(), fixed_dimensions.end()), model_name);
+}
+
+void validate_prepared_vector_input(const kfcore::tensorrt::TensorView& input,
+                                    const std::string& expected_name,
+                                    const BatchBounds& batch,
+                                    const std::vector<std::int64_t>& fixed_dimensions,
+                                    const char* model_name)
 {
     const std::string model(model_name);
     if (input.name != expected_name)
@@ -560,9 +729,10 @@ void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
     {
         throw_view(model, "prepared tensor data must not be null");
     }
-    if (input.shape.size() != 4)
+    const std::size_t expected_rank = fixed_dimensions.size() + 1U;
+    if (input.shape.size() != expected_rank)
     {
-        throw_view(model, "prepared tensor rank must be 4");
+        throw_view(model, "prepared tensor rank must be " + std::to_string(expected_rank));
     }
     if (input.shape[0] <= 0)
     {
@@ -598,6 +768,56 @@ void validate_prepared_input(const kfcore::tensorrt::TensorView& input,
     if (input.byte_size < required_bytes)
     {
         throw_view(model, "prepared tensor capacity is smaller than its shape");
+    }
+}
+
+void validate_prepared_output(const kfcore::tensorrt::MutableTensorView& output,
+                              const std::string& expected_name, std::int64_t expected_batch,
+                              const std::array<std::int64_t, 3>& fixed_dimensions,
+                              const char* model_name)
+{
+    const std::string model(model_name);
+    if (output.name != expected_name)
+    {
+        throw_view(model, "expected exact output tensor name " + expected_name);
+    }
+    if (output.data_type != DataType::Float32)
+    {
+        throw_view(model, "prepared output tensor must use FP32 elements");
+    }
+    if (output.memory_kind != MemoryKind::Host && output.memory_kind != MemoryKind::CudaDevice)
+    {
+        throw_view(model, "prepared output tensor memory kind is invalid");
+    }
+    if (output.data == nullptr)
+    {
+        throw_view(model, "prepared output tensor data must not be null");
+    }
+    if (expected_batch <= 0)
+    {
+        throw_view(model, "prepared output tensor batch must be positive");
+    }
+    if (output.shape.size() != fixed_dimensions.size() + 1U ||
+        output.shape[0] != expected_batch)
+    {
+        throw_view(model, "prepared output tensor has incorrect batch or rank");
+    }
+    std::size_t required_elements = static_cast<std::size_t>(expected_batch);
+    for (std::size_t index = 0; index < fixed_dimensions.size(); ++index)
+    {
+        if (output.shape[index + 1U] != fixed_dimensions[index])
+        {
+            throw_view(model, "prepared output tensor has incorrect fixed dimensions");
+        }
+        required_elements = checked_multiply(required_elements,
+                                             static_cast<std::size_t>(fixed_dimensions[index]),
+                                             model, "prepared output tensor element count");
+    }
+    const std::size_t required_bytes = checked_multiply(
+        required_elements, kFloatBytes, model, "prepared output tensor bytes");
+    if (output.byte_size < required_bytes)
+    {
+        throw_view(model, "prepared output tensor capacity is smaller than its shape");
     }
 }
 
