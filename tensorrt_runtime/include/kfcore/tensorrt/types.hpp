@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,10 +43,13 @@ struct TensorProfile
 
 struct TensorDescriptor
 {
-    std::string   name;
-    TensorIoMode  mode      = TensorIoMode::Input;
-    DataType      data_type = DataType::Float32;
-    TensorProfile profile;
+    std::string                  name;
+    TensorIoMode                 mode      = TensorIoMode::Input;
+    DataType                     data_type = DataType::Float32;
+    // The network declaration uses -1 for runtime dimensions. It is not an output bound.
+    TensorShape                  declared_shape;
+    // Only inputs have profile 0 bounds. Output sizes are resolved from IExecutionContext.
+    std::optional<TensorProfile> profile;
 };
 
 // TensorView borrows read-only input storage for the duration of Executor::run().

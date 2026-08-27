@@ -162,7 +162,7 @@ void CudaBuffer::reserve(std::size_t bytes, std::size_t hard_limit)
 #else
         const cudaError_t release_result = cudaFree(old);
 #endif
-        check_cuda(release_result, "cudaFree", "CUDA device buffer replacement cleanup");
+        check_cuda(release_result, "cudaFree", "CUDA device buffer committed cleanup");
     }
 }
 
@@ -261,7 +261,7 @@ void PinnedHostBuffer::reserve(std::size_t bytes, std::size_t hard_limit)
 #else
         const cudaError_t release_result = cudaFreeHost(old);
 #endif
-        check_cuda(release_result, "cudaFreeHost", "CUDA pinned host buffer replacement cleanup");
+        check_cuda(release_result, "cudaFreeHost", "CUDA pinned host buffer committed cleanup");
     }
 }
 

@@ -34,8 +34,9 @@ public:
     CudaBuffer(CudaBuffer&& other) noexcept;
     CudaBuffer& operator=(CudaBuffer&& other) noexcept;
 
-    // Allocation and limit failures preserve the old allocation. If freeing the old allocation
-    // reports an error after replacement, this owner retains only the valid replacement.
+    // Strong guarantee applies before commit: allocation and limit failures preserve the old
+    // allocation. After replacement is committed, an old-allocation free error has unknown old
+    // pointer validity; this owner keeps the replacement and reports a committed-cleanup error.
     void        reserve(std::size_t bytes, std::size_t hard_limit);
     void*       data() noexcept;
     const void* data() const noexcept;
@@ -63,6 +64,7 @@ public:
     PinnedHostBuffer(PinnedHostBuffer&& other) noexcept;
     PinnedHostBuffer& operator=(PinnedHostBuffer&& other) noexcept;
 
+    // The same pre-commit strong guarantee and post-commit cleanup semantics as CudaBuffer.
     void        reserve(std::size_t bytes, std::size_t hard_limit);
     void*       data() noexcept;
     const void* data() const noexcept;

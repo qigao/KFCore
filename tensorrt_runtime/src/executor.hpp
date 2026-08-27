@@ -28,7 +28,7 @@ struct Executor::Impl final
 
     std::shared_ptr<const Engine::Impl>              engine;
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context;
-    detail::CudaStream                               stream;
+    std::unique_ptr<detail::CudaStream>              stream;
     std::vector<detail::ExecutorStagingBuffers>      staging;
     std::atomic_flag                                 in_use = ATOMIC_FLAG_INIT;
 };

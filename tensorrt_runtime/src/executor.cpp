@@ -1,5 +1,6 @@
 #include "executor.hpp"
 
+#include "cuda_device.hpp"
 #include "tensor_validation.hpp"
 
 #include "kfcore/tensorrt/error.hpp"
@@ -224,7 +225,7 @@ namespace
         const std::vector<TensorDescriptor>& input_descriptors,
         const std::vector<TensorDescriptor>& output_descriptors,
         const std::vector<TensorView>& inputs,
-        const std::vector<MutableTensorView>& outputs)
+        const std::vector<MutableTensorView>& outputs, std::size_t max_output_bytes)
     {
         for (const TensorDescriptor& descriptor : input_descriptors)
         {
@@ -239,6 +240,7 @@ namespace
         {
             throw_tensorrt("output shape stage: TensorRT could not infer all tensor shapes");
         }
+        std::size_t aggregate_output_bytes = 0;
         for (const TensorDescriptor& descriptor : output_descriptors)
         {
             const MutableTensorView& output = find_output(outputs, descriptor.name);
@@ -248,8 +250,38 @@ namespace
                 throw_invalid("output shape stage: caller shape does not match resolved shape for " +
                               descriptor.name);
             }
-            (void)detail::checked_shape_byte_size(shape, descriptor.data_type,
-                                                  "output shape validation");
+            const std::size_t bytes = detail::checked_shape_byte_size(
+                shape, descriptor.data_type, "output shape validation");
+            if (output.byte_size < bytes)
+            {
+                throw_invalid("output shape stage: caller capacity is smaller than resolved bytes for " +
+                              descriptor.name);
+            }
+            if (bytes > max_output_bytes - aggregate_output_bytes)
+            {
+                throw_resource(
+                    "output shape stage: aggregate resolved bytes exceed configured limit");
+            }
+            aggregate_output_bytes += bytes;
+        }
+    }
+
+    void validate_cuda_views(const std::vector<TensorView>& inputs,
+                             const std::vector<MutableTensorView>& outputs, int device_id)
+    {
+        for (const TensorView& input : inputs)
+        {
+            if (input.memory_kind == MemoryKind::CudaDevice)
+            {
+                detail::validate_cuda_device_pointer(input.data, device_id, input.name);
+            }
+        }
+        for (const MutableTensorView& output : outputs)
+        {
+            if (output.memory_kind == MemoryKind::CudaDevice)
+            {
+                detail::validate_cuda_device_pointer(output.data, device_id, output.name);
+            }
         }
     }
 
@@ -390,20 +422,44 @@ Executor::Impl::Impl(std::shared_ptr<const Engine::Impl> engine_state,
                      detail::TensorRtOwner<nvinfer1::IExecutionContext> execution_context)
     : engine(std::move(engine_state))
     , context(std::move(execution_context))
+    , stream(std::make_unique<detail::CudaStream>())
     , staging(engine->tensors.size())
 {
 }
 
 Executor::Impl::~Impl() noexcept
 {
-    if (engine)
+    const auto destroy_resources = [this]() noexcept
     {
-        (void)cudaSetDevice(engine->options.device_id);
+        context.reset();
+        staging.clear();
+        stream.reset();
+        engine.reset();
+    };
+    if (!engine)
+    {
+        destroy_resources();
+        return;
     }
-    (void)cudaStreamSynchronize(stream.get());
-    if (context && engine)
+
+    const int device_id = engine->options.device_id;
+    try
     {
-        (void)clear_tensor_addresses(*context, engine->tensors);
+        detail::CudaDeviceScope device_scope(device_id);
+        if (stream)
+        {
+            (void)cudaStreamSynchronize(stream->get());
+        }
+        if (context)
+        {
+            (void)clear_tensor_addresses(*context, engine->tensors);
+        }
+        destroy_resources();
+        device_scope.restore();
+    }
+    catch (...)
+    {
+        destroy_resources();
     }
 }
 
@@ -422,8 +478,7 @@ std::unique_ptr<Executor> Engine::create_executor() const
                             "executor creation stage: engine state is unavailable");
     }
 
-    detail::check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice",
-                       "executor creation");
+    detail::CudaDeviceScope device_scope(impl_->options.device_id);
     detail::TensorRtOwner<nvinfer1::IExecutionContext> context(
         impl_->engine->createExecutionContext());
     if (!context)
@@ -434,7 +489,9 @@ std::unique_ptr<Executor> Engine::create_executor() const
     try
     {
         auto executor_impl = std::make_unique<Executor::Impl>(impl_, std::move(context));
-        return std::unique_ptr<Executor>(new Executor(std::move(executor_impl)));
+        std::unique_ptr<Executor> result(new Executor(std::move(executor_impl)));
+        device_scope.restore();
+        return result;
     }
     catch (const std::bad_alloc&)
     {
@@ -468,12 +525,13 @@ void Executor::run(const std::vector<TensorView>& inputs,
                                       impl_->engine->options.max_output_bytes);
         reject_view_aliases(inputs, outputs);
 
-        detail::check_cuda(cudaSetDevice(impl_->engine->options.device_id), "cudaSetDevice",
-                           "execution");
+        detail::CudaDeviceScope device_scope(impl_->engine->options.device_id);
+        validate_cuda_views(inputs, outputs, impl_->engine->options.device_id);
         set_input_shapes_and_validate_outputs(*impl_->context, input_descriptors,
-                                              output_descriptors, inputs, outputs);
+                                              output_descriptors, inputs, outputs,
+                                              impl_->engine->options.max_output_bytes);
 
-        cudaStream_t stream              = impl_->stream.get();
+        cudaStream_t stream              = impl_->stream->get();
         bool         stream_work_pending = false;
         try
         {
@@ -514,6 +572,7 @@ void Executor::run(const std::vector<TensorView>& inputs,
             }
             throw;
         }
+        device_scope.restore();
     }
     catch (const std::bad_alloc&)
     {

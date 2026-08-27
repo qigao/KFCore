@@ -4,6 +4,7 @@
 
 #include <NvInfer.h>
 
+#include <atomic>
 #include <cstdio>
 #include <memory>
 
@@ -27,11 +28,18 @@ public:
     {
         if (severity <= Severity::kWARNING && message != nullptr)
         {
+            while (writing_.test_and_set(std::memory_order_acquire))
+            {
+            }
             std::fputs("TensorRT: ", stderr);
             std::fputs(message, stderr);
             std::fputc('\n', stderr);
+            writing_.clear(std::memory_order_release);
         }
     }
+
+private:
+    std::atomic_flag writing_ = ATOMIC_FLAG_INIT;
 };
 
 class CudaStream final

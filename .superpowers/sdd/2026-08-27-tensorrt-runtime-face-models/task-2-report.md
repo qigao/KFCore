@@ -110,3 +110,107 @@ Total Test time (real) = 8.48 sec
 - 残余风险：本 task 未以真实 serialized engine/GPU 执行 host/device inference；executor
   数据通路已通过 TensorRT 11.2.1.2 编译链接，但真实 engine 行为留给后续 opt-in integration
   tests 验证。
+
+## Fix round 1（review NEEDS CHANGES）
+
+本节取代上文初版自审中“未发现 HIGH/MED”的结论。review 指出的边界均已修复：
+
+- `HIGH`：metadata 将 network declared shape 与仅属于 input 的 optional profile 分离。
+  output 不再把 min/opt/max 输入采样结果伪装成逐维 bounds；`run()` 设置实际输入后只接受
+  context 解析出的全正 output shape，并以该实际 shape 重新检查 caller shape、bytes、
+  `max_tensor_bytes` 与 aggregate `max_output_bytes`。
+- `HIGH`：CUDA view 在 bind 前经 `cudaPointerGetAttributes` 校验；仅接受
+  `cudaMemoryTypeDevice` 且 device id 与 `EngineOptions::device_id` 相等的 pointer。
+  host、managed、unregistered、other-device 和查询失败均以 `InvalidTensorView` fail fast。
+- `HIGH`：alias query 版本门改为 TensorRT major > 10，或 major == 10 且 minor >= 11；
+  只有缺少该 API 的旧版本跳过查询。
+- `MED`：新增 checked device-scope guard，保存并在正常/异常路径恢复调用线程原 device。
+  `Executor::Impl` 在目标 device scope 内显式销毁 context、staging buffers 和 stream，避免
+  成员自动析构越过 device scope。
+- `MED`：plugin 初始化改为进程级 `std::call_once`，共享 logger 的输出序列化；初始化抛出
+  时遵循 `call_once` 的 retry 语义。每个 Engine 自身 runtime logger 生命周期保持不变。
+- `MED`：buffer strong guarantee 明确仅覆盖 allocation/limit 等 pre-commit 失败。replacement
+  commit 后若释放旧 allocation 失败，旧 pointer 有效性未知，owner 保持 replacement，并报告
+  `committed cleanup` 错误；不回滚到可能悬空的旧 pointer。
+- `MED`：新增纯/injectable control seam 单测，不伪造 TensorRT inference；真实 Host/CUDA run
+  integration 仍按 ruling 属于 Task 4。
+
+### Fix 文件
+
+- 修改 `tensorrt_runtime/include/kfcore/tensorrt/types.hpp`
+- 修改 `tensorrt_runtime/src/{engine,executor,cuda_buffer,tensor_validation}.{hpp,cpp}` 中适用文件
+- 修改 `tensorrt_runtime/src/tensorrt_raii.hpp`
+- 新增 `tensorrt_runtime/src/cuda_device.{hpp,cpp}`
+- 新增 `tensorrt_runtime/src/tensorrt_version.hpp`
+- 修改 `tensorrt_runtime/tests/test_{tensor_validation,cuda_buffer}.cpp`
+- 新增 `tensorrt_runtime/tests/test_runtime_control.cpp`
+- 修改 `tensorrt_runtime/CMakeLists.txt`
+
+### Fix TDD RED
+
+命令：
+
+```text
+cmake --build --preset win-release-user --target
+  test_tensorrt_runtime_contract test_tensorrt_runtime_cuda_buffer
+  test_tensorrt_runtime_control
+```
+
+关键输出（预期失败）：
+
+```text
+fatal error C1083: Cannot open include file: 'cuda_device.hpp'
+test_tensor_validation.cpp: aggregate initialization cannot convert to the old TensorDescriptor
+ninja: build stopped: subcommand failed.
+```
+
+### Fix TDD GREEN
+
+命令：
+
+```text
+cmake --build --preset win-release-user --target
+  test_tensorrt_runtime_contract test_tensorrt_runtime_cuda_buffer
+  test_tensorrt_runtime_control
+ctest --preset win-release-user -R
+  "test_tensorrt_runtime_(contract|cuda_buffer|control)$" --output-on-failure
+```
+
+关键输出：
+
+```text
+3/3 tests passed, 0 tests failed
+Total Test time (real) = 0.19 sec
+```
+
+### Fix 最终验证
+
+环境：VS 2022 Professional DevCmd，`TENSORRT_ROOT=C:\projects\TensorRT-11.2.1.2`，
+`win-release-user` preset。
+
+命令：
+
+```text
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
+```
+
+关键输出：
+
+```text
+100% tests passed, 0 tests failed out of 12
+Total Test time (real) = 9.58 sec
+```
+
+runtime 相关测试为 4/4：contract、engine file、CUDA buffer、runtime control。新增 focused
+coverage 包含 device-scope 正常恢复和异常展开、CUDA pointer 类型/device id 判定、TensorRT
+alias 版本门，以及 output declaration/实际 shape 和 post-commit cleanup 语义。
+
+### Fix 自审与残余风险
+
+- `HIGH`：未发现未处理项。output runtime shape、CUDA pointer provenance、版本门均有明确
+  fail-fast 边界与 focused test。
+- `MED`：未发现未处理项。device 状态恢复、显式资源销毁、plugin once 和 buffer commit
+  语义均已覆盖实现及测试/结构性检查。
+- 残余风险：真实 serialized engine 上的 Host/CUDA inference integration 不在 Task 2 范围，
+  依 ruling 留给 Task 4；TensorRT 10.11 之前因 SDK 本身不存在 alias API，无法执行 alias query。

@@ -1,0 +1,142 @@
+#include "cuda_device.hpp"
+#include "tensorrt_version.hpp"
+
+#include "kfcore/tensorrt/error.hpp"
+#include "tinytest.hpp"
+
+#include <cstddef>
+#include <functional>
+#include <stdexcept>
+#include <string>
+
+using namespace kfcore::tensorrt;
+using namespace kfcore::tensorrt::detail;
+
+namespace
+{
+
+struct FakeCudaState
+{
+    int            current_device = 1;
+    int            set_calls      = 0;
+    cudaMemoryType pointer_type   = cudaMemoryTypeDevice;
+    int            pointer_device = 2;
+    cudaError_t    query_result   = cudaSuccess;
+};
+
+FakeCudaState state;
+
+cudaError_t fake_get_device(int* device)
+{
+    *device = state.current_device;
+    return cudaSuccess;
+}
+
+cudaError_t fake_set_device(int device)
+{
+    state.current_device = device;
+    ++state.set_calls;
+    return cudaSuccess;
+}
+
+cudaError_t fake_get_pointer_attributes(cudaPointerAttributes* attributes, const void*)
+{
+    attributes->type   = state.pointer_type;
+    attributes->device = state.pointer_device;
+    return state.query_result;
+}
+
+const CudaRuntimeApi fake_api {
+    fake_get_device,
+    fake_set_device,
+    fake_get_pointer_attributes,
+};
+
+void check_view_error(const std::function<void()>& operation, const char* message)
+{
+    bool threw = false;
+    try
+    {
+        operation();
+    }
+    catch (const TensorRtError& error)
+    {
+        threw = true;
+        check(error.code() == TensorRtErrorCode::InvalidTensorView);
+        check(std::string(error.what()).find(message) != std::string::npos);
+    }
+    check_true(threw);
+}
+
+} // namespace
+
+spec("TensorRT runtime CUDA control")
+{
+    before_each()
+    {
+        state = {};
+    }
+
+    it("restores the caller CUDA device after normal completion")
+    {
+        CudaDeviceScope scope(2, fake_api);
+        check(state.current_device == 2);
+
+        scope.restore();
+
+        check(state.current_device == 1);
+        check(state.set_calls == 2);
+    }
+
+    it("restores the caller CUDA device while unwinding an exception")
+    {
+        try
+        {
+            CudaDeviceScope scope(2, fake_api);
+            throw std::runtime_error("stop");
+        }
+        catch (const std::runtime_error&)
+        {
+        }
+
+        check(state.current_device == 1);
+        check(state.set_calls == 2);
+    }
+
+    it("accepts only a device allocation on the configured device")
+    {
+        std::byte storage {};
+        validate_cuda_device_pointer(&storage, 2, "input", fake_api);
+
+        state.pointer_device = 3;
+        check_view_error([&] { validate_cuda_device_pointer(&storage, 2, "input", fake_api); },
+                         "device 3");
+    }
+
+    it("rejects host and managed pointers for CUDA device views")
+    {
+        std::byte storage {};
+        state.pointer_type = cudaMemoryTypeHost;
+        check_view_error([&] { validate_cuda_device_pointer(&storage, 2, "input", fake_api); },
+                         "device allocation");
+
+        state.pointer_type = cudaMemoryTypeManaged;
+        check_view_error([&] { validate_cuda_device_pointer(&storage, 2, "input", fake_api); },
+                         "device allocation");
+    }
+
+    it("classifies a rejected CUDA pointer query as an invalid view")
+    {
+        std::byte storage {};
+        state.query_result = cudaErrorInvalidValue;
+        check_view_error([&] { validate_cuda_device_pointer(&storage, 2, "input", fake_api); },
+                         "cudaPointerGetAttributes");
+    }
+
+    it("enables TensorRT alias queries beginning with version 10.11")
+    {
+        check_false(tensorrt_supports_alias_query(10, 10));
+        check_true(tensorrt_supports_alias_query(10, 11));
+        check_true(tensorrt_supports_alias_query(11, 0));
+    }
+}

@@ -109,7 +109,17 @@ spec("TensorRT runtime CUDA buffers")
             void* original         = buffer.data();
             state.fail_device_free = true;
 
-            check_throws_as(buffer.reserve(16, 16), TensorRtError);
+            bool threw = false;
+            try
+            {
+                buffer.reserve(16, 16);
+            }
+            catch (const TensorRtError& error)
+            {
+                threw = true;
+                check(std::string(error.what()).find("committed cleanup") != std::string::npos);
+            }
+            check_true(threw);
             check(buffer.data() != original);
             check(buffer.data() == static_cast<void*>(&state.device_allocations[1]));
             check(buffer.capacity() == std::size_t { 16 });
@@ -141,7 +151,17 @@ spec("TensorRT runtime CUDA buffers")
             void* original         = buffer.data();
             state.fail_pinned_free = true;
 
-            check_throws_as(buffer.reserve(16, 16), TensorRtError);
+            bool threw = false;
+            try
+            {
+                buffer.reserve(16, 16);
+            }
+            catch (const TensorRtError& error)
+            {
+                threw = true;
+                check(std::string(error.what()).find("committed cleanup") != std::string::npos);
+            }
+            check_true(threw);
             check(buffer.data() != original);
             check(buffer.data() == static_cast<void*>(&state.pinned_allocations[1]));
             check(buffer.capacity() == std::size_t { 16 });

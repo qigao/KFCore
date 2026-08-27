@@ -1,7 +1,9 @@
 #include "engine.hpp"
 
 #include "engine_file.hpp"
+#include "cuda_device.hpp"
 #include "tensor_validation.hpp"
+#include "tensorrt_version.hpp"
 
 #include "kfcore/tensorrt/error.hpp"
 
@@ -9,8 +11,8 @@
 #include <NvInferVersion.h>
 
 #include <cstdint>
-#include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -60,6 +62,23 @@ namespace
         {
             throw_resource("engine options stage: all resource limits must be positive");
         }
+    }
+
+    void initialize_plugins_once()
+    {
+        static detail::TensorRtLogger plugin_logger;
+        static std::once_flag         plugin_once;
+        std::call_once(plugin_once,
+                       []
+                       {
+                           if (!initLibNvInferPlugins(&plugin_logger, ""))
+                           {
+                               // A throwing call_once invocation is not committed, so a later
+                               // Engine::load may retry initialization.
+                               throw_tensorrt(
+                                   "plugin initialization stage: initLibNvInferPlugins failed");
+                           }
+                       });
     }
 
     DataType data_type(nvinfer1::DataType type, const char* tensor_name)
@@ -119,22 +138,6 @@ namespace
         return shape;
     }
 
-    nvinfer1::Dims dims_from_shape(const TensorShape& shape, const std::string& tensor_name)
-    {
-        if (shape.size() > static_cast<std::size_t>(nvinfer1::Dims::MAX_DIMS))
-        {
-            throw_contract("metadata extraction stage: tensor rank exceeds TensorRT capacity: " +
-                           tensor_name);
-        }
-        nvinfer1::Dims dims {};
-        dims.nbDims = static_cast<std::int32_t>(shape.size());
-        for (std::size_t index = 0; index < shape.size(); ++index)
-        {
-            dims.d[index] = shape[index];
-        }
-        return dims;
-    }
-
     void validate_physical_layout(const nvinfer1::ICudaEngine& engine, const char* tensor_name,
                                   DataType type)
     {
@@ -152,87 +155,6 @@ namespace
         {
             throw_contract(std::string("metadata extraction stage: tensor must use an unpacked ") +
                            "linear scalar device format: " + tensor_name);
-        }
-    }
-
-    const TensorShape& selected_input_shape(const TensorDescriptor& descriptor,
-                                            nvinfer1::OptProfileSelector selector)
-    {
-        switch (selector)
-        {
-        case nvinfer1::OptProfileSelector::kMIN:
-            return descriptor.profile.minimum;
-        case nvinfer1::OptProfileSelector::kOPT:
-            return descriptor.profile.optimum;
-        case nvinfer1::OptProfileSelector::kMAX:
-            return descriptor.profile.maximum;
-        }
-        throw_contract("metadata extraction stage: invalid optimization profile selector");
-    }
-
-    TensorShape& selected_output_shape(TensorDescriptor& descriptor,
-                                       nvinfer1::OptProfileSelector selector)
-    {
-        switch (selector)
-        {
-        case nvinfer1::OptProfileSelector::kMIN:
-            return descriptor.profile.minimum;
-        case nvinfer1::OptProfileSelector::kOPT:
-            return descriptor.profile.optimum;
-        case nvinfer1::OptProfileSelector::kMAX:
-            return descriptor.profile.maximum;
-        }
-        throw_contract("metadata extraction stage: invalid optimization profile selector");
-    }
-
-    void resolve_output_profile_shapes(nvinfer1::ICudaEngine& engine,
-                                       std::vector<TensorDescriptor>& tensors)
-    {
-        detail::TensorRtOwner<nvinfer1::IExecutionContext> context(
-            engine.createExecutionContext());
-        if (!context)
-        {
-            throw_tensorrt(
-                "metadata extraction stage: temporary execution context creation failed");
-        }
-
-        const nvinfer1::OptProfileSelector selectors[] = {
-            nvinfer1::OptProfileSelector::kMIN,
-            nvinfer1::OptProfileSelector::kOPT,
-            nvinfer1::OptProfileSelector::kMAX,
-        };
-        for (const nvinfer1::OptProfileSelector selector : selectors)
-        {
-            for (const TensorDescriptor& tensor : tensors)
-            {
-                if (tensor.mode != TensorIoMode::Input)
-                {
-                    continue;
-                }
-                const nvinfer1::Dims dims =
-                    dims_from_shape(selected_input_shape(tensor, selector), tensor.name);
-                if (!context->setInputShape(tensor.name.c_str(), dims))
-                {
-                    throw_contract("metadata extraction stage: profile 0 input shape was rejected for " +
-                                   tensor.name);
-                }
-            }
-
-            if (context->inferShapes(0, nullptr) != 0)
-            {
-                throw_contract(
-                    "metadata extraction stage: profile 0 tensor shapes could not be inferred");
-            }
-            for (TensorDescriptor& tensor : tensors)
-            {
-                if (tensor.mode != TensorIoMode::Output)
-                {
-                    continue;
-                }
-                selected_output_shape(tensor, selector) = shape_from_dims(
-                    context->getTensorShape(tensor.name.c_str()), tensor.name.c_str(),
-                    "resolved output");
-            }
         }
     }
 
@@ -284,34 +206,44 @@ namespace
             descriptor.name      = tensor_name;
             descriptor.mode      = io_mode(engine.getTensorIOMode(name), name);
             descriptor.data_type = data_type(engine.getTensorDataType(name), name);
+            descriptor.declared_shape =
+                shape_from_dims(engine.getTensorShape(name), name, "network declaration");
             validate_physical_layout(engine, name, descriptor.data_type);
 
-#if NV_TENSORRT_MAJOR >= 11
+#if NV_TENSORRT_MAJOR > 10 || (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 11)
+            static_assert(detail::tensorrt_supports_alias_query(NV_TENSORRT_MAJOR,
+                                                                 NV_TENSORRT_MINOR),
+                          "TensorRT alias-query version gate is inconsistent");
             if (descriptor.mode == TensorIoMode::Output &&
                 engine.getAliasedInputTensor(name) != nullptr)
             {
                 throw_contract("metadata extraction stage: aliased I/O is unsupported: " +
                                tensor_name);
             }
+#else
+            static_assert(!detail::tensorrt_supports_alias_query(NV_TENSORRT_MAJOR,
+                                                                  NV_TENSORRT_MINOR),
+                          "TensorRT alias-query version gate is inconsistent");
+            // TensorRT before 10.11 does not expose engine I/O alias metadata.
 #endif
 
             if (descriptor.mode == TensorIoMode::Input)
             {
-                descriptor.profile.minimum = shape_from_dims(
+                TensorProfile profile;
+                profile.minimum = shape_from_dims(
                     engine.getProfileShape(name, 0, nvinfer1::OptProfileSelector::kMIN), name,
                     "minimum profile");
-                descriptor.profile.optimum = shape_from_dims(
+                profile.optimum = shape_from_dims(
                     engine.getProfileShape(name, 0, nvinfer1::OptProfileSelector::kOPT), name,
                     "optimum profile");
-                descriptor.profile.maximum = shape_from_dims(
+                profile.maximum = shape_from_dims(
                     engine.getProfileShape(name, 0, nvinfer1::OptProfileSelector::kMAX), name,
                     "maximum profile");
-                detail::validate_profile_bounds(descriptor.profile, descriptor.name);
+                descriptor.profile = std::move(profile);
             }
             tensors.push_back(std::move(descriptor));
         }
 
-        resolve_output_profile_shapes(engine, tensors);
         detail::validate_tensor_metadata(tensors, options);
         return tensors;
     }
@@ -323,7 +255,24 @@ Engine::Engine(std::shared_ptr<const Impl> impl)
 {
 }
 
-Engine::~Engine() = default;
+Engine::~Engine()
+{
+    if (!impl_)
+    {
+        return;
+    }
+    const int device_id = impl_->options.device_id;
+    try
+    {
+        detail::CudaDeviceScope device_scope(device_id);
+        impl_.reset();
+        device_scope.restore();
+    }
+    catch (...)
+    {
+        impl_.reset();
+    }
+}
 
 std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_path,
                                            const EngineOptions&         options)
@@ -336,12 +285,8 @@ std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_p
     {
         auto impl     = std::make_shared<Impl>();
         impl->options = options;
-        detail::check_cuda(cudaSetDevice(options.device_id), "cudaSetDevice",
-                           "engine deserialization");
-        if (!initLibNvInferPlugins(&impl->logger, ""))
-        {
-            throw_tensorrt("plugin initialization stage: initLibNvInferPlugins failed");
-        }
+        detail::CudaDeviceScope device_scope(options.device_id);
+        initialize_plugins_once();
         impl->runtime.reset(nvinfer1::createInferRuntime(impl->logger));
         if (!impl->runtime)
         {
@@ -353,7 +298,9 @@ std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_p
             throw_deserialize("engine deserialization stage: TensorRT rejected the engine");
         }
         impl->tensors = extract_metadata(*impl->engine, options);
-        return std::shared_ptr<const Engine>(new Engine(std::move(impl)));
+        std::shared_ptr<const Engine> result(new Engine(std::move(impl)));
+        device_scope.restore();
+        return result;
     }
     catch (const std::bad_alloc&)
     {

@@ -3,6 +3,7 @@ find_package(TensorRT REQUIRED)
 
 add_library(kfcore_tensorrt_runtime SHARED
   src/cuda_buffer.cpp
+  src/cuda_device.cpp
   src/engine.cpp
   src/engine_file.cpp
   src/error.cpp
@@ -83,6 +84,24 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
     FOLDER "tensorrt_runtime/tests")
   add_test(NAME test_tensorrt_runtime_cuda_buffer COMMAND test_tensorrt_runtime_cuda_buffer)
+
+  add_executable(test_tensorrt_runtime_control
+    tests/test_runtime_control.cpp
+    src/cuda_buffer.cpp
+    src/cuda_device.cpp
+    src/error.cpp)
+  target_include_directories(test_tensorrt_runtime_control PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(test_tensorrt_runtime_control PRIVATE
+    CUDA::cudart
+    TurboUtils::TinyTest)
+  set_target_properties(test_tensorrt_runtime_control PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_runtime/tests")
+  add_test(NAME test_tensorrt_runtime_control COMMAND test_tensorrt_runtime_control)
 endif()
 
 cmake_install_headers(

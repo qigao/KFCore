@@ -66,6 +66,53 @@ namespace
         }
     }
 
+    void validate_declared_shape(const TensorShape& shape, const std::string& tensor_name)
+    {
+        for (const std::int64_t dimension : shape)
+        {
+            if (dimension == 0 || dimension < -1)
+            {
+                throw_contract(tensor_name,
+                               "declared shape dimensions must be positive or runtime -1");
+            }
+        }
+    }
+
+    void validate_descriptor_shape_contract(const TensorDescriptor& descriptor)
+    {
+        validate_declared_shape(descriptor.declared_shape, descriptor.name);
+        if (descriptor.mode == TensorIoMode::Input)
+        {
+            if (!descriptor.profile)
+            {
+                throw_contract(descriptor.name, "input profile 0 bounds are required");
+            }
+            validate_profile_bounds(*descriptor.profile, descriptor.name);
+            if (descriptor.declared_shape.size() != descriptor.profile->minimum.size())
+            {
+                throw_contract(descriptor.name,
+                               "declared input shape rank must match profile 0 rank");
+            }
+            for (std::size_t index = 0; index < descriptor.declared_shape.size(); ++index)
+            {
+                const std::int64_t declared = descriptor.declared_shape[index];
+                if (declared != -1 &&
+                    (descriptor.profile->minimum[index] != declared ||
+                     descriptor.profile->optimum[index] != declared ||
+                     descriptor.profile->maximum[index] != declared))
+                {
+                    throw_contract(descriptor.name,
+                                   "static input dimensions must match all profile 0 bounds");
+                }
+            }
+            return;
+        }
+        if (descriptor.mode == TensorIoMode::Output && descriptor.profile)
+        {
+            throw_contract(descriptor.name, "output profile bounds must not be provided");
+        }
+    }
+
     void validate_expected_descriptors(const std::vector<TensorDescriptor>& expected,
                                        TensorIoMode mode, const char* stage)
     {
@@ -81,7 +128,7 @@ namespace
                 throw_contract(descriptor.name,
                                "tensor I/O mode does not match validation direction");
             }
-            validate_profile_bounds(descriptor.profile, descriptor.name);
+            validate_descriptor_shape_contract(descriptor);
             for (std::size_t previous = 0; previous < index; ++previous)
             {
                 if (expected[previous].name == descriptor.name)
@@ -136,17 +183,28 @@ namespace
             {
                 throw_view(view.name, "tensor view data type does not match engine metadata");
             }
-            if (view.shape.size() != descriptor->profile.minimum.size())
+            if (view.shape.size() != descriptor->declared_shape.size())
             {
                 throw_view(view.name, "tensor view rank does not match engine metadata");
             }
             for (std::size_t dimension = 0; dimension < view.shape.size(); ++dimension)
             {
                 const std::int64_t value = view.shape[dimension];
-                if (value < descriptor->profile.minimum[dimension] ||
-                    value > descriptor->profile.maximum[dimension])
+                if (value <= 0)
+                {
+                    throw_view(view.name, "tensor view shape dimensions must be positive");
+                }
+                if (mode == TensorIoMode::Input &&
+                    (value < descriptor->profile->minimum[dimension] ||
+                     value > descriptor->profile->maximum[dimension]))
                 {
                     throw_view(view.name, "tensor view shape is outside profile 0 bounds");
+                }
+                const std::int64_t declared = descriptor->declared_shape[dimension];
+                if (mode == TensorIoMode::Output && declared != -1 && value != declared)
+                {
+                    throw_view(view.name,
+                               "tensor view shape does not match the declared shape");
                 }
             }
             const std::size_t required_bytes =
@@ -248,8 +306,7 @@ void validate_tensor_metadata(const std::vector<TensorDescriptor>& tensors,
         throw_resource("tensor metadata", "tensor count exceeds configured limit");
     }
 
-    std::size_t input_bytes  = 0;
-    std::size_t output_bytes = 0;
+    std::size_t input_bytes = 0;
     for (std::size_t index = 0; index < tensors.size(); ++index)
     {
         const TensorDescriptor& tensor = tensors[index];
@@ -264,16 +321,17 @@ void validate_tensor_metadata(const std::vector<TensorDescriptor>& tensors,
                 throw_contract(tensor.name, "duplicate tensor name");
             }
         }
-        validate_profile_bounds(tensor.profile, tensor.name);
-        const std::size_t bytes =
-            checked_shape_byte_size(tensor.profile.maximum, tensor.data_type, tensor.name.c_str());
+        validate_descriptor_shape_contract(tensor);
         switch (tensor.mode)
         {
         case TensorIoMode::Input:
+        {
+            const std::size_t bytes = checked_shape_byte_size(
+                tensor.profile->maximum, tensor.data_type, tensor.name.c_str());
             input_bytes = checked_add(input_bytes, bytes, tensor.name.c_str());
             break;
+        }
         case TensorIoMode::Output:
-            output_bytes = checked_add(output_bytes, bytes, tensor.name.c_str());
             break;
         default:
             throw_contract(tensor.name, "tensor I/O mode is unsupported");
@@ -282,10 +340,6 @@ void validate_tensor_metadata(const std::vector<TensorDescriptor>& tensors,
     if (input_bytes > options.max_input_bytes)
     {
         throw_resource("tensor metadata", "aggregate input bytes exceed configured limit");
-    }
-    if (output_bytes > options.max_output_bytes)
-    {
-        throw_resource("tensor metadata", "aggregate output bytes exceed configured limit");
     }
 }
 
