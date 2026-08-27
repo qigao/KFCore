@@ -249,6 +249,37 @@ if(BUILD_TESTS)
       endif()
     endif()
   endif()
+
+  if(KFCORE_INSTALL AND
+     (KFCORE_BUILD_VISION_MODELS_CPU OR KFCORE_BUILD_VISION_MODELS_TENSORRT))
+    include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
+    kfcore_require_ninja(_vision_models_consumer_ninja)
+    set(_vision_models_consumer_kind cpu)
+    set(_vision_models_consumer_cpu ON)
+    set(_vision_models_consumer_tensorrt OFF)
+    if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
+      set(_vision_models_consumer_kind tensorrt)
+      set(_vision_models_consumer_cpu OFF)
+      set(_vision_models_consumer_tensorrt ON)
+    endif()
+    set(_vision_models_consumer_root
+      "${CMAKE_BINARY_DIR}/tests/vision_models_${_vision_models_consumer_kind}_installed_consumer")
+    add_test(NAME test_vision_models_${_vision_models_consumer_kind}_installed_consumer
+      COMMAND "${CMAKE_COMMAND}"
+        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/VisionModelsInstalledConsumer"
+        "-DKFCORE_CONSUMER_BINARY_DIR=${_vision_models_consumer_root}/build"
+        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_vision_models_consumer_root}/install"
+        "-DKFCORE_CONSUMER_KFCORE_DIR=${_vision_models_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
+        "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_vision_models_consumer_ninja}"
+        "-DKFCORE_CONSUMER_EXPECT_CPU=${_vision_models_consumer_cpu}"
+        "-DKFCORE_CONSUMER_EXPECT_TENSORRT=${_vision_models_consumer_tensorrt}"
+        "-DKFCORE_CONSUMER_ONNXRUNTIME_ROOT=$ENV{ONNXRUNTIME_ROOT}"
+        "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
+        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_vision_models_installed_consumer.cmake")
+  endif()
 endif()
 
 cmake_install_headers(

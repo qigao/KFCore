@@ -678,6 +678,14 @@ CUDA 预处理复用，随后以 device tensor 直接进入 TensorRT；Age/Gende
 模型 I/O、matrix sidecar、所有权、非重入约束、构建和真实模型验证命令见
 [face_applications/README.md](face_applications/README.md)。
 
+### Hand 与 MediaPipe Landmark CPU/GPU
+
+`vision_models/` 提供 OpenCV-free 的 ONNX Runtime CPU 与 TensorRT CUDA 两条线路：
+Palm → 21 点 hand landmark → INT64 gesture classifier → KFCore ByteTrack/Kalman，以及消费
+调用方人脸框的 MediaPipe 468 点 landmarker。GPU 路径接受 Host/CUDA 图片，每帧只 stage
+一次并复用同一份 CUDA image；它不会隐式降级到 CPU。目标、模型 I/O、engine 转换、容量、
+所有权和分阶段耗时契约见 [vision_models/README.md](vision_models/README.md)。
+
 When building from this repository, the important options are:
 
 - `KFCORE_BUILD_APRILTAG`: build the vendored AprilTag detector.
@@ -687,6 +695,10 @@ When building from this repository, the important options are:
   helpers.
 - `KFCORE_BUILD_IMAGE_PROCESSOR`: build the reusable CUDA BGR/RGB image-to-tensor
   processor without requiring TensorRT or OpenCV.
+- `KFCORE_BUILD_VISION_MODELS`: build shared hand/face landmark types, decoding,
+  geometry, and per-instance ByteTrack orchestration.
+- `KFCORE_BUILD_VISION_MODELS_CPU`: build the ONNX Runtime CPU backend.
+- `KFCORE_BUILD_VISION_MODELS_TENSORRT`: build the TensorRT CUDA backend.
 - `KFCORE_BUILD_TESTS`: build local tests.
 
 The full repository depends on TurboNet and vcpkg packages such as SIMDe, STC,
