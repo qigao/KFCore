@@ -9,6 +9,7 @@ option(KFCORE_BUILD_SIFT "Build the reusable SIFT extractor contract" OFF)
 option(KFCORE_BUILD_SIFT_POPSIFT "Build the maintained CUDA SIFT backend" OFF)
 option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
+option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
 option(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS
        "Build TensorRT YOLO SDK integration tests" OFF)

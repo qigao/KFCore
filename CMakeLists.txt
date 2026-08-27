@@ -116,6 +116,11 @@ if(KFCORE_BUILD_YOLO_TRACKING)
   add_subdirectory(tensorrt_yolo)
 endif()
 
+if(KFCORE_BUILD_TENSORRT_RUNTIME)
+  enable_language(CXX)
+  add_subdirectory(tensorrt_runtime)
+endif()
+
 if(KFCORE_BUILD_APRILTAG)
   set(APRILTAG_BUILD_EXAMPLES "${KFCORE_BUILD_APRILTAG_EXAMPLES}" CACHE BOOL
       "Build AprilTag example executables" FORCE)
