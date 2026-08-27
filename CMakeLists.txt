@@ -121,6 +121,15 @@ if(KFCORE_BUILD_TENSORRT_RUNTIME)
   add_subdirectory(tensorrt_runtime)
 endif()
 
+if(KFCORE_BUILD_FACE_MODELS AND NOT KFCORE_BUILD_TENSORRT_RUNTIME)
+  message(FATAL_ERROR
+    "KFCORE_BUILD_FACE_MODELS requires KFCORE_BUILD_TENSORRT_RUNTIME=ON")
+endif()
+
+if(KFCORE_BUILD_FACE_MODELS)
+  add_subdirectory(face_models)
+endif()
+
 if(KFCORE_BUILD_APRILTAG)
   set(APRILTAG_BUILD_EXAMPLES "${KFCORE_BUILD_APRILTAG_EXAMPLES}" CACHE BOOL
       "Build AprilTag example executables" FORCE)
