@@ -5,6 +5,7 @@ add_library(kfcore_face_applications SHARED
   src/error.cpp
   src/geometry.cpp
   src/preprocess.cpp)
+target_sources(kfcore_face_applications PRIVATE src/tensorrt.cpp)
 target_include_directories(kfcore_face_applications
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -57,8 +58,18 @@ if(BUILD_TESTS)
     FOLDER "face_applications/tests")
   add_test(NAME test_face_composer COMMAND test_face_composer)
 
+  add_executable(test_face_application_validation tests/test_application_validation.cpp)
+  target_link_libraries(test_face_application_validation PRIVATE
+    KFCore::face_applications
+    TurboUtils::TinyTest)
+  set_target_properties(test_face_application_validation PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "face_applications/tests")
+  add_test(NAME test_face_application_validation COMMAND test_face_application_validation)
+
   if(WIN32)
-    set_tests_properties(test_face_geometry test_face_preprocess test_face_composer PROPERTIES
+    set_tests_properties(test_face_geometry test_face_preprocess test_face_composer
+      test_face_application_validation PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin")
   endif()
