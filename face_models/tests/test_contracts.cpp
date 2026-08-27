@@ -4,6 +4,7 @@
 #include "kfcore/face_models/tensorrt.hpp"
 #include "tinytest.hpp"
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <stdexcept>
@@ -75,6 +76,27 @@ void expect_error(const std::function<void()>& operation, FaceModelErrorCode cod
         threw = true;
         check(error.code() == code);
         check(std::string(error.what()).find(message) != std::string::npos);
+    }
+    check_true(threw);
+}
+
+void expect_prepared_view_error(const TensorView& input, const detail::BatchBounds& batch,
+                                const std::string& message)
+{
+    bool threw = false;
+    try
+    {
+        detail::validate_prepared_input(input, "input.1", batch, { 3, 112, 112 },
+                                        "ArcFace");
+    }
+    catch (const FaceModelError& error)
+    {
+        threw = true;
+        const std::string actual(error.what());
+        check(error.code() == FaceModelErrorCode::InvalidTensorView);
+        check(actual.find("ArcFace") != std::string::npos);
+        check(actual.find("input validation stage") != std::string::npos);
+        check(actual.find(message) != std::string::npos);
     }
     check_true(threw);
 }
@@ -310,5 +332,86 @@ spec("strict TensorRT face model contracts")
                                                 { 3, 112, 112 }, "ArcFace");
             },
             FaceModelErrorCode::InvalidTensorView, "positive");
+    }
+
+    it("rejects every invalid prepared tensor field before runtime execution")
+    {
+        ArcFaceOptions options;
+        options.max_batch = 2;
+        const detail::SingleOutputContract contract =
+            detail::validate_arcface_contract(arcface_metadata(), options);
+        ArcFaceOptions profile_limited_options;
+        profile_limited_options.max_batch = 16;
+        const detail::SingleOutputContract profile_limited_contract =
+            detail::validate_arcface_contract(arcface_metadata(), profile_limited_options);
+        float values[3 * 112 * 112] {};
+        const TensorView valid { "input.1", DataType::Float32, { 1, 3, 112, 112 }, values,
+                                 sizeof(values), MemoryKind::Host };
+
+        TensorView wrong_type = valid;
+        wrong_type.data_type = DataType::Float16;
+        TensorView wrong_memory = valid;
+        wrong_memory.memory_kind = static_cast<MemoryKind>(99);
+        TensorView null_data = valid;
+        null_data.data = nullptr;
+        TensorView wrong_rank = valid;
+        wrong_rank.shape = { 1, 3, 112 };
+        TensorView wrong_channel = valid;
+        wrong_channel.shape[1] = 1;
+        TensorView wrong_height = valid;
+        wrong_height.shape[2] = 111;
+        TensorView wrong_width = valid;
+        wrong_width.shape[3] = 111;
+        TensorView above_adapter_max = valid;
+        above_adapter_max.shape[0] = 3;
+        TensorView above_profile_max = valid;
+        above_profile_max.shape[0] = 9;
+        TensorView undersized = valid;
+        undersized.byte_size = sizeof(values) - 1U;
+
+        struct InvalidPreparedViewCase
+        {
+            const char*         name;
+            TensorView          view;
+            detail::BatchBounds batch;
+            const char*         message;
+        };
+        const std::array<InvalidPreparedViewCase, 10> cases = {
+            InvalidPreparedViewCase { "wrong data type", wrong_type, contract.batch, "FP32" },
+            InvalidPreparedViewCase { "invalid memory kind", wrong_memory, contract.batch,
+                                      "memory kind" },
+            InvalidPreparedViewCase { "null data", null_data, contract.batch, "not be null" },
+            InvalidPreparedViewCase { "wrong rank", wrong_rank, contract.batch, "rank" },
+            InvalidPreparedViewCase { "wrong channel", wrong_channel, contract.batch,
+                                      "fixed dimensions" },
+            InvalidPreparedViewCase { "wrong height", wrong_height, contract.batch,
+                                      "fixed dimensions" },
+            InvalidPreparedViewCase { "wrong width", wrong_width, contract.batch,
+                                      "fixed dimensions" },
+            InvalidPreparedViewCase { "above adapter maximum", above_adapter_max,
+                                      contract.batch, "adapter bounds" },
+            InvalidPreparedViewCase { "above profile maximum", above_profile_max,
+                                      profile_limited_contract.batch, "adapter bounds" },
+            InvalidPreparedViewCase { "undersized byte capacity", undersized, contract.batch,
+                                      "capacity" },
+        };
+
+        for (const InvalidPreparedViewCase& test_case : cases)
+        {
+            info("prepared-view case: %s", test_case.name);
+            expect_prepared_view_error(test_case.view, test_case.batch, test_case.message);
+        }
+    }
+
+    it("maps a cleanup-invalidated runtime error to a face runtime failure")
+    {
+        const TensorRtError runtime_error(
+            TensorRtErrorCode::TensorRtFailure,
+            "execution stage: executor is invalidated after tensor address cleanup stage: "
+            "TensorRT rejected address reset");
+
+        expect_error(
+            [&] { detail::rethrow_tensorrt(runtime_error, "ArcFace", "inference"); },
+            FaceModelErrorCode::RuntimeFailure, "tensor address cleanup stage");
     }
 }

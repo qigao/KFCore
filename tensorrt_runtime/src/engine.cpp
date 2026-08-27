@@ -225,7 +225,8 @@ namespace
             static_assert(!detail::tensorrt_supports_alias_query(NV_TENSORRT_MAJOR,
                                                                   NV_TENSORRT_MINOR),
                           "TensorRT alias-query version gate is inconsistent");
-            // TensorRT before 10.11 does not expose engine I/O alias metadata.
+            // Engine::load rejects 10.3 through 10.10 before file or GPU work. TensorRT
+            // 10.0 through 10.2 predates aliased plugin I/O and needs no query.
 #endif
 
             if (descriptor.mode == TensorIoMode::Input)
@@ -301,6 +302,7 @@ Engine::~Engine()
 std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_path,
                                            const EngineOptions&         options)
 {
+    detail::validate_tensorrt_runtime_version(NV_TENSORRT_MAJOR, NV_TENSORRT_MINOR);
     validate_engine_options(options);
     std::vector<std::byte> bytes =
         detail::read_engine_file_bounded(engine_path, options.max_serialized_engine_bytes);

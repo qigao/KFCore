@@ -1,4 +1,5 @@
 #include "cuda_device.hpp"
+#include "executor_control.hpp"
 #include "shared_lifetime.hpp"
 #include "tensorrt_version.hpp"
 
@@ -6,6 +7,8 @@
 #include "kfcore/tensorrt/runtime.hpp"
 #include "tinytest.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <stdexcept>
@@ -202,10 +205,111 @@ spec("TensorRT runtime CUDA control")
                          "cudaPointerGetAttributes");
     }
 
-    it("enables TensorRT alias queries beginning with version 10.11")
+    it("guards mutable executor state before invoking its state access")
     {
-        check_false(tensorrt_supports_alias_query(10, 10));
-        check_true(tensorrt_supports_alias_query(10, 11));
-        check_true(tensorrt_supports_alias_query(11, 0));
+        std::atomic_flag in_use = ATOMIC_FLAG_INIT;
+        int              state_accesses = 0;
+        bool             rejected = false;
+
+        {
+            ExecutorStateGuard first(in_use, [&] { ++state_accesses; });
+            try
+            {
+                ExecutorStateGuard overlapping(in_use, [&] { ++state_accesses; });
+            }
+            catch (const TensorRtError& error)
+            {
+                rejected = true;
+                check(error.code() == TensorRtErrorCode::ConcurrentExecution);
+            }
+            check(state_accesses == 1);
+        }
+
+        ExecutorStateGuard after_completion(in_use, [&] { ++state_accesses; });
+        check_true(rejected);
+        check(state_accesses == 2);
+    }
+
+    it("classifies an address-cleanup-invalidated executor as a TensorRT failure")
+    {
+        ExecutorInvalidationReason reason = ExecutorInvalidationReason::None;
+        record_tensor_address_cleanup_failure(reason);
+
+        bool threw = false;
+        try
+        {
+            validate_executor_run_state(true, false, reason);
+        }
+        catch (const TensorRtError& error)
+        {
+            threw = true;
+            const std::string message(error.what());
+            check(error.code() == TensorRtErrorCode::TensorRtFailure);
+            check(message.find("invalidated") != std::string::npos);
+            check(message.find("tensor address cleanup stage") != std::string::npos);
+            check(message.find("address reset") != std::string::npos);
+        }
+        check_true(threw);
+    }
+
+    it("retains invalid argument for an unavailable executor that was not poisoned")
+    {
+        bool threw = false;
+        try
+        {
+            validate_executor_run_state(true, false, ExecutorInvalidationReason::None);
+        }
+        catch (const TensorRtError& error)
+        {
+            threw = true;
+            check(error.code() == TensorRtErrorCode::InvalidArgument);
+        }
+        check_true(threw);
+    }
+
+    it("selects a fail-closed alias policy across supported TensorRT versions")
+    {
+        struct VersionCase
+        {
+            int                     major;
+            int                     minor;
+            TensorRtAliasPolicy     expected;
+        };
+        const std::array<VersionCase, 6> cases = {
+            VersionCase { 10, 0, TensorRtAliasPolicy::NoAliasFeature },
+            VersionCase { 10, 2, TensorRtAliasPolicy::NoAliasFeature },
+            VersionCase { 10, 3, TensorRtAliasPolicy::RejectUnavailableQuery },
+            VersionCase { 10, 10, TensorRtAliasPolicy::RejectUnavailableQuery },
+            VersionCase { 10, 11, TensorRtAliasPolicy::QueryEngine },
+            VersionCase { 11, 0, TensorRtAliasPolicy::QueryEngine },
+        };
+
+        for (const VersionCase& version : cases)
+        {
+            check(tensorrt_alias_policy(version.major, version.minor) == version.expected);
+        }
+    }
+
+    it("rejects an alias-capable TensorRT version before engine loading when query is unavailable")
+    {
+        validate_tensorrt_runtime_version(10, 0);
+        validate_tensorrt_runtime_version(10, 2);
+        validate_tensorrt_runtime_version(10, 11);
+        validate_tensorrt_runtime_version(11, 4);
+
+        bool threw = false;
+        try
+        {
+            validate_tensorrt_runtime_version(10, 3);
+        }
+        catch (const TensorRtError& error)
+        {
+            threw = true;
+            const std::string message(error.what());
+            check(error.code() == TensorRtErrorCode::EngineContractMismatch);
+            check(message.find("version gate stage") != std::string::npos);
+            check(message.find("10.3 through 10.10") != std::string::npos);
+        }
+        check_true(threw);
     }
 }

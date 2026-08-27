@@ -45,32 +45,6 @@ namespace
         throw TensorRtError(TensorRtErrorCode::ResourceLimitExceeded, std::move(message));
     }
 
-    class ExecutorCallGuard final
-    {
-    public:
-        explicit ExecutorCallGuard(std::atomic_flag& in_use)
-            : in_use_(in_use)
-        {
-            if (in_use_.test_and_set(std::memory_order_acquire))
-            {
-                throw TensorRtError(
-                    TensorRtErrorCode::ConcurrentExecution,
-                    "execution stage: concurrent calls on one executor are unsupported");
-            }
-        }
-
-        ~ExecutorCallGuard()
-        {
-            in_use_.clear(std::memory_order_release);
-        }
-
-        ExecutorCallGuard(const ExecutorCallGuard&)            = delete;
-        ExecutorCallGuard& operator=(const ExecutorCallGuard&) = delete;
-
-    private:
-        std::atomic_flag& in_use_;
-    };
-
     std::vector<TensorDescriptor> descriptors_with_mode(
         const std::vector<TensorDescriptor>& tensors, TensorIoMode mode)
     {
@@ -523,12 +497,19 @@ std::unique_ptr<Executor> Engine::create_executor() const
 void Executor::run(const std::vector<TensorView>& inputs,
                    const std::vector<MutableTensorView>& outputs)
 {
-    if (!impl_ || !impl_->engine || !impl_->context)
+    if (!impl_)
     {
         throw TensorRtError(TensorRtErrorCode::InvalidArgument,
                             "execution stage: executor state is unavailable");
     }
-    ExecutorCallGuard call_guard(impl_->in_use);
+    detail::ExecutorStateGuard state_guard(
+        impl_->in_use,
+        [&]
+        {
+            detail::validate_executor_run_state(impl_->engine != nullptr,
+                                                static_cast<bool>(impl_->context),
+                                                impl_->invalidation_reason);
+        });
 
     try
     {
@@ -568,6 +549,7 @@ void Executor::run(const std::vector<TensorView>& inputs,
             stream_work_pending = false;
             if (!clear_tensor_addresses(*impl_->context, impl_->engine->tensors))
             {
+                detail::record_tensor_address_cleanup_failure(impl_->invalidation_reason);
                 impl_->context.reset();
                 throw_tensorrt("tensor address cleanup stage: TensorRT rejected address reset");
             }
@@ -585,6 +567,7 @@ void Executor::run(const std::vector<TensorView>& inputs,
             {
                 // Discarding the context guarantees that no caller-owned pointer remains retained
                 // when TensorRT refuses to restore the default null bindings.
+                detail::record_tensor_address_cleanup_failure(impl_->invalidation_reason);
                 impl_->context.reset();
             }
             throw;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine.hpp"
+#include "executor_control.hpp"
 
 #include <atomic>
 #include <memory>
@@ -34,6 +35,8 @@ struct Executor::Impl final
     std::unique_ptr<detail::CudaStream>              stream;
     std::vector<detail::ExecutorStagingBuffers>      staging;
     std::atomic_flag                                 in_use = ATOMIC_FLAG_INIT;
+    detail::ExecutorInvalidationReason               invalidation_reason =
+        detail::ExecutorInvalidationReason::None;
 };
 
 } // namespace kfcore::tensorrt
