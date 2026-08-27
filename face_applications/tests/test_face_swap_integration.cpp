@@ -5,6 +5,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <cstdlib>
+#include <chrono>
 #include <string>
 
 using namespace kfcore::face_applications;
@@ -58,6 +59,54 @@ FaceApplicationModelPaths required_paths()
              KFCORE_TEST_INSWAPPER_MATRIX, std::nullopt, std::nullopt };
 }
 
+bool positive(FaceSwapDuration duration)
+{
+    return duration > FaceSwapDuration::zero();
+}
+
+void verify_analysis_timings(const FaceAnalysisTimingReport& timings)
+{
+    check_true(positive(timings.initial_staging));
+    check_true(positive(timings.detection));
+    check_true(positive(timings.face68_preprocess));
+    check_true(positive(timings.face68_inference_and_postprocess));
+    check_true(positive(timings.arcface_preprocess));
+    check_true(positive(timings.arcface_inference));
+    check_true(positive(timings.total));
+}
+
+void verify_profiled_swap(const cv::Mat& source, const cv::Mat& target,
+                          const FaceApplicationModelPaths& paths, bool expect_gfpgan)
+{
+    const cv::Mat source_before = source.clone();
+    const cv::Mat target_before = target.clone();
+    auto application = TensorRtFaceSwapApplication::load(paths);
+    const ProfiledFaceSwapResult profiled = application->swap_profiled(source, target);
+
+    check_false(profiled.image.empty());
+    check(profiled.image.type() == CV_8UC3);
+    check(profiled.image.size() == target.size());
+    check_true(identical(source, source_before));
+    check_true(identical(target, target_before));
+
+    verify_analysis_timings(profiled.timings.source_analysis);
+    verify_analysis_timings(profiled.timings.target_analysis);
+    check_true(positive(profiled.timings.embedding_projection));
+    check_true(positive(profiled.timings.inswapper_preprocess));
+    check_true(positive(profiled.timings.inswapper_inference_and_decode));
+    check_true(positive(profiled.timings.inswapper_composition));
+    check_true(positive(profiled.timings.total));
+    check(profiled.timings.gfpgan_preprocess.has_value() == expect_gfpgan);
+    check(profiled.timings.gfpgan_inference_and_decode.has_value() == expect_gfpgan);
+    check(profiled.timings.gfpgan_composition.has_value() == expect_gfpgan);
+    if (expect_gfpgan)
+    {
+        check_true(positive(*profiled.timings.gfpgan_preprocess));
+        check_true(positive(*profiled.timings.gfpgan_inference_and_decode));
+        check_true(positive(*profiled.timings.gfpgan_composition));
+    }
+}
+
 } // namespace
 
 spec("TensorRT face swap application integration")
@@ -71,6 +120,15 @@ spec("TensorRT face swap application integration")
         verify_swap(source, target, required_paths());
     }
 
+    it("records synchronous timings while optional stages remain absent")
+    {
+        const cv::Mat source = cv::imread(KFCORE_TEST_SOURCE_IMAGE, cv::IMREAD_COLOR);
+        const cv::Mat target = cv::imread(KFCORE_TEST_TARGET_IMAGE, cv::IMREAD_COLOR);
+        check_false(source.empty());
+        check_false(target.empty());
+        verify_profiled_swap(source, target, required_paths(), false);
+    }
+
     it("runs the explicit GFPGAN enhancement path when configured")
     {
         const std::string gfpgan_path = KFCORE_TEST_GFPGAN_ENGINE;
@@ -80,7 +138,7 @@ spec("TensorRT face swap application integration")
             const cv::Mat target = cv::imread(KFCORE_TEST_TARGET_IMAGE, cv::IMREAD_COLOR);
             FaceApplicationModelPaths paths = required_paths();
             paths.gfpgan_engine = gfpgan_path;
-            verify_swap(source, target, paths);
+            verify_profiled_swap(source, target, paths, true);
         }
     }
 }

@@ -28,6 +28,32 @@ CPU ROI resize，以维持 OpenCV 边界语义。
 修改，成功结果拥有自己的像素内存；任一阶段失败时抛出带阶段上下文的
 `FaceApplicationError`，不会返回部分结果。若要并行处理，应为每个任务加载独立实例。
 
+## 分阶段耗时
+
+需要诊断时使用 `swap_profiled(source_bgr, target_bgr)`；返回的
+`ProfiledFaceSwapResult` 同时包含拥有像素内存的 `image` 和 `FaceSwapTimingReport`。
+参数、线程约束、错误条件与 `swap()` 相同，原有 `swap()` 接口及行为保持不变：
+
+```cpp
+const kfcore::face_applications::ProfiledFaceSwapResult result =
+    application->swap_profiled(source_bgr, target_bgr);
+const double total_ms =
+    std::chrono::duration<double, std::milli>(result.timings.total).count();
+```
+
+报告使用 `std::chrono::nanoseconds` 保存以下同步 wall time：source/target 分析中的 staging、
+YOLO 检测、Face68 预处理与执行、ArcFace 预处理与执行，以及 embedding projection、
+InSwapper 预处理/执行/合成。启用 Age/Gender 或 GFPGAN 时，相应
+`std::optional` 字段有值；未配置模型时字段为空，而不是伪造 0 ms。
+
+TensorRT executor 与 CUDA image processor 都在阶段调用返回前同步，因此这些数值包含等待
+GPU 完成的时间，也包含 adapter 校验、输出 decode 和对应 CPU 合成。它们不是 CUDA kernel
+独占时间，不能换算为 FLOPS、GPU 利用率或功耗；这些指标应由 Nsight Systems/Compute 或
+设备遥测独立采集。`swap()` 不创建报告且不读取时钟，常规调用不会承担逐阶段计时开销。
+
+本机 CPU/CUDA 预处理、完整 pipeline P50/P95、CPU 占用、GPU 利用率/显存/功耗的可复验记录
+见 [`docs/performance/2026-08-27-face-swap-cpu-gpu.md`](../docs/performance/2026-08-27-face-swap-cpu-gpu.md)。
+
 ## 模型契约
 
 | 模型 | 默认 binding | 固定 shape / 结果 |
@@ -92,8 +118,9 @@ face_swap_demo.exe `
 - `S`：将当前结果写入 `--output`
 - `Q` / `Esc` / 关闭窗口：退出
 
-窗口会在 engine 加载前显示状态；推理保持同步。只有显式提供 `--gfpgan` 时才运行增强，
-不会自动搜索模型、转换 ONNX 或降级到 CPU。
+窗口会在 engine 加载前显示状态；推理保持同步。每次首次运行或按 `R` 重跑后，底部显示各
+阶段的本次耗时以及最近 120 次样本的 nearest-rank P50/P95；未启用的可选阶段显示 `--`。
+只有显式提供 `--gfpgan` 时才运行增强，不会自动搜索模型、转换 ONNX 或降级到 CPU。
 
 ## 真实模型 opt-in 测试
 
@@ -109,4 +136,5 @@ face_swap_demo.exe `
 
 若 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN` 也存在，同一测试额外验证增强路径。验收内容是
 TensorRT 执行成功、输出可重新解码为 `CV_8UC3`、输出尺寸等于 target，且 source/target
-内存不变；这不是模型 accuracy 或身份相似度的 golden test。
+内存不变，并验证必需计时为正、可选计时与模型配置一致；这不是模型 accuracy 或身份相似度
+的 golden test。

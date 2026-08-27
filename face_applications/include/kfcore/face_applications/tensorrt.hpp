@@ -7,6 +7,7 @@
 
 #include <opencv2/core.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -50,6 +51,44 @@ struct FaceAnalysis
     std::optional<kfcore::face_models::AgeGenderResult> age_gender_logits;
 };
 
+using FaceSwapDuration = std::chrono::nanoseconds;
+
+// Synchronous wall time for one analysis call. Inference fields include model
+// adapter validation and postprocessing performed before the call returns.
+struct FaceAnalysisTimingReport
+{
+    FaceSwapDuration initial_staging {};
+    FaceSwapDuration detection {};
+    FaceSwapDuration face68_preprocess {};
+    FaceSwapDuration face68_inference_and_postprocess {};
+    FaceSwapDuration arcface_preprocess {};
+    FaceSwapDuration arcface_inference {};
+    std::optional<FaceSwapDuration> age_gender;
+    FaceSwapDuration total {};
+};
+
+// Timings are synchronous wall time and therefore include waiting for CUDA work
+// to complete. Optional durations are absent when that model is not configured.
+struct FaceSwapTimingReport
+{
+    FaceAnalysisTimingReport source_analysis;
+    FaceAnalysisTimingReport target_analysis;
+    FaceSwapDuration embedding_projection {};
+    FaceSwapDuration inswapper_preprocess {};
+    FaceSwapDuration inswapper_inference_and_decode {};
+    FaceSwapDuration inswapper_composition {};
+    std::optional<FaceSwapDuration> gfpgan_preprocess;
+    std::optional<FaceSwapDuration> gfpgan_inference_and_decode;
+    std::optional<FaceSwapDuration> gfpgan_composition;
+    FaceSwapDuration total {};
+};
+
+struct ProfiledFaceSwapResult
+{
+    cv::Mat image;
+    FaceSwapTimingReport timings;
+};
+
 [[nodiscard]] std::optional<kfcore::yolo::Detection> select_highest_score_face(
     const std::vector<kfcore::yolo::Detection>& detections, int face_class_id,
     float score_threshold);
@@ -68,10 +107,15 @@ public:
     // Calls are synchronous and non-reentrant. Input images are borrowed and never mutated.
     [[nodiscard]] FaceAnalysis analyze(const cv::Mat& bgr_image);
     [[nodiscard]] cv::Mat swap(const cv::Mat& source_bgr, const cv::Mat& target_bgr);
+    [[nodiscard]] ProfiledFaceSwapResult swap_profiled(const cv::Mat& source_bgr,
+                                                        const cv::Mat& target_bgr);
 
 private:
     struct Impl;
     explicit TensorRtFaceSwapApplication(std::unique_ptr<Impl> impl);
+    [[nodiscard]] cv::Mat swap_internal(const cv::Mat& source_bgr,
+                                        const cv::Mat& target_bgr,
+                                        FaceSwapTimingReport* timings);
     std::unique_ptr<Impl> impl_;
 };
 

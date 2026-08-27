@@ -1,4 +1,5 @@
 #include "face_swap_cli.hpp"
+#include "face_swap_demo_metrics.hpp"
 #include "face_swap_demo_ui.hpp"
 
 #include "kfcore/face_applications/tensorrt.hpp"
@@ -47,14 +48,17 @@ void require_valid_output(const cv::Mat& output, const cv::Mat& target)
 }
 
 void show(const cv::Mat& source, const cv::Mat& target, const cv::Mat& result,
-          const std::string& status)
+          const std::string& status,
+          const std::vector<kfcore::face_applications::demo::TimingRow>& timing_rows = {},
+          std::size_t timing_samples = 0U)
 {
     cv::imshow(kWindowName,
-               kfcore::face_applications::demo::compose_canvas(source, target, result, status));
+               kfcore::face_applications::demo::compose_canvas(
+                   source, target, result, status, timing_rows, timing_samples));
     (void)cv::waitKey(kDisplayRefreshMilliseconds);
 }
 
-std::string completed_status(std::chrono::steady_clock::duration elapsed)
+std::string completed_status(kfcore::face_applications::FaceSwapDuration elapsed)
 {
     const double milliseconds =
         std::chrono::duration<double, std::milli>(elapsed).count();
@@ -104,15 +108,18 @@ int main(int argc, char** argv)
         auto application = kfcore::face_applications::TensorRtFaceSwapApplication::load(paths);
         cv::Mat result;
         std::string status;
+        kfcore::face_applications::demo::TimingHistory timing_history;
+        std::vector<kfcore::face_applications::demo::TimingRow> timing_rows;
         const auto run_swap = [&]() {
-            show(source, target, result, "Running TensorRT face swap...");
-            const auto started = std::chrono::steady_clock::now();
-            cv::Mat next = application->swap(source, target);
-            const auto finished = std::chrono::steady_clock::now();
-            require_valid_output(next, target);
-            result = std::move(next);
-            status = completed_status(finished - started);
-            show(source, target, result, status);
+            show(source, target, result, "Running TensorRT face swap...", timing_rows,
+                 timing_history.sample_count());
+            auto profiled = application->swap_profiled(source, target);
+            require_valid_output(profiled.image, target);
+            result = std::move(profiled.image);
+            status = completed_status(profiled.timings.total);
+            timing_history.add(profiled.timings);
+            timing_rows = timing_history.rows();
+            show(source, target, result, status, timing_rows, timing_history.sample_count());
         };
         run_swap();
 
@@ -138,7 +145,8 @@ int main(int argc, char** argv)
                     fail("failed to write output image: " + arguments.output);
                 }
                 status = "Saved: " + arguments.output;
-                show(source, target, result, status);
+                show(source, target, result, status, timing_rows,
+                     timing_history.sample_count());
             }
         }
         close_window();

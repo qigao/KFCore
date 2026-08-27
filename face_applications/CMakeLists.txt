@@ -49,6 +49,7 @@ if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
   add_executable(face_swap_demo
     examples/face_swap_cli.cpp
     examples/face_swap_demo.cpp
+    examples/face_swap_demo_metrics.cpp
     examples/face_swap_demo_ui.cpp)
   target_include_directories(face_swap_demo PRIVATE examples)
   target_link_libraries(face_swap_demo PRIVATE
@@ -76,9 +77,11 @@ if(BUILD_TESTS)
 
   add_executable(test_face_swap_demo_ui
     tests/test_face_swap_demo_ui.cpp
+    examples/face_swap_demo_metrics.cpp
     examples/face_swap_demo_ui.cpp)
   target_include_directories(test_face_swap_demo_ui PRIVATE examples)
   target_link_libraries(test_face_swap_demo_ui PRIVATE
+    KFCore::face_applications
     OpenCVLite::core
     OpenCVLite::imgproc
     TurboUtils::TinyTest)
@@ -153,20 +156,24 @@ if(BUILD_TESTS)
       endif()
     endforeach()
 
+    function(_kfcore_configure_face_application_test_assets target)
+      target_compile_definitions(${target} PRIVATE
+        "KFCORE_TEST_12FACE_ENGINE=\"${KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE}\""
+        "KFCORE_TEST_FACE68_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}\""
+        "KFCORE_TEST_ARCFACE_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}\""
+        "KFCORE_TEST_INSWAPPER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}\""
+        "KFCORE_TEST_GFPGAN_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}\""
+        "KFCORE_TEST_INSWAPPER_MATRIX=\"${KFCORE_FACE_APPLICATION_TEST_MATRIX}\""
+        "KFCORE_TEST_SOURCE_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE}\""
+        "KFCORE_TEST_TARGET_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE}\"")
+    endfunction()
+
     add_executable(test_face_swap_integration tests/test_face_swap_integration.cpp)
     target_link_libraries(test_face_swap_integration PRIVATE
       KFCore::face_applications
       OpenCVLite::imgcodecs
       TurboUtils::TinyTest)
-    target_compile_definitions(test_face_swap_integration PRIVATE
-      "KFCORE_TEST_12FACE_ENGINE=\"${KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE}\""
-      "KFCORE_TEST_FACE68_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}\""
-      "KFCORE_TEST_ARCFACE_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}\""
-      "KFCORE_TEST_INSWAPPER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}\""
-      "KFCORE_TEST_GFPGAN_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}\""
-      "KFCORE_TEST_INSWAPPER_MATRIX=\"${KFCORE_FACE_APPLICATION_TEST_MATRIX}\""
-      "KFCORE_TEST_SOURCE_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE}\""
-      "KFCORE_TEST_TARGET_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE}\"")
+    _kfcore_configure_face_application_test_assets(test_face_swap_integration)
     set_target_properties(test_face_swap_integration PROPERTIES
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
       FOLDER "face_applications/tests")
@@ -174,15 +181,28 @@ if(BUILD_TESTS)
     if(WIN32)
       set_tests_properties(test_face_swap_integration PROPERTIES
         ENVIRONMENT_MODIFICATION
-          "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin")
+          "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR};PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin;PATH=path_list_prepend:$ENV{TURBOUTILS_ROOT}/bin")
     endif()
+
+    add_executable(benchmark_face_swap_pipeline
+      tests/benchmark_face_swap_pipeline.cpp
+      examples/face_swap_demo_metrics.cpp)
+    target_include_directories(benchmark_face_swap_pipeline PRIVATE examples)
+    target_link_libraries(benchmark_face_swap_pipeline PRIVATE
+      KFCore::face_applications
+      OpenCVLite::imgcodecs
+      TurboUtils::TinyTest)
+    _kfcore_configure_face_application_test_assets(benchmark_face_swap_pipeline)
+    set_target_properties(benchmark_face_swap_pipeline PROPERTIES
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+      FOLDER "face_applications/benchmarks")
   endif()
 
   if(WIN32)
     set_tests_properties(test_face_swap_cli test_face_swap_demo_ui test_face_geometry test_face_preprocess test_face_composer
       test_face_application_validation PROPERTIES
       ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin")
+        "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR};PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin;PATH=path_list_prepend:$ENV{TURBOUTILS_ROOT}/bin")
   endif()
 
   if(KFCORE_INSTALL)

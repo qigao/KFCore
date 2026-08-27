@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -19,8 +21,10 @@ const cv::Scalar kPrimaryTextColor { 235, 235, 235 };
 const cv::Scalar kSecondaryTextColor { 165, 190, 210 };
 constexpr double kLabelScale = 0.62;
 constexpr double kStatusScale = 0.52;
+constexpr double kTimingScale = 0.39;
 constexpr int kTextThickness = 1;
 constexpr int kPanelTop = kCanvasGap + kHeaderHeight;
+constexpr int kTimingLineHeight = 18;
 
 void require_bgr(const cv::Mat& image, const char* role, bool allow_empty)
 {
@@ -72,6 +76,55 @@ void render_panel(cv::Mat& canvas, const cv::Mat& image, int left, const char* l
     display.copyTo(panel(cv::Rect(x, y, display.cols, display.rows)));
 }
 
+std::string format_duration(const std::optional<FaceSwapDuration>& duration)
+{
+    if (!duration)
+    {
+        return "--";
+    }
+    const double milliseconds =
+        std::chrono::duration<double, std::milli>(*duration).count();
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(2) << milliseconds;
+    return stream.str();
+}
+
+void render_timings(cv::Mat& canvas, int footer_top,
+                    const std::vector<TimingRow>& timing_rows,
+                    std::size_t timing_samples)
+{
+    if (timing_rows.empty())
+    {
+        return;
+    }
+
+    const std::string heading = "STAGE  current / P50 / P95 (ms)    samples: " +
+                                std::to_string(timing_samples);
+    constexpr int kHeadingOffset = 82;
+    cv::putText(canvas, heading, cv::Point(kCanvasGap, footer_top + kHeadingOffset),
+                cv::FONT_HERSHEY_SIMPLEX, kTimingScale, kPrimaryTextColor,
+                kTextThickness, cv::LINE_AA);
+
+    const std::size_t rows_per_column = (timing_rows.size() + 1U) / 2U;
+    const int column_width = kCanvasWidth / 2;
+    constexpr int kFirstRowOffset = kHeadingOffset + 23;
+    for (std::size_t index = 0U; index < timing_rows.size(); ++index)
+    {
+        const std::size_t column = index / rows_per_column;
+        const std::size_t row = index % rows_per_column;
+        const TimingRow& timing = timing_rows[index];
+        const std::string text = std::string(timing.label) + "  " +
+                                 format_duration(timing.current) + " / " +
+                                 format_duration(timing.p50) + " / " +
+                                 format_duration(timing.p95);
+        const cv::Point origin(
+            kCanvasGap + static_cast<int>(column) * column_width,
+            footer_top + kFirstRowOffset + static_cast<int>(row) * kTimingLineHeight);
+        cv::putText(canvas, text, origin, cv::FONT_HERSHEY_SIMPLEX, kTimingScale,
+                    kSecondaryTextColor, kTextThickness, cv::LINE_AA);
+    }
+}
+
 } // namespace
 
 DemoAction action_from_key(int key) noexcept
@@ -98,7 +151,9 @@ DemoAction action_from_key(int key) noexcept
 }
 
 cv::Mat compose_canvas(const cv::Mat& source, const cv::Mat& target,
-                       const cv::Mat& result, std::string_view status)
+                       const cv::Mat& result, std::string_view status,
+                       const std::vector<TimingRow>& timing_rows,
+                       std::size_t timing_samples)
 {
     require_bgr(source, "source", false);
     require_bgr(target, "target", false);
@@ -120,6 +175,7 @@ cv::Mat compose_canvas(const cv::Mat& source, const cv::Mat& target,
     cv::putText(canvas, std::string(status), cv::Point(kCanvasGap, footer_top + 49),
                 cv::FONT_HERSHEY_SIMPLEX, kStatusScale, kSecondaryTextColor,
                 kTextThickness, cv::LINE_AA);
+    render_timings(canvas, footer_top, timing_rows, timing_samples);
     return canvas;
 }
 
