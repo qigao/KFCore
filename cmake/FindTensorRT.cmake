@@ -2,7 +2,7 @@ include(FindPackageHandleStandardArgs)
 
 if(NOT DEFINED ENV{TENSORRT_ROOT} OR "$ENV{TENSORRT_ROOT}" STREQUAL "")
   message(FATAL_ERROR
-    "TENSORRT_ROOT is required when KFCORE_BUILD_TENSORRT_YOLO=ON")
+    "TENSORRT_ROOT is required when KFCore TensorRT support is enabled")
 endif()
 
 if(NOT IS_DIRECTORY "$ENV{TENSORRT_ROOT}")

@@ -57,6 +57,22 @@ if(BUILD_TESTS)
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
   endif()
 
+  if(KFCORE_INSTALL)
+    set(_tensorrt_runtime_consumer_root
+      "${CMAKE_BINARY_DIR}/tests/tensorrt_runtime_installed_consumer")
+    add_test(NAME test_tensorrt_runtime_installed_consumer
+      COMMAND "${CMAKE_COMMAND}"
+        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/TensorRtRuntimeInstalledConsumer"
+        "-DKFCORE_CONSUMER_BINARY_DIR=${_tensorrt_runtime_consumer_root}/build"
+        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_tensorrt_runtime_consumer_root}/install"
+        "-DKFCORE_CONSUMER_KFCORE_DIR=${_tensorrt_runtime_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
+        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
+        "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer.cmake")
+  endif()
+
   if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
      (NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "" OR
       NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}" STREQUAL "" OR

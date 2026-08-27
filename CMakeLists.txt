@@ -189,7 +189,7 @@ if(KFCORE_INSTALL)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
   endif()
 
-  if(KFCORE_BUILD_TENSORRT_YOLO)
+  if(KFCORE_BUILD_TENSORRT_RUNTIME OR KFCORE_BUILD_TENSORRT_YOLO)
     install(FILES cmake/FindTensorRT.cmake
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
   endif()
