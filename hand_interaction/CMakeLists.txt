@@ -1,4 +1,6 @@
 add_library(kfcore_hand_interaction STATIC
+  src/gesture_graph.cpp
+  src/hand_interaction.cpp
   src/hand_identity.cpp
   src/primitive_extractor.cpp)
 target_include_directories(kfcore_hand_interaction
@@ -34,6 +36,16 @@ if(BUILD_TESTS)
   target_compile_features(test_hand_primitive_extractor PRIVATE cxx_std_17)
   add_test(NAME test_hand_primitive_extractor
     COMMAND test_hand_primitive_extractor)
+
+  add_executable(test_hand_interaction
+    tests/test_hand_interaction.cpp)
+  target_include_directories(test_hand_interaction PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(test_hand_interaction PRIVATE
+    KFCore::hand_interaction
+    TurboUtils::TinyTest)
+  target_compile_features(test_hand_interaction PRIVATE cxx_std_17)
+  add_test(NAME test_hand_interaction COMMAND test_hand_interaction)
 endif()
 
 cmake_install_headers(
