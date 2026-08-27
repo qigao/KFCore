@@ -57,6 +57,9 @@ option(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}" CACHE FILEPATH
     "Trusted ArcFace TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}" CACHE FILEPATH
+    "Trusted Palm TensorRT engine used by dynamic-output integration tests")
 set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER
     "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}" CACHE FILEPATH
     "Trusted age/gender TensorRT engine used by opt-in runtime integration tests")

@@ -46,6 +46,10 @@ public:
 
     void run(const std::vector<TensorView>& inputs, const std::vector<MutableTensorView>& outputs);
 
+    std::vector<HostTensor> run_dynamic(
+        const std::vector<TensorView>& inputs,
+        const std::vector<DynamicOutputRequest>& outputs);
+
 private:
     friend class Engine;
     struct Impl;

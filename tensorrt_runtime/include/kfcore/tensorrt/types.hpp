@@ -74,6 +74,27 @@ struct MutableTensorView
     MemoryKind  memory_kind = MemoryKind::Host;
 };
 
+// Describes caller-approved storage for an output whose runtime shape is resolved after enqueue.
+struct DynamicOutputRequest
+{
+    std::string name;
+    DataType    data_type     = DataType::Float32;
+    std::size_t max_byte_size = 0;
+};
+
+// Owns a data-dependent output after synchronous execution. Typed copies validate both the
+// declared scalar type and the shape/byte contract before exposing values.
+struct HostTensor
+{
+    std::string            name;
+    DataType               data_type = DataType::Float32;
+    TensorShape            shape;
+    std::vector<std::byte> bytes;
+
+    std::vector<float>        float32_values() const;
+    std::vector<std::int64_t> int64_values() const;
+};
+
 struct EngineOptions
 {
     int         device_id                   = 0;

@@ -127,6 +127,30 @@ if(BUILD_TESTS)
           "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
     endif()
   endif()
+
+  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+     NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}" STREQUAL "")
+    add_executable(test_tensorrt_runtime_dynamic_output_integration
+      tests/test_tensorrt_runtime_dynamic_output_integration.cpp)
+    target_link_libraries(test_tensorrt_runtime_dynamic_output_integration PRIVATE
+      KFCore::tensorrt_runtime
+      TurboUtils::TinyTest)
+    set_target_properties(test_tensorrt_runtime_dynamic_output_integration PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "tensorrt_runtime/tests")
+    add_test(NAME test_tensorrt_runtime_dynamic_output
+      COMMAND test_tensorrt_runtime_dynamic_output_integration)
+    set_tests_properties(test_tensorrt_runtime_dynamic_output PROPERTIES
+      ENVIRONMENT
+        "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM=${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}")
+    if(WIN32)
+      set_tests_properties(test_tensorrt_runtime_dynamic_output PROPERTIES
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
+    endif()
+  endif()
 endif()
 
 cmake_install_headers(
