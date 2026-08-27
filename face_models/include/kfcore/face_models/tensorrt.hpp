@@ -37,6 +37,23 @@ struct AgeGenderOptions
     kfcore::tensorrt::EngineOptions engine;
 };
 
+struct InSwapperOptions
+{
+    std::string                     target_input_name = "target";
+    std::string                     source_input_name = "source";
+    std::string                     output_name       = "output";
+    std::size_t                     max_batch         = 1;
+    kfcore::tensorrt::EngineOptions engine;
+};
+
+struct GfpGanOptions
+{
+    std::string                     input_name  = "input";
+    std::string                     output_name = "output";
+    std::size_t                     max_batch   = 1;
+    kfcore::tensorrt::EngineOptions engine;
+};
+
 class TensorRtFace68 final
 {
 public:
