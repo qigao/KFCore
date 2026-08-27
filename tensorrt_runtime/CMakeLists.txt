@@ -1,5 +1,12 @@
+find_package(CUDAToolkit REQUIRED)
+find_package(TensorRT REQUIRED)
+
 add_library(kfcore_tensorrt_runtime SHARED
+  src/cuda_buffer.cpp
+  src/engine.cpp
+  src/engine_file.cpp
   src/error.cpp
+  src/executor.cpp
   src/tensor_validation.cpp)
 target_include_directories(kfcore_tensorrt_runtime
   PUBLIC
@@ -8,6 +15,10 @@ target_include_directories(kfcore_tensorrt_runtime
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(kfcore_tensorrt_runtime PUBLIC cxx_std_17)
+target_link_libraries(kfcore_tensorrt_runtime PRIVATE
+  CUDA::cudart
+  TensorRT::nvinfer
+  TensorRT::nvinfer_plugin)
 set_target_properties(kfcore_tensorrt_runtime PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
@@ -33,6 +44,45 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
     FOLDER "tensorrt_runtime/tests")
   add_test(NAME test_tensorrt_runtime_contract COMMAND test_tensorrt_runtime_contract)
+  if(WIN32)
+    set_tests_properties(test_tensorrt_runtime_contract PROPERTIES
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
+  endif()
+
+  add_executable(test_tensorrt_runtime_engine_file
+    tests/test_engine_file.cpp
+    src/engine_file.cpp
+    src/error.cpp)
+  target_include_directories(test_tensorrt_runtime_engine_file PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(test_tensorrt_runtime_engine_file PRIVATE TurboUtils::TinyTest)
+  set_target_properties(test_tensorrt_runtime_engine_file PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_runtime/tests")
+  add_test(NAME test_tensorrt_runtime_engine_file COMMAND test_tensorrt_runtime_engine_file)
+
+  add_executable(test_tensorrt_runtime_cuda_buffer
+    tests/test_cuda_buffer.cpp
+    src/cuda_buffer.cpp
+    src/error.cpp)
+  target_include_directories(test_tensorrt_runtime_cuda_buffer PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_definitions(test_tensorrt_runtime_cuda_buffer PRIVATE
+    KFCORE_TENSORRT_RUNTIME_CUDA_BUFFER_TESTING=1)
+  target_link_libraries(test_tensorrt_runtime_cuda_buffer PRIVATE
+    CUDA::cudart
+    TurboUtils::TinyTest)
+  set_target_properties(test_tensorrt_runtime_cuda_buffer PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_runtime/tests")
+  add_test(NAME test_tensorrt_runtime_cuda_buffer COMMAND test_tensorrt_runtime_cuda_buffer)
 endif()
 
 cmake_install_headers(

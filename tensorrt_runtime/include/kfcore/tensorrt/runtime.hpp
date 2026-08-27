@@ -24,6 +24,7 @@ public:
     const std::vector<TensorDescriptor>& tensors() const noexcept;
 
 private:
+    friend class Executor;
     struct Impl;
 
     explicit Engine(std::shared_ptr<const Impl> impl);
