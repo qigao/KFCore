@@ -121,4 +121,46 @@ spec("TensorRT runtime tensor validation")
         check_error([&] { detail::validate_tensor_metadata({ output_descriptor() }, options); },
                     TensorRtErrorCode::ResourceLimitExceeded, "output bytes");
     }
+
+    it("rejects an unsupported tensor I/O mode in engine metadata")
+    {
+        TensorDescriptor invalid = input_descriptor();
+        invalid.mode             = static_cast<TensorIoMode>(99);
+
+        check_error([&] { detail::validate_tensor_metadata({ invalid }, {}); },
+                    TensorRtErrorCode::EngineContractMismatch, "I/O mode");
+    }
+
+    it("rejects an input view with a mismatched data type")
+    {
+        float      values[3 * 112 * 112] {};
+        TensorView view { "input", DataType::Int8, { 1, 3, 112, 112 },
+                          values,  sizeof(values), MemoryKind::Host };
+
+        check_error([&]
+                    { detail::validate_input_views({ input_descriptor() }, { view }, 1U << 20U); },
+                    TensorRtErrorCode::InvalidTensorView, "data type");
+    }
+
+    it("rejects an input view outside profile zero bounds")
+    {
+        float      values[3 * 112 * 112] {};
+        TensorView view { "input", DataType::Float32, { 5, 3, 112, 112 },
+                          values,  sizeof(values),    MemoryKind::Host };
+
+        check_error([&]
+                    { detail::validate_input_views({ input_descriptor() }, { view }, 1U << 20U); },
+                    TensorRtErrorCode::InvalidTensorView, "profile 0 bounds");
+    }
+
+    it("rejects an output view whose capacity is too small")
+    {
+        float             values[512] {};
+        MutableTensorView view { "output", DataType::Float32,   { 1, 512 },
+                                 values,   sizeof(values) - 1U, MemoryKind::Host };
+
+        check_error(
+            [&] { detail::validate_output_views({ output_descriptor() }, { view }, 1U << 20U); },
+            TensorRtErrorCode::InvalidTensorView, "capacity");
+    }
 }

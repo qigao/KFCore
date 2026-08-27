@@ -267,13 +267,16 @@ void validate_tensor_metadata(const std::vector<TensorDescriptor>& tensors,
         validate_profile_bounds(tensor.profile, tensor.name);
         const std::size_t bytes =
             checked_shape_byte_size(tensor.profile.maximum, tensor.data_type, tensor.name.c_str());
-        if (tensor.mode == TensorIoMode::Input)
+        switch (tensor.mode)
         {
+        case TensorIoMode::Input:
             input_bytes = checked_add(input_bytes, bytes, tensor.name.c_str());
-        }
-        else
-        {
+            break;
+        case TensorIoMode::Output:
             output_bytes = checked_add(output_bytes, bytes, tensor.name.c_str());
+            break;
+        default:
+            throw_contract(tensor.name, "tensor I/O mode is unsupported");
         }
     }
     if (input_bytes > options.max_input_bytes)
