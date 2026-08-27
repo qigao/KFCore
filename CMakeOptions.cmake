@@ -9,6 +9,19 @@ option(KFCORE_BUILD_SIFT "Build the reusable SIFT extractor contract" OFF)
 option(KFCORE_BUILD_SIFT_POPSIFT "Build the maintained CUDA SIFT backend" OFF)
 option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
+option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
+option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
+option(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS
+       "Build real-engine TensorRT runtime and face model integration tests" OFF)
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}" CACHE FILEPATH
+    "Trusted ArcFace TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}" CACHE FILEPATH
+    "Trusted age/gender TensorRT engine used by opt-in runtime integration tests")
+set(KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
+    "$ENV{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}" CACHE FILEPATH
+    "Trusted Face68 TensorRT engine used by opt-in runtime integration tests")
 option(KFCORE_BUILD_YOLO_OPENCV "Build the optional OpenCV Lite YOLO adapter" OFF)
 option(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS
        "Build TensorRT YOLO SDK integration tests" OFF)

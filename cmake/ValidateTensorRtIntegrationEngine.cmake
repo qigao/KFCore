@@ -65,3 +65,38 @@ function(kfcore_add_optional_tensorrt_integration_test test_name validated_path)
 
   kfcore_add_tensorrt_integration_test("${test_name}" "${validated_path}" ${ARGN})
 endfunction()
+
+function(kfcore_validate_optional_tensorrt_runtime_engine
+         configured_path cache_variable model_name output_variable)
+  if("${configured_path}" STREQUAL "")
+    message(STATUS
+      "${cache_variable} is empty; ${model_name} real-engine integration tests "
+      "will not be registered")
+    set(${output_variable} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(_kfcore_runtime_engine_candidate "${configured_path}")
+  cmake_path(ABSOLUTE_PATH _kfcore_runtime_engine_candidate
+    BASE_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    NORMALIZE
+    OUTPUT_VARIABLE _kfcore_runtime_engine_absolute)
+  if(NOT EXISTS "${_kfcore_runtime_engine_absolute}" OR
+     IS_DIRECTORY "${_kfcore_runtime_engine_absolute}")
+    message(FATAL_ERROR
+      "${cache_variable} must name an existing non-empty regular file: "
+      "${_kfcore_runtime_engine_absolute}")
+  endif()
+
+  file(SIZE "${_kfcore_runtime_engine_absolute}" _kfcore_runtime_engine_size)
+  if(_kfcore_runtime_engine_size LESS_EQUAL 0)
+    message(FATAL_ERROR
+      "${cache_variable} must name an existing non-empty regular file: "
+      "${_kfcore_runtime_engine_absolute}")
+  endif()
+
+  file(REAL_PATH "${_kfcore_runtime_engine_absolute}" _kfcore_runtime_engine_real)
+  message(STATUS
+    "${model_name} real-engine integration tests use: ${_kfcore_runtime_engine_real}")
+  set(${output_variable} "${_kfcore_runtime_engine_real}" PARENT_SCOPE)
+endfunction()
