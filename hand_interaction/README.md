@@ -90,3 +90,82 @@ target_link_libraries(app PRIVATE KFCore::hand_interaction)
 
 包配置提供 `KFCore_HAS_THIG` 和 `KFCore_HAS_HAND_INTERACTION`，便于可选功能在 configure 阶段
 fail fast。模型与 TensorRT engine 仍由对应 backend 管理，既不复制也不安装到本模块。
+
+## Turbo Capture 实时 Demo
+
+`hand_interaction_demo` 是可选的桌面示例，不改变已安装库的接口或依赖。数据流为：
+
+```text
+USB camera -> Turbo Capture -> bounded latest-frame mailbox -> owning BGR image
+           -> CPU ONNX Runtime 或 TensorRT/ImageProcessor -> HandPipeline -> THIG -> HighGUI
+```
+
+Capture 回调中的像素指针只在回调期间有效，因此示例在回调返回前复制一次。邮箱固定保留两个
+受 `--max-frame-bytes` 限制的 vector；推理落后时以最新帧替换未消费帧并增加 `coalesced`，不会
+让采集线程等待。BGR 图像由示例拥有，并同时借给显示和所选推理后端；TensorRT 后端再由现有
+ImageProcessor 上传和预处理。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
+`KFCore::hand_interaction` 的传递依赖。
+
+### 构建
+
+CPU 路径：
+
+```powershell
+cmake --preset win-hand-interaction-demo-cpu-release-user
+cmake --build --preset win-hand-interaction-demo-cpu-release-user --target hand_interaction_demo
+ctest --preset win-hand-interaction-demo-cpu-release-user --output-on-failure
+```
+
+TensorRT 路径需要先指向本机 SDK；preset 只做编译验证，不要求集成测试 engine：
+
+```powershell
+$env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
+cmake --preset win-hand-interaction-demo-tensorrt-release-user
+cmake --build --preset win-hand-interaction-demo-tensorrt-release-user --target hand_interaction_demo
+ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure
+```
+
+两个 preset 都从 `CMakeUserPresets.json` 设置 `OPENCV_LITE_ROOT`，并为 configure、build 和
+CTest 子进程加入 OpenCV Lite、Turbo Capture 及对应推理 runtime 的 DLL 目录。直接从当前
+PowerShell 启动 exe 时，父 shell 仍需把这些目录加入 `PATH`。
+
+### 运行
+
+先列出摄像头及原生 mode；该操作不会加载模型：
+
+```powershell
+build\HandCPU\bin\hand_interaction_demo.exe --list-cameras
+```
+
+CPU 使用仓库已有的三份 ONNX hand 模型：
+
+```powershell
+build\HandCPU\bin\hand_interaction_demo.exe `
+  --backend cpu --camera 0 --width 640 --height 480 --fps 30 `
+  --model-dir C:\projects\cpp\KFCore\yolo-models
+```
+
+TensorRT 要求显式提供三份可信 engine，不会自动生成 engine 或回退到 CPU：
+
+```powershell
+build\HandTRT\bin\hand_interaction_demo.exe `
+  --backend tensorrt --camera 0 --mode 385 `
+  --palm C:\models\palm.engine `
+  --hand C:\models\hand_landmark.engine `
+  --classifier C:\models\keypoint_classifier.engine
+```
+
+`--mode` 与 `--width/--height/--fps` 二选一，且只接受精确匹配。省略时请求
+1280x720@30；同一规格按 NV12、I420、BGRA、RGB24 的顺序选择。MJPEG 会被明确拒绝，因为
+示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
+`R` 同时重置 tracker 与 THIG 状态，`Q`、Escape 或关闭窗口正常退出。
+
+启动时输出三模型加载耗时；窗口逐帧显示 Capture-to-BGR 转换、preprocess、Palm、landmark、
+classifier、tracking、model 总计、THIG 和整条处理 pipeline 的耗时，以及
+`captured/consumed/coalesced/rejected` 计数。这些是当前帧和当前运行的诊断数据，不等同于
+稳定的 P50/P95 性能结论，也不包含 HighGUI 的显示刷新时间。
+
+若 configure 报告缺少 `TurboUtils::Capture`，说明 TurboUtils SDK 没有安装 Capture 导出目标；
+在 TurboUtils 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install
+preset 后重新配置。若启动时 Windows 在进入 `main` 前退出，应先检查当前 shell 的 `PATH`
+是否包含 `opencv-lite/bin`、`turboutils/release/bin` 和相应推理 runtime 目录。

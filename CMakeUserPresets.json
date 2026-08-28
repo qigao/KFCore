@@ -227,6 +227,33 @@
             }
         },
         {
+            "name": "win-hand-interaction-demo-cpu-release-user",
+            "displayName": "THIG Hand Interaction Demo CPU Release Build (Windows, User)",
+            "inherits": "win-vision-models-cpu-release-user",
+            "binaryDir": "${sourceDir}/build/HandCPU",
+            "environment": {
+                "OPENCV_LITE_ROOT": "C:/projects/cpp/external/pkgs/opencv-lite",
+                "PATH": "$env{OPENCV_LITE_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/HandCPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES": "ON"
+            }
+        },
+        {
+            "name": "win-hand-interaction-demo-tensorrt-release-user",
+            "displayName": "THIG Hand Interaction Demo TensorRT Release Build (Windows, User)",
+            "inherits": "win-vision-models-tensorrt-release-user",
+            "binaryDir": "${sourceDir}/build/HandTRT",
+            "environment": {
+                "OPENCV_LITE_ROOT": "C:/projects/cpp/external/pkgs/opencv-lite",
+                "PATH": "$env{OPENCV_LITE_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/HandTRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES": "ON",
+                "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "OFF"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -319,6 +346,16 @@
             "name": "win-vision-models-tensorrt-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-vision-models-tensorrt-release-user"
+        },
+        {
+            "name": "win-hand-interaction-demo-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-hand-interaction-demo-cpu-release-user"
+        },
+        {
+            "name": "win-hand-interaction-demo-tensorrt-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-hand-interaction-demo-tensorrt-release-user"
         },
         {
             "name": "linux-dev-user",
@@ -484,6 +521,16 @@
             "name": "win-vision-models-tensorrt-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-vision-models-tensorrt-release-user"
+        },
+        {
+            "name": "win-hand-interaction-demo-cpu-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-hand-interaction-demo-cpu-release-user"
+        },
+        {
+            "name": "win-hand-interaction-demo-tensorrt-release-user",
+            "inherits": "win-release-user",
+            "configurePreset": "win-hand-interaction-demo-tensorrt-release-user"
         },
         {
             "name": "linux-dev-user",

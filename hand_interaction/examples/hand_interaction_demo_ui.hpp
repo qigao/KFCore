@@ -6,6 +6,9 @@
 
 #include <opencv2/core.hpp>
 
+#include <array>
+#include <string>
+
 namespace kfcore::hand_interaction::demo
 {
 
@@ -20,11 +23,15 @@ struct DemoMetrics
 {
     CaptureCounters                    capture;
     vision_models::StageTimings        model;
+    double                             convert_ms = 0.0;
     double                             thig_ms  = 0.0;
     double                             frame_ms = 0.0;
 };
 
 [[nodiscard]] DemoAction action_from_key(int key) noexcept;
+
+[[nodiscard]] std::array<std::string, 2> format_timing_lines(
+    const DemoMetrics& metrics);
 
 // Source must be a non-empty CV_8UC3 image. The returned overlay owns its
 // pixels and source is never modified.

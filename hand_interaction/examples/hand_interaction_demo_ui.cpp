@@ -63,15 +63,6 @@ int canonical_id_for(const HandInteractionFrame& interaction, std::size_t input_
     return 0;
 }
 
-std::string timing_line(const DemoMetrics& metrics)
-{
-    std::ostringstream text;
-    text << std::fixed << std::setprecision(2)
-         << "model " << metrics.model.total_ms << " ms | thig " << metrics.thig_ms
-         << " ms | frame " << metrics.frame_ms << " ms";
-    return text.str();
-}
-
 std::string capture_line(const DemoMetrics& metrics)
 {
     std::ostringstream text;
@@ -113,6 +104,23 @@ DemoAction action_from_key(int key) noexcept
     }
 }
 
+std::array<std::string, 2> format_timing_lines(const DemoMetrics& metrics)
+{
+    std::array<std::ostringstream, 2> text;
+    for (auto& line : text)
+    {
+        line << std::fixed << std::setprecision(2);
+    }
+    text[0] << "ms conv " << metrics.convert_ms << " pre "
+            << metrics.model.preprocess_ms << " palm "
+            << metrics.model.palm_inference_ms << " land "
+            << metrics.model.landmark_inference_ms;
+    text[1] << "ms cls " << metrics.model.classifier_inference_ms << " track "
+            << metrics.model.tracking_ms << " model " << metrics.model.total_ms
+            << " thig " << metrics.thig_ms << " pipe " << metrics.frame_ms;
+    return { text[0].str(), text[1].str() };
+}
+
 cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& hands,
                         const HandInteractionFrame& interaction,
                         const DemoMetrics& metrics)
@@ -125,17 +133,22 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
     cv::Mat output = source.clone();
     const int action_lines =
         std::min(static_cast<int>(interaction.actions.size()), kMaximumActionLines);
-    draw_status_background(output, 3 + action_lines);
+    const auto timing_lines = format_timing_lines(metrics);
+    draw_status_background(output, 4 + action_lines);
     cv::putText(output, "R reset tracking/THIG | Q/Esc quit",
                 cv::Point(kTextMargin, kTextMargin + kTextLineHeight),
                 cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
                 kTextThickness, cv::LINE_AA);
-    cv::putText(output, timing_line(metrics),
+    cv::putText(output, timing_lines[0],
                 cv::Point(kTextMargin, kTextMargin + 2 * kTextLineHeight),
                 cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
                 kTextThickness, cv::LINE_AA);
-    cv::putText(output, capture_line(metrics),
+    cv::putText(output, timing_lines[1],
                 cv::Point(kTextMargin, kTextMargin + 3 * kTextLineHeight),
+                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
+                kTextThickness, cv::LINE_AA);
+    cv::putText(output, capture_line(metrics),
+                cv::Point(kTextMargin, kTextMargin + 4 * kTextLineHeight),
                 cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
                 kTextThickness, cv::LINE_AA);
 
@@ -144,7 +157,7 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
         const auto& action = interaction.actions[static_cast<std::size_t>(index)];
         cv::putText(output, "ACTION: " + action.action,
                     cv::Point(kTextMargin,
-                              kTextMargin + (4 + index) * kTextLineHeight),
+                              kTextMargin + (5 + index) * kTextLineHeight),
                     cv::FONT_HERSHEY_SIMPLEX, kTextScale, kActionTextColor,
                     kTextThickness, cv::LINE_AA);
     }

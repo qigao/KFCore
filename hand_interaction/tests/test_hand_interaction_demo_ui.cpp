@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 
 #include "tinytest.hpp"
 
@@ -83,6 +84,26 @@ spec("hand interaction demo frame and UI")
         check(demo::action_from_key('q') == demo::DemoAction::Quit);
         check(demo::action_from_key(27) == demo::DemoAction::Quit);
         check(demo::action_from_key(-1) == demo::DemoAction::None);
+    }
+
+    it("formats every processing stage with stable units")
+    {
+        demo::DemoMetrics metrics;
+        metrics.convert_ms                    = 1.25;
+        metrics.model.preprocess_ms            = 2.5;
+        metrics.model.palm_inference_ms        = 3.75;
+        metrics.model.landmark_inference_ms    = 4.0;
+        metrics.model.classifier_inference_ms  = 5.25;
+        metrics.model.tracking_ms              = 6.5;
+        metrics.model.total_ms                 = 22.0;
+        metrics.thig_ms                        = 0.75;
+        metrics.frame_ms                       = 24.0;
+
+        const auto lines = demo::format_timing_lines(metrics);
+        check_equal(lines[0],
+                    std::string("ms conv 1.25 pre 2.50 palm 3.75 land 4.00"));
+        check_equal(lines[1],
+                    std::string("ms cls 5.25 track 6.50 model 22.00 thig 0.75 pipe 24.00"));
     }
 
     it("draws tracked hands actions and metrics without changing the input")

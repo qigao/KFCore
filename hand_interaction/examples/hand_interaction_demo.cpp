@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -178,7 +179,14 @@ int run(const demo::Arguments& arguments)
     const auto modes = demo::list_camera_modes(device.id);
     const auto& mode = modes.at(demo::select_mode(modes, arguments.capture));
 
-    auto model_pipeline = HandPipeline::create(make_backend(arguments));
+    const auto model_load_started = std::chrono::steady_clock::now();
+    auto       model_pipeline = HandPipeline::create(make_backend(arguments));
+    const auto model_load_finished = std::chrono::steady_clock::now();
+    const auto model_load_ms = std::chrono::duration<double, std::milli>(
+                                   model_load_finished - model_load_started)
+                                   .count();
+    std::cout << std::fixed << std::setprecision(2) << "Model load: "
+              << model_load_ms << " ms\n";
     HandInteractionPipeline interaction_pipeline;
     demo::LatestFrameMailbox mailbox(arguments.capture.max_frame_bytes);
     demo::CapturedFrame      captured = mailbox.make_consumer_frame();
@@ -206,6 +214,7 @@ int run(const demo::Arguments& arguments)
 
         const auto frame_started = std::chrono::steady_clock::now();
         const cv::Mat bgr = demo::to_bgr(captured);
+        const auto converted = std::chrono::steady_clock::now();
         HandFrame hands = model_pipeline->process(image_view(bgr));
         const auto thig_started = std::chrono::steady_clock::now();
         const GestureFrameContext context {
@@ -217,6 +226,8 @@ int run(const demo::Arguments& arguments)
         demo::DemoMetrics metrics;
         metrics.capture = mailbox.counters();
         metrics.model   = hands.timings;
+        metrics.convert_ms =
+            std::chrono::duration<double, std::milli>(converted - frame_started).count();
         metrics.thig_ms =
             std::chrono::duration<double, std::milli>(thig_finished - thig_started).count();
         metrics.frame_ms =
