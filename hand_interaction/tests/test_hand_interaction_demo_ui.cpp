@@ -4,9 +4,12 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "tinytest.hpp"
 
@@ -114,14 +117,89 @@ spec("hand interaction demo frame and UI")
                     std::string("ms face-pre 1.00 face-det 2.00 mesh-pre 3.00 mesh 4.00 face 10.50"));
     }
 
-    it("formats explicit hand, track, and gesture identities")
+    it("distinguishes raw model gesture from derived hand primitives")
     {
         kfcore::vision_models::HandResult hand;
         hand.track_id = 3;
-        hand.gesture  = kfcore::vision_models::Gesture::Pointer;
+        hand.gesture  = kfcore::vision_models::Gesture::Open;
 
-        check_equal(demo::format_hand_label(1, hand),
-                    std::string("Hand ID:1 | Track ID:3 | Gesture:Pointer"));
+        kfcore::hand_interaction::PrimitiveFrame primitives;
+        for (const std::string& relation : { "Shape V", "Motion Stationary", "Pose OK" })
+        {
+            kfcore::thig::Observation observation;
+            observation.source   = { "hand", 1 };
+            observation.relation = relation;
+            primitives.observations.push_back(std::move(observation));
+        }
+
+        const demo::HandOverlayText text =
+            demo::format_hand_overlay_text(1, hand, primitives);
+        check_equal(text.identity,
+                    std::string("Hand ID:1 | Track ID:3 | Raw:Open"));
+        check_equal(text.derived,
+                    std::string("Derived:V | Motion:Stationary | Pose:OK"));
+    }
+
+    it("keeps a semantic action visible for the configured interval")
+    {
+        demo::RecentActionHistory history;
+        kfcore::thig::ActionEvent grasp;
+        grasp.action = "Grasp";
+        grasp.source = { "hand", 1 };
+        const auto started = std::chrono::steady_clock::time_point {};
+
+        auto visible = history.update({ grasp }, started);
+        check_size(visible, 1U);
+        visible = history.update({}, started + std::chrono::milliseconds(1499));
+        check_size(visible, 1U);
+        check_equal(visible[0].action, std::string("Grasp"));
+        visible = history.update({}, started + std::chrono::milliseconds(1500));
+        check_empty(visible);
+    }
+
+    it("bounds and resets semantic action presentation history")
+    {
+        demo::RecentActionHistory history;
+        const auto started = std::chrono::steady_clock::time_point {};
+        std::vector<kfcore::thig::ActionEvent> actions;
+        for (int index = 0; index < 5; ++index)
+        {
+            kfcore::thig::ActionEvent action;
+            action.action = "Action " + std::to_string(index);
+            action.source = { "hand", index + 1 };
+            actions.push_back(std::move(action));
+        }
+
+        const auto visible = history.update(actions, started);
+        check_size(visible, 4U);
+        check_equal(visible.front().action, std::string("Action 1"));
+        check_equal(visible.back().action, std::string("Action 4"));
+        history.reset();
+        check_empty(history.update({}, started));
+    }
+
+    it("rejects unusable semantic action presentation bounds")
+    {
+        check_throws_as(demo::RecentActionHistory(std::chrono::milliseconds(0), 4U),
+                        std::invalid_argument);
+        check_throws_as(demo::RecentActionHistory(std::chrono::milliseconds(1500), 0U),
+                        std::invalid_argument);
+    }
+
+    it("formats THIG graph state and semantic action diagnostics")
+    {
+        demo::DemoThigStatus status;
+        status.hand_state  = "armed";
+        status.wave_state  = "armed";
+        status.click_state = "ready";
+        kfcore::thig::ActionEvent grasp;
+        grasp.action = "Grasp";
+        grasp.source = { "hand", 1 };
+
+        check_equal(demo::format_thig_state_line(status),
+                    std::string("THIG hand=armed | wave=armed | click=ready"));
+        check_equal(demo::format_action_line(grasp),
+                    std::string("ACTION: Grasp | Hand ID:1"));
     }
 
     it("mirrors the camera image without modifying its source")
@@ -130,7 +208,7 @@ spec("hand interaction demo frame and UI")
         const cv::Vec3b marker(5U, 17U, 93U);
         source.at<cv::Vec3b>(200, 10) = marker;
 
-        const cv::Mat output = demo::compose_overlay(source, {}, {}, nullptr, {});
+        const cv::Mat output = demo::compose_overlay(source, {}, {}, {}, nullptr, {});
         const cv::Vec3b mirrored_marker = output.at<cv::Vec3b>(200, 309);
         const cv::Vec3b original_position = output.at<cv::Vec3b>(200, 10);
 
@@ -189,8 +267,10 @@ spec("hand interaction demo frame and UI")
         }
         face.landmarks = landmarks;
 
+        demo::DemoThigStatus status;
+        status.recent_actions = interaction.actions;
         const cv::Mat output = demo::compose_overlay(
-            source, hands, interaction, &face, metrics);
+            source, hands, interaction, status, &face, metrics);
         check_equal(output.type(), CV_8UC3);
         check_equal(output.rows, source.rows);
         check_equal(output.cols, source.cols);
@@ -205,7 +285,7 @@ spec("hand interaction demo frame and UI")
     it("rejects non-BGR UI input")
     {
         cv::Mat gray(32, 32, CV_8UC1, cv::Scalar(0));
-        check_throws_as(demo::compose_overlay(gray, {}, {}, nullptr, {}),
+        check_throws_as(demo::compose_overlay(gray, {}, {}, {}, nullptr, {}),
                         std::invalid_argument);
     }
 }

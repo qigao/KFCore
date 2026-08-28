@@ -199,7 +199,13 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 稳定的 P50/P95 性能结论，也不包含 HighGUI 的显示刷新时间。
 
 窗口只在显示层镜像画面及手部/FaceMesh 坐标，模型仍消费原始相机帧。状态栏的 `FPS` 是按实际
-消费帧间隔计算的指数平滑值；每只手明确显示 THIG `Hand ID`、tracker `Track ID` 与 `Gesture` 名称。
+消费帧间隔计算的指数平滑值；每只手明确显示 THIG `Hand ID`、tracker `Track ID`、原始分类与
+派生 primitive。
+
+手框中的 `Raw` 只表示 keypoint classifier 的 `Open/Closed/Pointer` 原始三分类；`Derived`、
+`Motion` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。状态栏同时显示 hand、wave、click
+三张 THIG 状态图。`Single Hand V`、`Grasp` 等一次性 `ActionEvent` 不改变核心事件语义，但在
+demo 中最多保留四条、每条显示 1500ms，便于人工观察；按 `R` 会同时清除这段显示历史。
 
 若 configure 报告缺少 `TurboUtils::Capture`，说明 TurboUtils SDK 没有安装 Capture 导出目标；
 在 TurboUtils 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install

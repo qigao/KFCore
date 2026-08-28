@@ -40,6 +40,9 @@ using kfcore::vision_models::HandPipeline;
 using kfcore::vision_models::FaceMeshFrame;
 
 constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction + FaceMesh";
+constexpr char kHandInteractionGraph[] = "hand_interaction_cycle";
+constexpr char kWaveGraph[] = "wave_cycle";
+constexpr char kScreenClickGraph[] = "screen_click_cycle";
 constexpr std::chrono::milliseconds kFrameWait { 50 };
 constexpr double kFpsSmoothingAlpha = 0.15;
 
@@ -193,6 +196,7 @@ int run(const demo::Arguments& arguments)
     std::cout << std::fixed << std::setprecision(2) << "Model load: "
               << model_load_ms << " ms\n";
     HandInteractionPipeline interaction_pipeline;
+    demo::RecentActionHistory action_history;
     demo::LatestFrameMailbox mailbox(arguments.capture.max_frame_bytes);
     demo::CapturedFrame      captured = mailbox.make_consumer_frame();
     demo::CameraCapture      camera(device.id, mode, mailbox);
@@ -251,6 +255,13 @@ int run(const demo::Arguments& arguments)
         HandInteractionFrame interaction = interaction_pipeline.process(hands, context);
         const auto thig_finished = std::chrono::steady_clock::now();
 
+        demo::DemoThigStatus thig_status;
+        thig_status.recent_actions =
+            action_history.update(interaction.actions, thig_finished);
+        thig_status.hand_state = interaction_pipeline.graph_state(kHandInteractionGraph);
+        thig_status.wave_state = interaction_pipeline.graph_state(kWaveGraph);
+        thig_status.click_state = interaction_pipeline.graph_state(kScreenClickGraph);
+
         demo::DemoMetrics metrics;
         metrics.capture = mailbox.counters();
         metrics.model   = hands.timings;
@@ -263,13 +274,15 @@ int run(const demo::Arguments& arguments)
         metrics.frame_ms =
             std::chrono::duration<double, std::milli>(thig_finished - frame_started).count();
         cv::imshow(kWindowTitle, demo::compose_overlay(
-            bgr, hands, interaction, face_pipeline ? &face : nullptr, metrics));
+            bgr, hands, interaction, thig_status,
+            face_pipeline ? &face : nullptr, metrics));
 
         const demo::DemoAction action = demo::action_from_key(cv::waitKey(1));
         if (action == demo::DemoAction::Reset)
         {
             model_pipeline->reset();
             interaction_pipeline.reset();
+            action_history.reset();
         }
         else if (action == demo::DemoAction::Quit)
         {

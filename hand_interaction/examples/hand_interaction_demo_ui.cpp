@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace kfcore::hand_interaction::demo
 {
@@ -26,7 +27,6 @@ constexpr int    kPointRadius = 2;
 constexpr int    kTextThickness = 1;
 constexpr int    kTextLineHeight = 20;
 constexpr int    kTextMargin = 8;
-constexpr int    kMaximumActionLines = 4;
 constexpr double kTextScale = 0.48;
 
 int clamp_coordinate(float value, int extent)
@@ -111,6 +111,49 @@ DemoAction action_from_key(int key) noexcept
     }
 }
 
+RecentActionHistory::RecentActionHistory(std::chrono::milliseconds retention,
+                                         std::size_t maximum_actions)
+    : retention_(retention)
+    , maximum_actions_(maximum_actions)
+{
+    if (retention_.count() <= 0 || maximum_actions_ == 0U)
+    {
+        throw std::invalid_argument("recent action history requires positive bounds");
+    }
+    entries_.reserve(maximum_actions_);
+}
+
+std::vector<thig::ActionEvent> RecentActionHistory::update(
+    const std::vector<thig::ActionEvent>& actions,
+    std::chrono::steady_clock::time_point now)
+{
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
+                                  [now](const Entry& entry)
+                                  { return entry.expires_at <= now; }),
+                   entries_.end());
+    for (const thig::ActionEvent& action : actions)
+    {
+        if (entries_.size() == maximum_actions_)
+        {
+            entries_.erase(entries_.begin());
+        }
+        entries_.push_back({ action, now + retention_ });
+    }
+
+    std::vector<thig::ActionEvent> result;
+    result.reserve(entries_.size());
+    for (const Entry& entry : entries_)
+    {
+        result.push_back(entry.action);
+    }
+    return result;
+}
+
+void RecentActionHistory::reset() noexcept
+{
+    entries_.clear();
+}
+
 std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
 {
     std::array<std::ostringstream, 3> text;
@@ -133,17 +176,82 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
     return { text[0].str(), text[1].str(), text[2].str() };
 }
 
-std::string format_hand_label(int canonical_id,
-                              const vision_models::HandResult& hand)
+HandOverlayText format_hand_overlay_text(int canonical_id,
+                                         const vision_models::HandResult& hand,
+                                         const PrimitiveFrame& primitives)
 {
-    std::ostringstream label;
-    label << "Hand ID:" << canonical_id << " | Track ID:" << hand.track_id
-          << " | Gesture:" << gesture_name(hand.gesture);
-    return label.str();
+    std::string shape  = "Unknown";
+    std::string motion = "Unknown";
+    bool        ok     = false;
+    for (const thig::Observation& observation : primitives.observations)
+    {
+        if (observation.source.kind != "hand" ||
+            observation.source.id != canonical_id)
+        {
+            continue;
+        }
+        if (observation.relation.compare(0U, 6U, "Shape ") == 0)
+        {
+            shape = observation.relation.substr(6U);
+        }
+        else if (observation.relation.compare(0U, 7U, "Motion ") == 0)
+        {
+            motion = observation.relation.substr(7U);
+        }
+        else if (observation.relation == "Pose OK")
+        {
+            ok = true;
+        }
+    }
+
+    HandOverlayText result;
+    std::ostringstream identity;
+    identity << "Hand ID:" << canonical_id << " | Track ID:" << hand.track_id
+             << " | Raw:" << gesture_name(hand.gesture);
+    result.identity = identity.str();
+
+    std::ostringstream derived;
+    derived << "Derived:" << shape << " | Motion:" << motion;
+    if (ok)
+    {
+        derived << " | Pose:OK";
+    }
+    result.derived = derived.str();
+    return result;
+}
+
+std::string format_thig_state_line(const DemoThigStatus& status)
+{
+    const auto state_or_unknown = [](const std::string& state) -> const std::string&
+    {
+        static const std::string unknown = "unknown";
+        return state.empty() ? unknown : state;
+    };
+    std::ostringstream line;
+    line << "THIG hand=" << state_or_unknown(status.hand_state)
+         << " | wave=" << state_or_unknown(status.wave_state)
+         << " | click=" << state_or_unknown(status.click_state);
+    return line.str();
+}
+
+std::string format_action_line(const thig::ActionEvent& action)
+{
+    std::ostringstream line;
+    line << "ACTION: " << action.action << " | ";
+    if (action.source.kind == "hand")
+    {
+        line << "Hand ID:" << action.source.id;
+    }
+    else
+    {
+        line << action.source.kind << " ID:" << action.source.id;
+    }
+    return line.str();
 }
 
 cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& hands,
                         const HandInteractionFrame& interaction,
+                        const DemoThigStatus& status,
                         const vision_models::FaceMeshFrame* face,
                         const DemoMetrics& metrics)
 {
@@ -154,11 +262,12 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
 
     cv::Mat output;
     cv::flip(source, output, 1);
-    const int action_lines =
-        std::min(static_cast<int>(interaction.actions.size()), kMaximumActionLines);
+    const int action_lines = std::min(
+        static_cast<int>(status.recent_actions.size()),
+        static_cast<int>(kMaximumDisplayedActions));
     const int face_timing_lines = face != nullptr ? 1 : 0;
     const auto timing_lines = format_timing_lines(metrics);
-    draw_status_background(output, 4 + face_timing_lines + action_lines);
+    draw_status_background(output, 5 + face_timing_lines + action_lines);
     cv::putText(output, "R reset tracking/THIG | Q/Esc quit",
                 cv::Point(kTextMargin, kTextMargin + kTextLineHeight),
                 cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
@@ -184,12 +293,18 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
                     kTextThickness, cv::LINE_AA);
     }
 
+    cv::putText(output, format_thig_state_line(status),
+                cv::Point(kTextMargin,
+                          kTextMargin + (5 + face_timing_lines) * kTextLineHeight),
+                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
+                kTextThickness, cv::LINE_AA);
+
     for (int index = 0; index < action_lines; ++index)
     {
-        const auto& action = interaction.actions[static_cast<std::size_t>(index)];
-        cv::putText(output, "ACTION: " + action.action,
+        const auto& action = status.recent_actions[static_cast<std::size_t>(index)];
+        cv::putText(output, format_action_line(action),
                     cv::Point(kTextMargin,
-                              kTextMargin + (5 + face_timing_lines + index) *
+                              kTextMargin + (6 + face_timing_lines + index) *
                                   kTextLineHeight),
                     cv::FONT_HERSHEY_SIMPLEX, kTextScale, kActionTextColor,
                     kTextThickness, cv::LINE_AA);
@@ -219,8 +334,14 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
                        kPointRadius, kLandmarkColor, cv::FILLED, cv::LINE_AA);
         }
 
-        cv::putText(output, format_hand_label(canonical_id_for(interaction, index), hand),
-                    cv::Point(left, std::max(15, top - 6)),
+        const HandOverlayText label = format_hand_overlay_text(
+            canonical_id_for(interaction, index), hand, interaction.primitives);
+        const int identity_y = std::max(15, top - kTextLineHeight - 6);
+        cv::putText(output, label.identity, cv::Point(left, identity_y),
+                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
+                    kTextThickness, cv::LINE_AA);
+        cv::putText(output, label.derived,
+                    cv::Point(left, identity_y + kTextLineHeight),
                     cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
                     kTextThickness, cv::LINE_AA);
     }
