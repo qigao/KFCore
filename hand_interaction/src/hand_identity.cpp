@@ -285,7 +285,7 @@ private:
                    const HandIdentityObservation& observation) {
     const std::uint64_t age = frame_index_ - state.last_seen_frame;
     if (state.observation_count > 0 && age > 0) {
-    const double inverse_age = 1.0 / static_cast<double>(age);
+      const double inverse_age = 1.0 / static_cast<double>(age);
       const double observed_velocity_x =
           (static_cast<double>(observation.center_x) - state.center_x) * inverse_age;
       const double observed_velocity_y =
