@@ -142,6 +142,11 @@ Arguments parse_arguments(const std::vector<std::string>& values,
             result.list_cameras = true;
             continue;
         }
+        if (option == "--wave-require-horizontal-axis")
+        {
+            result.wave_require_horizontal_axis = true;
+            continue;
+        }
         if (index + 1U >= values.size() || values[index + 1U].empty() ||
             values[index + 1U].rfind("--", 0U) == 0U)
         {

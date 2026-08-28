@@ -74,6 +74,21 @@ spec("hand interaction demo CLI")
         check_equal(arguments.capture.fps, 30);
     }
 
+    it("enables the optional horizontal palm-axis Wave gate explicitly")
+    {
+        ModelFixture models;
+        const auto defaults = demo::parse_arguments(
+            { "hand_interaction_demo", "--model-dir", models.path() },
+            { true, false });
+        const auto constrained = demo::parse_arguments(
+            { "hand_interaction_demo", "--wave-require-horizontal-axis",
+              "--model-dir", models.path() },
+            { true, false });
+
+        check_false(defaults.wave_require_horizontal_axis);
+        check_true(constrained.wave_require_horizontal_axis);
+    }
+
     it("requires an explicit backend when both are compiled")
     {
         check_throws_as(demo::parse_arguments(

@@ -107,6 +107,15 @@ HandResult model_hand(Gesture gesture)
     return hand;
 }
 
+void translate_hand_x(HandResult& hand, float delta_x)
+{
+    hand.palm.box.x += delta_x;
+    for (auto& point : hand.landmarks)
+    {
+        point.x += delta_x;
+    }
+}
+
 GestureFrameContext frame_context(std::uint64_t serial, int elapsed_ms)
 {
     return { serial,
@@ -129,6 +138,31 @@ spec("hand interaction")
         const auto actions = feed(
             engine, 3, 200, { relation("Shape Open", 1, 3), relation("Direction Left", 1, 3) });
         check_true(has_action(actions, "Wave"));
+    }
+
+    it("recognizes a camera-derived Wave across neutral reversal frames")
+    {
+        HandInteractionOptions options;
+        options.primitives.motion.movement_window_samples = 2;
+        options.primitives.motion.direction_distance_min_px = 20.0F;
+        options.primitives.motion.direction_distance_hand_ratio = 0.10F;
+        options.temporal = immediate_settings();
+        options.temporal.wave_require_horizontal_palm_axis = true;
+        HandInteractionPipeline pipeline(options);
+        HandFrame               frame;
+        frame.hands.push_back(model_hand(Gesture::Open));
+
+        (void)pipeline.process(frame, frame_context(1, 0));
+        translate_hand_x(frame.hands[0], -40.0F);
+        (void)pipeline.process(frame, frame_context(2, 50));
+        (void)pipeline.process(frame, frame_context(3, 100));
+        translate_hand_x(frame.hands[0], 80.0F);
+        (void)pipeline.process(frame, frame_context(4, 150));
+        (void)pipeline.process(frame, frame_context(5, 200));
+        translate_hand_x(frame.hands[0], -80.0F);
+        const auto result = pipeline.process(frame, frame_context(6, 250));
+
+        check_true(has_action(result.actions, "Wave"));
     }
 
     it("optionally requires a horizontal palm axis throughout Wave")
@@ -245,6 +279,36 @@ spec("hand interaction")
         check_true(has_action(
             feed(rotate_engine, 1, 0,
                  { relation("Rotation Clockwise", 1, 1), relation("Motion Stationary", 1, 1) }),
+            "Rotate Clockwise"));
+    }
+
+    it("suppresses repeated Rotate actions inside the configured cooldown")
+    {
+        HandInteractionSettings settings = immediate_settings();
+        settings.rotation_cooldown_ms = 500;
+        TemporalGraphEngine engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+
+        check_true(has_action(
+            feed(engine, 1, 0,
+                 { relation("Rotation Clockwise", 1, 1),
+                   relation("Motion Stationary", 1, 1) }),
+            "Rotate Clockwise"));
+        (void)feed(engine, 2, 100,
+                   { relation("Rotation Stable", 1, 2),
+                     relation("Motion Stationary", 1, 2) });
+        check_false(has_action(
+            feed(engine, 3, 200,
+                 { relation("Rotation Clockwise", 1, 3),
+                   relation("Motion Stationary", 1, 3) }),
+            "Rotate Clockwise"));
+        (void)feed(engine, 4, 600,
+                   { relation("Rotation Stable", 1, 4),
+                     relation("Motion Stationary", 1, 4) });
+        check_true(has_action(
+            feed(engine, 5, 700,
+                 { relation("Rotation Clockwise", 1, 5),
+                   relation("Motion Stationary", 1, 5) }),
             "Rotate Clockwise"));
     }
 

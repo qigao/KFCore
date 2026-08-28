@@ -37,6 +37,7 @@ struct HandOverlayText
 {
     std::string identity;
     std::string derived;
+    std::string dynamics;
 };
 
 struct DemoThigStatus

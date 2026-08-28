@@ -180,10 +180,12 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
                                          const vision_models::HandResult& hand,
                                          const PrimitiveFrame& primitives)
 {
-    std::string shape  = "Unknown";
-    std::string motion = "Unknown";
-    std::string axis   = "Unknown";
-    bool        ok     = false;
+    std::string shape     = "Unknown";
+    std::string motion    = "Unknown";
+    std::string direction = "Unknown";
+    std::string rotation  = "Unknown";
+    std::string axis      = "Unknown";
+    bool        ok        = false;
     for (const thig::Observation& observation : primitives.observations)
     {
         if (observation.source.kind != "hand" ||
@@ -198,6 +200,14 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
         else if (observation.relation.compare(0U, 7U, "Motion ") == 0)
         {
             motion = observation.relation.substr(7U);
+        }
+        else if (observation.relation.compare(0U, 10U, "Direction ") == 0)
+        {
+            direction = observation.relation.substr(10U);
+        }
+        else if (observation.relation.compare(0U, 9U, "Rotation ") == 0)
+        {
+            rotation = observation.relation.substr(9U);
         }
         else if (observation.relation.compare(0U, 10U, "Palm Axis ") == 0)
         {
@@ -218,11 +228,15 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
     std::ostringstream derived;
     derived << "Derived:" << shape << " | Motion:" << motion
             << " | Axis:" << axis;
+    result.derived = derived.str();
+
+    std::ostringstream dynamics;
+    dynamics << "Direction:" << direction << " | Rotation:" << rotation;
     if (ok)
     {
-        derived << " | Pose:OK";
+        dynamics << " | Pose:OK";
     }
-    result.derived = derived.str();
+    result.dynamics = dynamics.str();
     return result;
 }
 
@@ -348,6 +362,10 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
                     kTextThickness, cv::LINE_AA);
         cv::putText(output, label.derived,
                     cv::Point(left, identity_y + kTextLineHeight),
+                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
+                    kTextThickness, cv::LINE_AA);
+        cv::putText(output, label.dynamics,
+                    cv::Point(left, identity_y + 2 * kTextLineHeight),
                     cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
                     kTextThickness, cv::LINE_AA);
     }

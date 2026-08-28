@@ -41,7 +41,8 @@ struct CaptureRequest
 
 struct Arguments
 {
-    bool                         list_cameras = false;
+    bool                         list_cameras                 = false;
+    bool                         wave_require_horizontal_axis = false;
     std::optional<Backend>       backend;
     std::optional<std::uint64_t> max_frames;
     CaptureRequest               capture;

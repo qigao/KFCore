@@ -18,7 +18,8 @@ TensorRT Hand backend ----+                         |
   `wave_require_horizontal_palm_axis` 要求整个动作期间掌根轴保持水平。
 - `Grasp`、`Release`、`Drag Start *`、`Drag *`、`Drag End`、`Drag Cancelled`。
 - `OK`、`Single Hand V`、`Two Hand V`。
-- `Zoom In`、`Zoom Out`、`Rotate Clockwise`、`Rotate CounterClockwise`。
+- `Zoom In`、`Zoom Out`、`Rotate Clockwise`、`Rotate CounterClockwise`；Rotate 默认使用
+  `rotation_cooldown_ms=600` 抑制短时间关系抖动造成的重复事件。
 - `Click Center/Left/Right/Top/Bottom`：需要应用提供 `Region *` 外部观察。
 
 动作只表达语义，不直接操作 Camera、Gallery、UI 或窗口。应用负责把动作映射为命令；人脸
@@ -253,9 +254,10 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 派生 primitive。
 
 手框中的 `Raw` 只表示 keypoint classifier 的 `Open/Closed/Pointer` 原始三分类；`Derived`、
-`Motion`、`Axis` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。`Axis` 将掌根 5→17 的
-无向轴按可配置阈值归类为 `Horizontal/Diagonal/Vertical`；demo 显式要求 `Wave` 全程为
-`Horizontal`，库默认仍保持关闭以兼容现有调用。状态栏同时显示 hand、wave、click
+`Motion`、`Direction`、`Rotation`、`Axis` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。
+`Axis` 将掌根 5→17 的无向轴按可配置阈值归类为 `Horizontal/Diagonal/Vertical`。demo 默认允许
+任意掌轴完成 `Wave`；需要严格限制时显式传入 `--wave-require-horizontal-axis`，要求全程为
+`Horizontal`。状态栏同时显示 hand、wave、click
 三张 THIG 状态图。`Single Hand V`、`Grasp` 等一次性 `ActionEvent` 不改变核心事件语义，但在
 demo 中最多保留四条、每条显示 1500ms，便于人工观察；按 `R` 会同时清除这段显示历史。
 

@@ -86,8 +86,8 @@ namespace
             pattern.nodes[7].inputs = { 5, 9 };
         }
         pattern.root               = 7;
-        pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Direction Neutral",
-                                       "Shape Fist",   "Shape Pointer",  "Shape V" };
+        pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Shape Fist",
+                                       "Shape Pointer", "Shape V" };
         return pattern;
     }
 
@@ -274,30 +274,32 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
     spec.actions.push_back(std::move(singleHandV));
 
     const auto addSpatialAction =
-        [&](std::string action, thig::PatternGraph pattern, std::string exclusiveGroup)
+        [&](std::string action, thig::PatternGraph pattern, std::string exclusiveGroup,
+            int cooldownMs)
     {
         thig::ActionSpec specAction;
         specAction.action         = std::move(action);
         specAction.pattern        = std::move(pattern);
         specAction.exclusiveGroup = std::move(exclusiveGroup);
         specAction.priority       = 70;
+        specAction.cooldownMs     = cooldownMs;
         spec.actions.push_back(std::move(specAction));
     };
     addSpatialAction(
         "Zoom In", thig::PatternGraph::Atom("Hands Distance Expanding", settings.spatial_dwell_ms),
-        "zoom_transform");
+        "zoom_transform", 0);
     addSpatialAction(
         "Zoom Out",
         thig::PatternGraph::Atom("Hands Distance Contracting", settings.spatial_dwell_ms),
-        "zoom_transform");
+        "zoom_transform", 0);
     addSpatialAction(
         "Rotate Clockwise",
         BothRelations("Rotation Clockwise", "Motion Stationary", settings.spatial_dwell_ms),
-        "rotation_transform");
+        "rotation_transform", settings.rotation_cooldown_ms);
     addSpatialAction(
         "Rotate CounterClockwise",
         BothRelations("Rotation CounterClockwise", "Motion Stationary", settings.spatial_dwell_ms),
-        "rotation_transform");
+        "rotation_transform", settings.rotation_cooldown_ms);
 
     const auto addDualHandAction =
         [&](std::string action, std::string first, std::string second, int priority)

@@ -197,7 +197,8 @@ int run(const demo::Arguments& arguments)
     std::cout << std::fixed << std::setprecision(2) << "Model load: "
               << model_load_ms << " ms\n";
     HandInteractionOptions interaction_options;
-    interaction_options.temporal.wave_require_horizontal_palm_axis = true;
+    interaction_options.temporal.wave_require_horizontal_palm_axis =
+        arguments.wave_require_horizontal_axis;
     HandInteractionPipeline interaction_pipeline(interaction_options);
     demo::RecentActionHistory action_history;
     demo::LatestFrameMailbox mailbox(arguments.capture.max_frame_bytes);
