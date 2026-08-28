@@ -237,4 +237,41 @@ spec("CPU vision real-model integration")
             check_true(std::isfinite(point.z));
         }
     }
+
+    it("runs YOLOv12 face detection and MediaPipe landmarks as one CPU pipeline")
+    {
+        CpuVisionOptions options;
+        options.intra_op_threads = 1;
+        options.inter_op_threads = 1;
+        options.face_detection_score_threshold = 0.25F;
+        auto detector = CpuFaceDetector::load(
+            KFCORE_VISION_CPU_TEST_FACE_DETECTOR, options);
+        auto landmarker = CpuFaceLandmarker::load(
+            KFCORE_VISION_CPU_TEST_FACE, options);
+        auto pipeline = FaceMeshPipeline::create(
+            std::move(detector), std::move(landmarker));
+
+        const kfcore::image::BgrImage image = read_bgr(
+            KFCORE_VISION_CPU_TEST_FACE_IMAGE);
+        const FaceMeshFrame frame = pipeline->process(image.view());
+
+        check_true(frame.detection.has_value());
+        check_true(frame.landmarks.has_value());
+        check_true(frame.timings.detection_preprocess_ms > 0.0);
+        check_true(frame.timings.detection_inference_ms > 0.0);
+        check_true(frame.timings.landmark_preprocess_ms > 0.0);
+        check_true(frame.timings.landmark_inference_ms > 0.0);
+        check_true(frame.timings.total_ms > 0.0);
+        const RectF& box = frame.detection->box;
+        check_true(box.x >= 0.0F);
+        check_true(box.y >= 0.0F);
+        check_true(box.x + box.width <= static_cast<float>(image.width));
+        check_true(box.y + box.height <= static_cast<float>(image.height));
+        for (const Point3f& point : frame.landmarks->landmarks)
+        {
+            check_true(std::isfinite(point.x));
+            check_true(std::isfinite(point.y));
+            check_true(std::isfinite(point.z));
+        }
+    }
 }

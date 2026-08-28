@@ -28,6 +28,7 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t kImageChannels = 3U;
 constexpr std::size_t kHandOutputWidth = kHandLandmarkCount * 3U;
 constexpr std::size_t kClassifierFeatureWidth = kHandLandmarkCount * 2U;
+constexpr std::int32_t kFaceDetectorInputExtent = 640;
 
 [[noreturn]] void throw_invalid(const std::string& detail)
 {
@@ -83,6 +84,16 @@ void validate_options(const CpuVisionOptions& options)
         options.hand_score_threshold < 0.0F || options.hand_score_threshold > 1.0F)
     {
         throw_invalid("model score thresholds must be finite within [0,1]");
+    }
+    if (!std::isfinite(options.face_detection_score_threshold) ||
+        options.face_detection_score_threshold < 0.0F ||
+        options.face_detection_score_threshold > 1.0F)
+    {
+        throw_invalid("face_detection_score_threshold must be finite within [0,1]");
+    }
+    if (options.face_class_id < 0)
+    {
+        throw_invalid("face_class_id must not be negative");
     }
 
     std::size_t hand_batch_elements = checked_multiply(
@@ -140,6 +151,14 @@ detail::OnnxModelContract face_contract()
              { { "scores", detail::OnnxElementType::Float32, { 1 } },
                { "landmarks", detail::OnnxElementType::Float32,
                  { 1, static_cast<std::int64_t>(kFaceLandmarkCount), 3 } } } };
+}
+
+detail::OnnxModelContract face_detector_contract()
+{
+    return { "YOLOv12 face detector",
+             { { "images", detail::OnnxElementType::Float32,
+                 { 1, 3, kFaceDetectorInputExtent, kFaceDetectorInputExtent } } },
+             { { "output0", detail::OnnxElementType::Float32, { 1, 300, 6 } } } };
 }
 
 image::PreprocessOptions rgb_unit_options(float border_value = 0.0F)
@@ -371,6 +390,94 @@ HandFrame CpuHandBackend::infer(const image::ImageView& source)
     catch (const std::bad_alloc&)
     {
         throw_resource("hand inference allocation failed");
+    }
+}
+
+struct CpuFaceDetector::Impl final
+{
+    Impl(const std::filesystem::path& path, const CpuVisionOptions& options_value)
+        : options(options_value)
+        , environment(ORT_LOGGING_LEVEL_ERROR, "KFCoreVisionModelsCpuFaceDetector")
+        , session(environment, path, face_detector_contract(), session_options(options))
+    {
+    }
+
+    CpuVisionOptions    options;
+    Ort::Env            environment;
+    detail::OnnxSession session;
+    std::atomic_flag    in_use = ATOMIC_FLAG_INIT;
+};
+
+CpuFaceDetector::CpuFaceDetector(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+CpuFaceDetector::~CpuFaceDetector() = default;
+
+std::unique_ptr<CpuFaceDetector> CpuFaceDetector::load(
+    const std::filesystem::path& model_path, const CpuVisionOptions& options)
+{
+    validate_options(options);
+    try
+    {
+        auto impl = std::make_unique<Impl>(model_path, options);
+        return std::unique_ptr<CpuFaceDetector>(new CpuFaceDetector(std::move(impl)));
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("face detector allocation failed");
+    }
+}
+
+FaceDetectionResult CpuFaceDetector::infer(const image::ImageView& source)
+{
+    if (!impl_)
+    {
+        throw_invalid("face detector state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    validate_host_image(source);
+    try
+    {
+        const Clock::time_point total_started = Clock::now();
+        FaceDetectionResult result;
+        image::LetterboxTransform letterbox;
+        const Clock::time_point preprocess_started = Clock::now();
+        std::vector<float> input = image::CpuImageProcessor::letterbox_nchw(
+            source, kFaceDetectorInputExtent, kFaceDetectorInputExtent,
+            rgb_unit_options(114.0F), impl_->options.max_source_bytes,
+            impl_->options.max_tensor_bytes, &letterbox);
+        result.preprocess_ms = elapsed_ms(preprocess_started);
+
+        const Clock::time_point inference_started = Clock::now();
+        std::vector<detail::OnnxHostTensor> outputs = impl_->session.run(
+            { { input.data(), input.size(),
+                { 1, 3, kFaceDetectorInputExtent, kFaceDetectorInputExtent } } });
+        result.inference_ms = elapsed_ms(inference_started);
+        if (outputs.size() != 1U || outputs[0].float_values.size() != 300U * 6U)
+        {
+            throw_contract("YOLOv12 face detector output set is invalid");
+        }
+        result.face = detail::decode_yolo12_face(
+            outputs[0].float_values.data(), outputs[0].float_values.size(),
+            impl_->options.face_class_id,
+            impl_->options.face_detection_score_threshold, letterbox,
+            source.width, source.height);
+        result.total_ms = elapsed_ms(total_started);
+        return result;
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("face detector inference allocation failed");
     }
 }
 

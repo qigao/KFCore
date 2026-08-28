@@ -97,13 +97,16 @@ fail fast。模型与 TensorRT engine 仍由对应 backend 管理，既不复制
 
 ```text
 USB camera -> Turbo Capture -> bounded latest-frame mailbox -> owning BGR image
-           -> CPU ONNX Runtime 或 TensorRT/ImageProcessor -> HandPipeline -> THIG -> HighGUI
+           +-> CPU ONNX Runtime 或 TensorRT/ImageProcessor -> HandPipeline -> THIG --+
+           +-> 可选 YOLOv12-face -> MediaPipe FaceMesh 468 点 -----------------------+-> HighGUI
 ```
 
 Capture 回调中的像素指针只在回调期间有效，因此示例在回调返回前复制一次。邮箱固定保留两个
 受 `--max-frame-bytes` 限制的 vector；推理落后时以最新帧替换未消费帧并增加 `coalesced`，不会
 让采集线程等待。BGR 图像由示例拥有，并同时借给显示和所选推理后端；TensorRT 后端再由现有
-ImageProcessor 上传和预处理。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
+ImageProcessor 上传和预处理。手部与人脸流程共享同一个只读 host BGR `ImageView`；当前
+TensorRT detector 与 landmarker 各自拥有 CUDA stream、staging 和 tensor buffer，因此这不是
+GPU tensor 级零拷贝共享。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
 `KFCore::hand_interaction` 的传递依赖。
 
 ### 构建
@@ -145,6 +148,17 @@ build\HandCPU\bin\hand_interaction_demo.exe `
   --model-dir C:\projects\cpp\KFCore\yolo-models
 ```
 
+在同一窗口启用 FaceMesh 时，额外显式提供 YOLOv12-face detector 与 MediaPipe 468 点模型；
+两项必须同时出现，省略两项仍保持原有 hand-only 行为：
+
+```powershell
+build\HandCPU\bin\hand_interaction_demo.exe `
+  --backend cpu --camera 1 --mode 0 --max-frames 100 `
+  --model-dir C:\projects\cpp\KFCore\yolo-models `
+  --face-detector C:\projects\cpp\KFCore\yolo-models\yolov12n-face.onnx `
+  --facemesh C:\projects\cpp\KFCore\yolo-models\MediaPipeFaceLandmarkDetector.onnx
+```
+
 TensorRT 要求显式提供三份可信 engine，不会自动生成 engine 或回退到 CPU：
 
 ```powershell
@@ -155,14 +169,33 @@ build\HandTRT\bin\hand_interaction_demo.exe `
   --classifier C:\models\keypoint_classifier.engine
 ```
 
+TensorRT FaceMesh 使用同模型生成的 strongly typed engine：
+
+```powershell
+build\HandTRT\bin\hand_interaction_demo.exe `
+  --backend tensorrt --camera 1 --mode 0 --max-frames 100 `
+  --palm C:\models\palm_detection.engine `
+  --hand C:\models\hand_landmark.engine `
+  --classifier C:\models\keypoint_classifier.engine `
+  --face-detector C:\models\yolov12n-face.engine `
+  --facemesh C:\models\face_landmark.engine
+```
+
+`--face-score` 和 `--facemesh-score` 分别设置 detector 与 landmarks 的 `[0,1]` 置信度阈值，
+默认均为 `0.5`。当前只消费 class 0 中得分最高的一张脸，并绘制 468 个点；没有使用未经本地
+模型验证的 mesh 连线表。TensorRT-YOLO 当前不拆分 detector 内部的上传、预处理与 enqueue
+计时，因此 TensorRT 窗口中的 `face-pre` 为 `0`，`face-det` 是 detector 整次调用的墙钟耗时；
+CPU 路径会分别报告两项。
+
 `--mode` 与 `--width/--height/--fps` 二选一，且只接受精确匹配。省略时请求
 1280x720@30；同一规格按 NV12、I420、BGRA、RGB24 的顺序选择。MJPEG 会被明确拒绝，因为
 示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
 `R` 同时重置 tracker 与 THIG 状态，`Q`、Escape 或关闭窗口正常退出。
 
-启动时输出三模型加载耗时；窗口逐帧显示 Capture-to-BGR 转换、preprocess、Palm、landmark、
+启动时输出全部已启用模型的总加载耗时；窗口逐帧显示 Capture-to-BGR 转换、preprocess、Palm、landmark、
 classifier、tracking、model 总计、THIG 和整条处理 pipeline 的耗时，以及
-`captured/consumed/coalesced/rejected` 计数。这些是当前帧和当前运行的诊断数据，不等同于
+FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh inference 与 face 总计，
+以及 `captured/consumed/coalesced/rejected` 计数。这些是当前帧和当前运行的诊断数据，不等同于
 稳定的 P50/P95 性能结论，也不包含 HighGUI 的显示刷新时间。
 
 若 configure 报告缺少 `TurboUtils::Capture`，说明 TurboUtils SDK 没有安装 Capture 导出目标；

@@ -96,6 +96,11 @@ spec("hand interaction demo frame and UI")
         metrics.model.classifier_inference_ms  = 5.25;
         metrics.model.tracking_ms              = 6.5;
         metrics.model.total_ms                 = 22.0;
+        metrics.face.detection_preprocess_ms   = 1.0;
+        metrics.face.detection_inference_ms    = 2.0;
+        metrics.face.landmark_preprocess_ms    = 3.0;
+        metrics.face.landmark_inference_ms     = 4.0;
+        metrics.face.total_ms                  = 10.5;
         metrics.thig_ms                        = 0.75;
         metrics.frame_ms                       = 24.0;
 
@@ -104,6 +109,8 @@ spec("hand interaction demo frame and UI")
                     std::string("ms conv 1.25 pre 2.50 palm 3.75 land 4.00"));
         check_equal(lines[1],
                     std::string("ms cls 5.25 track 6.50 model 22.00 thig 0.75 pipe 24.00"));
+        check_equal(lines[2],
+                    std::string("ms face-pre 1.00 face-det 2.00 mesh-pre 3.00 mesh 4.00 face 10.50"));
     }
 
     it("draws tracked hands actions and metrics without changing the input")
@@ -137,17 +144,38 @@ spec("hand interaction demo frame and UI")
         metrics.thig_ms                   = 0.4;
         metrics.frame_ms                  = 10.2;
 
-        const cv::Mat output = demo::compose_overlay(source, hands, interaction, metrics);
+        kfcore::vision_models::FaceMeshFrame face;
+        face.detection = kfcore::vision_models::FaceDetection {
+            { 160.0F, 40.0F, 100.0F, 120.0F }, 0.9F
+        };
+        kfcore::vision_models::FaceLandmarkResult landmarks;
+        landmarks.confidence = 0.95F;
+        for (std::size_t index = 0U; index < landmarks.landmarks.size(); ++index)
+        {
+            landmarks.landmarks[index] = {
+                170.0F + static_cast<float>(index % 20U),
+                60.0F + static_cast<float>(index / 20U), 0.0F
+            };
+        }
+        face.landmarks = landmarks;
+
+        const cv::Mat output = demo::compose_overlay(
+            source, hands, interaction, &face, metrics);
         check_equal(output.type(), CV_8UC3);
         check_equal(output.rows, source.rows);
         check_equal(output.cols, source.cols);
         check_equal(cv::countNonZero(source.reshape(1)), 0);
         check_greater(cv::countNonZero(output.reshape(1)), 0);
+        const cv::Vec3b face_point = output.at<cv::Vec3b>(60, 170);
+        check_equal(face_point[0], (std::uint8_t)255U);
+        check_equal(face_point[1], (std::uint8_t)80U);
+        check_equal(face_point[2], (std::uint8_t)180U);
     }
 
     it("rejects non-BGR UI input")
     {
         cv::Mat gray(32, 32, CV_8UC1, cv::Scalar(0));
-        check_throws_as(demo::compose_overlay(gray, {}, {}, {}), std::invalid_argument);
+        check_throws_as(demo::compose_overlay(gray, {}, {}, nullptr, {}),
+                        std::invalid_argument);
     }
 }

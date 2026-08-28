@@ -37,6 +37,7 @@ if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
     examples/hand_interaction_demo.cpp
     examples/hand_interaction_demo_cli.cpp
     examples/hand_interaction_demo_capture.cpp
+    examples/hand_interaction_demo_face.cpp
     examples/hand_interaction_demo_frame.cpp
     examples/hand_interaction_demo_ui.cpp)
   target_include_directories(hand_interaction_demo PRIVATE
@@ -55,10 +56,15 @@ if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
       KFCore::vision_models_cpu)
   endif()
   if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
+    if(NOT TARGET KFCore::tensorrt_yolo)
+      message(FATAL_ERROR
+        "TensorRT hand interaction demo requires KFCORE_BUILD_TENSORRT_YOLO=ON")
+    endif()
     target_compile_definitions(hand_interaction_demo PRIVATE
       KFCORE_HAND_DEMO_HAS_TENSORRT=1)
     target_link_libraries(hand_interaction_demo PRIVATE
-      KFCore::vision_models_tensorrt)
+      KFCore::vision_models_tensorrt
+      KFCore::tensorrt_yolo)
   endif()
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF

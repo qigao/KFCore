@@ -250,6 +250,8 @@
             },
             "cacheVariables": {
                 "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES": "ON",
+                "KFCORE_BUILD_YOLO_TRACKING": "ON",
+                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
                 "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "OFF"
             }
         },

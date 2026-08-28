@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -22,6 +23,8 @@ public:
         write("hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx");
         write("hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx");
         write("hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx");
+        write("yolov12n-face.onnx");
+        write("MediaPipeFaceLandmarkDetector.onnx");
     }
 
     ~ModelFixture() { std::filesystem::remove_all(root_); }
@@ -112,6 +115,48 @@ spec("hand interaction demo CLI")
               models.path() },
             { true, false });
         check_equal(*arguments.max_frames, (std::uint64_t)100U);
+    }
+
+    it("enables face mesh only when both model paths are supplied")
+    {
+        ModelFixture models;
+        const std::filesystem::path root(models.path());
+        const auto arguments = demo::parse_arguments(
+            { "hand_interaction_demo", "--model-dir", models.path(),
+              "--face-detector", (root / "yolov12n-face.onnx").string(),
+              "--facemesh", (root / "MediaPipeFaceLandmarkDetector.onnx").string(),
+              "--face-score", "0.6", "--facemesh-score", "0.7" },
+            { true, false });
+        check_true(arguments.face_detector_model.has_value());
+        check_true(arguments.face_landmark_model.has_value());
+        check_true(std::fabs(arguments.face_detection_score_threshold - 0.6F) <
+                   0.0001F);
+        check_true(std::fabs(arguments.face_landmark_score_threshold - 0.7F) <
+                   0.0001F);
+
+        check_throws_as(demo::parse_arguments(
+                            { "hand_interaction_demo", "--model-dir", models.path(),
+                              "--face-detector",
+                              (root / "yolov12n-face.onnx").string() },
+                            { true, false }),
+                        std::invalid_argument);
+        check_throws_as(demo::parse_arguments(
+                            { "hand_interaction_demo", "--model-dir", models.path(),
+                              "--face-score", "1.1" },
+                            { true, false }),
+                        std::invalid_argument);
+        check_throws_as(demo::parse_arguments(
+                            { "hand_interaction_demo", "--model-dir", models.path(),
+                              "--face-score", "0.6" },
+                            { true, false }),
+                        std::invalid_argument);
+        check_throws_as(demo::parse_arguments(
+                            { "hand_interaction_demo", "--model-dir", models.path(),
+                              "--face-detector", "Z:/missing-face.onnx",
+                              "--facemesh",
+                              (root / "MediaPipeFaceLandmarkDetector.onnx").string() },
+                            { true, false }),
+                        std::invalid_argument);
     }
 
     it("rejects unknown duplicate and missing-value options")

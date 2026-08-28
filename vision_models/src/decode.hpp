@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace kfcore::vision_models::detail
@@ -25,6 +26,11 @@ std::array<float, kHandLandmarkCount * 2U> make_keypoint_features(
 
 Handedness decode_handedness(float value);
 Gesture    decode_gesture(std::int64_t class_id) noexcept;
+
+std::optional<FaceDetection> decode_yolo12_face(
+    const float* values, std::size_t value_count, std::int32_t face_class_id,
+    float confidence_threshold, const image::LetterboxTransform& letterbox,
+    std::int32_t image_width, std::int32_t image_height);
 
 std::array<Point3f, kFaceLandmarkCount> decode_face_landmarks(
     const float* values, std::size_t value_count, const FaceRoi& roi,

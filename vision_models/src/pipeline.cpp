@@ -36,6 +36,70 @@ double elapsed_ms(Clock::time_point started)
     return std::chrono::duration<double, std::milli>(Clock::now() - started).count();
 }
 
+[[noreturn]] void throw_face_invalid(const std::string& detail)
+{
+    throw VisionModelError(VisionModelErrorCode::InvalidArgument,
+                           "FaceMesh pipeline stage: " + detail);
+}
+
+[[noreturn]] void throw_face_contract(const std::string& detail)
+{
+    throw VisionModelError(VisionModelErrorCode::ModelContractMismatch,
+                           "FaceMesh pipeline stage: " + detail);
+}
+
+void validate_duration(double value, const char* name)
+{
+    if (!std::isfinite(value) || value < 0.0)
+    {
+        throw_face_contract(std::string("backend ") + name +
+                            " must be finite and non-negative");
+    }
+}
+
+void validate_face_detection_result(const FaceDetectionResult& result)
+{
+    validate_duration(result.preprocess_ms, "detection preprocess_ms");
+    validate_duration(result.inference_ms, "detection inference_ms");
+    validate_duration(result.total_ms, "detection total_ms");
+    if (!result.face)
+    {
+        return;
+    }
+    const RectF& box = result.face->box;
+    if (!std::isfinite(box.x) || !std::isfinite(box.y) ||
+        !std::isfinite(box.width) || !std::isfinite(box.height) ||
+        box.width <= 0.0F || box.height <= 0.0F)
+    {
+        throw_face_contract("backend returned an invalid face box");
+    }
+    if (!std::isfinite(result.face->confidence) ||
+        result.face->confidence < 0.0F || result.face->confidence > 1.0F)
+    {
+        throw_face_contract("backend face confidence must be finite within [0,1]");
+    }
+}
+
+void validate_face_landmarks(const FaceLandmarkResult& result)
+{
+    if (!std::isfinite(result.confidence) || result.confidence < 0.0F ||
+        result.confidence > 1.0F)
+    {
+        throw_face_contract("backend landmark confidence must be finite within [0,1]");
+    }
+    validate_duration(result.preprocess_ms, "landmark preprocess_ms");
+    validate_duration(result.inference_ms, "landmark inference_ms");
+    validate_duration(result.total_ms, "landmark total_ms");
+    for (const Point3f& point : result.landmarks)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            !std::isfinite(point.z))
+        {
+            throw_face_contract("backend returned non-finite face landmarks");
+        }
+    }
+}
+
 void validate_unit(float value, const char* name)
 {
     if (!std::isfinite(value) || value < 0.0F || value > 1.0F)
@@ -98,13 +162,14 @@ void validate_hand(const HandResult& hand)
 class UseGuard final
 {
 public:
-    explicit UseGuard(std::atomic_flag& flag)
+    UseGuard(std::atomic_flag& flag, const char* stage)
         : flag_(flag)
     {
         if (flag_.test_and_set(std::memory_order_acquire))
         {
             throw VisionModelError(VisionModelErrorCode::ConcurrentExecution,
-                                   "hand pipeline stage: instance is already in use");
+                                   std::string(stage) +
+                                       " stage: instance is already in use");
         }
     }
 
@@ -175,7 +240,7 @@ HandFrame HandPipeline::process(const image::ImageView& image)
     {
         throw_invalid("pipeline state is unavailable");
     }
-    UseGuard guard(impl_->in_use);
+    UseGuard guard(impl_->in_use, "hand pipeline");
     if (image.data == nullptr || image.width <= 0 || image.height <= 0)
     {
         throw_invalid("image data and dimensions must be valid");
@@ -255,8 +320,93 @@ void HandPipeline::reset()
     {
         throw_invalid("pipeline state is unavailable");
     }
-    UseGuard guard(impl_->in_use);
+    UseGuard guard(impl_->in_use, "hand pipeline");
     bytetrack_reset(impl_->tracker.get());
+}
+
+struct FaceMeshPipeline::Impl final
+{
+    Impl(std::unique_ptr<FaceDetectorBackend> detector_value,
+         std::unique_ptr<FaceLandmarkBackend> landmarker_value,
+         const FaceMeshPipelineOptions& options_value)
+        : detector(std::move(detector_value))
+        , landmarker(std::move(landmarker_value))
+        , options(options_value)
+    {
+    }
+
+    std::unique_ptr<FaceDetectorBackend> detector;
+    std::unique_ptr<FaceLandmarkBackend> landmarker;
+    FaceMeshPipelineOptions              options;
+    std::atomic_flag                     in_use = ATOMIC_FLAG_INIT;
+};
+
+FaceMeshPipeline::FaceMeshPipeline(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+FaceMeshPipeline::~FaceMeshPipeline() = default;
+
+std::unique_ptr<FaceMeshPipeline> FaceMeshPipeline::create(
+    std::unique_ptr<FaceDetectorBackend> detector,
+    std::unique_ptr<FaceLandmarkBackend> landmarker,
+    const FaceMeshPipelineOptions& options)
+{
+    if (!detector)
+    {
+        throw_face_invalid("detector must not be null");
+    }
+    if (!landmarker)
+    {
+        throw_face_invalid("landmarker must not be null");
+    }
+    if (!std::isfinite(options.landmark_score_threshold) ||
+        options.landmark_score_threshold < 0.0F ||
+        options.landmark_score_threshold > 1.0F)
+    {
+        throw_face_invalid("landmark_score_threshold must be finite within [0,1]");
+    }
+    auto impl = std::make_unique<Impl>(std::move(detector), std::move(landmarker),
+                                      options);
+    return std::unique_ptr<FaceMeshPipeline>(new FaceMeshPipeline(std::move(impl)));
+}
+
+FaceMeshFrame FaceMeshPipeline::process(const image::ImageView& image)
+{
+    if (!impl_)
+    {
+        throw_face_invalid("pipeline state is unavailable");
+    }
+    UseGuard guard(impl_->in_use, "FaceMesh pipeline");
+    if (image.data == nullptr || image.width <= 0 || image.height <= 0)
+    {
+        throw_face_invalid("image data and dimensions must be valid");
+    }
+
+    const Clock::time_point total_started = Clock::now();
+    FaceMeshFrame frame;
+    const FaceDetectionResult detection = impl_->detector->infer(image);
+    validate_face_detection_result(detection);
+    frame.timings.detection_preprocess_ms = detection.preprocess_ms;
+    frame.timings.detection_inference_ms  = detection.inference_ms;
+    if (!detection.face)
+    {
+        frame.timings.total_ms = elapsed_ms(total_started);
+        return frame;
+    }
+
+    frame.detection = detection.face;
+    FaceLandmarkResult landmarks = impl_->landmarker->infer(image, detection.face->box);
+    validate_face_landmarks(landmarks);
+    frame.timings.landmark_preprocess_ms = landmarks.preprocess_ms;
+    frame.timings.landmark_inference_ms  = landmarks.inference_ms;
+    if (landmarks.confidence >= impl_->options.landmark_score_threshold)
+    {
+        frame.landmarks = std::move(landmarks);
+    }
+    frame.timings.total_ms = elapsed_ms(total_started);
+    return frame;
 }
 
 } // namespace kfcore::vision_models

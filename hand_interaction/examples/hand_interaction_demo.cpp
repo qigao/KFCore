@@ -1,6 +1,7 @@
 #include "hand_interaction_demo_capture.hpp"
 #include "hand_interaction_demo_cli.hpp"
 #include "hand_interaction_demo_frame.hpp"
+#include "hand_interaction_demo_face.hpp"
 #include "hand_interaction_demo_ui.hpp"
 
 #include "kfcore/hand_interaction/hand_interaction.hpp"
@@ -35,8 +36,9 @@ using kfcore::hand_interaction::HandInteractionPipeline;
 using kfcore::vision_models::HandFrame;
 using kfcore::vision_models::HandInferenceBackend;
 using kfcore::vision_models::HandPipeline;
+using kfcore::vision_models::FaceMeshFrame;
 
-constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction";
+constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction + FaceMesh";
 constexpr std::chrono::milliseconds kFrameWait { 50 };
 
 demo::BackendAvailability backend_availability()
@@ -181,6 +183,7 @@ int run(const demo::Arguments& arguments)
 
     const auto model_load_started = std::chrono::steady_clock::now();
     auto       model_pipeline = HandPipeline::create(make_backend(arguments));
+    auto       face_pipeline = demo::make_face_pipeline(arguments);
     const auto model_load_finished = std::chrono::steady_clock::now();
     const auto model_load_ms = std::chrono::duration<double, std::milli>(
                                    model_load_finished - model_load_started)
@@ -215,7 +218,13 @@ int run(const demo::Arguments& arguments)
         const auto frame_started = std::chrono::steady_clock::now();
         const cv::Mat bgr = demo::to_bgr(captured);
         const auto converted = std::chrono::steady_clock::now();
-        HandFrame hands = model_pipeline->process(image_view(bgr));
+        const kfcore::image::ImageView frame_view = image_view(bgr);
+        HandFrame hands = model_pipeline->process(frame_view);
+        FaceMeshFrame face;
+        if (face_pipeline)
+        {
+            face = face_pipeline->process(frame_view);
+        }
         const auto thig_started = std::chrono::steady_clock::now();
         const GestureFrameContext context {
             captured.serial, thig_started, captured.width, captured.height
@@ -226,13 +235,15 @@ int run(const demo::Arguments& arguments)
         demo::DemoMetrics metrics;
         metrics.capture = mailbox.counters();
         metrics.model   = hands.timings;
+        metrics.face    = face.timings;
         metrics.convert_ms =
             std::chrono::duration<double, std::milli>(converted - frame_started).count();
         metrics.thig_ms =
             std::chrono::duration<double, std::milli>(thig_finished - thig_started).count();
         metrics.frame_ms =
             std::chrono::duration<double, std::milli>(thig_finished - frame_started).count();
-        cv::imshow(kWindowTitle, demo::compose_overlay(bgr, hands, interaction, metrics));
+        cv::imshow(kWindowTitle, demo::compose_overlay(
+            bgr, hands, interaction, face_pipeline ? &face : nullptr, metrics));
 
         const demo::DemoAction action = demo::action_from_key(cv::waitKey(1));
         if (action == demo::DemoAction::Reset)

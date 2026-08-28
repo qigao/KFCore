@@ -4,6 +4,7 @@
 
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -34,6 +35,18 @@ Integer parse_integer(const std::string& text, const std::string& option, Intege
     if (parsed.ec != std::errc {} || parsed.ptr != text.data() + text.size() || value < minimum)
     {
         fail(option + " has an invalid numeric value: " + text);
+    }
+    return value;
+}
+
+float parse_score(const std::string& text, const std::string& option)
+{
+    float value = 0.0F;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc {} || parsed.ptr != text.data() + text.size() ||
+        !std::isfinite(value) || value < 0.0F || value > 1.0F)
+    {
+        fail(option + " must be a finite value within [0,1]: " + text);
     }
     return value;
 }
@@ -111,6 +124,10 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     std::optional<std::string>      palm;
     std::optional<std::string>      hand;
     std::optional<std::string>      classifier;
+    std::optional<std::string>      face_detector;
+    std::optional<std::string>      face_landmark;
+    bool                            face_score_set = false;
+    bool                            face_landmark_score_set = false;
     bool                            geometry_set = false;
 
     for (std::size_t index = 1U; index < values.size(); ++index)
@@ -150,6 +167,24 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         else if (option == "--classifier")
         {
             classifier = value;
+        }
+        else if (option == "--face-detector")
+        {
+            face_detector = value;
+        }
+        else if (option == "--facemesh")
+        {
+            face_landmark = value;
+        }
+        else if (option == "--face-score")
+        {
+            result.face_detection_score_threshold = parse_score(value, option);
+            face_score_set = true;
+        }
+        else if (option == "--facemesh-score")
+        {
+            result.face_landmark_score_threshold = parse_score(value, option);
+            face_landmark_score_set = true;
         }
         else if (option == "--camera")
         {
@@ -218,6 +253,20 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         fail("requested backend is not available in this build");
     }
 
+    if (face_detector.has_value() != face_landmark.has_value())
+    {
+        fail("--face-detector and --facemesh must be supplied together");
+    }
+    if ((face_score_set || face_landmark_score_set) && !face_detector.has_value())
+    {
+        fail("face score options require --face-detector and --facemesh");
+    }
+    if (face_detector.has_value())
+    {
+        result.face_detector_model = std::filesystem::path(*face_detector);
+        result.face_landmark_model = std::filesystem::path(*face_landmark);
+    }
+
     if (*result.backend == Backend::Cpu)
     {
         if (!model_dir.has_value())
@@ -251,6 +300,11 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     require_readable_file(result.palm_model, "palm model");
     require_readable_file(result.hand_model, "hand landmark model");
     require_readable_file(result.classifier_model, "classifier model");
+    if (result.face_detector_model.has_value())
+    {
+        require_readable_file(*result.face_detector_model, "face detector model");
+        require_readable_file(*result.face_landmark_model, "face landmark model");
+    }
     return result;
 }
 

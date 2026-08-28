@@ -50,10 +50,10 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-class TensorRtFaceLandmarker final
+class TensorRtFaceLandmarker final : public FaceLandmarkBackend
 {
 public:
-    ~TensorRtFaceLandmarker();
+    ~TensorRtFaceLandmarker() override;
 
     TensorRtFaceLandmarker(const TensorRtFaceLandmarker&)            = delete;
     TensorRtFaceLandmarker& operator=(const TensorRtFaceLandmarker&) = delete;
@@ -62,7 +62,8 @@ public:
     load(const std::filesystem::path& engine_path,
          const TensorRtVisionOptions& options = {});
 
-    FaceLandmarkResult infer(const image::ImageView& image, const RectF& face_box);
+    FaceLandmarkResult infer(const image::ImageView& image,
+                             const RectF& face_box) override;
 
 private:
     struct Impl;

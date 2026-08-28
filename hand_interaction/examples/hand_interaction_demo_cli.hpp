@@ -48,6 +48,10 @@ struct Arguments
     std::filesystem::path        palm_model;
     std::filesystem::path        hand_model;
     std::filesystem::path        classifier_model;
+    std::optional<std::filesystem::path> face_detector_model;
+    std::optional<std::filesystem::path> face_landmark_model;
+    float                                face_detection_score_threshold = 0.50F;
+    float                                face_landmark_score_threshold = 0.50F;
 };
 
 [[nodiscard]] Arguments parse_arguments(const std::vector<std::string>& values,

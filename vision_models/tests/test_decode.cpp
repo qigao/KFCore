@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -139,5 +140,98 @@ spec("vision model output decoding")
         check_close(landmarks[0].x, 150.0F);
         check_close(landmarks[0].y, 95.0F);
         check_close(landmarks[0].z, 135.0F * 10.0F / 192.0F);
+    }
+
+    it("selects the highest-score YOLOv12 face and restores letterbox coordinates")
+    {
+        const std::array<float, 12> rows {
+            100.0F, 120.0F, 300.0F, 360.0F, 0.75F, 0.0F,
+             90.0F, 110.0F, 310.0F, 370.0F, 0.90F, 0.0F,
+        };
+        const kfcore::image::LetterboxTransform letterbox {
+            0.5F, 10.0F, 20.0F, 640, 480
+        };
+
+        const auto face = detail::decode_yolo12_face(
+            rows.data(), rows.size(), 0, 0.50F, letterbox, 640, 480);
+
+        check_true(face.has_value());
+        check_close(face->box.x, 160.0F);
+        check_close(face->box.y, 180.0F);
+        check_close(face->box.width, 440.0F);
+        check_close(face->box.height, 300.0F);
+        check_close(face->confidence, 0.90F);
+    }
+
+    it("returns no YOLOv12 face when class and score filters reject every row")
+    {
+        const std::array<float, 12> rows {
+            10.0F, 10.0F, 20.0F, 20.0F, 0.49F, 0.0F,
+            30.0F, 30.0F, 50.0F, 50.0F, 0.99F, 1.0F,
+        };
+        const kfcore::image::LetterboxTransform letterbox {
+            1.0F, 0.0F, 0.0F, 640, 480
+        };
+
+        const auto face = detail::decode_yolo12_face(
+            rows.data(), rows.size(), 0, 0.50F, letterbox, 640, 480);
+
+        check_false(face.has_value());
+    }
+
+    it("rejects malformed and non-finite YOLOv12 face rows")
+    {
+        std::array<float, 6> row {
+            10.0F, 10.0F, 20.0F, 20.0F, 0.90F, 0.0F
+        };
+        const kfcore::image::LetterboxTransform letterbox {
+            1.0F, 0.0F, 0.0F, 640, 480
+        };
+        check_error(
+            [&] {
+                (void)detail::decode_yolo12_face(
+                    row.data(), row.size() - 1U, 0, 0.50F, letterbox, 640, 480);
+            },
+            VisionModelErrorCode::ModelContractMismatch, "rows of six");
+
+        row[4] = (std::numeric_limits<float>::quiet_NaN)();
+        check_error(
+            [&] {
+                (void)detail::decode_yolo12_face(
+                    row.data(), row.size(), 0, 0.50F, letterbox, 640, 480);
+            },
+            VisionModelErrorCode::ModelContractMismatch, "finite");
+    }
+
+    it("rejects invalid YOLOv12 face boxes before filtering")
+    {
+        const std::array<float, 6> row {
+            20.0F, 10.0F, 10.0F, 20.0F, 0.90F, 0.0F
+        };
+        const kfcore::image::LetterboxTransform letterbox {
+            1.0F, 0.0F, 0.0F, 640, 480
+        };
+        check_error(
+            [&] {
+                (void)detail::decode_yolo12_face(
+                    row.data(), row.size(), 0, 0.50F, letterbox, 640, 480);
+            },
+            VisionModelErrorCode::ModelContractMismatch, "box");
+    }
+
+    it("rejects a YOLOv12 face letterbox transform from another source image")
+    {
+        const std::array<float, 6> row {
+            10.0F, 10.0F, 20.0F, 20.0F, 0.90F, 0.0F
+        };
+        const kfcore::image::LetterboxTransform letterbox {
+            1.0F, 0.0F, 0.0F, 320, 240
+        };
+        check_error(
+            [&] {
+                (void)detail::decode_yolo12_face(
+                    row.data(), row.size(), 0, 0.50F, letterbox, 640, 480);
+            },
+            VisionModelErrorCode::ModelContractMismatch, "source dimensions");
     }
 }

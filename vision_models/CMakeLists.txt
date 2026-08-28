@@ -141,9 +141,12 @@ if(BUILD_TESTS)
         "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx")
       set(_vision_cpu_face
         "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/MediaPipeFaceLandmarkDetector.onnx")
+      set(_vision_cpu_face_detector
+        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/yolov12n-face.onnx")
       foreach(_vision_cpu_asset IN ITEMS
           "${_vision_cpu_palm}" "${_vision_cpu_hand}"
           "${_vision_cpu_classifier}" "${_vision_cpu_face}"
+          "${_vision_cpu_face_detector}"
           "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}"
           "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}")
         if(NOT IS_ABSOLUTE "${_vision_cpu_asset}" OR
@@ -170,6 +173,7 @@ if(BUILD_TESTS)
         "KFCORE_VISION_CPU_TEST_HAND=\"${_vision_cpu_hand}\""
         "KFCORE_VISION_CPU_TEST_CLASSIFIER=\"${_vision_cpu_classifier}\""
         "KFCORE_VISION_CPU_TEST_FACE=\"${_vision_cpu_face}\""
+        "KFCORE_VISION_CPU_TEST_FACE_DETECTOR=\"${_vision_cpu_face_detector}\""
         "KFCORE_VISION_CPU_TEST_HAND_IMAGE=\"${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}\""
         "KFCORE_VISION_CPU_TEST_FACE_IMAGE=\"${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}\"")
       target_link_libraries(test_vision_models_cpu_integration PRIVATE
