@@ -58,6 +58,19 @@ if(BUILD_TESTS)
   target_compile_features(test_hand_interaction_demo_cli PRIVATE cxx_std_17)
   add_test(NAME test_hand_interaction_demo_cli
     COMMAND test_hand_interaction_demo_cli)
+
+  add_executable(test_hand_interaction_demo_capture
+    tests/test_hand_interaction_demo_capture.cpp
+    examples/hand_interaction_demo_capture.cpp)
+  target_include_directories(test_hand_interaction_demo_capture PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+  target_link_libraries(test_hand_interaction_demo_capture PRIVATE
+    TurboUtils::Capture
+    TurboUtils::Core
+    TurboUtils::TinyTest)
+  target_compile_features(test_hand_interaction_demo_capture PRIVATE cxx_std_17)
+  add_test(NAME test_hand_interaction_demo_capture
+    COMMAND test_hand_interaction_demo_capture)
 endif()
 
 cmake_install_headers(
