@@ -97,6 +97,21 @@ spec("hand interaction demo CLI")
                               "--model-dir", "." },
                             { true, false }),
                         std::invalid_argument);
+        check_throws_as(demo::parse_arguments(
+                            { "hand_interaction_demo", "--max-frames", "0",
+                              "--model-dir", "." },
+                            { true, false }),
+                        std::invalid_argument);
+    }
+
+    it("accepts an explicit bounded run length")
+    {
+        ModelFixture models;
+        const auto arguments = demo::parse_arguments(
+            { "hand_interaction_demo", "--max-frames", "100", "--model-dir",
+              models.path() },
+            { true, false });
+        check_equal(*arguments.max_frames, (std::uint64_t)100U);
     }
 
     it("rejects unknown duplicate and missing-value options")

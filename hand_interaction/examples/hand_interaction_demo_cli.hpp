@@ -41,12 +41,13 @@ struct CaptureRequest
 
 struct Arguments
 {
-    bool                    list_cameras = false;
-    std::optional<Backend>  backend;
-    CaptureRequest          capture;
-    std::filesystem::path   palm_model;
-    std::filesystem::path   hand_model;
-    std::filesystem::path   classifier_model;
+    bool                         list_cameras = false;
+    std::optional<Backend>       backend;
+    std::optional<std::uint64_t> max_frames;
+    CaptureRequest               capture;
+    std::filesystem::path        palm_model;
+    std::filesystem::path        hand_model;
+    std::filesystem::path        classifier_model;
 };
 
 [[nodiscard]] Arguments parse_arguments(const std::vector<std::string>& values,

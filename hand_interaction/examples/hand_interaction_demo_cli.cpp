@@ -179,6 +179,10 @@ Arguments parse_arguments(const std::vector<std::string>& values,
             result.capture.max_frame_bytes =
                 parse_integer<std::size_t>(value, option, 1U);
         }
+        else if (option == "--max-frames")
+        {
+            result.max_frames = parse_integer<std::uint64_t>(value, option, 1U);
+        }
         else
         {
             fail("unknown option: " + option);

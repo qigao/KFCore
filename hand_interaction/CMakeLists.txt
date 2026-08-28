@@ -32,6 +32,37 @@ if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
       "installed with the Capture component")
   endif()
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
+
+  add_executable(hand_interaction_demo
+    examples/hand_interaction_demo.cpp
+    examples/hand_interaction_demo_cli.cpp
+    examples/hand_interaction_demo_capture.cpp
+    examples/hand_interaction_demo_frame.cpp
+    examples/hand_interaction_demo_ui.cpp)
+  target_include_directories(hand_interaction_demo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+  target_link_libraries(hand_interaction_demo PRIVATE
+    KFCore::hand_interaction
+    OpenCVLite::core
+    OpenCVLite::imgproc
+    OpenCVLite::highgui
+    TurboUtils::Capture
+    TurboUtils::Core)
+  if(KFCORE_BUILD_VISION_MODELS_CPU)
+    target_compile_definitions(hand_interaction_demo PRIVATE
+      KFCORE_HAND_DEMO_HAS_CPU=1)
+    target_link_libraries(hand_interaction_demo PRIVATE
+      KFCore::vision_models_cpu)
+  endif()
+  if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
+    target_compile_definitions(hand_interaction_demo PRIVATE
+      KFCORE_HAND_DEMO_HAS_TENSORRT=1)
+    target_link_libraries(hand_interaction_demo PRIVATE
+      KFCore::vision_models_tensorrt)
+  endif()
+  set_target_properties(hand_interaction_demo PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "hand_interaction/examples")
 endif()
 
 if(BUILD_TESTS)
