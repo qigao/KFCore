@@ -46,6 +46,9 @@ for (const auto& action : result.actions) {
 }
 ```
 
+`rotation_cooldown_ms` 追加在公开 aggregate `HandInteractionSettings` 的末尾，旧的位置初始化代码仍按
+原字段顺序解释；由于结构体尺寸发生变化，升级 KFCore 后必须重新编译 C++ 消费端。
+
 `process()` 同步借用输入 `HandFrame`，返回值拥有 observations、evidence 和 actions；不会保留
 landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减，图像尺寸必须为正。
 违反配置、顺序或容量约束会抛出明确异常，不会自动切换后端。
@@ -161,7 +164,7 @@ GPU tensor 级零拷贝共享。OpenCV Lite 与 Turbo Capture 只链接到示例
 CPU 路径：
 
 ```powershell
-cmake --preset win-hand-interaction-demo-cpu-release-user -DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF
+cmake --preset win-hand-interaction-demo-cpu-release-user
 cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_hand_primitive_extractor
 ctest --preset win-hand-interaction-demo-cpu-release-user --output-on-failure
 ```
@@ -170,14 +173,15 @@ TensorRT 路径需要先指向本机 SDK；preset 只做编译验证，不要求
 
 ```powershell
 $env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
-cmake --preset win-hand-interaction-demo-tensorrt-release-user -DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF
+cmake --preset win-hand-interaction-demo-tensorrt-release-user
 cmake --build --preset win-hand-interaction-demo-tensorrt-release-user
 ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure
 ```
 
-本机 TurboParser release package 若未导出 `TurboParser::Capture`，必须如上关闭
-`KFCORE_BUILD_HAND_INTERACTION_EXAMPLES` 才能验证 core 和测试；这不代表 identity core 测试失败。需要
-构建实时 demo 时，应安装包含 Capture component 的 TurboParser SDK，再以 `ON` 重新 configure。
+本机 TurboParser release package 若未导出 `TurboParser::Capture`，只能使用
+`-DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF` 验证 core 和非 demo 测试；这不代表 identity core
+测试失败。需要构建实时 demo 时，应安装包含 Capture component 的 TurboParser SDK，再使用上述
+preset 的默认 `ON` 配置重新 configure。
 
 两个 preset 都从 `CMakeUserPresets.json` 设置 `OPENCV_LITE_ROOT`，并为 configure、build 和
 CTest 子进程加入 OpenCV Lite、Turbo Capture 及对应推理 runtime 的 DLL 目录。直接从当前

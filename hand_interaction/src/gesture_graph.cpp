@@ -178,7 +178,8 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         std::max(settings.neutral_rearm_ms, settings.observation_max_gap_ms);
     thig::EngineSpec spec;
     spec.version                 = kHandInteractionSpecVersion;
-    spec.historyMs               = std::max(settings.history_ms, static_cast<int>(doubled_neutral));
+    spec.historyMs = std::max({ settings.history_ms, static_cast<int>(doubled_neutral),
+                                settings.rotation_cooldown_ms });
     spec.maxObservationsPerFrame = settings.max_observations_per_frame;
     spec.maxRelationEvents       = settings.max_relation_events;
     spec.maxObservationWindowStates = settings.max_observation_window_states;

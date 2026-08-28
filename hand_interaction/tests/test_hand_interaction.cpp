@@ -107,6 +107,13 @@ HandResult model_hand(Gesture gesture)
     return hand;
 }
 
+bool has_relation(const kfcore::hand_interaction::PrimitiveFrame& frame,
+                  const std::string& name)
+{
+    return std::any_of(frame.observations.begin(), frame.observations.end(),
+                       [&](const Observation& item) { return item.relation == name; });
+}
+
 void translate_hand_x(HandResult& hand, float delta_x)
 {
     hand.palm.box.x += delta_x;
@@ -152,16 +159,24 @@ spec("hand interaction")
         HandFrame               frame;
         frame.hands.push_back(model_hand(Gesture::Open));
 
-        (void)pipeline.process(frame, frame_context(1, 0));
+        const auto initial = pipeline.process(frame, frame_context(1, 0));
         translate_hand_x(frame.hands[0], -40.0F);
-        (void)pipeline.process(frame, frame_context(2, 50));
-        (void)pipeline.process(frame, frame_context(3, 100));
+        const auto left = pipeline.process(frame, frame_context(2, 50));
+        const auto first_neutral = pipeline.process(frame, frame_context(3, 100));
         translate_hand_x(frame.hands[0], 80.0F);
-        (void)pipeline.process(frame, frame_context(4, 150));
-        (void)pipeline.process(frame, frame_context(5, 200));
+        const auto right = pipeline.process(frame, frame_context(4, 150));
+        const auto second_neutral = pipeline.process(frame, frame_context(5, 200));
         translate_hand_x(frame.hands[0], -80.0F);
         const auto result = pipeline.process(frame, frame_context(6, 250));
 
+        check_true(has_relation(initial.primitives, "Direction Neutral"));
+        check_true(has_relation(left.primitives, "Direction Left"));
+        check_true(has_relation(first_neutral.primitives, "Direction Neutral"));
+        check_true(has_relation(right.primitives, "Direction Right"));
+        check_true(has_relation(second_neutral.primitives, "Direction Neutral"));
+        check_true(has_relation(result.primitives, "Direction Left"));
+        check_true(has_relation(result.primitives, "Shape Open"));
+        check_true(has_relation(result.primitives, "Palm Axis Horizontal"));
         check_true(has_action(result.actions, "Wave"));
     }
 
@@ -286,6 +301,7 @@ spec("hand interaction")
     {
         HandInteractionSettings settings = immediate_settings();
         settings.rotation_cooldown_ms = 500;
+        settings.history_ms = 100;
         TemporalGraphEngine engine(
             kfcore::hand_interaction::build_hand_interaction_graph(settings));
 

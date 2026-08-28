@@ -30,7 +30,6 @@ struct HandInteractionSettings
     int         dual_hand_dwell_ms                        = 200;
     int         dual_hand_onset_window_ms                 = 600;
     int         spatial_dwell_ms                          = 200;
-    int         rotation_cooldown_ms                      = 600;
     int         click_ready_dwell_ms                      = 100;
     int         click_press_dwell_ms                      = 67;
     int         click_release_dwell_ms                    = 100;
@@ -51,6 +50,7 @@ struct HandInteractionSettings
     std::size_t max_observation_window_states             = 64;
     std::size_t max_action_states                         = 4096;
     bool        wave_require_horizontal_palm_axis         = false;
+    int         rotation_cooldown_ms                      = 600;
 };
 
 [[nodiscard]] thig::EngineSpec
