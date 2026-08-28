@@ -11,12 +11,14 @@ detector：现有 YOLOv12-face 仍负责产生人脸框，468 点模型只消费
 | `KFCore::vision_model_core` | backend 返回的手部结果 | 无 | 共享几何/解码 | 每个 `HandPipeline` 独占一份 KFCore ByteTrack/Kalman |
 | `KFCore::vision_models_cpu` | Host BGR/RGB/Gray `ImageView` | CPU（ONNX Runtime） | `CpuImageProcessor` | 每个 backend 独占 sessions |
 | `KFCore::vision_models_tensorrt` | Host 或 CUDA BGR/RGB/Gray `ImageView` | GPU（TensorRT） | `CudaImageProcessor` | 每个 backend 独占 processor、engines 与 executors |
+| `KFCore::hand_interaction` | 已跟踪的 `HandFrame` | 无额外推理 | 21 点几何 primitive + THIG | 每个实例独占身份、运动历史和时序图状态 |
 
 手部路径是：
 
 ```text
 image -> Palm [N,8] -> rotated hand ROI -> 21 landmarks
       -> 42-value keypoint feature -> gesture class -> ByteTrack/Kalman
+      -> HandPrimitiveExtractor -> THIG -> semantic ActionEvent
 ```
 
 GPU backend 每次 `infer()` 只调用一次 `stage()`。Host 图像在此处上传；CUDA 图像在同一
@@ -120,6 +122,10 @@ const auto frame = pipeline->process(image_view);
 TensorRT 用法只需把 paths/options 类型换为 `HandTensorRtEnginePaths` 和
 `TensorRtVisionOptions`。输入 bytes 只借用到同步调用结束；返回值拥有全部结果。一个实例不允许
 重入，不同实例可以并行并拥有独立 tracker/session/executor 状态。
+
+CPU 和 TensorRT backend 都产生相同的 `HandFrame`，复杂手势统一进入
+`KFCore::hand_interaction`，不会在两个推理后端各维护一套时序规则。完整动作、容量、外部
+区域观察与 reset 契约见 [hand_interaction/README.md](../hand_interaction/README.md)。
 
 ## 耗时记录
 

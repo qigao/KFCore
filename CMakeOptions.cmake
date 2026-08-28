@@ -32,6 +32,10 @@ set(KFCORE_VISION_MODEL_TEST_FACE_IMAGE "" CACHE FILEPATH
     "Trusted face image used by CPU vision-model integration tests")
 option(KFCORE_BUILD_VISION_MODELS_TENSORRT
        "Build TensorRT CUDA hand and MediaPipe landmark models" OFF)
+option(KFCORE_BUILD_THIG
+       "Build the backend-neutral temporal interaction graph" OFF)
+option(KFCORE_BUILD_HAND_INTERACTION
+       "Build tracked hand primitive and temporal interaction support" OFF)
 cmake_dependent_option(
   KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS
   "Build real-engine TensorRT vision-model integration tests"
