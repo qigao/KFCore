@@ -46,6 +46,18 @@ if(BUILD_TESTS)
     TurboUtils::TinyTest)
   target_compile_features(test_hand_interaction PRIVATE cxx_std_17)
   add_test(NAME test_hand_interaction COMMAND test_hand_interaction)
+
+  add_executable(test_hand_interaction_demo_cli
+    tests/test_hand_interaction_demo_cli.cpp
+    examples/hand_interaction_demo_cli.cpp)
+  target_include_directories(test_hand_interaction_demo_cli PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+  target_link_libraries(test_hand_interaction_demo_cli PRIVATE
+    TurboUtils::Core
+    TurboUtils::TinyTest)
+  target_compile_features(test_hand_interaction_demo_cli PRIVATE cxx_std_17)
+  add_test(NAME test_hand_interaction_demo_cli
+    COMMAND test_hand_interaction_demo_cli)
 endif()
 
 cmake_install_headers(
