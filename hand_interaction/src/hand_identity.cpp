@@ -17,58 +17,59 @@ struct IdentityState {
   int raw_track_id = -1;
   HandShapeDescriptor shape;
   vision_models::Handedness handedness = vision_models::Handedness::Unknown;
-  float center_x = 0.0f;
-  float center_y = 0.0f;
-  float scale = 0.0f;
-  float velocity_x = 0.0f;
-  float velocity_y = 0.0f;
+  double center_x = 0.0;
+  double center_y = 0.0;
+  double scale = 0.0;
+  double velocity_x = 0.0;
+  double velocity_y = 0.0;
   int observation_count = 0;
   std::uint64_t last_seen_frame = 0;
 };
 
 struct Candidate {
   int canonical_id = 0;
-  float cost = std::numeric_limits<float>::infinity();
+  double cost = std::numeric_limits<double>::infinity();
 };
 
-float LinearScaleRatio(float lhs, float rhs) {
-  const float smaller = std::min(lhs, rhs);
-  return smaller > 0.0f ? std::max(lhs, rhs) / smaller
-                        : std::numeric_limits<float>::infinity();
+double LinearScaleRatio(double lhs, double rhs) {
+  const double smaller = std::min(lhs, rhs);
+  return smaller > 0.0 ? std::max(lhs, rhs) / smaller
+                        : std::numeric_limits<double>::infinity();
 }
 
-float PredictedDistanceRatio(const HandIdentityObservation& observation,
-                             const IdentityState& state,
-                             std::uint64_t frame_index,
-                             int maximum_prediction_frames) {
-  const float age = static_cast<float>(std::min<std::uint64_t>(
+double PredictedDistanceRatio(const HandIdentityObservation& observation,
+                              const IdentityState& state,
+                              std::uint64_t frame_index,
+                              int maximum_prediction_frames) {
+  const double age = static_cast<double>(std::min<std::uint64_t>(
       frame_index - state.last_seen_frame,
       static_cast<std::uint64_t>(maximum_prediction_frames)));
-  const float predicted_x = state.center_x + state.velocity_x * age;
-  const float predicted_y = state.center_y + state.velocity_y * age;
-  const float dx = observation.center_x - predicted_x;
-  const float dy = observation.center_y - predicted_y;
-  const float scale = std::max({observation.scale, state.scale, 1.0f});
+  const double predicted_x = state.center_x + state.velocity_x * age;
+  const double predicted_y = state.center_y + state.velocity_y * age;
+  const double dx = static_cast<double>(observation.center_x) - predicted_x;
+  const double dy = static_cast<double>(observation.center_y) - predicted_y;
+  const double scale = std::max({static_cast<double>(observation.scale),
+                                 state.scale, 1.0});
   return std::hypot(dx, dy) / scale;
 }
 
-float SaturatedDistanceCost(float distance_ratio, float maximum_ratio) {
-  return std::min(distance_ratio / maximum_ratio, 1.0f);
+double SaturatedDistanceCost(double distance_ratio, double maximum_ratio) {
+  return std::min(distance_ratio / maximum_ratio, 1.0);
 }
 
-float SaturatedScaleCost(float scale_ratio, float maximum_ratio) {
-  const float logarithmic_ratio = std::abs(std::log(scale_ratio));
-  const float logarithmic_limit = std::log(maximum_ratio);
-  if (logarithmic_limit <= 0.0f) {
-    return logarithmic_ratio == 0.0f ? 0.0f : 1.0f;
+double SaturatedScaleCost(double scale_ratio, double maximum_ratio) {
+  const double logarithmic_ratio = std::abs(std::log(scale_ratio));
+  const double logarithmic_limit = std::log(maximum_ratio);
+  if (logarithmic_limit <= 0.0) {
+    return logarithmic_ratio == 0.0 ? 0.0 : 1.0;
   }
-  return std::min(logarithmic_ratio / logarithmic_limit, 1.0f);
+  return std::min(logarithmic_ratio / logarithmic_limit, 1.0);
 }
 
 struct PendingMatch {
   std::size_t observation_index = 0;
   std::vector<Candidate> candidates;
-  float certainty = 0.0f;
+  double certainty = 0.0;
 };
 
 }  // namespace
@@ -118,29 +119,33 @@ public:
             state.handedness != observation.handedness) {
           continue;
         }
-        const float shape_distance =
+        const double shape_distance =
             HandShapeDistance(*observation.shape, state.shape);
         if (shape_distance > config_.maximum_shape_distance) {
           continue;
         }
         const std::uint64_t age = frame_index_ - state.last_seen_frame;
-        const float capped_age_ratio = static_cast<float>(
+        const double capped_age_ratio = static_cast<double>(
             std::min<std::uint64_t>(age,
                                     static_cast<std::uint64_t>(config_.reacquire_frames))) /
-            static_cast<float>(config_.reacquire_frames);
-        const float raw_bonus = observation.raw_track_id >= 0 &&
+            static_cast<double>(config_.reacquire_frames);
+        const double raw_bonus = observation.raw_track_id >= 0 &&
                                         observation.raw_track_id == state.raw_track_id
-                                    ? config_.raw_id_continuity_bonus
-                                    : 0.0f;
-        float cost = config_.shape_cost_weight * shape_distance +
-                     config_.age_cost_weight * capped_age_ratio - raw_bonus;
-        const float scale_ratio = LinearScaleRatio(observation.scale, state.scale);
+                                    ? static_cast<double>(config_.raw_id_continuity_bonus)
+                                    : 0.0;
+        double cost = static_cast<double>(config_.shape_cost_weight) * shape_distance +
+                      static_cast<double>(config_.age_cost_weight) * capped_age_ratio -
+                      raw_bonus;
+        const double scale_ratio =
+            LinearScaleRatio(static_cast<double>(observation.scale), state.scale);
         cost += SaturatedDistanceCost(
                     PredictedDistanceRatio(observation, state, frame_index_,
                                            config_.maximum_prediction_frames),
-                    config_.maximum_distance_scale_ratio) +
-                config_.scale_cost_weight * SaturatedScaleCost(
-                    scale_ratio, config_.maximum_linear_scale_ratio);
+                    static_cast<double>(config_.maximum_distance_scale_ratio)) +
+                static_cast<double>(config_.scale_cost_weight) *
+                    SaturatedScaleCost(
+                        scale_ratio,
+                        static_cast<double>(config_.maximum_linear_scale_ratio));
         candidates.push_back({canonical_id, cost});
       }
       std::sort(candidates.begin(), candidates.end(),
@@ -155,8 +160,8 @@ public:
         new_identity_observations.push_back(index);
         continue;
       }
-      const float certainty = candidates.size() == 1
-                                  ? std::numeric_limits<float>::infinity()
+      const double certainty = candidates.size() == 1
+                                  ? std::numeric_limits<double>::infinity()
                                   : candidates[1].cost - candidates[0].cost;
       if (certainty < config_.ambiguity_cost_margin) {
         continue;
@@ -280,14 +285,14 @@ private:
                    const HandIdentityObservation& observation) {
     const std::uint64_t age = frame_index_ - state.last_seen_frame;
     if (state.observation_count > 0 && age > 0) {
-      const float inverse_age = 1.0f / static_cast<float>(age);
-      const float observed_velocity_x =
-          (observation.center_x - state.center_x) * inverse_age;
-      const float observed_velocity_y =
-          (observation.center_y - state.center_y) * inverse_age;
-      const float weight = state.observation_count == 1
-                               ? 1.0f
-                               : config_.velocity_observation_weight;
+    const double inverse_age = 1.0 / static_cast<double>(age);
+      const double observed_velocity_x =
+          (static_cast<double>(observation.center_x) - state.center_x) * inverse_age;
+      const double observed_velocity_y =
+          (static_cast<double>(observation.center_y) - state.center_y) * inverse_age;
+      const double weight = state.observation_count == 1
+                                ? 1.0
+                                : static_cast<double>(config_.velocity_observation_weight);
       state.velocity_x += weight * (observed_velocity_x - state.velocity_x);
       state.velocity_y += weight * (observed_velocity_y - state.velocity_y);
     }
@@ -307,9 +312,9 @@ private:
         observation.handedness != vision_models::Handedness::Unknown) {
       state.handedness = observation.handedness;
     }
-    state.center_x = observation.center_x;
-    state.center_y = observation.center_y;
-    state.scale = observation.scale;
+    state.center_x = static_cast<double>(observation.center_x);
+    state.center_y = static_cast<double>(observation.center_y);
+    state.scale = static_cast<double>(observation.scale);
     state.last_seen_frame = frame_index_;
     ++state.observation_count;
   }

@@ -28,6 +28,8 @@ landmark noise). Final verification covers the bounded horizon, 3D-only shape
 change, handedness gate, candidate competition, both legacy saturation ratios,
 prototype update weight, and transactional capacity retry. Matching complexity
 is `O(H * (20I + I log I))`, with staged copy and expiry pruning `O(I)`.
+Candidate cost and ambiguity arithmetic use `double` so finite extreme public
+weights do not overflow into order-dependent non-finite comparisons.
 
 ## Global Constraints
 
@@ -143,15 +145,14 @@ is `O(H * (20I + I log I))`, with staged copy and expiry pruning `O(I)`.
 - Modify: `hand_interaction/tests/test_primitive_extractor.cpp`
 
 **Interfaces:**
-- Consumes: `HandShapeDescriptor`, handedness, and the four appended `HandIdentityOptions` fields
+- Consumes: `HandShapeDescriptor`, handedness, and the three appended `HandIdentityOptions` fields
 - Produces: retention-window canonical identity with bounded descriptor prototypes
 
 - [ ] **Step 1: Add and validate public configuration**
 
   Append `maximum_shape_distance = 0.20F`, `shape_cost_weight = 2.0F`,
-  `shape_update_weight = 0.20F`, and
-  `handedness_mismatch_penalty = 0.35F`. Change the default
-  `maximum_identities` to `32`. Add constructor tests for zero, negative,
+  `shape_update_weight = 0.20F`. Change the default `maximum_identities` to
+  `32`. Add constructor tests for zero, negative,
   non-finite, and out-of-range values.
 
 - [ ] **Step 2: Store and update descriptor prototypes**

@@ -106,6 +106,10 @@ candidate gates. A reliable hand with no compatible prototype allocates a new
 identity. State remains bounded by `maximum_identities`; exhaustion throws
 `std::length_error` before a partial-frame commit.
 
+Public ranking weights are finite `float` values, but candidate cost
+accumulation, ordering, and ambiguity differences use `double`. This preserves
+the ambiguity contract even when valid extreme weights would overflow `float`.
+
 `maximum_identities` defaults to `32`. `HandIdentityOptions` additionally has
 these validated defaults:
 
@@ -114,7 +118,6 @@ these validated defaults:
 | `maximum_shape_distance` | `0.20F` | Conservative candidate L1 gate; calibrate in `(0, 2]` |
 | `shape_cost_weight` | `2.0F` | Non-negative shape-distance ranking weight |
 | `shape_update_weight` | `0.20F` | EMA prototype update weight in `(0, 1]` |
-| `handedness_mismatch_penalty` | `0.35F` | Validated retained layout field; known disagreement is a hard gate |
 
 The new fields are appended to the public `HandIdentityOptions` structure.
 Default construction and short aggregate initializers retain their source

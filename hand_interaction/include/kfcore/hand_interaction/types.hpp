@@ -34,7 +34,6 @@ struct HandIdentityOptions
     float       maximum_shape_distance         = 0.20F;
     float       shape_cost_weight              = 2.0F;
     float       shape_update_weight            = 0.20F;
-    float       handedness_mismatch_penalty    = 0.35F;
 };
 
 struct HandPoseOptions

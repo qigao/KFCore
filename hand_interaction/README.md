@@ -81,6 +81,9 @@ ID 为 `0`，不会退回为仅按位置匹配。候选还必须满足 `maximum_
 线性归一化到 `[0, 1]`，尺度比的对数差按 `log(后者)` 归一化到 `[0, 1]`。它们不会放宽形状或
 handedness gate；部署应以实际镜头、手势和 landmark 噪声校准这些阈值。
 
+所有公开 cost 权重仍为有限 `float` 配置，但候选 cost、排序和歧义差值均以 `double` 累加与比较；因此极大
+但有效的权重不会把同成本候选变成 `+inf` 并绕过 `ambiguity_cost_margin`。
+
 `HandIdentityOptions` 的默认容量为 `maximum_identities = 32`，并追加下列已在构造时验证的配置：
 
 | Field | Default | Meaning |
@@ -88,9 +91,8 @@ handedness gate；部署应以实际镜头、手势和 landmark 噪声校准这�
 | `maximum_shape_distance` | `0.20F` | 保守的形状候选 L1 gate（范围 `(0, 2]`）；应按实际 landmark 噪声校准 |
 | `shape_cost_weight` | `2.0F` | 形状距离在候选成本中的权重 |
 | `shape_update_weight` | `0.20F` | 已接受形状写入原型的 EMA 权重（范围 `(0, 1]`） |
-| `handedness_mismatch_penalty` | `0.35F` | 为公开结构兼容而保留并验证；已知左右手冲突由硬 gate 拒绝 |
 
-这四个字段被追加到公开 `HandIdentityOptions` 末尾。源码默认构造和短 aggregate 初始化保持可用，但其
+这三个字段被追加到公开 `HandIdentityOptions` 末尾。源码默认构造和短 aggregate 初始化保持可用，但其
 对象布局已变化；所有二进制下游消费者必须重新构建。
 
 ## 状态、并发与容量

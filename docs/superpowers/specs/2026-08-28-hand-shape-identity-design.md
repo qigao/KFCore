@@ -80,6 +80,8 @@ single-threaded, as before.
    across the frame, so input order cannot decide the result.
 6. A reliable observation with no shape-compatible candidate allocates a new
    identity. Exceeding `maximum_identities` remains a fail-fast capacity error.
+   Candidate cost accumulation and all ambiguity differences are `double`, so
+   valid extreme finite `float` weights cannot turn equal costs into `inf - inf`.
 
 ## Public configuration
 
@@ -90,7 +92,6 @@ The following fields are appended to `HandIdentityOptions`:
 | `maximum_shape_distance` | `0.20` | Conservative L1 candidate gate; calibrate for landmark noise |
 | `shape_cost_weight` | `2.0` | Shape contribution to assignment cost |
 | `shape_update_weight` | `0.20` | EMA weight of the newest accepted descriptor |
-| `handedness_mismatch_penalty` | `0.35` | Validated retained layout field; known mismatch is a hard gate |
 
 `maximum_identities` changes from `8` to `32`, bounding retention-window state
 while allowing transient false detections and multiple people without immediate
@@ -119,7 +120,7 @@ consumers of `KFCore::hand_interaction` must be rebuilt. The visible behavior
 also changes: identities expire after the bounded `reacquire_frames` retention
 horizon, so a feature-compatible hand after that horizon receives a new ID.
 
-Rollback consists of reverting the descriptor source, the four option fields,
+Rollback consists of reverting the descriptor source, the three option fields,
 the increased capacity default, and the resolver matching changes. No stored
 data or external format requires migration.
 

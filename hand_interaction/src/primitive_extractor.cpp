@@ -357,9 +357,7 @@ void validate_options(const HandPrimitiveOptions& options)
         options.identity.shape_cost_weight < 0.0F ||
         !std::isfinite(options.identity.shape_update_weight) ||
         options.identity.shape_update_weight <= 0.0F ||
-        options.identity.shape_update_weight > 1.0F ||
-        !std::isfinite(options.identity.handedness_mismatch_penalty) ||
-        options.identity.handedness_mismatch_penalty < 0.0F)
+        options.identity.shape_update_weight > 1.0F)
     {
         throw std::invalid_argument("invalid canonical hand identity configuration");
     }
@@ -553,7 +551,6 @@ detail::HandIdentityConfig identity_config(const HandIdentityOptions& options)
     result.maximum_shape_distance        = options.maximum_shape_distance;
     result.shape_cost_weight             = options.shape_cost_weight;
     result.shape_update_weight           = options.shape_update_weight;
-    result.handedness_mismatch_penalty   = options.handedness_mismatch_penalty;
     return result;
 }
 

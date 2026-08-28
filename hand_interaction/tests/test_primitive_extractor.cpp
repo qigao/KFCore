@@ -505,13 +505,21 @@ spec("hand primitive extractor")
     it("withholds duplicate competitors independent of input order")
     {
         const auto resolve_duplicates = [](bool reverse_input) {
-            HandPrimitiveExtractor extractor;
+            HandPrimitiveOptions options;
+            options.identity.maximum_shape_distance = 2.0F;
+            options.identity.shape_cost_weight =
+                (std::numeric_limits<float>::max)();
+            options.identity.age_cost_weight =
+                (std::numeric_limits<float>::max)();
+            HandPrimitiveExtractor extractor(options);
             HandFrame first_frame;
             first_frame.hands.push_back(identity_hand(4));
             (void)extractor.process(first_frame, frame_context(1));
 
             HandResult nearer = identity_hand(-1);
             HandResult farther = identity_hand(-1);
+            stretch_finger(nearer, 5U, 100.0F);
+            stretch_finger(farther, 5U, 100.0F);
             translate_hand(nearer, 8.0F, 0.0F);
             translate_hand(farther, 9.0F, 0.0F);
             HandFrame duplicates;
@@ -609,6 +617,31 @@ spec("hand primitive extractor")
         const auto shape_weighted = resolve(30.0F);
         check(spatial_only.second.second == spatial_only.first);
         check(shape_weighted.second.second == shape_weighted.second.first);
+    }
+
+    it("withholds equal extreme finite shape costs as ambiguous")
+    {
+        HandPrimitiveOptions options;
+        options.max_hands = 2;
+        options.identity.maximum_identities = 2;
+        options.identity.maximum_shape_distance = 2.0F;
+        options.identity.shape_cost_weight =
+            (std::numeric_limits<float>::max)();
+        options.identity.age_cost_weight =
+            (std::numeric_limits<float>::max)();
+        HandPrimitiveExtractor extractor(options);
+
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(4));
+        initial_frame.hands.push_back(identity_hand(9));
+        (void)extractor.process(initial_frame, frame_context(1));
+
+        HandFrame query_frame;
+        query_frame.hands.push_back(identity_hand(-1));
+        stretch_finger(query_frame.hands[0], 5U, 100.0F);
+        const auto query = extractor.process(query_frame, frame_context(2));
+
+        check(query.hands[0].canonical_id == 0);
     }
 
     it("normalizes distance evidence by its configured saturation ratio")
@@ -1086,26 +1119,12 @@ spec("hand primitive extractor")
             std::numeric_limits<float>::infinity();
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
-        options = {};
-        options.identity.handedness_mismatch_penalty = -0.1F;
-        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
-
-        options = {};
-        options.identity.handedness_mismatch_penalty =
-            std::numeric_limits<float>::quiet_NaN();
-        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
-
-        options = {};
-        options.identity.handedness_mismatch_penalty =
-            std::numeric_limits<float>::infinity();
-        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 
-    it("accepts zero shape and handedness ranking costs")
+    it("accepts a zero shape ranking cost")
     {
         HandPrimitiveOptions options;
         options.identity.shape_cost_weight = 0.0F;
-        options.identity.handedness_mismatch_penalty = 0.0F;
 
         check_nothrow(HandPrimitiveExtractor { options });
     }

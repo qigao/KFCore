@@ -11,9 +11,9 @@ namespace kfcore::hand_interaction::detail {
 
 struct HandIdentityObservation {
   int raw_track_id = -1;
-  float center_x = 0.0f;
-  float center_y = 0.0f;
-  float scale = 0.0f;
+  double center_x = 0.0;
+  double center_y = 0.0;
+  double scale = 0.0;
   float confidence = 0.0f;
   std::optional<HandShapeDescriptor> shape;
   vision_models::Handedness handedness = vision_models::Handedness::Unknown;
@@ -34,7 +34,6 @@ struct HandIdentityConfig {
   float maximum_shape_distance = 0.20f;
   float shape_cost_weight = 2.0f;
   float shape_update_weight = 0.20f;
-  float handedness_mismatch_penalty = 0.35f;
 };
 
 // Owns bounded-reacquisition identities exposed to temporal consumers. Shape
