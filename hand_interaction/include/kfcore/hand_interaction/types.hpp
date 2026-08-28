@@ -83,6 +83,8 @@ struct HandSpatialOptions
     float       scale_change_ratio                 = 0.12F;
     float       rotation_change_degrees            = 18.0F;
     float       two_hand_distance_change_ratio     = 0.06F;
+    float       palm_axis_horizontal_max_degrees   = 30.0F;
+    float       palm_axis_vertical_min_degrees     = 60.0F;
 };
 
 struct HandPrimitiveOptions

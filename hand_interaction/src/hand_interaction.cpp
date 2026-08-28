@@ -64,7 +64,7 @@ namespace
 
     std::size_t maximum_primitive_observations(std::size_t hand_count)
     {
-        constexpr std::size_t kObservationsPerHand = 7U;
+        constexpr std::size_t kObservationsPerHand = 8U;
         const std::size_t pair_count = hand_count > 1U ? hand_count * (hand_count - 1U) / 2U : 0U;
         return hand_count * kObservationsPerHand + pair_count;
     }

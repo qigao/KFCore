@@ -33,6 +33,7 @@ namespace
 namespace demo = kfcore::hand_interaction::demo;
 using kfcore::hand_interaction::GestureFrameContext;
 using kfcore::hand_interaction::HandInteractionFrame;
+using kfcore::hand_interaction::HandInteractionOptions;
 using kfcore::hand_interaction::HandInteractionPipeline;
 using kfcore::vision_models::HandFrame;
 using kfcore::vision_models::HandInferenceBackend;
@@ -195,7 +196,9 @@ int run(const demo::Arguments& arguments)
                                    .count();
     std::cout << std::fixed << std::setprecision(2) << "Model load: "
               << model_load_ms << " ms\n";
-    HandInteractionPipeline interaction_pipeline;
+    HandInteractionOptions interaction_options;
+    interaction_options.temporal.wave_require_horizontal_palm_axis = true;
+    HandInteractionPipeline interaction_pipeline(interaction_options);
     demo::RecentActionHistory action_history;
     demo::LatestFrameMailbox mailbox(arguments.capture.max_frame_bytes);
     demo::CapturedFrame      captured = mailbox.make_consumer_frame();

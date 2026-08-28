@@ -23,7 +23,10 @@ using vision_models::HandResult;
 
 constexpr std::array<std::size_t, 5> kPalmLandmarkIndices = { 0, 5, 9, 13, 17 };
 constexpr float kMinimumPalmSpanPixels = 8.0F;
-constexpr float kDegreesPerRadian = 180.0F / 3.14159265358979323846F;
+constexpr float kRightAngleDegrees = 90.0F;
+constexpr float kHalfTurnDegrees = 180.0F;
+constexpr float kFullTurnDegrees = 360.0F;
+constexpr float kDegreesPerRadian = kHalfTurnDegrees / 3.14159265358979323846F;
 constexpr std::size_t kMaximumSupportedHands = 64;
 
 struct PalmGeometry
@@ -430,6 +433,12 @@ void validate_options(const HandPrimitiveOptions& options)
         options.spatial.scale_change_ratio <= 0.0F ||
         !finite(options.spatial.rotation_change_degrees) ||
         options.spatial.rotation_change_degrees <= 0.0F ||
+        !finite(options.spatial.palm_axis_horizontal_max_degrees) ||
+        options.spatial.palm_axis_horizontal_max_degrees <= 0.0F ||
+        !finite(options.spatial.palm_axis_vertical_min_degrees) ||
+        options.spatial.palm_axis_vertical_min_degrees >= kRightAngleDegrees ||
+        options.spatial.palm_axis_horizontal_max_degrees >=
+            options.spatial.palm_axis_vertical_min_degrees ||
         !finite(options.spatial.two_hand_distance_change_ratio) ||
         options.spatial.two_hand_distance_change_ratio <= 0.0F)
     {
@@ -446,16 +455,41 @@ std::uint64_t pair_key(int first, int second)
 
 float shortest_angle_delta(float first, float last)
 {
-    float delta = std::fmod(last - first, 360.0F);
-    if (delta > 180.0F)
+    float delta = std::fmod(last - first, kFullTurnDegrees);
+    if (delta > kHalfTurnDegrees)
     {
-        delta -= 360.0F;
+        delta -= kFullTurnDegrees;
     }
-    else if (delta < -180.0F)
+    else if (delta < -kHalfTurnDegrees)
     {
-        delta += 360.0F;
+        delta += kFullTurnDegrees;
     }
     return delta;
+}
+
+std::string palm_axis_relation(float orientation_degrees,
+                               const HandSpatialOptions& options)
+{
+    float axis_degrees = std::fmod(orientation_degrees, kHalfTurnDegrees);
+    if (axis_degrees >= kRightAngleDegrees)
+    {
+        axis_degrees -= kHalfTurnDegrees;
+    }
+    else if (axis_degrees < -kRightAngleDegrees)
+    {
+        axis_degrees += kHalfTurnDegrees;
+    }
+
+    const float absolute_axis_degrees = std::fabs(axis_degrees);
+    if (absolute_axis_degrees <= options.palm_axis_horizontal_max_degrees)
+    {
+        return "Palm Axis Horizontal";
+    }
+    if (absolute_axis_degrees >= options.palm_axis_vertical_min_degrees)
+    {
+        return "Palm Axis Vertical";
+    }
+    return "Palm Axis Diagonal";
 }
 
 std::string trend_relation(const char* prefix, float delta, float threshold,
@@ -533,6 +567,11 @@ struct HandPrimitiveExtractor::Impl
                               const GestureFrameContext& context,
                               PrimitiveFrame& result)
     {
+        result.observations.push_back(observation(
+            context, canonical_id, confidence,
+            palm_axis_relation(geometry.orientation_degrees, options.spatial),
+            "palm_geometry"));
+
         auto& points = motion_history[canonical_id];
         points.push_back(
             { geometry.center_x, geometry.center_y, context.observed_at });
@@ -841,7 +880,7 @@ PrimitiveFrame HandPrimitiveExtractor::process(
         impl_->identities.Resolve(identity_observations);
     PrimitiveFrame result;
     result.hands.reserve(frame.hands.size());
-    result.observations.reserve(frame.hands.size() * 7U + potential_pairs);
+    result.observations.reserve(frame.hands.size() * 8U + potential_pairs);
     ++impl_->frame_index;
     impl_->consecutive_empty_frames = frame.hands.empty()
         ? std::min(impl_->consecutive_empty_frames + 1U,

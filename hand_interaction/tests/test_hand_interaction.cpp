@@ -131,6 +131,94 @@ spec("hand interaction")
         check_true(has_action(actions, "Wave"));
     }
 
+    it("optionally requires a horizontal palm axis throughout Wave")
+    {
+        HandInteractionSettings settings = immediate_settings();
+        settings.wave_require_horizontal_palm_axis = true;
+
+        TemporalGraphEngine horizontal_engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+        check_empty(feed(horizontal_engine, 1, 0,
+                         { relation("Shape Open", 1, 1),
+                           relation("Direction Left", 1, 1),
+                           relation("Palm Axis Horizontal", 1, 1) }));
+        check_empty(feed(horizontal_engine, 2, 100,
+                         { relation("Shape Open", 1, 2),
+                           relation("Direction Right", 1, 2),
+                           relation("Palm Axis Horizontal", 1, 2) }));
+        const auto horizontal_actions = feed(
+            horizontal_engine, 3, 200,
+            { relation("Shape Open", 1, 3),
+              relation("Direction Left", 1, 3),
+              relation("Palm Axis Horizontal", 1, 3) });
+        check_true(has_action(horizontal_actions, "Wave"));
+
+        TemporalGraphEngine vertical_engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+        (void)feed(vertical_engine, 1, 0,
+                   { relation("Shape Open", 1, 1),
+                     relation("Direction Left", 1, 1),
+                     relation("Palm Axis Vertical", 1, 1) });
+        (void)feed(vertical_engine, 2, 100,
+                   { relation("Shape Open", 1, 2),
+                     relation("Direction Right", 1, 2),
+                     relation("Palm Axis Vertical", 1, 2) });
+        const auto vertical_actions = feed(
+            vertical_engine, 3, 200,
+            { relation("Shape Open", 1, 3),
+              relation("Direction Left", 1, 3),
+              relation("Palm Axis Vertical", 1, 3) });
+        check_false(has_action(vertical_actions, "Wave"));
+
+        TemporalGraphEngine changing_axis_engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+        (void)feed(changing_axis_engine, 1, 0,
+                   { relation("Shape Open", 1, 1),
+                     relation("Direction Left", 1, 1),
+                     relation("Palm Axis Horizontal", 1, 1) });
+        (void)feed(changing_axis_engine, 2, 100,
+                   { relation("Shape Open", 1, 2),
+                     relation("Direction Right", 1, 2),
+                     relation("Palm Axis Vertical", 1, 2) });
+        const auto changing_axis_actions = feed(
+            changing_axis_engine, 3, 200,
+            { relation("Shape Open", 1, 3),
+              relation("Direction Left", 1, 3),
+              relation("Palm Axis Horizontal", 1, 3) });
+        check_false(has_action(changing_axis_actions, "Wave"));
+
+        TemporalGraphEngine other_hand_axis_engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+        (void)feed(other_hand_axis_engine, 1, 0,
+                   { relation("Shape Open", 1, 1),
+                     relation("Direction Left", 1, 1),
+                     relation("Palm Axis Horizontal", 2, 1) });
+        (void)feed(other_hand_axis_engine, 2, 100,
+                   { relation("Shape Open", 1, 2),
+                     relation("Direction Right", 1, 2),
+                     relation("Palm Axis Horizontal", 2, 2) });
+        const auto other_hand_axis_actions = feed(
+            other_hand_axis_engine, 3, 200,
+            { relation("Shape Open", 1, 3),
+              relation("Direction Left", 1, 3),
+              relation("Palm Axis Horizontal", 2, 3) });
+        check_false(has_action(other_hand_axis_actions, "Wave"));
+
+        TemporalGraphEngine missing_axis_engine(
+            kfcore::hand_interaction::build_hand_interaction_graph(settings));
+        (void)feed(missing_axis_engine, 1, 0,
+                   { relation("Shape Open", 1, 1),
+                     relation("Direction Left", 1, 1) });
+        (void)feed(missing_axis_engine, 2, 100,
+                   { relation("Shape Open", 1, 2),
+                     relation("Direction Right", 1, 2) });
+        const auto missing_axis_actions = feed(
+            missing_axis_engine, 3, 200,
+            { relation("Shape Open", 1, 3),
+              relation("Direction Left", 1, 3) });
+        check_false(has_action(missing_axis_actions, "Wave"));
+    }
+
     it("recognizes OK, dual-hand V, Zoom and Rotate semantic actions")
     {
         const auto          settings = immediate_settings();
@@ -252,23 +340,37 @@ spec("hand interaction")
         check_true(retry.primitives.hands.size() == 1U);
     }
 
-    it("rejects frames that cannot fit the configured THIG capacity")
+    it("preflights the exact primitive and external observation capacity")
     {
         HandInteractionOptions options;
         options.temporal                            = immediate_settings();
-        options.temporal.max_observations_per_frame = 6;
-        HandInteractionPipeline pipeline(options);
+        options.temporal.max_observations_per_frame = 8;
         HandFrame               frame;
         frame.hands.push_back(model_hand(Gesture::Open));
 
-        check_throws_as(pipeline.process(frame, frame_context(1, 0)), std::length_error);
+        HandInteractionPipeline exact_pipeline(options);
+        const auto exact = exact_pipeline.process(frame, frame_context(1, 0));
+        check_size(exact.primitives.observations, 8U);
+
+        options.temporal.max_observations_per_frame = 7;
+        HandInteractionPipeline primitive_overflow(options);
+        check_throws_with(primitive_overflow.process(frame, frame_context(1, 0)),
+                          "hand interaction frame exceeds the THIG observation capacity");
+
+        options.temporal.max_observations_per_frame = 8;
+        HandInteractionPipeline external_overflow(options);
+        const std::vector<Observation> external = {
+            relation("Region Center", 1, 1)
+        };
+        check_throws_with(external_overflow.process(frame, frame_context(1, 0), external),
+                          "hand interaction frame exceeds the THIG observation capacity");
     }
 
     it("does not commit primitive state when THIG relation capacity rejects a frame")
     {
         HandInteractionOptions options;
         options.temporal                     = immediate_settings();
-        options.temporal.max_relation_events = 7;
+        options.temporal.max_relation_events = 8;
         HandInteractionPipeline pipeline(options);
         HandFrame               frame;
         frame.hands.push_back(model_hand(Gesture::Open));

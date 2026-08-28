@@ -14,7 +14,8 @@ TensorRT Hand backend ----+                         |
 
 ## 支持的语义动作
 
-- `Wave`：张开手掌的 Left/Right/Left 或 Right/Left/Right 三段反向运动。
+- `Wave`：张开手掌的 Left/Right/Left 或 Right/Left/Right 三段反向运动；可通过
+  `wave_require_horizontal_palm_axis` 要求整个动作期间掌根轴保持水平。
 - `Grasp`、`Release`、`Drag Start *`、`Drag *`、`Drag End`、`Drag Cancelled`。
 - `OK`、`Single Hand V`、`Two Hand V`。
 - `Zoom In`、`Zoom Out`、`Rotate Clockwise`、`Rotate CounterClockwise`。
@@ -48,6 +49,11 @@ for (const auto& action : result.actions) {
 landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减，图像尺寸必须为正。
 违反配置、顺序或容量约束会抛出明确异常，不会自动切换后端。
 
+`HandSpatialOptions::palm_axis_horizontal_max_degrees` 默认 `30°`，小于等于该值归为
+`Palm Axis Horizontal`；`palm_axis_vertical_min_degrees` 默认 `60°`，大于等于该值归为
+`Palm Axis Vertical`，两者之间归为 `Palm Axis Diagonal`。两个阈值必须满足
+`0 < horizontal_max < vertical_min < 90`，非法配置在构造 extractor 时抛出异常。
+
 外部观察目前只接受图中已经声明的 `Region Center/Left/Right/Top/Bottom/Unclassified`，每帧
 每个 canonical hand 最多一个同名观察，不允许 target。`source.id` 使用前一帧
 `HandInteractionFrame::primitives.hands[].canonical_id`；首帧尚无 canonical ID 时应省略区域
@@ -64,7 +70,7 @@ landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减
 `max_observation_window_states`、`max_action_states`。action-state 容量必须至少覆盖
 `max_relation_events * action_count`，配置时会先验证且 action 状态按 `history_ms` 过期。
 默认 8 手的 primitive 上界为
-`8 * 7 + 8 * 7 / 2 = 84` 个 observations/帧，低于默认 THIG 上限 128；缩小任一容量时应按
+`8 * 8 + 8 * 7 / 2 = 92` 个 observations/帧，低于默认 THIG 上限 128；缩小任一容量时应按
 部署的最大手数重新计算。
 
 facade 每帧在 bounded extractor state 的副本上计算；只有 THIG 接受整帧后才提交 identity 和
@@ -203,7 +209,9 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 派生 primitive。
 
 手框中的 `Raw` 只表示 keypoint classifier 的 `Open/Closed/Pointer` 原始三分类；`Derived`、
-`Motion` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。状态栏同时显示 hand、wave、click
+`Motion`、`Axis` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。`Axis` 将掌根 5→17 的
+无向轴按可配置阈值归类为 `Horizontal/Diagonal/Vertical`；demo 显式要求 `Wave` 全程为
+`Horizontal`，库默认仍保持关闭以兼容现有调用。状态栏同时显示 hand、wave、click
 三张 THIG 状态图。`Single Hand V`、`Grasp` 等一次性 `ActionEvent` 不改变核心事件语义，但在
 demo 中最多保留四条、每条显示 1500ms，便于人工观察；按 `R` 会同时清除这段显示历史。
 

@@ -127,6 +127,28 @@ void rotate_hand(HandResult& hand, float degrees, float center_x = 100.0F,
     }
 }
 
+void set_palm_axis(HandResult& hand, float degrees, float center_x = 110.0F,
+                   float center_y = 170.0F)
+{
+    constexpr float kRadius = 40.0F;
+    constexpr float kRadiansPerDegree = 3.14159265358979323846F / 180.0F;
+    const float radians = degrees * kRadiansPerDegree;
+    const float x = std::cos(radians) * kRadius;
+    const float y = std::sin(radians) * kRadius;
+    set_point(hand, 5, center_x + x, center_y + y);
+    set_point(hand, 17, center_x - x, center_y - y);
+}
+
+float measured_palm_axis(const HandResult& hand)
+{
+    constexpr float kDegreesPerRadian = 180.0F / 3.14159265358979323846F;
+    const float orientation =
+        std::atan2(hand.landmarks[5].y - hand.landmarks[17].y,
+                   hand.landmarks[5].x - hand.landmarks[17].x) *
+        kDegreesPerRadian;
+    return std::fabs(orientation);
+}
+
 HandPrimitiveOptions immediate_options()
 {
     HandPrimitiveOptions options;
@@ -144,6 +166,15 @@ const Observation* find_relation(const std::vector<Observation>& observations,
             return item.relation == relation;
         });
     return found == observations.end() ? nullptr : &*found;
+}
+
+std::size_t count_palm_axis_relations(
+    const std::vector<Observation>& observations)
+{
+    return static_cast<std::size_t>(std::count_if(
+        observations.begin(), observations.end(), [](const Observation& item) {
+            return item.relation.compare(0U, 10U, "Palm Axis ") == 0;
+        }));
 }
 
 } // namespace
@@ -355,6 +386,71 @@ spec("hand primitive extractor")
                                      "Rotation Clockwise"));
     }
 
+    it("publishes an undirected palm-axis angle state")
+    {
+        HandPrimitiveOptions options = immediate_options();
+        options.spatial.palm_axis_horizontal_max_degrees = 30.0F;
+        options.spatial.palm_axis_vertical_min_degrees = 60.0F;
+
+        HandFrame frame;
+        frame.hands.push_back(base_hand(0));
+        HandPrimitiveExtractor horizontal_extractor(options);
+        const auto horizontal =
+            horizontal_extractor.process(frame, frame_context(1));
+        check_not_null(find_relation(horizontal.observations,
+                                     "Palm Axis Horizontal"));
+        check(count_palm_axis_relations(horizontal.observations) == 1U);
+
+        rotate_hand(frame.hands[0], 45.0F);
+        HandPrimitiveExtractor diagonal_extractor(options);
+        const auto diagonal =
+            diagonal_extractor.process(frame, frame_context(2));
+        check_not_null(find_relation(diagonal.observations,
+                                     "Palm Axis Diagonal"));
+        check(count_palm_axis_relations(diagonal.observations) == 1U);
+
+        rotate_hand(frame.hands[0], 45.0F);
+        HandPrimitiveExtractor vertical_extractor(options);
+        const auto vertical =
+            vertical_extractor.process(frame, frame_context(3));
+        check_not_null(find_relation(vertical.observations,
+                                     "Palm Axis Vertical"));
+        check(count_palm_axis_relations(vertical.observations) == 1U);
+
+        frame.hands[0] = base_hand(0);
+        rotate_hand(frame.hands[0], 170.0F);
+        HandPrimitiveExtractor reversed_extractor(options);
+        const auto reversed =
+            reversed_extractor.process(frame, frame_context(4));
+        check_not_null(find_relation(reversed.observations,
+                                     "Palm Axis Horizontal"));
+        check(count_palm_axis_relations(reversed.observations) == 1U);
+
+        frame.hands[0] = base_hand(0);
+        set_palm_axis(frame.hands[0], 30.0F);
+        HandPrimitiveOptions horizontal_boundary_options = immediate_options();
+        horizontal_boundary_options.spatial.palm_axis_horizontal_max_degrees =
+            measured_palm_axis(frame.hands[0]);
+        HandPrimitiveExtractor horizontal_boundary_extractor(
+            horizontal_boundary_options);
+        const auto horizontal_boundary =
+            horizontal_boundary_extractor.process(frame, frame_context(5));
+        check_not_null(find_relation(horizontal_boundary.observations,
+                                     "Palm Axis Horizontal"));
+
+        frame.hands[0] = base_hand(0);
+        set_palm_axis(frame.hands[0], 60.0F);
+        HandPrimitiveOptions vertical_boundary_options = immediate_options();
+        vertical_boundary_options.spatial.palm_axis_vertical_min_degrees =
+            measured_palm_axis(frame.hands[0]);
+        HandPrimitiveExtractor vertical_boundary_extractor(
+            vertical_boundary_options);
+        const auto vertical_boundary =
+            vertical_boundary_extractor.process(frame, frame_context(6));
+        check_not_null(find_relation(vertical_boundary.observations,
+                                     "Palm Axis Vertical"));
+    }
+
     it("publishes normalized distance trends with both canonical identities")
     {
         HandPrimitiveExtractor extractor(immediate_options());
@@ -434,6 +530,16 @@ spec("hand primitive extractor")
         options = {};
         options.spatial.scale_change_ratio =
             std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.spatial.palm_axis_horizontal_max_degrees = 60.0F;
+        options.spatial.palm_axis_vertical_min_degrees = 30.0F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.spatial.palm_axis_vertical_min_degrees =
+            std::numeric_limits<float>::infinity();
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 }

@@ -124,7 +124,8 @@ spec("hand interaction demo frame and UI")
         hand.gesture  = kfcore::vision_models::Gesture::Open;
 
         kfcore::hand_interaction::PrimitiveFrame primitives;
-        for (const std::string& relation : { "Shape V", "Motion Stationary", "Pose OK" })
+        for (const std::string& relation : { "Shape V", "Motion Stationary",
+                                             "Palm Axis Horizontal", "Pose OK" })
         {
             kfcore::thig::Observation observation;
             observation.source   = { "hand", 1 };
@@ -137,7 +138,8 @@ spec("hand interaction demo frame and UI")
         check_equal(text.identity,
                     std::string("Hand ID:1 | Track ID:3 | Raw:Open"));
         check_equal(text.derived,
-                    std::string("Derived:V | Motion:Stationary | Pose:OK"));
+                    std::string(
+                        "Derived:V | Motion:Stationary | Axis:Horizontal | Pose:OK"));
     }
 
     it("keeps a semantic action visible for the configured interval")

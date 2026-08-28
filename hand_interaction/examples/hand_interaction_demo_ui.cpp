@@ -182,6 +182,7 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
 {
     std::string shape  = "Unknown";
     std::string motion = "Unknown";
+    std::string axis   = "Unknown";
     bool        ok     = false;
     for (const thig::Observation& observation : primitives.observations)
     {
@@ -198,6 +199,10 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
         {
             motion = observation.relation.substr(7U);
         }
+        else if (observation.relation.compare(0U, 10U, "Palm Axis ") == 0)
+        {
+            axis = observation.relation.substr(10U);
+        }
         else if (observation.relation == "Pose OK")
         {
             ok = true;
@@ -211,7 +216,8 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
     result.identity = identity.str();
 
     std::ostringstream derived;
-    derived << "Derived:" << shape << " | Motion:" << motion;
+    derived << "Derived:" << shape << " | Motion:" << motion
+            << " | Axis:" << axis;
     if (ok)
     {
         derived << " | Pose:OK";

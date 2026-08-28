@@ -62,7 +62,8 @@ namespace
 
     thig::PatternGraph ThreeStrokeWavePattern(std::string firstDirection,
                                               std::string secondDirection, int strokeDwellMs,
-                                              int reversalMaxMs, int totalMaxMs)
+                                              int reversalMaxMs, int totalMaxMs,
+                                              bool requireHorizontalPalmAxis)
     {
         thig::PatternGraph pattern;
         pattern.nodes = {
@@ -75,6 +76,15 @@ namespace
             { "open_palm", thig::PatternOperator::Atom, {}, "Shape Open", 0 },
             { "open_palm_wave", thig::PatternOperator::During, { 5, 6 } },
         };
+        if (requireHorizontalPalmAxis)
+        {
+            pattern.nodes.push_back(
+                { "horizontal_palm_axis", thig::PatternOperator::Atom, {},
+                  "Palm Axis Horizontal", 0 });
+            pattern.nodes.push_back(
+                { "open_horizontal_palm", thig::PatternOperator::Both, { 6, 8 } });
+            pattern.nodes[7].inputs = { 5, 9 };
+        }
         pattern.root               = 7;
         pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Direction Neutral",
                                        "Shape Fist",   "Shape Pointer",  "Shape V" };
@@ -202,6 +212,9 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         { "Rotation CounterClockwise", "palm_rotation" },
         { "Rotation Stable", "palm_rotation" },
         { "Rotation Unclassified", "palm_rotation" },
+        { "Palm Axis Horizontal", "palm_axis_orientation" },
+        { "Palm Axis Diagonal", "palm_axis_orientation" },
+        { "Palm Axis Vertical", "palm_axis_orientation" },
         { "Hands Distance Expanding", "hands_distance" },
         { "Hands Distance Contracting", "hands_distance" },
         { "Hands Distance Stable", "hands_distance" },
@@ -392,12 +405,14 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         PatternTransition(
             "wave_left_right_left", kArmedState, kAwaitNeutralState,
             ThreeStrokeWavePattern("Direction Left", "Direction Right", settings.direction_dwell_ms,
-                                              settings.wave_reversal_max_ms, settings.wave_total_max_ms),
+                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
+                                   settings.wave_require_horizontal_palm_axis),
             boundIfPresent, true, false, "Wave", 100),
         PatternTransition(
             "wave_right_left_right", kArmedState, kAwaitNeutralState,
             ThreeStrokeWavePattern("Direction Right", "Direction Left", settings.direction_dwell_ms,
-                                              settings.wave_reversal_max_ms, settings.wave_total_max_ms),
+                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
+                                   settings.wave_require_horizontal_palm_axis),
             boundIfPresent, true, false, "Wave", 100),
         Transition("wave_rearm", kAwaitNeutralState, kArmedState, "Direction Neutral",
                               settings.neutral_rearm_ms, bound, false, true, {}, 100),
