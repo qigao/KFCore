@@ -2,6 +2,7 @@ add_library(kfcore_hand_interaction STATIC
   src/gesture_graph.cpp
   src/hand_interaction.cpp
   src/hand_identity.cpp
+  src/hand_shape_descriptor.cpp
   src/primitive_extractor.cpp)
 target_include_directories(kfcore_hand_interaction
   PUBLIC

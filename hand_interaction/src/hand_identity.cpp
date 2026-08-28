@@ -15,6 +15,8 @@ namespace {
 struct IdentityState {
   int canonical_id = 0;
   int raw_track_id = -1;
+  HandShapeDescriptor shape;
+  vision_models::Handedness handedness = vision_models::Handedness::Unknown;
   float center_x = 0.0f;
   float center_y = 0.0f;
   float scale = 0.0f;
@@ -82,7 +84,6 @@ public:
   std::vector<int> Resolve(
       const std::vector<HandIdentityObservation>& observations) {
     ++frame_index_;
-    PruneExpired();
 
     std::vector<int> resolved(observations.size(), 0);
     std::unordered_set<int> used_canonical_ids;
@@ -95,23 +96,37 @@ public:
       const auto& observation = observations[index];
       std::vector<Candidate> candidates;
       candidates.reserve(identities_.size());
+      // Bounded matching costs O(H * I * 20): each observation compares one
+      // inline descriptor against each persistent, capacity-limited prototype.
       for (const auto& [canonical_id, state] : identities_) {
-        if (!IsPlausible(observation, state)) {
+        const float shape_distance =
+            HandShapeDistance(*observation.shape, state.shape);
+        if (shape_distance > config_.maximum_shape_distance) {
           continue;
         }
-        const float scale_ratio = LinearScaleRatio(observation.scale, state.scale);
-        const float age_ratio = static_cast<float>(frame_index_ - state.last_seen_frame) /
-                                static_cast<float>(config_.reacquire_frames);
+        const std::uint64_t age = frame_index_ - state.last_seen_frame;
+        const float capped_age_ratio = static_cast<float>(
+            std::min<std::uint64_t>(age,
+                                    static_cast<std::uint64_t>(config_.reacquire_frames))) /
+            static_cast<float>(config_.reacquire_frames);
         const float raw_bonus = observation.raw_track_id >= 0 &&
                                         observation.raw_track_id == state.raw_track_id
                                     ? config_.raw_id_continuity_bonus
                                     : 0.0f;
-        candidates.push_back(
-            {canonical_id,
-             PredictedDistanceRatio(observation, state, frame_index_,
-                                    config_.maximum_prediction_frames) +
-                 config_.scale_cost_weight * std::abs(std::log(scale_ratio)) +
-                 config_.age_cost_weight * age_ratio - raw_bonus});
+        float cost = config_.shape_cost_weight * shape_distance +
+                     config_.age_cost_weight * capped_age_ratio - raw_bonus;
+        if (state.handedness != vision_models::Handedness::Unknown &&
+            observation.handedness != vision_models::Handedness::Unknown &&
+            state.handedness != observation.handedness) {
+          cost += config_.handedness_mismatch_penalty;
+        }
+        if (age <= static_cast<std::uint64_t>(config_.reacquire_frames)) {
+          const float scale_ratio = LinearScaleRatio(observation.scale, state.scale);
+          cost += PredictedDistanceRatio(observation, state, frame_index_,
+                                         config_.maximum_prediction_frames) +
+                  config_.scale_cost_weight * std::abs(std::log(scale_ratio));
+        }
+        candidates.push_back({canonical_id, cost});
       }
       std::sort(candidates.begin(), candidates.end(),
                 [](const Candidate& lhs, const Candidate& rhs) {
@@ -197,16 +212,8 @@ private:
   bool IsReliable(const HandIdentityObservation& observation) const {
     return observation.confidence >= config_.minimum_confidence &&
            observation.scale > 0.0f && std::isfinite(observation.center_x) &&
-           std::isfinite(observation.center_y) && std::isfinite(observation.scale);
-  }
-
-  bool IsPlausible(const HandIdentityObservation& observation,
-                   const IdentityState& state) const {
-    return PredictedDistanceRatio(observation, state, frame_index_,
-                                  config_.maximum_prediction_frames) <=
-               config_.maximum_distance_scale_ratio &&
-           LinearScaleRatio(observation.scale, state.scale) <=
-               config_.maximum_linear_scale_ratio;
+           std::isfinite(observation.center_y) && std::isfinite(observation.scale) &&
+           observation.shape.has_value();
   }
 
   int AllocateIdentity() {
@@ -235,22 +242,24 @@ private:
     if (observation.raw_track_id >= 0) {
       state.raw_track_id = observation.raw_track_id;
     }
+    if (state.observation_count == 0) {
+      state.shape = *observation.shape;
+    } else {
+      for (std::size_t index = 0U; index < kHandShapeFeatureCount; ++index) {
+        state.shape.values[index] += config_.shape_update_weight *
+            (observation.shape->values[index] - state.shape.values[index]);
+      }
+      (void)NormalizeHandShapeDescriptor(state.shape);
+    }
+    if (state.handedness == vision_models::Handedness::Unknown &&
+        observation.handedness != vision_models::Handedness::Unknown) {
+      state.handedness = observation.handedness;
+    }
     state.center_x = observation.center_x;
     state.center_y = observation.center_y;
     state.scale = observation.scale;
     state.last_seen_frame = frame_index_;
     ++state.observation_count;
-  }
-
-  void PruneExpired() {
-    for (auto iterator = identities_.begin(); iterator != identities_.end();) {
-      if (frame_index_ - iterator->second.last_seen_frame <=
-          static_cast<std::uint64_t>(config_.reacquire_frames)) {
-        ++iterator;
-        continue;
-      }
-      iterator = identities_.erase(iterator);
-    }
   }
 
   HandIdentityConfig config_;

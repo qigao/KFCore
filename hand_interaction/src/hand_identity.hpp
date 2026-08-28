@@ -1,7 +1,10 @@
 #pragma once
 
+#include "hand_shape_descriptor.hpp"
+
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace kfcore::hand_interaction::detail {
@@ -12,6 +15,8 @@ struct HandIdentityObservation {
   float center_y = 0.0f;
   float scale = 0.0f;
   float confidence = 0.0f;
+  std::optional<HandShapeDescriptor> shape;
+  vision_models::Handedness handedness = vision_models::Handedness::Unknown;
 };
 
 struct HandIdentityConfig {
@@ -25,13 +30,16 @@ struct HandIdentityConfig {
   float raw_id_continuity_bonus = 0.08f;
   float velocity_observation_weight = 0.65f;
   int maximum_prediction_frames = 2;
-  std::size_t maximum_identities = 8;
+  std::size_t maximum_identities = 32;
+  float maximum_shape_distance = 0.35f;
+  float shape_cost_weight = 2.0f;
+  float shape_update_weight = 0.20f;
+  float handedness_mismatch_penalty = 0.35f;
 };
 
-// Owns the stable identity exposed to temporal consumers. ByteTrack IDs are
-// short-lived evidence only. This registry never predicts geometry and never
-// classifies gestures; it only rekeys a recently observed identity when the
-// raw tracker recreates its ID. Ambiguous observations remain unconfirmed (0).
+// Owns persistent identities exposed to temporal consumers. Shape is the
+// candidate gate; ByteTrack and spatial evidence only rank compatible states.
+// Ambiguous observations remain unconfirmed (0).
 class HandTrackIdentityRegistry {
 public:
   explicit HandTrackIdentityRegistry(HandIdentityConfig config = {});

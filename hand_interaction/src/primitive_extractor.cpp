@@ -1,6 +1,7 @@
 #include "kfcore/hand_interaction/primitive_extractor.hpp"
 
 #include "hand_identity.hpp"
+#include "hand_shape_descriptor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,7 @@ constexpr float kHalfTurnDegrees = 180.0F;
 constexpr float kFullTurnDegrees = 360.0F;
 constexpr float kDegreesPerRadian = kHalfTurnDegrees / 3.14159265358979323846F;
 constexpr std::size_t kMaximumSupportedHands = 64;
+constexpr float kMaximumHandShapeDistance = 2.0F;
 
 struct PalmGeometry
 {
@@ -347,7 +349,17 @@ void validate_options(const HandPrimitiveOptions& options)
         !std::isfinite(options.identity.velocity_observation_weight) ||
         options.identity.velocity_observation_weight < 0.0F ||
         options.identity.velocity_observation_weight > 1.0F ||
-        options.identity.maximum_prediction_frames <= 0)
+        options.identity.maximum_prediction_frames <= 0 ||
+        !std::isfinite(options.identity.maximum_shape_distance) ||
+        options.identity.maximum_shape_distance <= 0.0F ||
+        options.identity.maximum_shape_distance > kMaximumHandShapeDistance ||
+        !std::isfinite(options.identity.shape_cost_weight) ||
+        options.identity.shape_cost_weight < 0.0F ||
+        !std::isfinite(options.identity.shape_update_weight) ||
+        options.identity.shape_update_weight <= 0.0F ||
+        options.identity.shape_update_weight > 1.0F ||
+        !std::isfinite(options.identity.handedness_mismatch_penalty) ||
+        options.identity.handedness_mismatch_penalty < 0.0F)
     {
         throw std::invalid_argument("invalid canonical hand identity configuration");
     }
@@ -538,6 +550,10 @@ detail::HandIdentityConfig identity_config(const HandIdentityOptions& options)
     result.velocity_observation_weight  = options.velocity_observation_weight;
     result.maximum_prediction_frames    = options.maximum_prediction_frames;
     result.maximum_identities            = options.maximum_identities;
+    result.maximum_shape_distance        = options.maximum_shape_distance;
+    result.shape_cost_weight             = options.shape_cost_weight;
+    result.shape_update_weight           = options.shape_update_weight;
+    result.handedness_mismatch_penalty   = options.handedness_mismatch_penalty;
     return result;
 }
 
@@ -868,12 +884,15 @@ PrimitiveFrame HandPrimitiveExtractor::process(
         geometry_valid[index] = estimate_palm_geometry(
             hand, context.image_width, context.image_height, geometries[index]);
         const float confidence = observation_confidence(hand);
+        const auto shape = detail::MakeHandShapeDescriptor(hand.landmarks);
         identity_observations.push_back(
             { hand.track_id,
               geometries[index].center_x,
               geometries[index].center_y,
               geometries[index].scale,
-              geometry_valid[index] ? confidence : 0.0F });
+              geometry_valid[index] ? confidence : 0.0F,
+              shape,
+              hand.handedness });
     }
 
     const std::vector<int> canonical_ids =
