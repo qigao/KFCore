@@ -188,7 +188,8 @@
   adds no heap allocation or OpenCV dependency, and request a read-only code
   review focused on identity swaps, ambiguity, capacity, and invalid input.
 
-- [ ] **Step 5: Commit and push**
+- [ ] **Step 5: Commit implementation and documentation**
 
-  Commit the implementation and documentation, push
-  `feature/thig-hand-interaction-demo`, and confirm PR #19 targets `master`.
+  Commit the implementation and documentation. Pushing and confirming a PR are
+  separate publishing steps that require explicit authorization and are not
+  performed by Task 4.
