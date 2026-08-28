@@ -37,8 +37,8 @@ public:
   explicit HandTrackIdentityRegistry(HandIdentityConfig config = {});
   ~HandTrackIdentityRegistry();
 
-  HandTrackIdentityRegistry(const HandTrackIdentityRegistry&) = delete;
-  HandTrackIdentityRegistry& operator=(const HandTrackIdentityRegistry&) = delete;
+  HandTrackIdentityRegistry(const HandTrackIdentityRegistry&);
+  HandTrackIdentityRegistry& operator=(const HandTrackIdentityRegistry&);
   HandTrackIdentityRegistry(HandTrackIdentityRegistry&&) noexcept;
   HandTrackIdentityRegistry& operator=(HandTrackIdentityRegistry&&) noexcept;
 
@@ -52,4 +52,3 @@ private:
 };
 
 }  // namespace kfcore::hand_interaction::detail
-

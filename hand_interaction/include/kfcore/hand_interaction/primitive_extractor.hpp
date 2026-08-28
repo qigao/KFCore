@@ -8,6 +8,8 @@
 namespace kfcore::hand_interaction
 {
 
+class HandInteractionPipeline;
+
 class HandPrimitiveExtractor final
 {
 public:
@@ -25,6 +27,10 @@ public:
     void reset();
 
 private:
+    friend class HandInteractionPipeline;
+
+    [[nodiscard]] HandPrimitiveExtractor clone() const;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

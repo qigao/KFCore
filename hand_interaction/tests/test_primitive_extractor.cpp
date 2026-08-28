@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <string>
 
 namespace
@@ -28,7 +30,6 @@ GestureFrameContext frame_context(std::uint64_t serial, int elapsed_ms = 0)
              kImageWidth,
              kImageHeight };
 }
-
 void set_point(HandResult& hand, std::size_t index, float x, float y)
 {
     hand.landmarks[index] = { x, y, 0.0F };
@@ -228,6 +229,48 @@ spec("hand primitive extractor")
         check(second.hands[0].canonical_id == first.hands[0].canonical_id);
     }
 
+    it("allocates a new canonical identity for a far hand while an old hand is dormant")
+    {
+        HandPrimitiveOptions options;
+        options.max_hands = 1;
+        options.identity.maximum_identities = 2;
+        HandPrimitiveExtractor extractor(options);
+        HandFrame first_frame;
+        first_frame.hands.push_back(base_hand(4));
+        const auto first = extractor.process(first_frame, frame_context(1));
+        (void)extractor.process({}, frame_context(2, 33));
+
+        HandFrame far_frame;
+        far_frame.hands.push_back(base_hand(19));
+        translate_hand(far_frame.hands[0], 350.0F, 0.0F);
+        const auto far_result =
+            extractor.process(far_frame, frame_context(3, 66));
+
+        check(far_result.hands[0].canonical_id > 0);
+        check(far_result.hands[0].canonical_id != first.hands[0].canonical_id);
+    }
+
+    it("rejects canonical identity exhaustion without consuming the frame")
+    {
+        HandPrimitiveOptions options;
+        options.max_hands = 1;
+        options.identity.maximum_identities = 1;
+        HandPrimitiveExtractor extractor(options);
+        HandFrame first_frame;
+        first_frame.hands.push_back(base_hand(4));
+        (void)extractor.process(first_frame, frame_context(1));
+
+        HandFrame far_frame;
+        far_frame.hands.push_back(base_hand(19));
+        translate_hand(far_frame.hands[0], 350.0F, 0.0F);
+        check_throws_as(extractor.process(far_frame, frame_context(2, 33)),
+                        std::length_error);
+
+        const auto retry =
+            extractor.process(first_frame, frame_context(2, 33));
+        check(retry.hands[0].canonical_id == 1);
+    }
+
     it("withholds canonical identities while two crossing hands are ambiguous")
     {
         HandPrimitiveExtractor extractor;
@@ -369,6 +412,28 @@ spec("hand primitive extractor")
 
         options = {};
         options.identity.velocity_observation_weight = 1.5F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+    }
+
+    it("rejects non-finite and negative geometry thresholds")
+    {
+        HandPrimitiveOptions options;
+        options.pose.minimum_confidence =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.pose.thumb_index_contact_ratio = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.motion.direction_dominance_ratio =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.spatial.scale_change_ratio =
+            std::numeric_limits<float>::quiet_NaN();
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 }

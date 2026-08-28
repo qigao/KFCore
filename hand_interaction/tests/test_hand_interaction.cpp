@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -233,6 +234,24 @@ spec("hand interaction")
         check_true(accepted.primitives.hands.size() == 1U);
     }
 
+    it("rejects multiple external Regions for one canonical hand")
+    {
+        HandInteractionOptions options;
+        options.temporal = immediate_settings();
+        HandInteractionPipeline pipeline(options);
+        HandFrame               frame;
+        frame.hands.push_back(model_hand(Gesture::Open));
+        const auto               first        = pipeline.process(frame, frame_context(1, 0));
+        const int                canonical_id = first.primitives.hands.front().canonical_id;
+        std::vector<Observation> conflicting  = { relation("Region Center", canonical_id, 2),
+                                                  relation("Region Left", canonical_id, 2) };
+
+        check_throws_as(pipeline.process(frame, frame_context(2, 33), conflicting),
+                        std::invalid_argument);
+        const auto retry = pipeline.process(frame, frame_context(2, 33));
+        check_true(retry.primitives.hands.size() == 1U);
+    }
+
     it("rejects frames that cannot fit the configured THIG capacity")
     {
         HandInteractionOptions options;
@@ -243,5 +262,30 @@ spec("hand interaction")
         frame.hands.push_back(model_hand(Gesture::Open));
 
         check_throws_as(pipeline.process(frame, frame_context(1, 0)), std::length_error);
+    }
+
+    it("does not commit primitive state when THIG relation capacity rejects a frame")
+    {
+        HandInteractionOptions options;
+        options.temporal                     = immediate_settings();
+        options.temporal.max_relation_events = 7;
+        HandInteractionPipeline pipeline(options);
+        HandFrame               frame;
+        frame.hands.push_back(model_hand(Gesture::Open));
+        const auto first = pipeline.process(frame, frame_context(1, 0));
+
+        frame.hands[0].gesture = Gesture::Closed;
+        check_throws_as(pipeline.process(frame, frame_context(2, 33)), std::length_error);
+
+        frame.hands[0].gesture = Gesture::Open;
+        const auto retry       = pipeline.process(frame, frame_context(2, 33));
+        check(retry.primitives.hands[0].canonical_id == first.primitives.hands[0].canonical_id);
+    }
+
+    it("rejects temporal settings before duration arithmetic can overflow")
+    {
+        HandInteractionOptions options;
+        options.temporal.neutral_rearm_ms = (std::numeric_limits<int>::max)();
+        check_throws_as(HandInteractionPipeline { options }, std::invalid_argument);
     }
 }

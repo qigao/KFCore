@@ -38,6 +38,16 @@ std::string RelationKey(const Observation& observation) {
   return key;
 }
 
+std::string ExclusiveScopeKey(const EntityRef& source,
+                              const std::optional<EntityRef>& target,
+                              const std::string& exclusiveGroup) {
+  std::string key = EntityKey(source) + kKeySeparator;
+  if (target.has_value()) {
+    key += EntityKey(*target);
+  }
+  return key + kKeySeparator + exclusiveGroup;
+}
+
 bool Contains(const std::vector<std::string>& values, const std::string& value) {
   return std::find(values.begin(), values.end(), value) != values.end();
 }
@@ -118,8 +128,13 @@ void ValidateSpec(const EngineSpec& spec) {
     throw std::invalid_argument("THIG observationMaxGapMs cannot be negative");
   }
   if (spec.maxObservationsPerFrame == 0 || spec.maxRelationEvents == 0 ||
-      spec.maxObservationWindowStates == 0) {
+      spec.maxObservationWindowStates == 0 || spec.maxActionStates == 0) {
     throw std::invalid_argument("THIG graph capacity limits must be positive");
+  }
+  if (!spec.actions.empty() &&
+      spec.maxRelationEvents > spec.maxActionStates / spec.actions.size()) {
+    throw std::invalid_argument(
+        "THIG maxActionStates must cover the relation/action bound");
   }
 
   std::unordered_set<std::string> relations;
@@ -476,7 +491,6 @@ public:
     return output;
   }
 
-private:
   struct WindowSample {
     std::uint64_t observedMs = 0;
     Observation observation;
@@ -652,8 +666,7 @@ public:
     relations_.clear();
     activeRelationByKey_.clear();
     stabilizer_.Reset();
-    actionFingerprints_.clear();
-    actionLastEmittedMs_.clear();
+    actionStates_.clear();
     stateRuntimes_.clear();
     nextEventId_ = 1;
     lastProcessMs_ = 0;
@@ -676,13 +689,16 @@ public:
 
     std::vector<Observation> observations = input;
     ValidateObservations(observations);
-    PruneHistory(nowMs);
     InsertBindingTimeoutObservations(observations, nowMs);
     ValidateObservations(observations);
-    // Capacity is checked against raw input before the stabilizer mutates its
-    // bounded windows. This is conservative and keeps rejection atomic.
-    EnsureRelationCapacity(observations);
-    auto effectiveObservations = stabilizer_.ProcessFrame(observations, nowMs);
+    // Stabilization is staged so a later graph-capacity rejection cannot
+    // consume temporal-window history from a frame the engine did not accept.
+    auto stagedStabilizer = stabilizer_;
+    auto effectiveObservations =
+        stagedStabilizer.ProcessFrame(observations, nowMs);
+    EnsureRelationCapacity(effectiveObservations, nowMs);
+    PruneHistory(nowMs);
+    stabilizer_ = std::move(stagedStabilizer);
     lastProcessMs_ = nowMs;
     hasProcessed_ = true;
     UpdateRelationGraph(effectiveObservations, nowMs);
@@ -698,6 +714,7 @@ public:
 
   const EngineSpec& Spec() const { return spec_; }
   const std::vector<RelationEvent>& Relations() const { return relations_; }
+  std::size_t ActionStateCount() const { return actionStates_.size(); }
 
   std::string StateOf(const std::string& graphId) const {
     const auto iterator = stateRuntimes_.find(graphId);
@@ -710,40 +727,69 @@ private:
       throw std::length_error("THIG frame exceeds maxObservationsPerFrame");
     }
     std::unordered_set<std::string> keys;
+    std::unordered_set<std::string> exclusiveKeys;
     for (const auto& observation : observations) {
-      if (relationSpecs_.find(observation.relation) == relationSpecs_.end()) {
-        throw std::invalid_argument("THIG observation references unknown relation '" +
-                                    observation.relation + "'");
+      const auto relationSpec = relationSpecs_.find(observation.relation);
+      if (relationSpec == relationSpecs_.end()) {
+        throw std::invalid_argument(
+            "THIG observation references unknown relation '" +
+            observation.relation + "'");
       }
       const std::string key = RelationKey(observation);
       if (!keys.insert(key).second) {
-        throw std::invalid_argument("THIG frame contains duplicate relation observation '" +
-                                    observation.relation + "'");
+        throw std::invalid_argument(
+            "THIG frame contains duplicate relation observation '" +
+            observation.relation + "'");
       }
-      if (!std::isfinite(observation.confidence) || observation.confidence < 0.0f ||
-          observation.confidence > 1.0f) {
+      if (observation.truth == TruthValue::True &&
+          !relationSpec->second.exclusiveGroup.empty()) {
+        std::string exclusiveKey = ExclusiveScopeKey(
+            observation.source, observation.target,
+            relationSpec->second.exclusiveGroup);
+        if (!exclusiveKeys.insert(std::move(exclusiveKey)).second) {
+          throw std::invalid_argument(
+              "THIG frame contains conflicting true relations in exclusive "
+              "group '" +
+              relationSpec->second.exclusiveGroup + "'");
+        }
+      }
+      if (!std::isfinite(observation.confidence) ||
+          observation.confidence < 0.0f || observation.confidence > 1.0f) {
         throw std::invalid_argument("THIG confidence must be within [0, 1]");
       }
       if (observation.source.kind.empty() ||
           observation.source.kind.find(kKeySeparator) != std::string::npos ||
           (observation.target.has_value() &&
            (observation.target->kind.empty() ||
-            observation.target->kind.find(kKeySeparator) != std::string::npos))) {
-        throw std::invalid_argument("THIG entity kinds must be non-empty canonical keys");
+            observation.target->kind.find(kKeySeparator) !=
+                std::string::npos))) {
+        throw std::invalid_argument(
+            "THIG entity kinds must be non-empty canonical keys");
       }
     }
   }
 
-  void EnsureRelationCapacity(const std::vector<Observation>& observations) const {
+  void EnsureRelationCapacity(
+      const std::vector<EffectiveObservation>& observations,
+      std::uint64_t nowMs) const {
+    const std::uint64_t cutoff =
+        nowMs > static_cast<std::uint64_t>(spec_.historyMs)
+            ? nowMs - static_cast<std::uint64_t>(spec_.historyMs)
+            : 0;
+    const std::size_t retainedEvents = static_cast<std::size_t>(std::count_if(
+        relations_.begin(), relations_.end(), [&](const auto& relation) {
+          return relation.active || relation.endMs >= cutoff;
+        }));
     std::size_t newEvents = 0;
-    for (const auto& observation : observations) {
+    for (const auto& effective : observations) {
+      const auto& observation = effective.observation;
       if (observation.truth == TruthValue::True &&
           activeRelationByKey_.find(RelationKey(observation)) ==
               activeRelationByKey_.end()) {
         ++newEvents;
       }
     }
-    if (relations_.size() + newEvents > spec_.maxRelationEvents) {
+    if (retainedEvents + newEvents > spec_.maxRelationEvents) {
       throw std::length_error("THIG rolling graph exceeds maxRelationEvents");
     }
   }
@@ -781,7 +827,7 @@ private:
                            std::uint64_t nowMs) {
     std::unordered_map<std::string, const EffectiveObservation*> observedByKey;
     std::unordered_map<std::string, std::unordered_set<std::string>>
-        trueGroupsBySource;
+        trueRelationsByExclusiveScope;
     observedByKey.reserve(observations.size());
     for (const auto& effective : observations) {
       const auto& observation = effective.observation;
@@ -789,8 +835,10 @@ private:
       if (observation.truth == TruthValue::True) {
         const auto& relationSpec = relationSpecs_.at(observation.relation);
         if (!relationSpec.exclusiveGroup.empty()) {
-          trueGroupsBySource[EntityKey(observation.source)].insert(
-              relationSpec.exclusiveGroup + "\x1f" + observation.relation);
+          trueRelationsByExclusiveScope[ExclusiveScopeKey(
+              observation.source, observation.target,
+              relationSpec.exclusiveGroup)]
+              .insert(observation.relation);
         }
       }
     }
@@ -803,12 +851,12 @@ private:
       const auto& relationSpec = relationSpecs_.at(event.relation);
       bool conflict = false;
       if (!relationSpec.exclusiveGroup.empty()) {
-        const auto sourceGroups = trueGroupsBySource.find(EntityKey(event.source));
-        if (sourceGroups != trueGroupsBySource.end()) {
-          for (const auto& entry : sourceGroups->second) {
-            const auto separator = entry.find('\x1f');
-            if (entry.substr(0, separator) == relationSpec.exclusiveGroup &&
-                entry.substr(separator + 1) != event.relation) {
+        const auto scopeRelations = trueRelationsByExclusiveScope.find(
+            ExclusiveScopeKey(event.source, event.target,
+                              relationSpec.exclusiveGroup));
+        if (scopeRelations != trueRelationsByExclusiveScope.end()) {
+          for (const auto& relation : scopeRelations->second) {
+            if (relation != event.relation) {
               conflict = true;
               break;
             }
@@ -1147,21 +1195,45 @@ private:
   }
 
   void MatchActions(std::uint64_t nowMs, std::vector<ActionEvent>& output) {
+    PruneActionStates(nowMs);
     for (const auto& action : spec_.actions) {
       for (const auto& match : CurrentMatches(action.pattern, nowMs)) {
         const std::string fingerprint = MatchFingerprint(match, relations_);
-        const std::string key = action.action + "\x1f" + EntityKey(match.source);
-        if (actionFingerprints_[key] == fingerprint) {
+        const std::string key =
+            action.action + "\x1f" + EntityKey(match.source);
+        const auto existing = actionStates_.find(key);
+        if (existing != actionStates_.end() &&
+            existing->second.fingerprint == fingerprint) {
+          existing->second.lastMatchedMs = nowMs;
           continue;
         }
-        const auto last = actionLastEmittedMs_.find(key);
-        if (last != actionLastEmittedMs_.end() && action.cooldownMs > 0 &&
-            nowMs - last->second < static_cast<std::uint64_t>(action.cooldownMs)) {
+        if (existing != actionStates_.end() && action.cooldownMs > 0 &&
+            nowMs - existing->second.lastEmittedMs <
+                static_cast<std::uint64_t>(action.cooldownMs)) {
+          existing->second.lastMatchedMs = nowMs;
           continue;
         }
-        actionFingerprints_[key] = fingerprint;
-        actionLastEmittedMs_[key] = nowMs;
+        if (existing == actionStates_.end() &&
+            actionStates_.size() >= spec_.maxActionStates) {
+          throw std::length_error("THIG action state budget exhausted");
+        }
+        actionStates_[key] = {fingerprint, nowMs, nowMs};
         output.push_back(MakeActionEvent(action.action, match, nowMs));
+      }
+    }
+  }
+
+  void PruneActionStates(std::uint64_t nowMs) {
+    const std::uint64_t cutoff =
+        nowMs > static_cast<std::uint64_t>(spec_.historyMs)
+            ? nowMs - static_cast<std::uint64_t>(spec_.historyMs)
+            : 0;
+    for (auto iterator = actionStates_.begin();
+         iterator != actionStates_.end();) {
+      if (iterator->second.lastMatchedMs < cutoff) {
+        iterator = actionStates_.erase(iterator);
+      } else {
+        ++iterator;
       }
     }
   }
@@ -1317,8 +1389,12 @@ private:
   TemporalStabilizer stabilizer_;
   std::vector<RelationEvent> relations_;
   std::unordered_map<std::string, std::size_t> activeRelationByKey_;
-  std::unordered_map<std::string, std::string> actionFingerprints_;
-  std::unordered_map<std::string, std::uint64_t> actionLastEmittedMs_;
+  struct ActionState {
+    std::string fingerprint;
+    std::uint64_t lastEmittedMs = 0;
+    std::uint64_t lastMatchedMs = 0;
+  };
+  std::unordered_map<std::string, ActionState> actionStates_;
   std::unordered_map<std::string, StateRuntime> stateRuntimes_;
   std::uint64_t nextEventId_ = 1;
   std::uint64_t lastProcessMs_ = 0;
@@ -1350,10 +1426,11 @@ const EngineSpec& TemporalGraphEngine::Spec() const { return impl_->Spec(); }
 const std::vector<RelationEvent>& TemporalGraphEngine::Relations() const {
   return impl_->Relations();
 }
+std::size_t TemporalGraphEngine::ActionStateCount() const {
+  return impl_->ActionStateCount();
+}
 std::string TemporalGraphEngine::StateOf(const std::string& graphId) const {
   return impl_->StateOf(graphId);
 }
 
 }  // namespace kfcore::thig
-
-

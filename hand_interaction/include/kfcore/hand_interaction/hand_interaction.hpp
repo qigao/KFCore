@@ -48,6 +48,7 @@ struct HandInteractionSettings
     std::size_t max_observations_per_frame                = 128;
     std::size_t max_relation_events                       = 512;
     std::size_t max_observation_window_states             = 64;
+    std::size_t max_action_states                         = 4096;
 };
 
 [[nodiscard]] thig::EngineSpec

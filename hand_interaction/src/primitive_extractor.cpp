@@ -311,6 +311,7 @@ std::string model_shape(Gesture gesture)
 
 void validate_options(const HandPrimitiveOptions& options)
 {
+    const auto finite = [](float value) { return std::isfinite(value); };
     if (options.max_hands == 0 || options.max_hands > kMaximumSupportedHands ||
         options.identity.maximum_identities == 0 ||
         options.identity.maximum_identities < options.max_hands)
@@ -319,8 +320,9 @@ void validate_options(const HandPrimitiveOptions& options)
             "hand primitive capacities must be positive and identity capacity "
             "must cover max_hands");
     }
-    if (options.pose.minimum_confidence < 0.0F ||
+    if (!finite(options.pose.minimum_confidence) || options.pose.minimum_confidence < 0.0F ||
         options.pose.minimum_confidence > 1.0F ||
+        !finite(options.identity.minimum_confidence) ||
         options.identity.minimum_confidence < 0.0F ||
         options.identity.minimum_confidence > 1.0F)
     {
@@ -347,8 +349,32 @@ void validate_options(const HandPrimitiveOptions& options)
         throw std::invalid_argument("invalid canonical hand identity configuration");
     }
     if (options.pose.index_pressed_mcp_tip_palm_ratio < 0.0F ||
+        !finite(options.pose.thumb_index_contact_ratio) ||
+        options.pose.thumb_index_contact_ratio <= 0.0F ||
+        !finite(options.pose.thumb_index_contact_to_mcp_ratio) ||
+        options.pose.thumb_index_contact_to_mcp_ratio <= 0.0F ||
+        !finite(options.pose.contact_palm_distance_ratio) ||
+        options.pose.contact_palm_distance_ratio <= 0.0F ||
+        !finite(options.pose.extended_tip_beyond_pip_ratio) ||
+        options.pose.extended_tip_beyond_pip_ratio <= 0.0F ||
+        !finite(options.pose.extended_tip_mcp_distance_ratio) ||
+        options.pose.extended_tip_mcp_distance_ratio <= 0.0F ||
+        !finite(options.pose.v_extended_tip_beyond_pip_ratio) ||
+        options.pose.v_extended_tip_beyond_pip_ratio <= 0.0F ||
+        !finite(options.pose.v_extended_tip_mcp_distance_ratio) ||
+        options.pose.v_extended_tip_mcp_distance_ratio <= 0.0F ||
+        !finite(options.pose.folded_tip_beyond_pip_max_ratio) ||
+        options.pose.folded_tip_beyond_pip_max_ratio < 0.0F ||
+        !finite(options.pose.folded_tip_mcp_distance_max_ratio) ||
+        options.pose.folded_tip_mcp_distance_max_ratio <= 0.0F ||
+        !finite(options.pose.v_tip_separation_ratio) ||
+        options.pose.v_tip_separation_ratio <= 0.0F ||
+        !finite(options.pose.index_extended_mcp_tip_palm_ratio) ||
+        !finite(options.pose.index_pressed_mcp_tip_palm_ratio) ||
         options.pose.index_extended_mcp_tip_palm_ratio <=
             options.pose.index_pressed_mcp_tip_palm_ratio ||
+        !finite(options.pose.index_pressed_pip_angle_degrees) ||
+        !finite(options.pose.index_extended_pip_angle_degrees) ||
         options.pose.index_pressed_pip_angle_degrees < 0.0F ||
         options.pose.index_extended_pip_angle_degrees <=
             options.pose.index_pressed_pip_angle_degrees ||
@@ -369,7 +395,29 @@ void validate_options(const HandPrimitiveOptions& options)
         options.motion.stationary_samples > options.motion.max_history_samples ||
         options.motion.track_state_ttl_frames == 0 ||
         options.motion.empty_reset_frames == 0 ||
+        !finite(options.motion.nominal_samples_per_second) ||
         options.motion.nominal_samples_per_second <= 0.0F ||
+        !finite(options.motion.stop_speed_min_px_per_sample) ||
+        options.motion.stop_speed_min_px_per_sample < 0.0F ||
+        !finite(options.motion.stop_speed_hand_ratio) ||
+        options.motion.stop_speed_hand_ratio < 0.0F ||
+        !finite(options.motion.move_distance_min_px) ||
+        options.motion.move_distance_min_px < 0.0F ||
+        !finite(options.motion.move_distance_hand_ratio) ||
+        options.motion.move_distance_hand_ratio < 0.0F ||
+        !finite(options.motion.direction_distance_min_px) ||
+        options.motion.direction_distance_min_px < 0.0F ||
+        !finite(options.motion.direction_distance_hand_ratio) ||
+        options.motion.direction_distance_hand_ratio < 0.0F ||
+        !finite(options.motion.direction_dominance_ratio) ||
+        options.motion.direction_dominance_ratio < 1.0F ||
+        !finite(options.motion.stationary_low_speed_px_per_sample_at_30fps) ||
+        options.motion.stationary_low_speed_px_per_sample_at_30fps < 0.0F ||
+        !finite(options.motion.stationary_total_step_px) ||
+        options.motion.stationary_total_step_px < 0.0F ||
+        !finite(options.motion.stationary_displacement_px) ||
+        options.motion.stationary_displacement_px < 0.0F ||
+        !finite(options.motion.safe_area_inset_ratio) ||
         options.motion.safe_area_inset_ratio < 0.0F ||
         options.motion.safe_area_inset_ratio >= 0.5F)
     {
@@ -378,8 +426,11 @@ void validate_options(const HandPrimitiveOptions& options)
     if (options.spatial.window_ms <= 0 || options.spatial.minimum_samples < 2 ||
         options.spatial.max_samples_per_hand < options.spatial.minimum_samples ||
         options.spatial.max_pair_histories < maximum_pairs ||
+        !finite(options.spatial.scale_change_ratio) ||
         options.spatial.scale_change_ratio <= 0.0F ||
+        !finite(options.spatial.rotation_change_degrees) ||
         options.spatial.rotation_change_degrees <= 0.0F ||
+        !finite(options.spatial.two_hand_distance_change_ratio) ||
         options.spatial.two_hand_distance_change_ratio <= 0.0F)
     {
         throw std::invalid_argument("invalid bounded hand spatial configuration");
@@ -873,6 +924,13 @@ void HandPrimitiveExtractor::reset()
     impl_->has_previous_context = false;
     impl_->previous_serial      = 0;
     impl_->previous_time        = {};
+}
+
+HandPrimitiveExtractor HandPrimitiveExtractor::clone() const
+{
+    HandPrimitiveExtractor result(impl_->options);
+    result.impl_ = std::make_unique<Impl>(*impl_);
+    return result;
 }
 
 } // namespace kfcore::hand_interaction

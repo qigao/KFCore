@@ -73,10 +73,10 @@ struct RelationEvent {
   float support = 0.0f;
   std::uint64_t firstSourceSerial = 0;
   std::uint64_t lastSourceSerial = 0;
-  int rawFrames = 0;
-  int observedFrames = 0;
-  int supportFrames = 0;
-  int unknownFrames = 0;
+  std::uint64_t rawFrames = 0;
+  std::uint64_t observedFrames = 0;
+  std::uint64_t supportFrames = 0;
+  std::uint64_t unknownFrames = 0;
   bool active = false;
   std::string producer;
   std::string diagnostic;
@@ -170,6 +170,7 @@ struct EngineSpec {
   std::size_t maxObservationsPerFrame = 64;
   std::size_t maxRelationEvents = 512;
   std::size_t maxObservationWindowStates = 64;
+  std::size_t maxActionStates = 4096;
   std::vector<RelationSpec> relations;
   std::vector<ObservationWindowSpec> observationWindows;
   std::vector<ActionSpec> actions;
@@ -214,6 +215,7 @@ public:
 
   [[nodiscard]] const EngineSpec& Spec() const;
   [[nodiscard]] const std::vector<RelationEvent>& Relations() const;
+  [[nodiscard]] std::size_t ActionStateCount() const;
   [[nodiscard]] std::string StateOf(const std::string& graphId) const;
 
 private:
@@ -222,5 +224,3 @@ private:
 };
 
 }  // namespace kfcore::thig
-
-

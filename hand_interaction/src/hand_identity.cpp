@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -87,10 +88,6 @@ public:
     std::unordered_set<int> used_canonical_ids;
     std::vector<PendingMatch> pending_matches;
     std::vector<std::size_t> new_identity_observations;
-    const std::size_t reliable_observation_count =
-        static_cast<std::size_t>(std::count_if(
-            observations.begin(), observations.end(),
-            [&](const auto& observation) { return IsReliable(observation); }));
     for (std::size_t index = 0; index < observations.size(); ++index) {
       if (!IsReliable(observations[index])) {
         continue;
@@ -163,23 +160,20 @@ public:
       used_canonical_ids.insert(canonical_id);
     }
 
-    std::size_t permitted_new_identities =
-        reliable_observation_count > identities_.size()
-            ? reliable_observation_count - identities_.size()
-            : 0;
+    const std::size_t remaining_capacity =
+        config_.maximum_identities - identities_.size();
+    const std::size_t remaining_id_range = static_cast<std::size_t>(
+        std::numeric_limits<int>::max() - next_canonical_id_);
+    if (new_identity_observations.size() > remaining_capacity ||
+        new_identity_observations.size() > remaining_id_range) {
+      throw std::length_error("canonical hand identity capacity exhausted");
+    }
     for (const std::size_t observation_index : new_identity_observations) {
-      if (permitted_new_identities == 0) {
-        break;
-      }
       const int canonical_id = AllocateIdentity();
-      if (canonical_id <= 0) {
-        continue;
-      }
       auto& state = identities_[canonical_id];
       state.canonical_id = canonical_id;
       resolved[observation_index] = canonical_id;
       used_canonical_ids.insert(canonical_id);
-      --permitted_new_identities;
     }
 
     // Commit only after the complete assignment is known, so one update never
@@ -270,16 +264,28 @@ HandTrackIdentityRegistry::HandTrackIdentityRegistry(HandIdentityConfig config)
 
 HandTrackIdentityRegistry::~HandTrackIdentityRegistry() = default;
 HandTrackIdentityRegistry::HandTrackIdentityRegistry(
+    const HandTrackIdentityRegistry& other)
+    : impl_(std::make_unique<Impl>(*other.impl_)) {}
+HandTrackIdentityRegistry& HandTrackIdentityRegistry::operator=(
+    const HandTrackIdentityRegistry& other) {
+  if (this != &other) {
+    impl_ = std::make_unique<Impl>(*other.impl_);
+  }
+  return *this;
+}
+HandTrackIdentityRegistry::HandTrackIdentityRegistry(
     HandTrackIdentityRegistry&&) noexcept = default;
 HandTrackIdentityRegistry& HandTrackIdentityRegistry::operator=(
     HandTrackIdentityRegistry&&) noexcept = default;
 
 std::vector<int> HandTrackIdentityRegistry::Resolve(
     const std::vector<HandIdentityObservation>& observations) {
-  return impl_->Resolve(observations);
+  auto staged = std::make_unique<Impl>(*impl_);
+  auto resolved = staged->Resolve(observations);
+  impl_ = std::move(staged);
+  return resolved;
 }
 
 void HandTrackIdentityRegistry::Reset() { impl_->Reset(); }
 
 }  // namespace kfcore::hand_interaction::detail
-

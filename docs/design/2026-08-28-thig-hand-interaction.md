@@ -61,13 +61,13 @@ THIG observations; KFCore does not infer application layout.
 | Ownership | `process()` borrows the frame for the call; extractor and THIG copy all retained fields |
 | Topology | One producer and one consumer executor; every mutable instance is single-owner and non-reentrant |
 | Ordering | Frame serial and timestamp must both be monotonic |
-| Capacity | `max_hands`, samples per hand, canonical identities, pair histories, observations per frame, relation events, and observation-window states have explicit hard limits |
+| Capacity | `max_hands`, samples per hand, canonical identities, pair histories, observations per frame, relation events, observation-window states, and action states have explicit hard limits |
 | Full behavior | Invalid configuration and capacity exhaustion throw before partially committing a frame |
 | Reset | `reset()` clears identities, primitive histories, THIG relations, cooldowns, and graph state together |
 | Shutdown | RAII destruction after the owning executor stops calling the instance; there are no background threads or callbacks |
 | Observability | Result exposes primitives/actions; configuration and exceptions identify the failed boundary |
 
-Histories are pruned by both monotonic age and sample count. No unbounded map,
+Histories and action state are pruned by monotonic age and bounded by count. No unbounded map,
 queue, or vector is allowed on the frame path. THIG action events copy evidence,
 so later pruning cannot invalidate returned events.
 
@@ -101,4 +101,3 @@ targets. Existing vision inference and tracking behavior is unaffected.
   Rotate without model or GPU mocks.
 - Run existing vision core, CPU integration, and TensorRT integration tests to
   prove the common semantic layer does not alter backend contracts.
-

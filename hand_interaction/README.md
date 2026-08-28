@@ -32,6 +32,7 @@ kfcore::hand_interaction::HandInteractionOptions options;
 options.primitives.max_hands = 8;
 options.temporal.max_observations_per_frame = 128;
 options.temporal.max_relation_events = 512;
+options.temporal.max_action_states = 4096;
 kfcore::hand_interaction::HandInteractionPipeline gestures(options);
 
 std::uint64_t serial = 1;
@@ -60,9 +61,15 @@ landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减
 
 所有保留数据同时受时间窗与数量上限约束：`max_hands`、每手样本数、pair histories、
 `history_ms`、`max_observations_per_frame`、`max_relation_events` 和
-`max_observation_window_states`。默认 8 手的 primitive 上界为
+`max_observation_window_states`、`max_action_states`。action-state 容量必须至少覆盖
+`max_relation_events * action_count`，配置时会先验证且 action 状态按 `history_ms` 过期。
+默认 8 手的 primitive 上界为
 `8 * 7 + 8 * 7 / 2 = 84` 个 observations/帧，低于默认 THIG 上限 128；缩小任一容量时应按
 部署的最大手数重新计算。
+
+facade 每帧在 bounded extractor state 的副本上计算；只有 THIG 接受整帧后才提交 identity 和
+geometry histories。relation/window/action 容量拒绝不会消费 serial，调用方可用同一 frame
+重试。canonical identity 容量耗尽同样显式抛错，不会用 ID 0 静默表示资源不足。
 
 ## 构建和安装
 

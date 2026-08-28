@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -15,17 +16,6 @@ namespace
     constexpr char kHandEntityKind[] = "hand";
     constexpr char kRegionPrefix[]   = "Region ";
 
-    std::string observation_key(const thig::Observation& observation)
-    {
-        std::string key = observation.relation + "\n" + observation.source.kind + "\n" +
-                          std::to_string(observation.source.id);
-        if (observation.target.has_value())
-        {
-            key += "\n" + observation.target->kind + "\n" + std::to_string(observation.target->id);
-        }
-        return key;
-    }
-
     void validate_external_observations(const std::vector<thig::Observation>& observations,
                                         const GestureFrameContext&            context,
                                         const thig::EngineSpec&               spec)
@@ -37,8 +27,8 @@ namespace
             graph_relations.insert(relation.relation);
         }
 
-        std::unordered_set<std::string> frame_keys;
-        frame_keys.reserve(observations.size());
+        std::unordered_set<std::int64_t> region_sources;
+        region_sources.reserve(observations.size());
         for (const thig::Observation& observation : observations)
         {
             if (observation.serial != context.serial)
@@ -64,10 +54,10 @@ namespace
                 throw std::invalid_argument(
                     "external observation confidence must be within [0, 1]");
             }
-            if (!frame_keys.insert(observation_key(observation)).second)
+            if (!region_sources.insert(observation.source.id).second)
             {
                 throw std::invalid_argument(
-                    "external observations contain a duplicate Region relation");
+                    "external observations contain multiple Regions for one hand");
             }
         }
     }
@@ -123,13 +113,15 @@ HandInteractionPipeline::process(const vision_models::HandFrame&       frame,
         throw std::length_error("hand interaction frame exceeds the THIG observation capacity");
     }
 
-    HandInteractionFrame result;
-    result.primitives = impl_->primitives.process(frame, context);
+    HandPrimitiveExtractor staged_primitives = impl_->primitives.clone();
+    HandInteractionFrame   result;
+    result.primitives = staged_primitives.process(frame, context);
     result.primitives.observations.insert(result.primitives.observations.end(),
                                           external_observations.begin(),
                                           external_observations.end());
     result.actions =
         impl_->engine.ProcessFrame(result.primitives.observations, context.observed_at);
+    impl_->primitives = std::move(staged_primitives);
     return result;
 }
 

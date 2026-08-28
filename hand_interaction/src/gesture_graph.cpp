@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -154,14 +155,24 @@ namespace
 
 thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& settings)
 {
+    if (settings.neutral_rearm_ms < 0)
+    {
+        throw std::invalid_argument("neutral rearm duration cannot be negative");
+    }
+    const auto doubled_neutral = static_cast<std::int64_t>(settings.neutral_rearm_ms) * 2;
+    if (doubled_neutral > (std::numeric_limits<int>::max)())
+    {
+        throw std::invalid_argument("neutral rearm duration exceeds the THIG time range");
+    }
     const int sourceBindingTimeoutMs =
         std::max(settings.neutral_rearm_ms, settings.observation_max_gap_ms);
     thig::EngineSpec spec;
-    spec.version                    = kHandInteractionSpecVersion;
-    spec.historyMs                  = std::max(settings.history_ms, settings.neutral_rearm_ms * 2);
-    spec.maxObservationsPerFrame    = settings.max_observations_per_frame;
-    spec.maxRelationEvents          = settings.max_relation_events;
+    spec.version                 = kHandInteractionSpecVersion;
+    spec.historyMs               = std::max(settings.history_ms, static_cast<int>(doubled_neutral));
+    spec.maxObservationsPerFrame = settings.max_observations_per_frame;
+    spec.maxRelationEvents       = settings.max_relation_events;
     spec.maxObservationWindowStates = settings.max_observation_window_states;
+    spec.maxActionStates            = settings.max_action_states;
     spec.observationMaxGapMs        = settings.observation_max_gap_ms;
     spec.relations                  = {
         { "Pose OK", kOkPoseGroup },

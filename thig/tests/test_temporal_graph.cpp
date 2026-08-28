@@ -127,6 +127,41 @@ spec("THIG temporal graph") {
     check(actions[0].evidence[0].unknownFrames == 0);
   }
 
+  it("rejects simultaneous true relations in one exclusive group") {
+    auto graph = BasicSpec("circle", 0);
+    graph.relations.push_back({"open", "pose"});
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+
+    check_throws_as(
+        engine.ProcessFrame({Observe("circle", 8), Observe("open", 8)},
+                            std::chrono::steady_clock::now()),
+        std::invalid_argument);
+    check_empty(engine.Relations());
+  }
+
+  it("keeps targeted exclusive relations independent across targets") {
+    kfcore::thig::EngineSpec graph;
+    graph.version = "targeted-exclusive-v1";
+    graph.observationMaxGapMs = 1000;
+    graph.relations = {{"near", "pair_distance"},
+                       {"far", "pair_distance"}};
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+    const auto now = std::chrono::steady_clock::now();
+
+    auto near_observation = Observe("near", 1, 1);
+    near_observation.target = kfcore::thig::EntityRef{"hand", 2};
+    auto far_observation = Observe("far", 1, 2);
+    far_observation.target = kfcore::thig::EntityRef{"hand", 3};
+    check_empty(engine.ProcessFrame({near_observation}, now));
+    check_empty(engine.ProcessFrame({far_observation},
+                                    now + std::chrono::milliseconds(1)));
+
+    const auto active = static_cast<std::size_t>(std::count_if(
+        engine.Relations().begin(), engine.Relations().end(),
+        [](const auto& relation) { return relation.active; }));
+    check(active == 2U);
+  }
+
   it("matches a declarative sequence with consistent entity binding") {
     kfcore::thig::EngineSpec spec;
     spec.version = "sequence-v1";
@@ -707,5 +742,97 @@ spec("THIG temporal graph") {
         std::length_error);
     check_size(engine.Relations(), 1);
   }
-}
 
+  it("does not prune relation history when a later frame exceeds capacity") {
+    auto graph = BasicSpec("candidate", 0);
+    graph.historyMs = 1;
+    graph.observationMaxGapMs = 1000;
+    graph.maxRelationEvents = 2;
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+    const auto now = std::chrono::steady_clock::now();
+
+    check_size(engine.ProcessFrame({Observe("candidate", 1, 1)}, now), 1);
+    check_size(engine.ProcessFrame(
+                   {Reject("candidate", 1, 2), Observe("candidate", 2, 2)},
+                   now + std::chrono::milliseconds(1)),
+               1);
+    check_size(engine.Relations(), 2);
+    check_throws_as(engine.ProcessFrame({Observe("candidate", 3, 3),
+                                         Observe("candidate", 4, 3)},
+                                        now + std::chrono::milliseconds(10)),
+                    std::length_error);
+    check_size(engine.Relations(), 2);
+
+    (void)engine.ProcessFrame({Observe("candidate", 2, 3)},
+                              now + std::chrono::milliseconds(10));
+    check_size(engine.Relations(), 1);
+  }
+
+  it("bounds and expires per-source action state") {
+    auto graph = BasicSpec("candidate", 0);
+    graph.historyMs = 2;
+    graph.observationMaxGapMs = 0;
+    graph.maxRelationEvents = 2;
+    graph.maxActionStates = 2;
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+    const auto now = std::chrono::steady_clock::now();
+
+    check_size(engine.ProcessFrame({Observe("candidate", 1, 1)}, now), 1);
+    check_size(engine.ProcessFrame({Observe("candidate", 2, 2)},
+                                   now + std::chrono::milliseconds(1)),
+               1);
+    check(engine.ActionStateCount() == 2U);
+    check_empty(engine.ProcessFrame(
+        {Reject("candidate", 1, 3), Reject("candidate", 2, 3)},
+        now + std::chrono::milliseconds(4)));
+    check(engine.ActionStateCount() == 0U);
+  }
+
+  it("keeps deduplication state while an action remains matched") {
+    auto graph = BasicSpec("candidate", 0);
+    graph.historyMs = 2;
+    graph.observationMaxGapMs = 1000;
+    graph.maxRelationEvents = 1;
+    graph.maxActionStates = 1;
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+    const auto now = std::chrono::steady_clock::now();
+
+    check_size(engine.ProcessFrame({Observe("candidate", 1, 1)}, now), 1);
+    check_empty(engine.ProcessFrame({Observe("candidate", 1, 2)},
+                                    now + std::chrono::milliseconds(2)));
+    check_empty(engine.ProcessFrame({Observe("candidate", 1, 3)},
+                                    now + std::chrono::milliseconds(4)));
+    check(engine.ActionStateCount() == 1U);
+  }
+
+  it("rejects an action-state budget smaller than the relation/action bound") {
+    auto graph = BasicSpec("candidate", 0);
+    graph.maxRelationEvents = 2;
+    graph.maxActionStates = 1;
+    check_throws_as(kfcore::thig::TemporalGraphEngine(std::move(graph)),
+                    std::invalid_argument);
+  }
+
+  it("leaves observation windows unchanged when their state budget rejects a "
+     "frame") {
+    auto graph = WindowedShapeSpec();
+    graph.maxObservationWindowStates = 1;
+    kfcore::thig::TemporalGraphEngine engine(std::move(graph));
+    const auto now = std::chrono::steady_clock::now();
+
+    check_empty(engine.ProcessFrame({Observe("open", 1, 1)}, now));
+    check_size(engine.ProcessFrame({Observe("open", 1, 2)},
+                                   now + std::chrono::milliseconds(1)),
+               1);
+    check_throws_as(
+        engine.ProcessFrame({Reject("open", 1, 3), Observe("open", 2, 3)},
+                            now + std::chrono::milliseconds(2)),
+        std::length_error);
+
+    check_empty(engine.ProcessFrame({Observe("open", 1, 3)},
+                                    now + std::chrono::milliseconds(2)));
+    const auto* active = ActiveRelation(engine, "open");
+    check_not_null(active);
+    check(active->observedFrames == 2);
+  }
+}
