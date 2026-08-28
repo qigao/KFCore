@@ -49,6 +49,8 @@ struct HandInteractionSettings
     std::size_t max_relation_events                       = 512;
     std::size_t max_observation_window_states             = 64;
     std::size_t max_action_states                         = 4096;
+    bool        wave_require_horizontal_palm_axis         = false;
+    int         rotation_cooldown_ms                      = 600;
 };
 
 [[nodiscard]] thig::EngineSpec

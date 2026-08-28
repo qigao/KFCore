@@ -30,7 +30,10 @@ struct HandIdentityOptions
     float       raw_id_continuity_bonus       = 0.08F;
     float       velocity_observation_weight   = 0.65F;
     int         maximum_prediction_frames     = 2;
-    std::size_t maximum_identities             = 8;
+    std::size_t maximum_identities             = 32;
+    float       maximum_shape_distance         = 0.20F;
+    float       shape_cost_weight              = 2.0F;
+    float       shape_update_weight            = 0.20F;
 };
 
 struct HandPoseOptions
@@ -83,6 +86,8 @@ struct HandSpatialOptions
     float       scale_change_ratio                 = 0.12F;
     float       rotation_change_degrees            = 18.0F;
     float       two_hand_distance_change_ratio     = 0.06F;
+    float       palm_axis_horizontal_max_degrees   = 30.0F;
+    float       palm_axis_vertical_min_degrees     = 60.0F;
 };
 
 struct HandPrimitiveOptions

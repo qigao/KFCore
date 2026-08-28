@@ -62,7 +62,8 @@ namespace
 
     thig::PatternGraph ThreeStrokeWavePattern(std::string firstDirection,
                                               std::string secondDirection, int strokeDwellMs,
-                                              int reversalMaxMs, int totalMaxMs)
+                                              int reversalMaxMs, int totalMaxMs,
+                                              bool requireHorizontalPalmAxis)
     {
         thig::PatternGraph pattern;
         pattern.nodes = {
@@ -75,9 +76,18 @@ namespace
             { "open_palm", thig::PatternOperator::Atom, {}, "Shape Open", 0 },
             { "open_palm_wave", thig::PatternOperator::During, { 5, 6 } },
         };
+        if (requireHorizontalPalmAxis)
+        {
+            pattern.nodes.push_back(
+                { "horizontal_palm_axis", thig::PatternOperator::Atom, {},
+                  "Palm Axis Horizontal", 0 });
+            pattern.nodes.push_back(
+                { "open_horizontal_palm", thig::PatternOperator::Both, { 6, 8 } });
+            pattern.nodes[7].inputs = { 5, 9 };
+        }
         pattern.root               = 7;
-        pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Direction Neutral",
-                                       "Shape Fist",   "Shape Pointer",  "Shape V" };
+        pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Shape Fist",
+                                       "Shape Pointer", "Shape V" };
         return pattern;
     }
 
@@ -168,7 +178,8 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         std::max(settings.neutral_rearm_ms, settings.observation_max_gap_ms);
     thig::EngineSpec spec;
     spec.version                 = kHandInteractionSpecVersion;
-    spec.historyMs               = std::max(settings.history_ms, static_cast<int>(doubled_neutral));
+    spec.historyMs = std::max({ settings.history_ms, static_cast<int>(doubled_neutral),
+                                settings.rotation_cooldown_ms });
     spec.maxObservationsPerFrame = settings.max_observations_per_frame;
     spec.maxRelationEvents       = settings.max_relation_events;
     spec.maxObservationWindowStates = settings.max_observation_window_states;
@@ -202,6 +213,9 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         { "Rotation CounterClockwise", "palm_rotation" },
         { "Rotation Stable", "palm_rotation" },
         { "Rotation Unclassified", "palm_rotation" },
+        { "Palm Axis Horizontal", "palm_axis_orientation" },
+        { "Palm Axis Diagonal", "palm_axis_orientation" },
+        { "Palm Axis Vertical", "palm_axis_orientation" },
         { "Hands Distance Expanding", "hands_distance" },
         { "Hands Distance Contracting", "hands_distance" },
         { "Hands Distance Stable", "hands_distance" },
@@ -261,30 +275,32 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
     spec.actions.push_back(std::move(singleHandV));
 
     const auto addSpatialAction =
-        [&](std::string action, thig::PatternGraph pattern, std::string exclusiveGroup)
+        [&](std::string action, thig::PatternGraph pattern, std::string exclusiveGroup,
+            int cooldownMs)
     {
         thig::ActionSpec specAction;
         specAction.action         = std::move(action);
         specAction.pattern        = std::move(pattern);
         specAction.exclusiveGroup = std::move(exclusiveGroup);
         specAction.priority       = 70;
+        specAction.cooldownMs     = cooldownMs;
         spec.actions.push_back(std::move(specAction));
     };
     addSpatialAction(
         "Zoom In", thig::PatternGraph::Atom("Hands Distance Expanding", settings.spatial_dwell_ms),
-        "zoom_transform");
+        "zoom_transform", 0);
     addSpatialAction(
         "Zoom Out",
         thig::PatternGraph::Atom("Hands Distance Contracting", settings.spatial_dwell_ms),
-        "zoom_transform");
+        "zoom_transform", 0);
     addSpatialAction(
         "Rotate Clockwise",
         BothRelations("Rotation Clockwise", "Motion Stationary", settings.spatial_dwell_ms),
-        "rotation_transform");
+        "rotation_transform", settings.rotation_cooldown_ms);
     addSpatialAction(
         "Rotate CounterClockwise",
         BothRelations("Rotation CounterClockwise", "Motion Stationary", settings.spatial_dwell_ms),
-        "rotation_transform");
+        "rotation_transform", settings.rotation_cooldown_ms);
 
     const auto addDualHandAction =
         [&](std::string action, std::string first, std::string second, int priority)
@@ -392,12 +408,14 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         PatternTransition(
             "wave_left_right_left", kArmedState, kAwaitNeutralState,
             ThreeStrokeWavePattern("Direction Left", "Direction Right", settings.direction_dwell_ms,
-                                              settings.wave_reversal_max_ms, settings.wave_total_max_ms),
+                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
+                                   settings.wave_require_horizontal_palm_axis),
             boundIfPresent, true, false, "Wave", 100),
         PatternTransition(
             "wave_right_left_right", kArmedState, kAwaitNeutralState,
             ThreeStrokeWavePattern("Direction Right", "Direction Left", settings.direction_dwell_ms,
-                                              settings.wave_reversal_max_ms, settings.wave_total_max_ms),
+                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
+                                   settings.wave_require_horizontal_palm_axis),
             boundIfPresent, true, false, "Wave", 100),
         Transition("wave_rearm", kAwaitNeutralState, kArmedState, "Direction Neutral",
                               settings.neutral_rearm_ms, bound, false, true, {}, 100),

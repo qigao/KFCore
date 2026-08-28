@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace kfcore::vision_models
@@ -109,6 +110,41 @@ struct FaceLandmarkResult
     double                                   preprocess_ms = 0.0;
     double                                   inference_ms  = 0.0;
     double                                   total_ms      = 0.0;
+};
+
+struct FaceDetection
+{
+    RectF box;
+    float confidence = 0.0F;
+};
+
+struct FaceDetectionResult
+{
+    std::optional<FaceDetection> face;
+    double                       preprocess_ms = 0.0;
+    double                       inference_ms  = 0.0;
+    double                       total_ms      = 0.0;
+};
+
+struct FaceMeshTimings
+{
+    double detection_preprocess_ms = 0.0;
+    double detection_inference_ms  = 0.0;
+    double landmark_preprocess_ms  = 0.0;
+    double landmark_inference_ms   = 0.0;
+    double total_ms                = 0.0;
+};
+
+struct FaceMeshFrame
+{
+    std::optional<FaceDetection>      detection;
+    std::optional<FaceLandmarkResult> landmarks;
+    FaceMeshTimings                   timings;
+};
+
+struct FaceMeshPipelineOptions
+{
+    float landmark_score_threshold = 0.50F;
 };
 
 struct ByteTrackOptions

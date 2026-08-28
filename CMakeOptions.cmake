@@ -37,6 +37,12 @@ option(KFCORE_BUILD_THIG
 option(KFCORE_BUILD_HAND_INTERACTION
        "Build tracked hand primitive and temporal interaction support" OFF)
 cmake_dependent_option(
+  KFCORE_BUILD_HAND_INTERACTION_EXAMPLES
+  "Build live Turbo Capture THIG hand-interaction examples"
+  OFF
+  "KFCORE_BUILD_HAND_INTERACTION"
+  OFF)
+cmake_dependent_option(
   KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS
   "Build real-engine TensorRT vision-model integration tests"
   OFF

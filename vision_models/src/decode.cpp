@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace kfcore::vision_models::detail
@@ -150,6 +151,91 @@ Gesture decode_gesture(std::int64_t class_id) noexcept
     default:
         return Gesture::Unknown;
     }
+}
+
+std::optional<FaceDetection> decode_yolo12_face(
+    const float* values, std::size_t value_count, std::int32_t face_class_id,
+    float confidence_threshold, const image::LetterboxTransform& letterbox,
+    std::int32_t image_width, std::int32_t image_height)
+{
+    constexpr std::size_t kValuesPerDetection = 6U;
+    if ((values == nullptr && value_count != 0U) ||
+        value_count % kValuesPerDetection != 0U)
+    {
+        throw_contract("YOLOv12 face output must contain complete rows of six FP32 values");
+    }
+    require_finite(confidence_threshold, "YOLOv12 face confidence threshold");
+    require_finite(letterbox.scale, "YOLOv12 face letterbox scale");
+    require_finite(letterbox.pad_x, "YOLOv12 face letterbox pad_x");
+    require_finite(letterbox.pad_y, "YOLOv12 face letterbox pad_y");
+    if (face_class_id < 0 || confidence_threshold < 0.0F ||
+        confidence_threshold > 1.0F || letterbox.scale <= 0.0F ||
+        image_width <= 0 || image_height <= 0)
+    {
+        throw_contract("YOLOv12 face decode configuration is invalid");
+    }
+    if (letterbox.source_width != image_width ||
+        letterbox.source_height != image_height)
+    {
+        throw_contract("YOLOv12 face letterbox source dimensions do not match the image");
+    }
+
+    std::optional<FaceDetection> best;
+    const std::size_t row_count = value_count / kValuesPerDetection;
+    for (std::size_t index = 0; index < row_count; ++index)
+    {
+        const float* row = values + index * kValuesPerDetection;
+        for (std::size_t value = 0; value < kValuesPerDetection; ++value)
+        {
+            require_finite(row[value], "YOLOv12 face output value");
+        }
+        const float score = row[4];
+        if (score < 0.0F || score > 1.0F)
+        {
+            throw_contract("YOLOv12 face score must be within [0,1]");
+        }
+        if (score == 0.0F)
+        {
+            continue;
+        }
+        if (row[0] > row[2] || row[1] > row[3])
+        {
+            throw_contract("YOLOv12 face box coordinates are invalid");
+        }
+        if (row[5] < 0.0F ||
+            row[5] > static_cast<float>((std::numeric_limits<std::int32_t>::max)()) ||
+            std::trunc(row[5]) != row[5])
+        {
+            throw_contract("YOLOv12 face class id is invalid");
+        }
+        const auto class_id = static_cast<std::int32_t>(row[5]);
+        if (class_id != face_class_id || score < confidence_threshold)
+        {
+            continue;
+        }
+
+        const float inverse_scale = 1.0F / letterbox.scale;
+        const float left = std::clamp((row[0] - letterbox.pad_x) * inverse_scale,
+                                      0.0F, static_cast<float>(image_width));
+        const float top = std::clamp((row[1] - letterbox.pad_y) * inverse_scale,
+                                     0.0F, static_cast<float>(image_height));
+        const float right = std::clamp((row[2] - letterbox.pad_x) * inverse_scale,
+                                       0.0F, static_cast<float>(image_width));
+        const float bottom = std::clamp((row[3] - letterbox.pad_y) * inverse_scale,
+                                        0.0F, static_cast<float>(image_height));
+        if (left >= right || top >= bottom)
+        {
+            throw_contract("YOLOv12 face restored box has no positive area");
+        }
+        const FaceDetection candidate {
+            { left, top, right - left, bottom - top }, score
+        };
+        if (!best || candidate.confidence > best->confidence)
+        {
+            best = candidate;
+        }
+    }
+    return best;
 }
 
 std::array<Point3f, kFaceLandmarkCount> decode_face_landmarks(

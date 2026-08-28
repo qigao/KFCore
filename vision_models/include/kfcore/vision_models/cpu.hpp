@@ -3,6 +3,7 @@
 #include "kfcore/vision_models/core.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -28,7 +29,33 @@ struct CpuVisionOptions
     std::size_t max_hands             = 8;
     float       palm_score_threshold  = 0.52F;
     float       hand_score_threshold  = 0.50F;
+    float       face_detection_score_threshold = 0.50F;
+    std::int32_t face_class_id                  = 0;
     bool        face_coordinates_normalized = true;
+};
+
+class CpuFaceDetector final : public FaceDetectorBackend
+{
+public:
+    ~CpuFaceDetector() override;
+
+    CpuFaceDetector(const CpuFaceDetector&)            = delete;
+    CpuFaceDetector& operator=(const CpuFaceDetector&) = delete;
+
+    // Loads the fixed YOLOv12-face images/output0 ONNX contract. The model path
+    // must be a readable regular file within the configured resource limits.
+    [[nodiscard]] static std::unique_ptr<CpuFaceDetector>
+    load(const std::filesystem::path& model_path,
+         const CpuVisionOptions& options = {});
+
+    // Accepts Host BGR8/RGB8 input and returns the highest-scoring configured
+    // face class after restoring source-image coordinates.
+    FaceDetectionResult infer(const image::ImageView& image) override;
+
+private:
+    struct Impl;
+    explicit CpuFaceDetector(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
 };
 
 class CpuHandBackend final : public HandInferenceBackend
@@ -50,10 +77,10 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-class CpuFaceLandmarker final
+class CpuFaceLandmarker final : public FaceLandmarkBackend
 {
 public:
-    ~CpuFaceLandmarker();
+    ~CpuFaceLandmarker() override;
 
     CpuFaceLandmarker(const CpuFaceLandmarker&)            = delete;
     CpuFaceLandmarker& operator=(const CpuFaceLandmarker&) = delete;
@@ -62,7 +89,8 @@ public:
     load(const std::filesystem::path& model_path,
          const CpuVisionOptions& options = {});
 
-    FaceLandmarkResult infer(const image::ImageView& image, const RectF& face_box);
+    FaceLandmarkResult infer(const image::ImageView& image,
+                             const RectF& face_box) override;
 
 private:
     struct Impl;
