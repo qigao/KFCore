@@ -373,6 +373,32 @@ spec("hand primitive extractor")
         check(reacquired.hands[0].canonical_id == first.hands[0].canonical_id);
     }
 
+    it("reacquires a hand with independent small 3D landmark jitter")
+    {
+        HandPrimitiveOptions options;
+        options.identity.reacquire_frames = 2;
+        HandPrimitiveExtractor extractor(options);
+
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(4));
+        const auto first = extractor.process(first_frame, frame_context(1));
+        (void)extractor.process({}, frame_context(2));
+        (void)extractor.process({}, frame_context(3));
+        (void)extractor.process({}, frame_context(4));
+
+        HandFrame jittered_frame;
+        jittered_frame.hands.push_back(identity_hand(19));
+        jittered_frame.hands[0].landmarks[1].x += 0.30F;
+        jittered_frame.hands[0].landmarks[6].y -= 0.25F;
+        jittered_frame.hands[0].landmarks[11].z += 0.20F;
+        jittered_frame.hands[0].landmarks[16].x -= 0.15F;
+        jittered_frame.hands[0].landmarks[19].z -= 0.18F;
+        translate_hand(jittered_frame.hands[0], 250.0F, 120.0F);
+        const auto jittered = extractor.process(jittered_frame, frame_context(5));
+
+        check(jittered.hands[0].canonical_id == first.hands[0].canonical_id);
+    }
+
     it("rejects a materially different hand shape at the same location")
     {
         HandPrimitiveExtractor extractor;
@@ -414,6 +440,34 @@ spec("hand primitive extractor")
 
         check(swapped.hands[0].canonical_id == initial.hands[1].canonical_id);
         check(swapped.hands[1].canonical_id == initial.hands[0].canonical_id);
+    }
+
+    it("withholds an indistinguishable shape match after spatial evidence expires")
+    {
+        HandPrimitiveOptions options;
+        options.identity.reacquire_frames = 2;
+        HandPrimitiveExtractor extractor(options);
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(4));
+        initial_frame.hands.push_back(identity_hand(9));
+        initial_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Unknown;
+        initial_frame.hands[1].handedness =
+            kfcore::vision_models::Handedness::Unknown;
+        translate_hand(initial_frame.hands[1], 260.0F, 0.0F);
+        (void)extractor.process(initial_frame, frame_context(1));
+        (void)extractor.process({}, frame_context(2));
+        (void)extractor.process({}, frame_context(3));
+        (void)extractor.process({}, frame_context(4));
+
+        HandFrame ambiguous_frame;
+        ambiguous_frame.hands.push_back(identity_hand(-1));
+        ambiguous_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Unknown;
+        const auto ambiguous =
+            extractor.process(ambiguous_frame, frame_context(5));
+
+        check(ambiguous.hands[0].canonical_id == 0);
     }
 
     it("withholds identity for a non-finite non-palm landmark")
@@ -704,11 +758,39 @@ spec("hand primitive extractor")
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
         options = {};
+        options.identity.maximum_shape_distance = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.maximum_shape_distance =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.maximum_shape_distance =
+            std::numeric_limits<float>::infinity();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
         options.identity.maximum_shape_distance = 2.1F;
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
         options = {};
         options.identity.shape_cost_weight = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.shape_cost_weight =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.shape_cost_weight =
+            std::numeric_limits<float>::infinity();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.shape_update_weight = -0.1F;
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
         options = {};
@@ -720,9 +802,37 @@ spec("hand primitive extractor")
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
         options = {};
+        options.identity.shape_update_weight =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.shape_update_weight =
+            std::numeric_limits<float>::infinity();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.handedness_mismatch_penalty = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
         options.identity.handedness_mismatch_penalty =
             std::numeric_limits<float>::quiet_NaN();
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.handedness_mismatch_penalty =
+            std::numeric_limits<float>::infinity();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+    }
+
+    it("accepts zero shape and handedness ranking costs")
+    {
+        HandPrimitiveOptions options;
+        options.identity.shape_cost_weight = 0.0F;
+        options.identity.handedness_mismatch_penalty = 0.0F;
+
+        check_nothrow(HandPrimitiveExtractor { options });
     }
 
     it("rejects non-finite and negative geometry thresholds")
