@@ -61,29 +61,34 @@ landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减
 
 ## Canonical hand identity
 
-canonical hand ID 由 registry 单独拥有；它以 20 条已标注手部骨架边的归一化三维长度作为 Hu-like
-不变形状证据，再把近期 palm 几何、handedness 和 raw ByteTrack ID 用作排序证据。该描述符对平移、
-统一缩放和图像平面内旋转保持不变，采用 L1 距离比较；它是从 21 个 landmark 的五条 wrist-to-finger
-链构成的固定值，不分配堆内存。它不是 OpenCV Hu moments，也不构成生物识别或身份保证。
+canonical hand ID 由 registry 单独拥有；它在有限重获时间窗内以 20 条已标注手部骨架边的归一化三维
+长度作为形状连续性证据，再把 palm 几何、handedness 和 raw ByteTrack ID 用作排序证据。该描述符对
+平移、统一缩放和图像平面内旋转保持不变，采用 L1 距离比较；它是从 21 个 landmark 的五条
+wrist-to-finger 链构成的固定值，不分配堆内存。它不是 OpenCV Hu moments，也不构成生物识别、人员
+识别或跨会话身份保证。
 
 所有 landmark 分量和边长必须有限，20 条边的总长度必须为正；否则形状证据无效，该手的 canonical
 ID 为 `0`，不会退回为仅按位置匹配。候选还必须满足 `maximum_shape_distance`；形状不兼容的可靠手会
 尝试分配新 canonical ID。若容量已耗尽，处理会以 `std::length_error` fail fast，而不是把资源耗尽
 伪装成 ID `0`。
 
-已分配的形状原型会持续到显式 `reset()`，不会因空帧或 frame age 被删除。`reacquire_frames` 现仅是
-空间、尺度和速度证据的有效 horizon：在此范围内这些证据参与候选排序；超过后它们会过期，重获仍可
-依赖形状、handedness、年龄和 raw-ID 连续性。因而同一形状可在长间隔、位置交换或 tracker raw ID
-重建后恢复同一个 canonical ID；无法消歧的候选仍返回 `0`。
+`reacquire_frames` 是 canonical identity 的保留 horizon：在每帧匹配前，年龄超过该值的原型会被删除。
+因此只在该时间窗内可因形状、空间、尺度与 raw-ID 连续性重获同一 ID；超出时间窗的同形状观测会分配
+新 ID，避免另一用户继承旧的 THIG 状态。双方 handedness 已知且冲突时不是候选；`Unknown` 与任意值
+兼容。若两个观测对同一最佳 ID 的成本差小于 `ambiguity_cost_margin`，两者均为 `0`，不按输入顺序取胜。
+
+`maximum_distance_scale_ratio` 与 `maximum_linear_scale_ratio` 是有限的软证据饱和值：预测距离分别按前者
+线性归一化到 `[0, 1]`，尺度比的对数差按 `log(后者)` 归一化到 `[0, 1]`。它们不会放宽形状或
+handedness gate；部署应以实际镜头、手势和 landmark 噪声校准这些阈值。
 
 `HandIdentityOptions` 的默认容量为 `maximum_identities = 32`，并追加下列已在构造时验证的配置：
 
 | Field | Default | Meaning |
 |---|---:|---|
-| `maximum_shape_distance` | `0.35F` | 形状候选允许的最大 L1 距离（范围 `(0, 2]`） |
+| `maximum_shape_distance` | `0.20F` | 保守的形状候选 L1 gate（范围 `(0, 2]`）；应按实际 landmark 噪声校准 |
 | `shape_cost_weight` | `2.0F` | 形状距离在候选成本中的权重 |
 | `shape_update_weight` | `0.20F` | 已接受形状写入原型的 EMA 权重（范围 `(0, 1]`） |
-| `handedness_mismatch_penalty` | `0.35F` | 双方 handedness 已知但不同时增加的成本 |
+| `handedness_mismatch_penalty` | `0.35F` | 为公开结构兼容而保留并验证；已知左右手冲突由硬 gate 拒绝 |
 
 这四个字段被追加到公开 `HandIdentityOptions` 末尾。源码默认构造和短 aggregate 初始化保持可用，但其
 对象布局已变化；所有二进制下游消费者必须重新构建。

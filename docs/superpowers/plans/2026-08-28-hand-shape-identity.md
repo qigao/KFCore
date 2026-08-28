@@ -2,13 +2,32 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Keep THIG canonical Hand IDs stable by matching a persistent, invariant hand-shape descriptor instead of treating frame age and position as identity.
+**Goal:** Keep THIG canonical Hand IDs continuous only within a bounded temporal
+retention window by matching invariant hand shape instead of treating raw tracker
+IDs alone as identity.
 
-**Architecture:** A small internal descriptor component converts the 21 labelled hand landmarks into 20 normalized 3D bone-length ratios. `HandTrackIdentityRegistry` owns persistent descriptor prototypes and uses shape as the candidate gate; recent spatial and ByteTrack evidence only rank compatible candidates.
+**Architecture:** A small internal descriptor component converts the 21 labelled hand landmarks into 20 normalized 3D bone-length ratios. `HandTrackIdentityRegistry` owns retention-limited descriptor prototypes and uses shape plus known handedness as candidate gates; normalized spatial and ByteTrack evidence rank compatible candidates.
 
 **Tech Stack:** C++17, `std::array`, KFCore vision model types, TinyTest, CMake Presets.
 
 **Spec:** `docs/superpowers/specs/2026-08-28-hand-shape-identity-design.md`
+
+## Final review correction (2026-08-29)
+
+This correction supersedes every earlier statement in this plan that describes
+identity as persistent until `reset()` or permits shape-only matching after the
+reacquisition horizon. Canonical IDs are now retained only through
+`reacquire_frames`; expiry is applied before matching so a later person cannot
+inherit old THIG state. Within that window, normalized 3D shape and known
+handedness are candidate gates; distance and scale are normalized, saturated
+soft evidence. Same-top cross-observation competition below the ambiguity margin
+returns `0` for every contender, independently of input order.
+
+The default `maximum_shape_distance` is `0.20F` (calibrate it for the deployed
+landmark noise). Final verification covers the bounded horizon, 3D-only shape
+change, handedness gate, candidate competition, both legacy saturation ratios,
+prototype update weight, and transactional capacity retry. Matching complexity
+is `O(H * (20I + I log I))`, with staged copy and expiry pruning `O(I)`.
 
 ## Global Constraints
 
@@ -20,14 +39,14 @@
 
 ---
 
-### Task 1: Specify persistent shape-based identity behavior
+### Task 1: Specify bounded shape-based identity behavior
 
 **Files:**
 - Modify: `hand_interaction/tests/test_primitive_extractor.cpp`
 
 **Interfaces:**
 - Consumes: existing `HandPrimitiveExtractor::process(const HandFrame&, const GestureFrameContext&)`
-- Produces: behavioral contracts for invariant reacquisition, different-shape rejection, and persistent two-hand identity
+- Produces: behavioral contracts for in-window reacquisition, expiry, different-shape rejection, and distinct two-hand identity
 
 - [ ] **Step 1: Add a complete labelled-hand fixture**
 
@@ -35,17 +54,17 @@
   `stretch_finger()` helper that changes literal bone proportions without using
   production descriptor code.
 
-- [ ] **Step 2: Add the failing long-gap invariant test**
+- [ ] **Step 2: Add bounded-horizon identity tests**
 
   ```cpp
-  it("reacquires the same hand by shape after spatial evidence expires")
+  it("allocates a new identity after the retention horizon")
   {
       HandPrimitiveOptions options;
       options.identity.reacquire_frames = 2;
       HandPrimitiveExtractor extractor(options);
-      // Establish one hand, consume three empty frames, then translate, scale,
-      // rotate, and recreate its raw ID. The final canonical ID must equal the
-      // literal ID returned by the first frame.
+      // Establish one hand, consume more than the retention horizon, then
+      // recreate its shape and raw ID. The final canonical ID must differ from
+      // the literal ID returned by the first frame.
   }
   ```
 
@@ -56,14 +75,14 @@
   ctest --preset win-hand-interaction-demo-cpu-release-user -C Release -R test_hand_primitive_extractor --output-on-failure
   ```
 
-  Expected: FAIL because the current registry deletes the first identity after
-  the configured frame horizon.
+  Expected final behavior: the long-gap case receives a new ID; a separate
+  in-window test retains the original ID.
 
 - [ ] **Step 3: Add different-shape and two-hand swap tests**
 
   Assert that a materially stretched finger creates a new canonical ID, and
   that two hands with different literal bone proportions recover their original
-  IDs after the spatial horizon even when their screen positions swap.
+  IDs inside the retention horizon even when their screen positions swap.
 
 - [ ] **Step 4: Add invalid-shape behavior tests**
 
@@ -114,7 +133,7 @@
 
 ---
 
-### Task 3: Make feature identity persistent and configurable
+### Task 3: Make feature identity bounded and configurable
 
 **Files:**
 - Modify: `hand_interaction/include/kfcore/hand_interaction/types.hpp`
@@ -125,11 +144,11 @@
 
 **Interfaces:**
 - Consumes: `HandShapeDescriptor`, handedness, and the four appended `HandIdentityOptions` fields
-- Produces: persistent canonical identity with bounded descriptor prototypes
+- Produces: retention-window canonical identity with bounded descriptor prototypes
 
 - [ ] **Step 1: Add and validate public configuration**
 
-  Append `maximum_shape_distance = 0.35F`, `shape_cost_weight = 2.0F`,
+  Append `maximum_shape_distance = 0.20F`, `shape_cost_weight = 2.0F`,
   `shape_update_weight = 0.20F`, and
   `handedness_mismatch_penalty = 0.35F`. Change the default
   `maximum_identities` to `32`. Add constructor tests for zero, negative,
@@ -141,12 +160,12 @@
   update the shape using the configured EMA weight and renormalize it; keep the
   first known handedness as stable categorical evidence.
 
-- [ ] **Step 3: Replace time deletion with feature candidate gating**
+- [ ] **Step 3: Use bounded time-and-feature candidate gating**
 
-  Remove identity pruning. Reject candidates only when shape distance exceeds
-  `maximum_shape_distance`. Apply recent spatial/scale cost only while age is at
-  most `reacquire_frames`; add shape, handedness, capped age, and raw-ID evidence
-  to the existing deterministic assignment cost.
+  Prune identities older than `reacquire_frames` before matching. Reject
+  candidates when shape distance exceeds `maximum_shape_distance` or known
+  handedness conflicts. Normalize and saturate spatial/scale costs within the
+  retention window, then apply frame-wide ambiguity withholding.
 
 - [ ] **Step 4: Verify GREEN and refactor**
 
@@ -168,9 +187,9 @@
 
 - [ ] **Step 1: Document behavior and compatibility**
 
-  Describe the descriptor invariants, persistent-until-reset lifetime,
-  `reacquire_frames` spatial-horizon semantics, capacity failure, new defaults,
-  and the downstream rebuild requirement.
+  Describe descriptor invariants, the time-bounded `reacquire_frames` lifetime,
+  saturation semantics, capacity failure, new defaults, calibration, and the
+  downstream rebuild requirement.
 
 - [ ] **Step 2: Run focused and full CPU verification**
 

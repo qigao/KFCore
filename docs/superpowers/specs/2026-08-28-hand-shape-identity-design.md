@@ -16,9 +16,10 @@ feature source for this change.
 
 ## Decision
 
-Canonical identity uses a persistent, normalized hand-shape descriptor as its
-primary matching gate. Time, palm position, palm size, motion, handedness, and
-the raw ByteTrack ID remain supporting evidence.
+Canonical identity uses a normalized hand-shape descriptor for continuity within
+a bounded `reacquire_frames` retention horizon. Palm position, palm size,
+motion, handedness, and raw ByteTrack ID remain supporting evidence rather than
+a person-recognition key.
 
 The descriptor is the 20 MediaPipe skeleton-edge lengths in `(x, y, z)` space,
 normalized by their sum. It has the same useful invariance goal as Hu moments:
@@ -37,7 +38,7 @@ existing dependency boundary where OpenCV Lite is demo-only.
 HandResult landmarks + handedness
   -> make_hand_shape_descriptor (fixed value, no ownership transfer)
   -> HandIdentityObservation (owned value for one resolver call)
-  -> HandTrackIdentityRegistry::IdentityState (persistent prototype)
+  -> HandTrackIdentityRegistry::IdentityState (retention-limited prototype)
   -> canonical Hand ID
 ```
 
@@ -66,21 +67,18 @@ single-threaded, as before.
    or a valid shape descriptor.
 2. A stored identity is a candidate only when shape distance is at most
    `maximum_shape_distance`.
-3. Shape distance contributes `shape_cost_weight * distance` to the candidate
-   cost. A known handedness disagreement adds
-   `handedness_mismatch_penalty`; it is a penalty rather than a hard rejection
-   because the model exposes no handedness confidence.
-4. While an identity age is within `reacquire_frames`, predicted palm distance
-   and scale difference contribute supporting costs. They do not reject an
-   otherwise valid shape match.
-5. After `reacquire_frames`, spatial and velocity evidence is considered stale;
-   matching uses shape, handedness, age, and any raw-ID continuity evidence.
-6. Existing ambiguity rejection and one-canonical-ID-per-frame assignment remain
-   unchanged. Ambiguous observations receive `0` instead of being assigned by
-   input order.
-7. Identity descriptors persist until explicit `reset()`. `reacquire_frames`
-   therefore becomes the spatial-evidence horizon, not an identity deletion TTL.
-8. A reliable observation with no shape-compatible candidate allocates a new
+3. A known left/right handedness disagreement rejects a candidate; `Unknown`
+   remains compatible. Shape distance contributes `shape_cost_weight * distance`
+   to the candidate cost.
+4. Before matching, identities older than `reacquire_frames` are removed. Within
+   that horizon, predicted palm distance is divided by
+   `maximum_distance_scale_ratio` and clamped to `[0, 1]`; logarithmic scale
+   difference is divided by `log(maximum_linear_scale_ratio)` and clamped to
+   `[0, 1]`, then weighted by `scale_cost_weight`.
+5. If two observations share a top canonical candidate and their top costs differ
+   by less than `ambiguity_cost_margin`, neither receives it. This is evaluated
+   across the frame, so input order cannot decide the result.
+6. A reliable observation with no shape-compatible candidate allocates a new
    identity. Exceeding `maximum_identities` remains a fail-fast capacity error.
 
 ## Public configuration
@@ -89,12 +87,12 @@ The following fields are appended to `HandIdentityOptions`:
 
 | Field | Default | Meaning |
 |---|---:|---|
-| `maximum_shape_distance` | `0.35` | Maximum L1 descriptor distance for a candidate |
+| `maximum_shape_distance` | `0.20` | Conservative L1 candidate gate; calibrate for landmark noise |
 | `shape_cost_weight` | `2.0` | Shape contribution to assignment cost |
 | `shape_update_weight` | `0.20` | EMA weight of the newest accepted descriptor |
-| `handedness_mismatch_penalty` | `0.35` | Cost added when both handedness values are known and differ |
+| `handedness_mismatch_penalty` | `0.35` | Validated retained layout field; known mismatch is a hard gate |
 
-`maximum_identities` changes from `8` to `32`, bounding persistent session state
+`maximum_identities` changes from `8` to `32`, bounding retention-window state
 while allowing transient false detections and multiple people without immediate
 capacity exhaustion. All new thresholds are validated at construction; invalid
 configuration throws `std::invalid_argument` before any frame is consumed.
@@ -102,11 +100,12 @@ configuration throws `std::invalid_argument` before any frame is consumed.
 ## Complexity and resource effects
 
 Descriptor construction is `O(20)` time and `O(20)` inline storage per detected
-hand. Matching is `O(H * I * 20)` time for `H` observations and `I` stored
-identities. With the public limits `H <= 8` and default `I <= 32`, the upper bound
-is 5,120 scalar descriptor differences per processed frame. Persistent identity
-storage is bounded by `maximum_identities`; the descriptor adds 80 bytes per
-identity before alignment and existing state.
+hand. Matching plus candidate sorting is `O(H * (20I + I log I))` time for `H`
+observations and `I` retained identities; staged state copy and expiry pruning
+are `O(I)`. With the public limits `H <= 8` and default `I <= 32`, the descriptor
+term has at most 5,120 scalar differences per processed frame. Identity storage
+is bounded by `maximum_identities`; the descriptor adds 80 bytes per identity
+before alignment and existing state.
 
 The descriptor itself performs no heap allocation, logging, I/O, locking, or
 virtual dispatch. Model inference remains the dominant frame cost; a SIMD path
@@ -117,8 +116,8 @@ is not justified for 20-element arrays without profiling evidence.
 Appending fields preserves ordinary source use of default construction and
 short aggregate initializers, but changes the public structure layout. Binary
 consumers of `KFCore::hand_interaction` must be rebuilt. The visible behavior
-also changes: identities survive arbitrary frame gaps until reset, and time no
-longer rejects a feature-compatible hand.
+also changes: identities expire after the bounded `reacquire_frames` retention
+horizon, so a feature-compatible hand after that horizon receives a new ID.
 
 Rollback consists of reverting the descriptor source, the four option fields,
 the increased capacity default, and the resolver matching changes. No stored
@@ -127,12 +126,13 @@ data or external format requires migration.
 ## Validation
 
 - A hand retains its ID across translation, uniform scale, in-plane rotation,
-  raw Track ID recreation, and more than `reacquire_frames` empty frames.
+  raw Track ID recreation inside `reacquire_frames` empty frames.
+- A shape-compatible hand after the retention horizon receives a new ID.
 - Small independent landmark jitter retains the ID.
 - A hand with materially different bone proportions at the same position gets a
   different ID.
 - Two differently shaped hands retain distinct IDs when their positions swap
-  after the spatial horizon.
+  inside the retention horizon.
 - Shape-identical candidates remain unconfirmed when supporting evidence cannot
   disambiguate them.
 - Non-finite or degenerate landmarks yield ID `0`; invalid thresholds fail at

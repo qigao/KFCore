@@ -31,15 +31,16 @@ struct HandIdentityConfig {
   float velocity_observation_weight = 0.65f;
   int maximum_prediction_frames = 2;
   std::size_t maximum_identities = 32;
-  float maximum_shape_distance = 0.35f;
+  float maximum_shape_distance = 0.20f;
   float shape_cost_weight = 2.0f;
   float shape_update_weight = 0.20f;
   float handedness_mismatch_penalty = 0.35f;
 };
 
-// Owns persistent identities exposed to temporal consumers. Shape is the
-// candidate gate; ByteTrack and spatial evidence only rank compatible states.
-// Ambiguous observations remain unconfirmed (0).
+// Owns bounded-reacquisition identities exposed to temporal consumers. Shape
+// and known handedness gate candidates during the retention horizon; ByteTrack
+// and normalized spatial evidence only rank compatible states. Ambiguous
+// observations remain unconfirmed (0).
 class HandTrackIdentityRegistry {
 public:
   explicit HandTrackIdentityRegistry(HandIdentityConfig config = {});

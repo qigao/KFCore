@@ -349,7 +349,7 @@ spec("hand primitive extractor")
         check(left.hands[0].canonical_id == initial.hands[0].canonical_id);
     }
 
-    it("reacquires the same hand by shape after spatial evidence expires")
+    it("reacquires the same hand by shape inside the retention horizon")
     {
         HandPrimitiveOptions options;
         options.identity.reacquire_frames = 2;
@@ -359,8 +359,6 @@ spec("hand primitive extractor")
         first_frame.hands.push_back(identity_hand(4));
         const auto first = extractor.process(first_frame, frame_context(1));
         (void)extractor.process({}, frame_context(2));
-        (void)extractor.process({}, frame_context(3));
-        (void)extractor.process({}, frame_context(4));
 
         HandFrame reacquired_frame;
         reacquired_frame.hands.push_back(identity_hand(19));
@@ -368,7 +366,7 @@ spec("hand primitive extractor")
         rotate_hand(reacquired_frame.hands[0], 57.0F);
         translate_hand(reacquired_frame.hands[0], 250.0F, 120.0F);
         const auto reacquired =
-            extractor.process(reacquired_frame, frame_context(5));
+            extractor.process(reacquired_frame, frame_context(3));
 
         check(reacquired.hands[0].canonical_id == first.hands[0].canonical_id);
     }
@@ -383,8 +381,6 @@ spec("hand primitive extractor")
         first_frame.hands.push_back(identity_hand(4));
         const auto first = extractor.process(first_frame, frame_context(1));
         (void)extractor.process({}, frame_context(2));
-        (void)extractor.process({}, frame_context(3));
-        (void)extractor.process({}, frame_context(4));
 
         HandFrame jittered_frame;
         jittered_frame.hands.push_back(identity_hand(19));
@@ -394,9 +390,31 @@ spec("hand primitive extractor")
         jittered_frame.hands[0].landmarks[16].x -= 0.15F;
         jittered_frame.hands[0].landmarks[19].z -= 0.18F;
         translate_hand(jittered_frame.hands[0], 250.0F, 120.0F);
-        const auto jittered = extractor.process(jittered_frame, frame_context(5));
+        const auto jittered = extractor.process(jittered_frame, frame_context(3));
 
         check(jittered.hands[0].canonical_id == first.hands[0].canonical_id);
+    }
+
+    it("allocates a new identity after the retention horizon")
+    {
+        HandPrimitiveOptions options;
+        options.identity.reacquire_frames = 2;
+        HandPrimitiveExtractor extractor(options);
+
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(4));
+        const auto first = extractor.process(first_frame, frame_context(1));
+        (void)extractor.process({}, frame_context(2));
+        (void)extractor.process({}, frame_context(3));
+        (void)extractor.process({}, frame_context(4));
+
+        HandFrame later_frame;
+        later_frame.hands.push_back(identity_hand(19));
+        translate_hand(later_frame.hands[0], 250.0F, 120.0F);
+        const auto later = extractor.process(later_frame, frame_context(5));
+
+        check(later.hands[0].canonical_id > 0);
+        check(later.hands[0].canonical_id != first.hands[0].canonical_id);
     }
 
     it("rejects a materially different hand shape at the same location")
@@ -408,7 +426,7 @@ spec("hand primitive extractor")
 
         HandFrame different_shape_frame;
         different_shape_frame.hands.push_back(identity_hand(19));
-        stretch_finger(different_shape_frame.hands[0], 5U, 2.8F);
+        stretch_finger(different_shape_frame.hands[0], 5U, 2.0F);
         const auto different_shape =
             extractor.process(different_shape_frame, frame_context(2));
 
@@ -416,7 +434,7 @@ spec("hand primitive extractor")
         check(different_shape.hands[0].canonical_id != first.hands[0].canonical_id);
     }
 
-    it("preserves two shape identities when their positions swap after the horizon")
+    it("preserves two shape identities when their positions swap inside the horizon")
     {
         HandPrimitiveOptions options;
         options.identity.reacquire_frames = 2;
@@ -427,22 +445,40 @@ spec("hand primitive extractor")
         stretch_finger(initial_frame.hands[1], 9U, 2.8F);
         translate_hand(initial_frame.hands[1], 260.0F, 0.0F);
         const auto initial = extractor.process(initial_frame, frame_context(1));
-        (void)extractor.process({}, frame_context(2));
-        (void)extractor.process({}, frame_context(3));
-        (void)extractor.process({}, frame_context(4));
 
         HandFrame swapped_frame;
         swapped_frame.hands.push_back(identity_hand(19));
         stretch_finger(swapped_frame.hands[0], 9U, 2.8F);
         swapped_frame.hands.push_back(identity_hand(23));
         translate_hand(swapped_frame.hands[1], 260.0F, 0.0F);
-        const auto swapped = extractor.process(swapped_frame, frame_context(5));
+        const auto swapped = extractor.process(swapped_frame, frame_context(2));
 
         check(swapped.hands[0].canonical_id == initial.hands[1].canonical_id);
         check(swapped.hands[1].canonical_id == initial.hands[0].canonical_id);
     }
 
-    it("withholds an indistinguishable shape match after spatial evidence expires")
+    it("rejects a known handedness conflict as an identity candidate")
+    {
+        HandPrimitiveOptions options;
+        options.max_hands = 1;
+        options.identity.maximum_identities = 2;
+        HandPrimitiveExtractor extractor(options);
+
+        HandFrame left_frame;
+        left_frame.hands.push_back(identity_hand(4));
+        const auto left = extractor.process(left_frame, frame_context(1));
+
+        HandFrame right_frame;
+        right_frame.hands.push_back(identity_hand(19));
+        right_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        const auto right = extractor.process(right_frame, frame_context(2));
+
+        check(right.hands[0].canonical_id > 0);
+        check(right.hands[0].canonical_id != left.hands[0].canonical_id);
+    }
+
+    it("withholds an indistinguishable shape match while retention evidence is fresh")
     {
         HandPrimitiveOptions options;
         options.identity.reacquire_frames = 2;
@@ -454,20 +490,259 @@ spec("hand primitive extractor")
             kfcore::vision_models::Handedness::Unknown;
         initial_frame.hands[1].handedness =
             kfcore::vision_models::Handedness::Unknown;
-        translate_hand(initial_frame.hands[1], 260.0F, 0.0F);
         (void)extractor.process(initial_frame, frame_context(1));
-        (void)extractor.process({}, frame_context(2));
-        (void)extractor.process({}, frame_context(3));
-        (void)extractor.process({}, frame_context(4));
 
         HandFrame ambiguous_frame;
         ambiguous_frame.hands.push_back(identity_hand(-1));
         ambiguous_frame.hands[0].handedness =
             kfcore::vision_models::Handedness::Unknown;
         const auto ambiguous =
-            extractor.process(ambiguous_frame, frame_context(5));
+            extractor.process(ambiguous_frame, frame_context(2));
 
         check(ambiguous.hands[0].canonical_id == 0);
+    }
+
+    it("withholds duplicate competitors independent of input order")
+    {
+        const auto resolve_duplicates = [](bool reverse_input) {
+            HandPrimitiveExtractor extractor;
+            HandFrame first_frame;
+            first_frame.hands.push_back(identity_hand(4));
+            (void)extractor.process(first_frame, frame_context(1));
+
+            HandResult nearer = identity_hand(-1);
+            HandResult farther = identity_hand(-1);
+            translate_hand(nearer, 8.0F, 0.0F);
+            translate_hand(farther, 9.0F, 0.0F);
+            HandFrame duplicates;
+            if (reverse_input)
+            {
+                duplicates.hands.push_back(farther);
+                duplicates.hands.push_back(nearer);
+            }
+            else
+            {
+                duplicates.hands.push_back(nearer);
+                duplicates.hands.push_back(farther);
+            }
+            return extractor.process(duplicates, frame_context(2));
+        };
+
+        const auto forward = resolve_duplicates(false);
+        const auto reversed = resolve_duplicates(true);
+
+        check(forward.hands[0].canonical_id == 0);
+        check(forward.hands[1].canonical_id == 0);
+        check(reversed.hands[0].canonical_id == 0);
+        check(reversed.hands[1].canonical_id == 0);
+    }
+
+    it("uses the full 3D descriptor when deciding a shape match")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(4));
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        HandFrame depth_changed_frame;
+        depth_changed_frame.hands.push_back(identity_hand(19));
+        depth_changed_frame.hands[0].landmarks[8].z = 1000.0F;
+        const auto depth_changed =
+            extractor.process(depth_changed_frame, frame_context(2));
+
+        check(depth_changed.hands[0].canonical_id !=
+              first.hands[0].canonical_id);
+    }
+
+    it("applies the configured shape-distance gate")
+    {
+        const auto resolve = [](float maximum_shape_distance) {
+            HandPrimitiveOptions options;
+            options.identity.maximum_shape_distance = maximum_shape_distance;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame first_frame;
+            first_frame.hands.push_back(identity_hand(4));
+            const auto first = extractor.process(first_frame, frame_context(1));
+
+            HandFrame changed_frame;
+            changed_frame.hands.push_back(identity_hand(19));
+            stretch_finger(changed_frame.hands[0], 5U, 2.0F);
+            const auto changed = extractor.process(changed_frame, frame_context(2));
+            return std::pair { first.hands[0].canonical_id,
+                               changed.hands[0].canonical_id };
+        };
+
+        const auto strict = resolve(0.20F);
+        const auto permissive = resolve(0.25F);
+        check(strict.first != strict.second);
+        check(permissive.first == permissive.second);
+    }
+
+    it("weights compatible shapes when spatial evidence disagrees")
+    {
+        const auto resolve = [](float shape_cost_weight) {
+            HandPrimitiveOptions options;
+            options.max_hands = 2;
+            options.identity.maximum_identities = 2;
+            options.identity.maximum_shape_distance = 0.25F;
+            options.identity.shape_cost_weight = shape_cost_weight;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame initial_frame;
+            initial_frame.hands.push_back(identity_hand(4));
+            initial_frame.hands.push_back(identity_hand(9));
+            stretch_finger(initial_frame.hands[1], 5U, 2.0F);
+            translate_hand(initial_frame.hands[1], 300.0F, 0.0F);
+            const auto initial = extractor.process(initial_frame, frame_context(1));
+
+            HandFrame query_frame;
+            query_frame.hands.push_back(identity_hand(-1));
+            stretch_finger(query_frame.hands[0], 5U, 2.0F);
+            const auto query = extractor.process(query_frame, frame_context(2));
+            return std::pair { initial.hands[0].canonical_id,
+                               std::pair { initial.hands[1].canonical_id,
+                                           query.hands[0].canonical_id } };
+        };
+
+        const auto spatial_only = resolve(0.0F);
+        const auto shape_weighted = resolve(30.0F);
+        check(spatial_only.second.second == spatial_only.first);
+        check(shape_weighted.second.second == shape_weighted.second.first);
+    }
+
+    it("normalizes distance evidence by its configured saturation ratio")
+    {
+        const auto resolve = [](float maximum_distance_scale_ratio) {
+            HandPrimitiveOptions options;
+            options.max_hands = 2;
+            options.identity.maximum_identities = 2;
+            options.identity.maximum_distance_scale_ratio =
+                maximum_distance_scale_ratio;
+            options.identity.ambiguity_cost_margin = 0.20F;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame initial_frame;
+            initial_frame.hands.push_back(identity_hand(4));
+            initial_frame.hands.push_back(identity_hand(9));
+            translate_hand(initial_frame.hands[1], 100.0F, 0.0F);
+            const auto initial = extractor.process(initial_frame, frame_context(1));
+
+            HandFrame query_frame;
+            query_frame.hands.push_back(identity_hand(-1));
+            translate_hand(query_frame.hands[0], 10.0F, 0.0F);
+            const auto query = extractor.process(query_frame, frame_context(2));
+            return std::pair { initial.hands[0].canonical_id,
+                               query.hands[0].canonical_id };
+        };
+
+        const auto discriminating = resolve(3.0F);
+        const auto saturated = resolve(0.10F);
+        check(discriminating.second == discriminating.first);
+        check(saturated.second == 0);
+    }
+
+    it("normalizes scale evidence by its configured saturation ratio")
+    {
+        const auto resolve = [](float maximum_linear_scale_ratio) {
+            HandPrimitiveOptions options;
+            options.max_hands = 2;
+            options.identity.maximum_identities = 2;
+            options.identity.maximum_distance_scale_ratio = 3.0F;
+            options.identity.maximum_linear_scale_ratio =
+                maximum_linear_scale_ratio;
+            options.identity.scale_cost_weight = 1.0F;
+            options.identity.ambiguity_cost_margin = 0.20F;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame initial_frame;
+            initial_frame.hands.push_back(identity_hand(4));
+            initial_frame.hands.push_back(identity_hand(9));
+            scale_hand(initial_frame.hands[1], 2.0F);
+            const auto initial = extractor.process(initial_frame, frame_context(1));
+
+            HandFrame query_frame;
+            query_frame.hands.push_back(identity_hand(-1));
+            scale_hand(query_frame.hands[0], 1.2F);
+            const auto query = extractor.process(query_frame, frame_context(2));
+            return std::pair { initial.hands[0].canonical_id,
+                               query.hands[0].canonical_id };
+        };
+
+        const auto discriminating = resolve(3.0F);
+        const auto saturated = resolve(1.10F);
+        check(discriminating.second == discriminating.first);
+        check(saturated.second == 0);
+    }
+
+    it("updates the shape prototype at the configured rate")
+    {
+        const auto resolve = [](float shape_update_weight) {
+            HandPrimitiveOptions options;
+            options.max_hands = 2;
+            options.identity.maximum_identities = 2;
+            options.identity.maximum_shape_distance = 0.10F;
+            options.identity.shape_update_weight = shape_update_weight;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame first_frame;
+            first_frame.hands.push_back(identity_hand(4));
+            const auto first = extractor.process(first_frame, frame_context(1));
+
+            HandFrame intermediate_frame;
+            intermediate_frame.hands.push_back(identity_hand(19));
+            stretch_finger(intermediate_frame.hands[0], 5U, 1.4F);
+            (void)extractor.process(intermediate_frame, frame_context(2));
+
+            HandFrame later_frame;
+            later_frame.hands.push_back(identity_hand(23));
+            stretch_finger(later_frame.hands[0], 5U, 1.8F);
+            const auto later = extractor.process(later_frame, frame_context(3));
+            return std::pair { first.hands[0].canonical_id,
+                               later.hands[0].canonical_id };
+        };
+
+        const auto slow = resolve(0.10F);
+        const auto immediate = resolve(1.0F);
+        check(slow.first != slow.second);
+        check(immediate.first == immediate.second);
+    }
+
+    it("does not commit matched prototype updates when a mixed frame exhausts capacity")
+    {
+        HandPrimitiveOptions options;
+        options.max_hands = 2;
+        options.identity.maximum_identities = 2;
+        options.identity.maximum_shape_distance = 0.10F;
+        options.identity.shape_update_weight = 1.0F;
+        HandPrimitiveExtractor extractor(options);
+
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(4));
+        initial_frame.hands.push_back(identity_hand(9));
+        stretch_finger(initial_frame.hands[1], 13U, 2.0F);
+        translate_hand(initial_frame.hands[1], 300.0F, 0.0F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        HandFrame overflowing_frame;
+        overflowing_frame.hands.push_back(identity_hand(19));
+        stretch_finger(overflowing_frame.hands[0], 5U, 1.4F);
+        overflowing_frame.hands.push_back(identity_hand(23));
+        stretch_finger(overflowing_frame.hands[1], 9U, 2.0F);
+        translate_hand(overflowing_frame.hands[1], 300.0F, 0.0F);
+        check_throws_as(extractor.process(overflowing_frame, frame_context(2)),
+                        std::length_error);
+
+        HandFrame later_shape_frame;
+        later_shape_frame.hands.push_back(identity_hand(29));
+        stretch_finger(later_shape_frame.hands[0], 5U, 1.8F);
+        check_throws_as(extractor.process(later_shape_frame, frame_context(2)),
+                        std::length_error);
+
+        HandFrame retry_frame;
+        retry_frame.hands.push_back(identity_hand(31));
+        const auto retry = extractor.process(retry_frame, frame_context(2));
+        check(retry.hands[0].canonical_id == initial.hands[0].canonical_id);
     }
 
     it("withholds identity for a non-finite non-palm landmark")

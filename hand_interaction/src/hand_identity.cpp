@@ -52,6 +52,19 @@ float PredictedDistanceRatio(const HandIdentityObservation& observation,
   return std::hypot(dx, dy) / scale;
 }
 
+float SaturatedDistanceCost(float distance_ratio, float maximum_ratio) {
+  return std::min(distance_ratio / maximum_ratio, 1.0f);
+}
+
+float SaturatedScaleCost(float scale_ratio, float maximum_ratio) {
+  const float logarithmic_ratio = std::abs(std::log(scale_ratio));
+  const float logarithmic_limit = std::log(maximum_ratio);
+  if (logarithmic_limit <= 0.0f) {
+    return logarithmic_ratio == 0.0f ? 0.0f : 1.0f;
+  }
+  return std::min(logarithmic_ratio / logarithmic_limit, 1.0f);
+}
+
 struct PendingMatch {
   std::size_t observation_index = 0;
   std::vector<Candidate> candidates;
@@ -84,6 +97,7 @@ public:
   std::vector<int> Resolve(
       const std::vector<HandIdentityObservation>& observations) {
     ++frame_index_;
+    PruneExpired();
 
     std::vector<int> resolved(observations.size(), 0);
     std::unordered_set<int> used_canonical_ids;
@@ -97,8 +111,13 @@ public:
       std::vector<Candidate> candidates;
       candidates.reserve(identities_.size());
       // Bounded matching costs O(H * I * 20): each observation compares one
-      // inline descriptor against each persistent, capacity-limited prototype.
+      // inline descriptor against each retention-limited prototype.
       for (const auto& [canonical_id, state] : identities_) {
+        if (state.handedness != vision_models::Handedness::Unknown &&
+            observation.handedness != vision_models::Handedness::Unknown &&
+            state.handedness != observation.handedness) {
+          continue;
+        }
         const float shape_distance =
             HandShapeDistance(*observation.shape, state.shape);
         if (shape_distance > config_.maximum_shape_distance) {
@@ -115,17 +134,13 @@ public:
                                     : 0.0f;
         float cost = config_.shape_cost_weight * shape_distance +
                      config_.age_cost_weight * capped_age_ratio - raw_bonus;
-        if (state.handedness != vision_models::Handedness::Unknown &&
-            observation.handedness != vision_models::Handedness::Unknown &&
-            state.handedness != observation.handedness) {
-          cost += config_.handedness_mismatch_penalty;
-        }
-        if (age <= static_cast<std::uint64_t>(config_.reacquire_frames)) {
-          const float scale_ratio = LinearScaleRatio(observation.scale, state.scale);
-          cost += PredictedDistanceRatio(observation, state, frame_index_,
-                                         config_.maximum_prediction_frames) +
-                  config_.scale_cost_weight * std::abs(std::log(scale_ratio));
-        }
+        const float scale_ratio = LinearScaleRatio(observation.scale, state.scale);
+        cost += SaturatedDistanceCost(
+                    PredictedDistanceRatio(observation, state, frame_index_,
+                                           config_.maximum_prediction_frames),
+                    config_.maximum_distance_scale_ratio) +
+                config_.scale_cost_weight * SaturatedScaleCost(
+                    scale_ratio, config_.maximum_linear_scale_ratio);
         candidates.push_back({canonical_id, cost});
       }
       std::sort(candidates.begin(), candidates.end(),
@@ -149,9 +164,31 @@ public:
       pending_matches.push_back({index, std::move(candidates), certainty});
     }
 
-    // Resolve the clearest observations first. A second observation competing
-    // for the same identity remains unconfirmed instead of receiving a
-    // detection-order-dependent ID.
+    std::unordered_map<int, std::vector<const PendingMatch*>> competitors;
+    for (const auto& pending : pending_matches) {
+      competitors[pending.candidates.front().canonical_id].push_back(&pending);
+    }
+    std::unordered_set<std::size_t> ambiguous_observations;
+    for (auto& [canonical_id, competing] : competitors) {
+      (void)canonical_id;
+      if (competing.size() < 2U) {
+        continue;
+      }
+      std::sort(competing.begin(), competing.end(),
+                [](const PendingMatch* lhs, const PendingMatch* rhs) {
+                  return lhs->candidates.front().cost < rhs->candidates.front().cost;
+                });
+      if (competing[1]->candidates.front().cost -
+              competing[0]->candidates.front().cost <
+          config_.ambiguity_cost_margin) {
+        for (const PendingMatch* pending : competing) {
+          ambiguous_observations.insert(pending->observation_index);
+        }
+      }
+    }
+
+    // Resolve only competitors with a clear winner. This keeps a shared top
+    // canonical identity independent of observation input order.
     std::sort(pending_matches.begin(), pending_matches.end(),
               [](const PendingMatch& lhs, const PendingMatch& rhs) {
                 if (lhs.certainty != rhs.certainty) {
@@ -163,6 +200,10 @@ public:
                 return lhs.observation_index < rhs.observation_index;
               });
     for (const auto& pending : pending_matches) {
+      if (ambiguous_observations.find(pending.observation_index) !=
+          ambiguous_observations.end()) {
+        continue;
+      }
       const int canonical_id = pending.candidates.front().canonical_id;
       if (used_canonical_ids.find(canonical_id) != used_canonical_ids.end()) {
         continue;
@@ -209,6 +250,17 @@ public:
   }
 
 private:
+  void PruneExpired() {
+    for (auto iterator = identities_.begin(); iterator != identities_.end();) {
+      if (frame_index_ - iterator->second.last_seen_frame >
+          static_cast<std::uint64_t>(config_.reacquire_frames)) {
+        iterator = identities_.erase(iterator);
+      } else {
+        ++iterator;
+      }
+    }
+  }
+
   bool IsReliable(const HandIdentityObservation& observation) const {
     return observation.confidence >= config_.minimum_confidence &&
            observation.scale > 0.0f && std::isfinite(observation.center_x) &&
