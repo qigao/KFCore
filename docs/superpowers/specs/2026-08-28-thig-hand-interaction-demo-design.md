@@ -5,8 +5,8 @@
 KFCore already provides CPU and TensorRT hand inference, per-pipeline ByteTrack/Kalman state,
 and backend-neutral THIG hand interaction. It does not yet provide an executable that connects
 those pieces to a live camera. OpenCV Lite intentionally has no `videoio` component, while the
-installed TurboUtils SDK provides native camera enumeration and capture through
-`TurboUtils::Capture`.
+installed TurboParser SDK provides native camera enumeration and capture through
+`TurboParser::Capture`.
 
 ## Scope
 
@@ -99,8 +99,8 @@ All additions are opt-in and example-local. Existing library targets, package ex
 presets, CPU/GPU inference semantics, and OpenCV-free CPU libraries remain unchanged. Rollback is
 disabling `KFCORE_BUILD_HAND_INTERACTION_EXAMPLES` or reverting the new example sources and option.
 
-The TurboUtils SDK must export `TurboUtils::Capture`; having only `turbo_capture.dll/.lib/.h` is
-considered an invalid installation and configuration fails. Reinstalling TurboUtils with its
+The TurboParser SDK must export `TurboParser::Capture`; having only `turbo_capture.dll/.lib/.h` is
+considered an invalid installation and configuration fails. Reinstalling TurboParser with its
 `install-win-capture-release-user` preset restores the official export target.
 
 ## Validation

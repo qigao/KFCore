@@ -174,9 +174,9 @@ cmake --build --preset win-hand-interaction-demo-tensorrt-release-user
 ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure
 ```
 
-本机 TurboUtils release package 若未导出 `TurboUtils::Capture`，必须如上关闭
+本机 TurboParser release package 若未导出 `TurboParser::Capture`，必须如上关闭
 `KFCORE_BUILD_HAND_INTERACTION_EXAMPLES` 才能验证 core 和测试；这不代表 identity core 测试失败。需要
-构建实时 demo 时，应安装包含 Capture component 的 TurboUtils SDK，再以 `ON` 重新 configure。
+构建实时 demo 时，应安装包含 Capture component 的 TurboParser SDK，再以 `ON` 重新 configure。
 
 两个 preset 都从 `CMakeUserPresets.json` 设置 `OPENCV_LITE_ROOT`，并为 configure、build 和
 CTest 子进程加入 OpenCV Lite、Turbo Capture 及对应推理 runtime 的 DLL 目录。直接从当前
@@ -259,7 +259,7 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 三张 THIG 状态图。`Single Hand V`、`Grasp` 等一次性 `ActionEvent` 不改变核心事件语义，但在
 demo 中最多保留四条、每条显示 1500ms，便于人工观察；按 `R` 会同时清除这段显示历史。
 
-若 configure 报告缺少 `TurboUtils::Capture`，说明 TurboUtils SDK 没有安装 Capture 导出目标；
-在 TurboUtils 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install
+若 configure 报告缺少 `TurboParser::Capture`，说明 TurboParser SDK 没有安装 Capture 导出目标；
+在 TurboParser 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install
 preset 后重新配置。若启动时 Windows 在进入 `main` 前退出，应先检查当前 shell 的 `PATH`
-是否包含 `opencv-lite/bin`、`turboutils/release/bin` 和相应推理 runtime 目录。
+是否包含 `opencv-lite/bin`、`turboparser/release/bin` 和相应推理 runtime 目录。

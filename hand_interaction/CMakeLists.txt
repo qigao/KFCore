@@ -27,9 +27,9 @@ cmake_config_target(kfcore_hand_interaction
   FOLDER "hand_interaction")
 
 if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
-  if(NOT TARGET TurboUtils::Capture)
+  if(NOT TARGET TurboParser::Capture)
     message(FATAL_ERROR
-      "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES requires a TurboUtils SDK "
+      "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES requires a TurboParser SDK "
       "installed with the Capture component")
   endif()
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
@@ -48,7 +48,7 @@ if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
     OpenCVLite::core
     OpenCVLite::imgproc
     OpenCVLite::highgui
-    TurboUtils::Capture
+    TurboParser::Capture
     TurboUtils::Core)
   if(KFCORE_BUILD_VISION_MODELS_CPU)
     target_compile_definitions(hand_interaction_demo PRIVATE
@@ -113,7 +113,7 @@ if(BUILD_TESTS)
     target_include_directories(test_hand_interaction_demo_capture PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/examples)
     target_link_libraries(test_hand_interaction_demo_capture PRIVATE
-      TurboUtils::Capture
+      TurboParser::Capture
       TurboUtils::Core
       TurboUtils::TinyTest)
     target_compile_features(test_hand_interaction_demo_capture PRIVATE cxx_std_17)
@@ -131,7 +131,7 @@ if(BUILD_TESTS)
       KFCore::hand_interaction
       OpenCVLite::core
       OpenCVLite::imgproc
-      TurboUtils::Capture
+      TurboParser::Capture
       TurboUtils::Core
       TurboUtils::TinyTest)
     target_compile_features(test_hand_interaction_demo_ui PRIVATE cxx_std_17)
