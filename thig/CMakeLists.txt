@@ -31,4 +31,4 @@ endif()
 cmake_install_headers(
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  COMPONENT Development)
+  PATTERNS "*.hpp")

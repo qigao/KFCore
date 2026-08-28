@@ -207,9 +207,11 @@ spec("hand interaction")
         HandInteractionPipeline pipeline(options);
         HandFrame               frame;
         frame.hands.push_back(model_hand(Gesture::Open));
-        std::vector<Observation> external = { relation("Region Center", 1, 1) };
+        const auto               first        = pipeline.process(frame, frame_context(1, 0));
+        const int                canonical_id = first.primitives.hands.front().canonical_id;
+        std::vector<Observation> external     = { relation("Region Center", canonical_id, 2) };
 
-        const auto result         = pipeline.process(frame, frame_context(1, 0), external);
+        const auto result         = pipeline.process(frame, frame_context(2, 33), external);
         external.front().relation = "Region Left";
         check_true(std::any_of(result.primitives.observations.begin(),
                                result.primitives.observations.end(), [](const Observation& item)

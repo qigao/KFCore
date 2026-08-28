@@ -399,6 +399,22 @@
             ]
         },
         {
+            "name": "install-win-vision-models-cpu-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-vision-models-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-vision-models-tensorrt-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-vision-models-tensorrt-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
             "name": "install-linux-dev-user",
             "configurePreset": "linux-dev-user",
             "targets": [
