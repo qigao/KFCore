@@ -192,6 +192,8 @@
             },
             "cacheVariables": {
                 "KFCORE_BUILD_VISION_MODELS": "ON",
+                "KFCORE_BUILD_THIG": "ON",
+                "KFCORE_BUILD_HAND_INTERACTION": "ON",
                 "KFCORE_BUILD_VISION_MODELS_CPU": "ON",
                 "KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS": "ON",
                 "KFCORE_VISION_MODEL_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
@@ -212,6 +214,8 @@
                 "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
                 "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
                 "KFCORE_BUILD_VISION_MODELS": "ON",
+                "KFCORE_BUILD_THIG": "ON",
+                "KFCORE_BUILD_HAND_INTERACTION": "ON",
                 "KFCORE_BUILD_VISION_MODELS_TENSORRT": "ON",
                 "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "ON",
                 "KFCORE_VISION_MODEL_TEST_ENGINE_PALM": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_PALM}",
@@ -390,6 +394,22 @@
             "name": "install-win-face-cpu-release-user",
             "inherits": "install-win-release-user",
             "configurePreset": "win-face-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-vision-models-cpu-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-vision-models-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-vision-models-tensorrt-release-user",
+            "inherits": "install-win-release-user",
+            "configurePreset": "win-vision-models-tensorrt-release-user",
             "targets": [
                 "install"
             ]

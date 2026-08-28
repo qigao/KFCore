@@ -7,7 +7,8 @@ set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY FALSE)
 set(CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH FALSE)
 
 if(NOT DEFINED KFCORE_EXPECTED_KFCORE_DIR OR
-   NOT DEFINED KFCORE_EXPECT_CPU OR NOT DEFINED KFCORE_EXPECT_TENSORRT)
+   NOT DEFINED KFCORE_EXPECT_CPU OR NOT DEFINED KFCORE_EXPECT_TENSORRT OR
+   NOT DEFINED KFCORE_EXPECT_HAND_INTERACTION)
   message(FATAL_ERROR "Expected KFCore directory and backend flags are required")
 endif()
 if(KFCORE_EXPECT_CPU)
@@ -52,10 +53,24 @@ if(KFCORE_EXPECT_TENSORRT AND
   message(FATAL_ERROR
     "Installed KFCore package does not report/export the TensorRT vision backend")
 endif()
+if(KFCORE_EXPECT_HAND_INTERACTION AND
+   (NOT DEFINED KFCore_HAS_THIG OR NOT KFCore_HAS_THIG OR
+    NOT DEFINED KFCore_HAS_HAND_INTERACTION OR
+    NOT KFCore_HAS_HAND_INTERACTION OR
+    NOT TARGET KFCore::thig OR NOT TARGET KFCore::hand_interaction))
+  message(FATAL_ERROR
+    "Installed KFCore package does not report/export hand interaction")
+endif()
 
 add_executable(vision_models_installed_consumer main.cpp)
 target_link_libraries(vision_models_installed_consumer PRIVATE
   KFCore::vision_model_core)
+if(KFCORE_EXPECT_HAND_INTERACTION)
+  target_link_libraries(vision_models_installed_consumer PRIVATE
+    KFCore::hand_interaction)
+  target_compile_definitions(vision_models_installed_consumer PRIVATE
+    KFCORE_CONSUMER_HAS_HAND_INTERACTION=1)
+endif()
 if(KFCORE_EXPECT_CPU)
   target_link_libraries(vision_models_installed_consumer PRIVATE
     KFCore::vision_models_cpu)
