@@ -25,6 +25,15 @@ cmake_config_target(kfcore_hand_interaction
   EXPORT_SET KFCoreTargets
   FOLDER "hand_interaction")
 
+if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
+  if(NOT TARGET TurboUtils::Capture)
+    message(FATAL_ERROR
+      "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES requires a TurboUtils SDK "
+      "installed with the Capture component")
+  endif()
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
+endif()
+
 if(BUILD_TESTS)
   add_executable(test_hand_primitive_extractor
     tests/test_primitive_extractor.cpp)
@@ -71,6 +80,26 @@ if(BUILD_TESTS)
   target_compile_features(test_hand_interaction_demo_capture PRIVATE cxx_std_17)
   add_test(NAME test_hand_interaction_demo_capture
     COMMAND test_hand_interaction_demo_capture)
+
+  if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
+    add_executable(test_hand_interaction_demo_ui
+      tests/test_hand_interaction_demo_ui.cpp
+      examples/hand_interaction_demo_capture.cpp
+      examples/hand_interaction_demo_frame.cpp
+      examples/hand_interaction_demo_ui.cpp)
+    target_include_directories(test_hand_interaction_demo_ui PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_hand_interaction_demo_ui PRIVATE
+      KFCore::hand_interaction
+      OpenCVLite::core
+      OpenCVLite::imgproc
+      TurboUtils::Capture
+      TurboUtils::Core
+      TurboUtils::TinyTest)
+    target_compile_features(test_hand_interaction_demo_ui PRIVATE cxx_std_17)
+    add_test(NAME test_hand_interaction_demo_ui
+      COMMAND test_hand_interaction_demo_ui)
+  endif()
 endif()
 
 cmake_install_headers(
