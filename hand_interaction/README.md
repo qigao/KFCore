@@ -59,6 +59,35 @@ landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减
 `HandInteractionFrame::primitives.hands[].canonical_id`；首帧尚无 canonical ID 时应省略区域
 观察。输入 observation 会复制进结果和 THIG，不得使用 raw ByteTrack ID 代替 canonical ID。
 
+## Canonical hand identity
+
+canonical hand ID 由 registry 单独拥有；它以 20 条已标注手部骨架边的归一化三维长度作为 Hu-like
+不变形状证据，再把近期 palm 几何、handedness 和 raw ByteTrack ID 用作排序证据。该描述符对平移、
+统一缩放和图像平面内旋转保持不变，采用 L1 距离比较；它是从 21 个 landmark 的五条 wrist-to-finger
+链构成的固定值，不分配堆内存。它不是 OpenCV Hu moments，也不构成生物识别或身份保证。
+
+所有 landmark 分量和边长必须有限，20 条边的总长度必须为正；否则形状证据无效，该手的 canonical
+ID 为 `0`，不会退回为仅按位置匹配。候选还必须满足 `maximum_shape_distance`；形状不兼容的可靠手会
+尝试分配新 canonical ID。若容量已耗尽，处理会以 `std::length_error` fail fast，而不是把资源耗尽
+伪装成 ID `0`。
+
+已分配的形状原型会持续到显式 `reset()`，不会因空帧或 frame age 被删除。`reacquire_frames` 现仅是
+空间、尺度和速度证据的有效 horizon：在此范围内这些证据参与候选排序；超过后它们会过期，重获仍可
+依赖形状、handedness、年龄和 raw-ID 连续性。因而同一形状可在长间隔、位置交换或 tracker raw ID
+重建后恢复同一个 canonical ID；无法消歧的候选仍返回 `0`。
+
+`HandIdentityOptions` 的默认容量为 `maximum_identities = 32`，并追加下列已在构造时验证的配置：
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `maximum_shape_distance` | `0.35F` | 形状候选允许的最大 L1 距离（范围 `(0, 2]`） |
+| `shape_cost_weight` | `2.0F` | 形状距离在候选成本中的权重 |
+| `shape_update_weight` | `0.20F` | 已接受形状写入原型的 EMA 权重（范围 `(0, 1]`） |
+| `handedness_mismatch_penalty` | `0.35F` | 双方 handedness 已知但不同时增加的成本 |
+
+这四个字段被追加到公开 `HandIdentityOptions` 末尾。源码默认构造和短 aggregate 初始化保持可用，但其
+对象布局已变化；所有二进制下游消费者必须重新构建。
+
 ## 状态、并发与容量
 
 每个 `HandInteractionPipeline` 是单 owner、不可重入对象。不同实例可由不同任务并行运行，
@@ -97,6 +126,10 @@ target_link_libraries(app PRIVATE KFCore::hand_interaction)
 包配置提供 `KFCore_HAS_THIG` 和 `KFCore_HAS_HAND_INTERACTION`，便于可选功能在 configure 阶段
 fail fast。模型与 TensorRT engine 仍由对应 backend 管理，既不复制也不安装到本模块。
 
+identity 与 primitive core 不依赖 OpenCV、CUDA、TensorRT 或 ONNX Runtime；CPU ONNX Runtime 和
+TensorRT CUDA backend 只提供同一种 `HandFrame`，因此使用同一套 canonical identity 行为。实时 demo
+是可选边界，才会链接 Capture、OpenCV Lite 和所选推理 backend。
+
 ## Turbo Capture 实时 Demo
 
 `hand_interaction_demo` 是可选的桌面示例，不改变已安装库的接口或依赖。数据流为：
@@ -120,8 +153,8 @@ GPU tensor 级零拷贝共享。OpenCV Lite 与 Turbo Capture 只链接到示例
 CPU 路径：
 
 ```powershell
-cmake --preset win-hand-interaction-demo-cpu-release-user
-cmake --build --preset win-hand-interaction-demo-cpu-release-user --target hand_interaction_demo
+cmake --preset win-hand-interaction-demo-cpu-release-user -DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF
+cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_hand_primitive_extractor
 ctest --preset win-hand-interaction-demo-cpu-release-user --output-on-failure
 ```
 
@@ -129,10 +162,14 @@ TensorRT 路径需要先指向本机 SDK；preset 只做编译验证，不要求
 
 ```powershell
 $env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
-cmake --preset win-hand-interaction-demo-tensorrt-release-user
-cmake --build --preset win-hand-interaction-demo-tensorrt-release-user --target hand_interaction_demo
+cmake --preset win-hand-interaction-demo-tensorrt-release-user -DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF
+cmake --build --preset win-hand-interaction-demo-tensorrt-release-user
 ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure
 ```
+
+本机 TurboUtils release package 若未导出 `TurboUtils::Capture`，必须如上关闭
+`KFCORE_BUILD_HAND_INTERACTION_EXAMPLES` 才能验证 core 和测试；这不代表 identity core 测试失败。需要
+构建实时 demo 时，应安装包含 Capture component 的 TurboUtils SDK，再以 `ON` 重新 configure。
 
 两个 preset 都从 `CMakeUserPresets.json` 设置 `OPENCV_LITE_ROOT`，并为 configure、build 和
 CTest 子进程加入 OpenCV Lite、Turbo Capture 及对应推理 runtime 的 DLL 目录。直接从当前

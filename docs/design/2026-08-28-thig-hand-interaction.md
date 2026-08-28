@@ -48,6 +48,12 @@ identity, per-hand geometry history, pair-distance history, and its THIG engine.
 It emits owned primitive observations and action events. It does not retain the
 input frame or landmark pointers.
 
+Canonical identity is backend-neutral. CPU ONNX Runtime and TensorRT CUDA only
+produce `HandFrame`; the common extractor performs identity resolution, so the
+same input frame has the same identity semantics regardless of inference
+backend. The installed core target has no OpenCV, CUDA, TensorRT, or ONNX
+Runtime dependency; those dependencies stay at the optional demo/backend edge.
+
 Application code remains responsible for mapping semantic actions to commands.
 Optional screen-region or face-relative evidence may be appended as external
 THIG observations; KFCore does not infer application layout.
@@ -71,6 +77,46 @@ Histories and action state are pruned by monotonic age and bounded by count. No 
 queue, or vector is allowed on the frame path. THIG action events copy evidence,
 so later pruning cannot invalidate returned events.
 
+## Persistent shape-based canonical identity
+
+The identity registry owns one persistent prototype for every canonical hand.
+The prototype is Hu-like invariant shape evidence: 20 normalized 3D skeleton-edge
+lengths from the five labelled wrist-to-finger chains of the 21-point hand
+skeleton. It is a fixed inline value, normalized by the total edge length, and
+is compared with L1 distance. It is not OpenCV Hu moments—there is no hand mask
+or contour in this core path—and it is not a biometric guarantee.
+
+All landmark components and derived lengths must be finite and the total length
+must be positive. A failed descriptor is unconfirmable and produces canonical ID
+`0`; it does not fall back to a position-only match. A descriptor farther than
+`maximum_shape_distance` is not a candidate. Handedness, raw ByteTrack ID,
+capped age, and, while fresh, palm position/scale/velocity only rank compatible
+candidates. Ambiguous matches remain ID `0` rather than being resolved by input
+order.
+
+Identity prototypes remain until the owning pipeline receives explicit
+`reset()`. `reacquire_frames` is therefore the spatial-evidence horizon, not an
+identity deletion TTL: palm motion and scale evidence are used only through that
+age, while shape-compatible re-acquisition continues after it. A reliable hand
+with no compatible prototype allocates a new identity. State remains bounded by
+`maximum_identities`; exhaustion throws `std::length_error` before a partial
+frame commit.
+
+`maximum_identities` defaults to `32`. `HandIdentityOptions` additionally has
+these validated defaults:
+
+| Field | Default | Contract |
+|---|---:|---|
+| `maximum_shape_distance` | `0.35F` | Candidate L1 gate; must be in `(0, 2]` |
+| `shape_cost_weight` | `2.0F` | Non-negative shape-distance ranking weight |
+| `shape_update_weight` | `0.20F` | EMA prototype update weight in `(0, 1]` |
+| `handedness_mismatch_penalty` | `0.35F` | Non-negative cost for differing known handedness |
+
+The new fields are appended to the public `HandIdentityOptions` structure.
+Default construction and short aggregate initializers retain their source
+behavior, but the public layout changes; binary downstream consumers must
+rebuild.
+
 ## Compatibility and migration
 
 Existing `HandInferenceBackend`, `HandPipeline`, `HandFrame`, CPU, and TensorRT
@@ -81,7 +127,8 @@ never applies Retro's `track_id <= 0` rejection rule.
 Model `Gesture::Closed` maps to primitive `Shape Fist`. V, OK, index state,
 direction, stationarity, scale, rotation, and two-hand distance are derived from
 raw landmarks without modifying them. Handedness is display metadata and never
-an entity key.
+an entity key. It is secondary categorical evidence for canonical identity, not
+a hard key: a known mismatch adds the configured ranking penalty.
 
 The source implementation is derived from the first-party Retro repository at
 `C:/projects/project-cpp-template/Retro/interaction/thig`; migration retains the
@@ -95,6 +142,9 @@ targets. Existing vision inference and tracking behavior is unaffected.
 - Port the complete Retro THIG behavior suite under TinyTest.
 - Test ID zero, timestamp/serial rejection, capacity limits, reset, ambiguity,
   and history pruning.
+- Test persistent shape re-acquisition across a frame gap, translation, scale,
+  in-plane rotation, and raw Track ID recreation; test shape rejection, swapped
+  hands, invalid/degenerate descriptors, and capacity exhaustion.
 - Test literal landmark fixtures for V, OK, index state, direction,
   stationarity, scale, rotation, and pair distance.
 - Test graph sequences for Wave, Grasp, Release, OK, dual-hand V, Zoom, and
