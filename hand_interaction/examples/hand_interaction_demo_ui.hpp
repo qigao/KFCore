@@ -24,6 +24,7 @@ struct DemoMetrics
     CaptureCounters                    capture;
     vision_models::StageTimings        model;
     vision_models::FaceMeshTimings     face;
+    double                             fps        = 0.0;
     double                             convert_ms = 0.0;
     double                             thig_ms  = 0.0;
     double                             frame_ms = 0.0;
@@ -34,8 +35,11 @@ struct DemoMetrics
 [[nodiscard]] std::array<std::string, 3> format_timing_lines(
     const DemoMetrics& metrics);
 
-// Source must be a non-empty CV_8UC3 image. The returned overlay owns its
-// pixels and source is never modified.
+[[nodiscard]] std::string format_hand_label(
+    int canonical_id, const vision_models::HandResult& hand);
+
+// Source must be a non-empty CV_8UC3 image. The returned overlay is mirrored,
+// owns its pixels, and source is never modified.
 [[nodiscard]] cv::Mat compose_overlay(
     const cv::Mat& source, const vision_models::HandFrame& hands,
     const HandInteractionFrame& interaction,

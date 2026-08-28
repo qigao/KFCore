@@ -89,6 +89,7 @@ spec("hand interaction demo frame and UI")
     it("formats every processing stage with stable units")
     {
         demo::DemoMetrics metrics;
+        metrics.fps                           = 24.5;
         metrics.convert_ms                    = 1.25;
         metrics.model.preprocess_ms            = 2.5;
         metrics.model.palm_inference_ms        = 3.75;
@@ -106,11 +107,40 @@ spec("hand interaction demo frame and UI")
 
         const auto lines = demo::format_timing_lines(metrics);
         check_equal(lines[0],
-                    std::string("ms conv 1.25 pre 2.50 palm 3.75 land 4.00"));
+                    std::string("FPS 24.50 | ms conv 1.25 pre 2.50 palm 3.75 land 4.00"));
         check_equal(lines[1],
                     std::string("ms cls 5.25 track 6.50 model 22.00 thig 0.75 pipe 24.00"));
         check_equal(lines[2],
                     std::string("ms face-pre 1.00 face-det 2.00 mesh-pre 3.00 mesh 4.00 face 10.50"));
+    }
+
+    it("formats explicit hand, track, and gesture identities")
+    {
+        kfcore::vision_models::HandResult hand;
+        hand.track_id = 3;
+        hand.gesture  = kfcore::vision_models::Gesture::Pointer;
+
+        check_equal(demo::format_hand_label(1, hand),
+                    std::string("Hand ID:1 | Track ID:3 | Gesture:Pointer"));
+    }
+
+    it("mirrors the camera image without modifying its source")
+    {
+        cv::Mat source(240, 320, CV_8UC3, cv::Scalar(0, 0, 0));
+        const cv::Vec3b marker(5U, 17U, 93U);
+        source.at<cv::Vec3b>(200, 10) = marker;
+
+        const cv::Mat output = demo::compose_overlay(source, {}, {}, nullptr, {});
+        const cv::Vec3b mirrored_marker = output.at<cv::Vec3b>(200, 309);
+        const cv::Vec3b original_position = output.at<cv::Vec3b>(200, 10);
+
+        check_equal(mirrored_marker[0], marker[0]);
+        check_equal(mirrored_marker[1], marker[1]);
+        check_equal(mirrored_marker[2], marker[2]);
+        check_equal(original_position[0], (std::uint8_t)0U);
+        check_equal(original_position[1], (std::uint8_t)0U);
+        check_equal(original_position[2], (std::uint8_t)0U);
+        check_equal(source.at<cv::Vec3b>(200, 10)[2], marker[2]);
     }
 
     it("draws tracked hands actions and metrics without changing the input")
@@ -166,7 +196,7 @@ spec("hand interaction demo frame and UI")
         check_equal(output.cols, source.cols);
         check_equal(cv::countNonZero(source.reshape(1)), 0);
         check_greater(cv::countNonZero(output.reshape(1)), 0);
-        const cv::Vec3b face_point = output.at<cv::Vec3b>(60, 170);
+        const cv::Vec3b face_point = output.at<cv::Vec3b>(60, 149);
         check_equal(face_point[0], (std::uint8_t)255U);
         check_equal(face_point[1], (std::uint8_t)80U);
         check_equal(face_point[2], (std::uint8_t)180U);

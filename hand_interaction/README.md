@@ -198,6 +198,9 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 以及 `captured/consumed/coalesced/rejected` 计数。这些是当前帧和当前运行的诊断数据，不等同于
 稳定的 P50/P95 性能结论，也不包含 HighGUI 的显示刷新时间。
 
+窗口只在显示层镜像画面及手部/FaceMesh 坐标，模型仍消费原始相机帧。状态栏的 `FPS` 是按实际
+消费帧间隔计算的指数平滑值；每只手明确显示 THIG `Hand ID`、tracker `Track ID` 与 `Gesture` 名称。
+
 若 configure 报告缺少 `TurboUtils::Capture`，说明 TurboUtils SDK 没有安装 Capture 导出目标；
 在 TurboUtils 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install
 preset 后重新配置。若启动时 Windows 在进入 `main` 前退出，应先检查当前 shell 的 `PATH`

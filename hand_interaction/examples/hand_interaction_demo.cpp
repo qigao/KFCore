@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -40,6 +41,7 @@ using kfcore::vision_models::FaceMeshFrame;
 
 constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction + FaceMesh";
 constexpr std::chrono::milliseconds kFrameWait { 50 };
+constexpr double kFpsSmoothingAlpha = 0.15;
 
 demo::BackendAvailability backend_availability()
 {
@@ -202,6 +204,8 @@ int run(const demo::Arguments& arguments)
     camera.start();
     bool running = true;
     std::uint64_t processed_frames = 0U;
+    std::optional<std::chrono::steady_clock::time_point> previous_frame_started;
+    double displayed_fps = 0.0;
     while (running && window.is_open())
     {
         const demo::TakeStatus status = mailbox.take_latest(captured, kFrameWait);
@@ -216,6 +220,21 @@ int run(const demo::Arguments& arguments)
         }
 
         const auto frame_started = std::chrono::steady_clock::now();
+        if (previous_frame_started.has_value())
+        {
+            const double interval_seconds =
+                std::chrono::duration<double>(frame_started - *previous_frame_started)
+                    .count();
+            if (interval_seconds > 0.0)
+            {
+                const double sampled_fps = 1.0 / interval_seconds;
+                displayed_fps = displayed_fps > 0.0
+                                    ? kFpsSmoothingAlpha * sampled_fps +
+                                          (1.0 - kFpsSmoothingAlpha) * displayed_fps
+                                    : sampled_fps;
+            }
+        }
+        previous_frame_started = frame_started;
         const cv::Mat bgr = demo::to_bgr(captured);
         const auto converted = std::chrono::steady_clock::now();
         const kfcore::image::ImageView frame_view = image_view(bgr);
@@ -236,6 +255,7 @@ int run(const demo::Arguments& arguments)
         metrics.capture = mailbox.counters();
         metrics.model   = hands.timings;
         metrics.face    = face.timings;
+        metrics.fps     = displayed_fps;
         metrics.convert_ms =
             std::chrono::duration<double, std::milli>(converted - frame_started).count();
         metrics.thig_ms =

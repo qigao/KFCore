@@ -38,6 +38,11 @@ int clamp_coordinate(float value, int extent)
     return std::clamp(static_cast<int>(std::lround(value)), 0, extent - 1);
 }
 
+int mirror_coordinate(float value, int extent)
+{
+    return extent - 1 - clamp_coordinate(value, extent);
+}
+
 std::string gesture_name(vision_models::Gesture gesture)
 {
     switch (gesture)
@@ -113,7 +118,7 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
     {
         line << std::fixed << std::setprecision(2);
     }
-    text[0] << "ms conv " << metrics.convert_ms << " pre "
+    text[0] << "FPS " << metrics.fps << " | ms conv " << metrics.convert_ms << " pre "
             << metrics.model.preprocess_ms << " palm "
             << metrics.model.palm_inference_ms << " land "
             << metrics.model.landmark_inference_ms;
@@ -128,6 +133,15 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
     return { text[0].str(), text[1].str(), text[2].str() };
 }
 
+std::string format_hand_label(int canonical_id,
+                              const vision_models::HandResult& hand)
+{
+    std::ostringstream label;
+    label << "Hand ID:" << canonical_id << " | Track ID:" << hand.track_id
+          << " | Gesture:" << gesture_name(hand.gesture);
+    return label.str();
+}
+
 cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& hands,
                         const HandInteractionFrame& interaction,
                         const vision_models::FaceMeshFrame* face,
@@ -138,7 +152,8 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
         throw std::invalid_argument("hand interaction demo source must be non-empty CV_8UC3");
     }
 
-    cv::Mat output = source.clone();
+    cv::Mat output;
+    cv::flip(source, output, 1);
     const int action_lines =
         std::min(static_cast<int>(interaction.actions.size()), kMaximumActionLines);
     const int face_timing_lines = face != nullptr ? 1 : 0;
@@ -183,10 +198,12 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
     for (std::size_t index = 0U; index < hands.hands.size(); ++index)
     {
         const auto& hand = hands.hands[index];
-        const int left = clamp_coordinate(hand.palm.box.x, output.cols);
+        const int source_left = clamp_coordinate(hand.palm.box.x, output.cols);
         const int top = clamp_coordinate(hand.palm.box.y, output.rows);
-        const int right = clamp_coordinate(hand.palm.box.x + hand.palm.box.width,
-                                           output.cols);
+        const int source_right = clamp_coordinate(
+            hand.palm.box.x + hand.palm.box.width, output.cols);
+        const int left = output.cols - 1 - source_right;
+        const int right = output.cols - 1 - source_left;
         const int bottom = clamp_coordinate(hand.palm.box.y + hand.palm.box.height,
                                             output.rows);
         if (right > left && bottom > top)
@@ -197,24 +214,24 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
         for (const auto& landmark : hand.landmarks)
         {
             cv::circle(output,
-                       cv::Point(clamp_coordinate(landmark.x, output.cols),
+                       cv::Point(mirror_coordinate(landmark.x, output.cols),
                                  clamp_coordinate(landmark.y, output.rows)),
                        kPointRadius, kLandmarkColor, cv::FILLED, cv::LINE_AA);
         }
 
-        std::ostringstream label;
-        label << "hand " << canonical_id_for(interaction, index) << " track "
-              << hand.track_id << " " << gesture_name(hand.gesture);
-        cv::putText(output, label.str(), cv::Point(left, std::max(15, top - 6)),
+        cv::putText(output, format_hand_label(canonical_id_for(interaction, index), hand),
+                    cv::Point(left, std::max(15, top - 6)),
                     cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
                     kTextThickness, cv::LINE_AA);
     }
     if (face != nullptr && face->detection.has_value())
     {
         const auto& box = face->detection->box;
-        const int left = clamp_coordinate(box.x, output.cols);
+        const int source_left = clamp_coordinate(box.x, output.cols);
         const int top = clamp_coordinate(box.y, output.rows);
-        const int right = clamp_coordinate(box.x + box.width, output.cols);
+        const int source_right = clamp_coordinate(box.x + box.width, output.cols);
+        const int left = output.cols - 1 - source_right;
+        const int right = output.cols - 1 - source_left;
         const int bottom = clamp_coordinate(box.y + box.height, output.rows);
         if (right > left && bottom > top)
         {
@@ -226,7 +243,7 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
             for (const auto& landmark : face->landmarks->landmarks)
             {
                 cv::circle(output,
-                           cv::Point(clamp_coordinate(landmark.x, output.cols),
+                           cv::Point(mirror_coordinate(landmark.x, output.cols),
                                      clamp_coordinate(landmark.y, output.rows)),
                            1, kFaceLandmarkColor, cv::FILLED, cv::LINE_AA);
             }
