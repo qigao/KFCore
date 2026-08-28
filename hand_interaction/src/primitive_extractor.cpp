@@ -873,7 +873,7 @@ PrimitiveFrame HandPrimitiveExtractor::process(
               geometries[index].center_x,
               geometries[index].center_y,
               geometries[index].scale,
-              hand.track_id >= 0 && geometry_valid[index] ? confidence : 0.0F });
+              geometry_valid[index] ? confidence : 0.0F });
     }
 
     const std::vector<int> canonical_ids =

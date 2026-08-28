@@ -260,6 +260,55 @@ spec("hand primitive extractor")
         check(second.hands[0].canonical_id == first.hands[0].canonical_id);
     }
 
+    it("keeps a canonical identity while ByteTrack is temporarily unconfirmed")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(base_hand(4));
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        HandFrame unconfirmed_frame;
+        unconfirmed_frame.hands.push_back(base_hand(-1));
+        translate_hand(unconfirmed_frame.hands[0], 8.0F, 4.0F);
+        const auto unconfirmed =
+            extractor.process(unconfirmed_frame, frame_context(2, 33));
+
+        check(first.hands[0].canonical_id > 0);
+        check(unconfirmed.hands[0].raw_track_id == -1);
+        check(unconfirmed.hands[0].canonical_id ==
+              first.hands[0].canonical_id);
+    }
+
+    it("keeps distinct canonical identities when two hands alternate unconfirmed")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame both_hands;
+        both_hands.hands.push_back(base_hand(4));
+        both_hands.hands.push_back(base_hand(9));
+        translate_hand(both_hands.hands[1], 240.0F, 0.0F);
+        const auto initial = extractor.process(both_hands, frame_context(1));
+
+        HandFrame right_only;
+        right_only.hands.push_back(base_hand(-1));
+        translate_hand(right_only.hands[0], 244.0F, 3.0F);
+        const auto right =
+            extractor.process(right_only, frame_context(2, 33));
+
+        HandFrame left_only;
+        left_only.hands.push_back(base_hand(-1));
+        translate_hand(left_only.hands[0], 4.0F, 3.0F);
+        const auto left =
+            extractor.process(left_only, frame_context(3, 66));
+
+        check(initial.hands[0].canonical_id > 0);
+        check(initial.hands[1].canonical_id > 0);
+        check(initial.hands[0].canonical_id != initial.hands[1].canonical_id);
+        check(right.hands[0].raw_track_id == -1);
+        check(right.hands[0].canonical_id == initial.hands[1].canonical_id);
+        check(left.hands[0].raw_track_id == -1);
+        check(left.hands[0].canonical_id == initial.hands[0].canonical_id);
+    }
+
     it("allocates a new canonical identity for a far hand while an old hand is dormant")
     {
         HandPrimitiveOptions options;
