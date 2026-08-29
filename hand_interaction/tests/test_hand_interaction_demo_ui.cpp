@@ -98,6 +98,7 @@ spec("hand interaction demo frame and UI")
         metrics.model.palm_inference_ms        = 3.75;
         metrics.model.landmark_inference_ms    = 4.0;
         metrics.model.classifier_inference_ms  = 5.25;
+        metrics.model.appearance_ms             = 0.5;
         metrics.model.tracking_ms              = 6.5;
         metrics.model.total_ms                 = 22.0;
         metrics.face.detection_preprocess_ms   = 1.0;
@@ -112,7 +113,7 @@ spec("hand interaction demo frame and UI")
         check_equal(lines[0],
                     std::string("FPS 24.50 | ms conv 1.25 pre 2.50 palm 3.75 land 4.00"));
         check_equal(lines[1],
-                    std::string("ms cls 5.25 track 6.50 model 22.00 thig 0.75 pipe 24.00"));
+                    std::string("ms cls 5.25 reid 0.50 track 6.50 model 22.00 thig 0.75 pipe 24.00"));
         check_equal(lines[2],
                     std::string("ms face-pre 1.00 face-det 2.00 mesh-pre 3.00 mesh 4.00 face 10.50"));
     }
@@ -135,13 +136,54 @@ spec("hand interaction demo frame and UI")
         }
 
         const demo::HandOverlayText text =
-            demo::format_hand_overlay_text(1, hand, primitives);
+            demo::format_hand_overlay_text(
+                { 0U, 3, 1,
+                  kfcore::hand_interaction::HandIdentityAssociation::ShapeReacquired },
+                hand, primitives);
         check_equal(text.identity,
-                    std::string("Hand ID:1 | Track ID:3 | Raw:Open"));
+                    std::string(
+                        "Hand ID:1 | Track ID:3 | Match:Shape | Raw:Open"));
         check_equal(text.derived,
                     std::string("Derived:V | Motion:Stationary | Axis:Horizontal"));
         check_equal(text.dynamics,
                     std::string("Direction:Right | Rotation:Clockwise | Pose:OK"));
+    }
+
+    it("formats one bounded diagnostic snapshot for identity transitions")
+    {
+        kfcore::vision_models::HandFrame hands;
+        kfcore::vision_models::HandResult hand;
+        hand.track_id = 7;
+        hand.handedness = kfcore::vision_models::Handedness::Left;
+        hand.palm.box = { 10.0F, 20.0F, 40.0F, 60.0F };
+        hand.palm.confidence = 0.90F;
+        hand.landmark_confidence = 0.80F;
+        kfcore::vision_models::HandAppearanceDescriptor appearance;
+        appearance.valid_parts =
+            kfcore::vision_models::hand_appearance_part_bit(
+                kfcore::vision_models::HandAppearancePart::Palm) |
+            kfcore::vision_models::hand_appearance_part_bit(
+                kfcore::vision_models::HandAppearancePart::Pinky);
+        hand.appearance = appearance;
+        hands.hands.push_back(hand);
+
+        kfcore::hand_interaction::HandInteractionFrame interaction;
+        interaction.primitives.hands.push_back(
+            { 0U, 7, 3,
+              kfcore::hand_interaction::HandIdentityAssociation::AppearanceReacquired });
+
+        const auto diagnostics =
+            demo::make_identity_diagnostics(hands, interaction);
+        check_size(diagnostics, 1U);
+        check_equal(diagnostics[0].raw_track_id, 7);
+        check_equal(diagnostics[0].canonical_id, 3);
+        check_equal(diagnostics[0].appearance_parts, (std::uint8_t)0x21U);
+        check_equal(
+            demo::format_identity_diagnostic_line(42U, hands, interaction),
+            std::string(
+                "[ID] frame=42 hands=1 | input=0 raw=7 hand=3 match=Appearance "
+                "side=Left parts=0x21 center=(30.0,50.0) scale=60.0 "
+                "confidence=(0.90,0.80)"));
     }
 
     it("keeps a semantic action visible for the configured interval")
@@ -284,6 +326,69 @@ spec("hand interaction demo frame and UI")
         check_equal(face_point[0], (std::uint8_t)255U);
         check_equal(face_point[1], (std::uint8_t)80U);
         check_equal(face_point[2], (std::uint8_t)180U);
+    }
+
+    it("labels appearance-based identity reacquisition")
+    {
+        kfcore::vision_models::HandResult hand;
+        hand.track_id = 8;
+        const kfcore::hand_interaction::PrimitiveFrame primitives;
+
+        const demo::HandOverlayText text = demo::format_hand_overlay_text(
+            { 0U, 8, 3,
+              kfcore::hand_interaction::HandIdentityAssociation::AppearanceReacquired },
+            hand, primitives);
+
+        check_equal(text.identity,
+                    std::string(
+                        "Hand ID:3 | Track ID:8 | Match:Appearance | Raw:Unknown"));
+    }
+
+    it("keeps hand labels readable on both bright and dark camera frames")
+    {
+        kfcore::vision_models::HandFrame hands;
+        kfcore::vision_models::HandResult hand;
+        hand.palm.box            = { 40.0F, 180.0F, 160.0F, 120.0F };
+        hand.palm.confidence     = 0.98F;
+        hand.landmark_confidence = 0.98F;
+        hand.track_id            = 7;
+        hands.hands.push_back(hand);
+
+        kfcore::hand_interaction::HandInteractionFrame interaction;
+        interaction.primitives.hands.push_back(
+            { 0U, 7, 2,
+              kfcore::hand_interaction::HandIdentityAssociation::RawTrackContinuity });
+
+        const auto count_pixels = [](const cv::Mat& image, bool bright)
+        {
+            std::size_t count = 0U;
+            const cv::Rect label_region(425, 125, 215, 70);
+            for (int y = label_region.y;
+                 y < label_region.y + label_region.height; ++y)
+            {
+                for (int x = label_region.x;
+                     x < label_region.x + label_region.width; ++x)
+                {
+                    const cv::Vec3b pixel = image.at<cv::Vec3b>(y, x);
+                    const bool matches = bright
+                        ? pixel[0] >= 230U && pixel[1] >= 230U && pixel[2] >= 230U
+                        : pixel[0] <= 24U && pixel[1] <= 24U && pixel[2] <= 24U;
+                    count += matches ? 1U : 0U;
+                }
+            }
+            return count;
+        };
+
+        const cv::Mat bright_source(360, 640, CV_8UC3,
+                                    cv::Scalar(255, 255, 255));
+        const cv::Mat dark_source(360, 640, CV_8UC3, cv::Scalar(0, 0, 0));
+        const cv::Mat on_bright = demo::compose_overlay(
+            bright_source, hands, interaction, {}, nullptr, {});
+        const cv::Mat on_dark = demo::compose_overlay(
+            dark_source, hands, interaction, {}, nullptr, {});
+
+        check_greater(count_pixels(on_bright, false), 10U);
+        check_greater(count_pixels(on_dark, true), 10U);
     }
 
     it("rejects non-BGR UI input")

@@ -9,6 +9,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,19 @@ struct DemoThigStatus
     std::string                    click_state;
 };
 
+struct HandIdentityDiagnostic
+{
+    std::size_t             input_index = 0U;
+    int                     raw_track_id = -1;
+    int                     canonical_id = 0;
+    HandIdentityAssociation association =
+        HandIdentityAssociation::UnreliableObservation;
+    vision_models::Handedness handedness = vision_models::Handedness::Unknown;
+    std::uint8_t appearance_parts = 0U;
+
+    [[nodiscard]] bool operator==(const HandIdentityDiagnostic& other) const noexcept;
+};
+
 inline constexpr std::chrono::milliseconds kActionDisplayDuration { 1500 };
 inline constexpr std::size_t kMaximumDisplayedActions = 4U;
 
@@ -81,11 +95,19 @@ private:
     const DemoMetrics& metrics);
 
 [[nodiscard]] HandOverlayText format_hand_overlay_text(
-    int canonical_id, const vision_models::HandResult& hand,
+    const CanonicalHand& identity, const vision_models::HandResult& hand,
     const PrimitiveFrame& primitives);
 
 [[nodiscard]] std::string format_thig_state_line(const DemoThigStatus& status);
 [[nodiscard]] std::string format_action_line(const thig::ActionEvent& action);
+
+[[nodiscard]] std::vector<HandIdentityDiagnostic> make_identity_diagnostics(
+    const vision_models::HandFrame& hands,
+    const HandInteractionFrame& interaction);
+
+[[nodiscard]] std::string format_identity_diagnostic_line(
+    std::uint64_t frame_serial, const vision_models::HandFrame& hands,
+    const HandInteractionFrame& interaction);
 
 // Source must be a non-empty CV_8UC3 image. The returned overlay is mirrored,
 // owns its pixels, and source is never modified.

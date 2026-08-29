@@ -1,5 +1,7 @@
 #include "kfcore/vision_models/core.hpp"
 
+#include "hand_appearance.hpp"
+
 #include "trackers/tracker.h"
 
 #include <atomic>
@@ -159,6 +161,18 @@ void validate_hand(const HandResult& hand)
     }
 }
 
+void validate_appearance_options(const HandAppearanceOptions& options)
+{
+    if (!std::isfinite(options.minimum_palm_span_pixels) ||
+        options.minimum_palm_span_pixels <= 0.0F ||
+        !std::isfinite(options.minimum_part_in_frame_sample_ratio) ||
+        options.minimum_part_in_frame_sample_ratio <= 0.0F ||
+        options.minimum_part_in_frame_sample_ratio > 1.0F)
+    {
+        throw_invalid("hand appearance options are invalid");
+    }
+}
+
 class UseGuard final
 {
 public:
@@ -221,6 +235,7 @@ std::unique_ptr<HandPipeline> HandPipeline::create(
         throw_resource("max_hands must be within [1, INT_MAX]");
     }
     const bytetrack_config_t config = tracker_config(options.tracker);
+    validate_appearance_options(options.appearance);
     bytetrack_t* tracker = bytetrack_create(&config);
     if (tracker == nullptr)
     {
@@ -245,6 +260,10 @@ HandFrame HandPipeline::process(const image::ImageView& image)
     {
         throw_invalid("image data and dimensions must be valid");
     }
+    if (impl_->options.appearance.enabled)
+    {
+        detail::validate_hand_appearance_source(image);
+    }
 
     const Clock::time_point total_started = Clock::now();
     HandFrame frame = impl_->backend->infer(image);
@@ -255,9 +274,19 @@ HandFrame HandPipeline::process(const image::ImageView& image)
 
     std::vector<detection_t> detections;
     detections.reserve(frame.hands.size());
+    Clock::time_point appearance_started {};
+    if (impl_->options.appearance.enabled)
+    {
+        appearance_started = Clock::now();
+    }
     for (HandResult& hand : frame.hands)
     {
         validate_hand(hand);
+        if (impl_->options.appearance.enabled)
+        {
+            hand.appearance = detail::make_hand_appearance_descriptor(
+                image, hand.landmarks, impl_->options.appearance);
+        }
         hand.track_id = -1;
         const RectF& box = hand.palm.box;
         detection_t detection {};
@@ -267,6 +296,10 @@ HandFrame HandPipeline::process(const image::ImageView& image)
         detection.class_id = 0;
         detection.has_class_id = 1;
         detections.push_back(detection);
+    }
+    if (impl_->options.appearance.enabled)
+    {
+        frame.timings.appearance_ms = elapsed_ms(appearance_started);
     }
 
     const Clock::time_point tracking_started = Clock::now();

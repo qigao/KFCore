@@ -114,6 +114,8 @@ auto backend = kfcore::vision_models::CpuHandBackend::load(paths);
 
 kfcore::vision_models::HandPipelineOptions pipeline_options;
 pipeline_options.tracker.minimum_consecutive_frames = 1;
+// Host BGR8/RGB8 only. The returned HandResult owns the fixed descriptor.
+pipeline_options.appearance.enabled = true;
 auto pipeline = kfcore::vision_models::HandPipeline::create(
     std::move(backend), pipeline_options);
 const auto frame = pipeline->process(image_view);
@@ -127,9 +129,19 @@ CPU 和 TensorRT backend 都产生相同的 `HandFrame`，复杂手势统一进�
 `KFCore::hand_interaction`，不会在两个推理后端各维护一套时序规则。完整动作、容量、外部
 区域观察与 reset 契约见 [hand_interaction/README.md](../hand_interaction/README.md)。
 
+`appearance.enabled` 默认关闭，以保持 CUDA-device `ImageView` 调用和成本不变。启用后，内置提取器从
+同步调用期间借用的 Host BGR8/RGB8 原图与 landmark 生成 256 维六分区描述子：掌心 96 维，拇指、食指、
+中指、无名指和小指各 32 维。`valid_parts` 和 `quality` 分别表示分区有效掩码与采样覆盖率。若传入
+CUDA-device、Gray8、非法 stride/byte size，则在模型推理前返回 `InvalidArgument`，不会静默下载或
+切换路径。USB capture 的 CPU/TensorRT demo 输入都是 Host BGR，因此显式启用同一 CPU Re-ID 提取器。
+对纯 device 流，调用方应保持该选项关闭，直到提供经过验证的 CUDA/learned descriptor producer。
+
+旧的掌心专用 96 维契约不再兼容：没有 kind 标记、转换器或双读路径。所有使用
+`HandAppearanceDescriptor`、`HandResult` 或 `HandPipelineOptions` 的 C++ 下游必须用当前头文件重新编译。
+
 ## 耗时记录
 
-`HandFrame::timings` 分别记录 `preprocess_ms`、Palm、landmark、classifier、tracking 和
+`HandFrame::timings` 分别记录 `preprocess_ms`、Palm、landmark、classifier、`appearance_ms`、tracking 和
 `total_ms`；`FaceLandmarkResult` 记录 preprocess、inference 和 total。GPU 计时包含同步的
 Host 上传（若有）、CUDA 图像处理、TensorRT 执行与小输出下载；CPU 计时包含 CPU 图像处理和
 ONNX Runtime。模型加载不在单帧 timing 内，应在构造前后由应用另行计时。比较 CPU/GPU 时应
@@ -141,5 +153,7 @@ ONNX Runtime。模型加载不在单帧 timing 内，应在构造前后由应用
 - 目前 hand landmark ROI 逐个同步推理；classifier 会对有效手批处理。这样保证复用一个有界
   CUDA affine tensor buffer，后续只有 profiling 证明 landmark batching 是瓶颈时才扩展。
 - `HandPipeline` 用 Palm box 作为 ByteTrack observation；它不预测或平滑 21 个关键点。
+- 内置六分区描述子是轻量图像外观证据，不等价于经过手部数据训练的 OSNet/FastReID；当前仓库没有
+  可验证的手部 Re-ID 权重，不能宣称跨会话或人员级身份准确率。
 - 本模块不验证模型精度、训练标签来源或许可证；部署方必须对有 provenance 的 golden samples
   做 accuracy 验收。

@@ -22,12 +22,14 @@ const cv::Scalar kFaceLandmarkColor { 255, 80, 180 };
 const cv::Scalar kPrimaryTextColor { 245, 245, 245 };
 const cv::Scalar kActionTextColor { 60, 230, 255 };
 const cv::Scalar kTextBackground { 24, 24, 24 };
+const cv::Scalar kTextOutlineColor { 0, 0, 0 };
 constexpr int    kBoxThickness = 2;
 constexpr int    kPointRadius = 2;
-constexpr int    kTextThickness = 1;
+constexpr int    kTextThickness = 2;
+constexpr int    kTextOutlineThickness = 4;
 constexpr int    kTextLineHeight = 20;
 constexpr int    kTextMargin = 8;
-constexpr double kTextScale = 0.48;
+constexpr double kTextScale = 0.52;
 
 int clamp_coordinate(float value, int extent)
 {
@@ -58,16 +60,60 @@ std::string gesture_name(vision_models::Gesture gesture)
     }
 }
 
-int canonical_id_for(const HandInteractionFrame& interaction, std::size_t input_index)
+const CanonicalHand* canonical_hand_for(const HandInteractionFrame& interaction,
+                                        std::size_t input_index)
 {
     for (const CanonicalHand& hand : interaction.primitives.hands)
     {
         if (hand.input_index == input_index)
         {
-            return hand.canonical_id;
+            return &hand;
         }
     }
-    return 0;
+    return nullptr;
+}
+
+const char* association_name(HandIdentityAssociation association) noexcept
+{
+    switch (association)
+    {
+    case HandIdentityAssociation::NewIdentity:
+        return "New";
+    case HandIdentityAssociation::RawTrackContinuity:
+        return "Raw";
+    case HandIdentityAssociation::ShapeReacquired:
+        return "Shape";
+    case HandIdentityAssociation::AppearanceReacquired:
+        return "Appearance";
+    case HandIdentityAssociation::Ambiguous:
+        return "Ambiguous";
+    case HandIdentityAssociation::UnreliableObservation:
+    default:
+        return "Unreliable";
+    }
+}
+
+const char* handedness_name(vision_models::Handedness handedness) noexcept
+{
+    switch (handedness)
+    {
+    case vision_models::Handedness::Left:
+        return "Left";
+    case vision_models::Handedness::Right:
+        return "Right";
+    case vision_models::Handedness::Unknown:
+    default:
+        return "Unknown";
+    }
+}
+
+void draw_readable_text(cv::Mat& image, const std::string& text,
+                        const cv::Point& origin, const cv::Scalar& color)
+{
+    cv::putText(image, text, origin, cv::FONT_HERSHEY_SIMPLEX, kTextScale,
+                kTextOutlineColor, kTextOutlineThickness, cv::LINE_AA);
+    cv::putText(image, text, origin, cv::FONT_HERSHEY_SIMPLEX, kTextScale,
+                color, kTextThickness, cv::LINE_AA);
 }
 
 std::string capture_line(const DemoMetrics& metrics)
@@ -109,6 +155,17 @@ DemoAction action_from_key(int key) noexcept
     default:
         return DemoAction::None;
     }
+}
+
+bool HandIdentityDiagnostic::operator==(
+    const HandIdentityDiagnostic& other) const noexcept
+{
+    return input_index == other.input_index &&
+           raw_track_id == other.raw_track_id &&
+           canonical_id == other.canonical_id &&
+           association == other.association &&
+           handedness == other.handedness &&
+           appearance_parts == other.appearance_parts;
 }
 
 RecentActionHistory::RecentActionHistory(std::chrono::milliseconds retention,
@@ -165,7 +222,8 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
             << metrics.model.preprocess_ms << " palm "
             << metrics.model.palm_inference_ms << " land "
             << metrics.model.landmark_inference_ms;
-    text[1] << "ms cls " << metrics.model.classifier_inference_ms << " track "
+    text[1] << "ms cls " << metrics.model.classifier_inference_ms << " reid "
+            << metrics.model.appearance_ms << " track "
             << metrics.model.tracking_ms << " model " << metrics.model.total_ms
             << " thig " << metrics.thig_ms << " pipe " << metrics.frame_ms;
     text[2] << "ms face-pre " << metrics.face.detection_preprocess_ms
@@ -176,10 +234,11 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
     return { text[0].str(), text[1].str(), text[2].str() };
 }
 
-HandOverlayText format_hand_overlay_text(int canonical_id,
+HandOverlayText format_hand_overlay_text(const CanonicalHand& identity_result,
                                          const vision_models::HandResult& hand,
                                          const PrimitiveFrame& primitives)
 {
+    const int canonical_id = identity_result.canonical_id;
     std::string shape     = "Unknown";
     std::string motion    = "Unknown";
     std::string direction = "Unknown";
@@ -222,6 +281,7 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
     HandOverlayText result;
     std::ostringstream identity;
     identity << "Hand ID:" << canonical_id << " | Track ID:" << hand.track_id
+             << " | Match:" << association_name(identity_result.association)
              << " | Raw:" << gesture_name(hand.gesture);
     result.identity = identity.str();
 
@@ -238,6 +298,63 @@ HandOverlayText format_hand_overlay_text(int canonical_id,
     }
     result.dynamics = dynamics.str();
     return result;
+}
+
+std::vector<HandIdentityDiagnostic> make_identity_diagnostics(
+    const vision_models::HandFrame& hands,
+    const HandInteractionFrame& interaction)
+{
+    std::vector<HandIdentityDiagnostic> result;
+    result.reserve(hands.hands.size());
+    for (std::size_t index = 0U; index < hands.hands.size(); ++index)
+    {
+        const vision_models::HandResult& hand = hands.hands[index];
+        const CanonicalHand* identity = canonical_hand_for(interaction, index);
+        result.push_back(
+            { index,
+              hand.track_id,
+              identity != nullptr ? identity->canonical_id : 0,
+              identity != nullptr
+                  ? identity->association
+                  : HandIdentityAssociation::UnreliableObservation,
+              hand.handedness,
+              hand.appearance.has_value()
+                  ? hand.appearance->valid_parts
+                  : static_cast<std::uint8_t>(0U) });
+    }
+    return result;
+}
+
+std::string format_identity_diagnostic_line(
+    std::uint64_t frame_serial, const vision_models::HandFrame& hands,
+    const HandInteractionFrame& interaction)
+{
+    const std::vector<HandIdentityDiagnostic> diagnostics =
+        make_identity_diagnostics(hands, interaction);
+    std::ostringstream line;
+    line << "[ID] frame=" << frame_serial << " hands=" << diagnostics.size();
+    for (const HandIdentityDiagnostic& diagnostic : diagnostics)
+    {
+        const vision_models::HandResult& hand =
+            hands.hands[diagnostic.input_index];
+        const vision_models::RectF& box = hand.palm.box;
+        line << " | input=" << diagnostic.input_index
+             << " raw=" << diagnostic.raw_track_id
+             << " hand=" << diagnostic.canonical_id
+             << " match=" << association_name(diagnostic.association)
+             << " side=" << handedness_name(diagnostic.handedness)
+             << " parts=0x" << std::hex << std::setw(2) << std::setfill('0')
+             << static_cast<unsigned int>(diagnostic.appearance_parts)
+             << std::dec << std::setfill(' ')
+             << std::fixed << std::setprecision(1)
+             << " center=(" << box.x + box.width * 0.5F << ','
+             << box.y + box.height * 0.5F << ')'
+             << " scale=" << std::max(box.width, box.height)
+             << std::setprecision(2)
+             << " confidence=(" << hand.palm.confidence << ','
+             << hand.landmark_confidence << ')';
+    }
+    return line.str();
 }
 
 std::string format_thig_state_line(const DemoThigStatus& status)
@@ -288,46 +405,45 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
     const int face_timing_lines = face != nullptr ? 1 : 0;
     const auto timing_lines = format_timing_lines(metrics);
     draw_status_background(output, 5 + face_timing_lines + action_lines);
-    cv::putText(output, "R reset tracking/THIG | Q/Esc quit",
-                cv::Point(kTextMargin, kTextMargin + kTextLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                kTextThickness, cv::LINE_AA);
-    cv::putText(output, timing_lines[0],
-                cv::Point(kTextMargin, kTextMargin + 2 * kTextLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                kTextThickness, cv::LINE_AA);
-    cv::putText(output, timing_lines[1],
-                cv::Point(kTextMargin, kTextMargin + 3 * kTextLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                kTextThickness, cv::LINE_AA);
-    cv::putText(output, capture_line(metrics),
-                cv::Point(kTextMargin,
-                          kTextMargin + (4 + face_timing_lines) * kTextLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                kTextThickness, cv::LINE_AA);
+    draw_readable_text(output, "R reset tracking/THIG | Q/Esc quit",
+                       cv::Point(kTextMargin, kTextMargin + kTextLineHeight),
+                       kPrimaryTextColor);
+    draw_readable_text(
+        output, timing_lines[0],
+        cv::Point(kTextMargin, kTextMargin + 2 * kTextLineHeight),
+        kPrimaryTextColor);
+    draw_readable_text(
+        output, timing_lines[1],
+        cv::Point(kTextMargin, kTextMargin + 3 * kTextLineHeight),
+        kPrimaryTextColor);
+    draw_readable_text(
+        output, capture_line(metrics),
+        cv::Point(kTextMargin,
+                  kTextMargin + (4 + face_timing_lines) * kTextLineHeight),
+        kPrimaryTextColor);
     if (face != nullptr)
     {
-        cv::putText(output, timing_lines[2],
-                    cv::Point(kTextMargin, kTextMargin + 4 * kTextLineHeight),
-                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                    kTextThickness, cv::LINE_AA);
+        draw_readable_text(
+            output, timing_lines[2],
+            cv::Point(kTextMargin, kTextMargin + 4 * kTextLineHeight),
+            kPrimaryTextColor);
     }
 
-    cv::putText(output, format_thig_state_line(status),
-                cv::Point(kTextMargin,
-                          kTextMargin + (5 + face_timing_lines) * kTextLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kTextScale, kPrimaryTextColor,
-                kTextThickness, cv::LINE_AA);
+    draw_readable_text(
+        output, format_thig_state_line(status),
+        cv::Point(kTextMargin,
+                  kTextMargin + (5 + face_timing_lines) * kTextLineHeight),
+        kPrimaryTextColor);
 
     for (int index = 0; index < action_lines; ++index)
     {
         const auto& action = status.recent_actions[static_cast<std::size_t>(index)];
-        cv::putText(output, format_action_line(action),
-                    cv::Point(kTextMargin,
-                              kTextMargin + (6 + face_timing_lines + index) *
-                                  kTextLineHeight),
-                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kActionTextColor,
-                    kTextThickness, cv::LINE_AA);
+        draw_readable_text(
+            output, format_action_line(action),
+            cv::Point(kTextMargin,
+                      kTextMargin + (6 + face_timing_lines + index) *
+                          kTextLineHeight),
+            kActionTextColor);
     }
 
     for (std::size_t index = 0U; index < hands.hands.size(); ++index)
@@ -354,20 +470,23 @@ cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& h
                        kPointRadius, kLandmarkColor, cv::FILLED, cv::LINE_AA);
         }
 
+        const CanonicalHand missing_identity {
+            index, hand.track_id, 0,
+            HandIdentityAssociation::UnreliableObservation
+        };
+        const CanonicalHand* identity = canonical_hand_for(interaction, index);
         const HandOverlayText label = format_hand_overlay_text(
-            canonical_id_for(interaction, index), hand, interaction.primitives);
+            identity != nullptr ? *identity : missing_identity, hand,
+            interaction.primitives);
         const int identity_y = std::max(15, top - kTextLineHeight - 6);
-        cv::putText(output, label.identity, cv::Point(left, identity_y),
-                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
-                    kTextThickness, cv::LINE_AA);
-        cv::putText(output, label.derived,
-                    cv::Point(left, identity_y + kTextLineHeight),
-                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
-                    kTextThickness, cv::LINE_AA);
-        cv::putText(output, label.dynamics,
-                    cv::Point(left, identity_y + 2 * kTextLineHeight),
-                    cv::FONT_HERSHEY_SIMPLEX, kTextScale, kBoxColor,
-                    kTextThickness, cv::LINE_AA);
+        draw_readable_text(output, label.identity, cv::Point(left, identity_y),
+                           kPrimaryTextColor);
+        draw_readable_text(output, label.derived,
+                           cv::Point(left, identity_y + kTextLineHeight),
+                           kPrimaryTextColor);
+        draw_readable_text(output, label.dynamics,
+                           cv::Point(left, identity_y + 2 * kTextLineHeight),
+                           kPrimaryTextColor);
     }
     if (face != nullptr && face->detection.has_value())
     {
