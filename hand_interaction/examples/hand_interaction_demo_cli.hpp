@@ -12,8 +12,8 @@
 namespace kfcore::hand_interaction::demo
 {
 
-inline constexpr int         kDefaultCaptureWidth     = 1280;
-inline constexpr int         kDefaultCaptureHeight    = 720;
+inline constexpr int         kDefaultCaptureWidth     = 640;
+inline constexpr int         kDefaultCaptureHeight    = 480;
 inline constexpr int         kDefaultCaptureFps       = 30;
 inline constexpr std::size_t kDefaultMaxFrameBytes    = 64U * 1024U * 1024U;
 

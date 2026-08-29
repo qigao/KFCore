@@ -69,8 +69,8 @@ spec("hand interaction demo CLI")
         check_true(arguments.palm_model.filename() ==
                    "palm_detection_full_inf_post_192x192.onnx");
         check_equal(arguments.capture.camera_index, 0);
-        check_equal(arguments.capture.width, 1280);
-        check_equal(arguments.capture.height, 720);
+        check_equal(arguments.capture.width, 640);
+        check_equal(arguments.capture.height, 480);
         check_equal(arguments.capture.fps, 30);
     }
 
@@ -213,12 +213,12 @@ spec("hand interaction demo CLI")
         check_equal(demo::select_mode(modes, request), (std::size_t)1U);
     }
 
-    it("prefers NV12 then I420 for an exact geometry and frame rate")
+    it("defaults to 640x480 and prefers NV12 then I420")
     {
         const std::vector<turbo_video_native_mode_t> modes {
-            mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_RGB24, 1U),
-            mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 2U),
-            mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 3U),
+            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_RGB24, 1U),
+            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 2U),
+            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 3U),
         };
         demo::CaptureRequest request;
         check_equal(demo::select_mode(modes, request), (std::size_t)2U);
@@ -228,11 +228,11 @@ spec("hand interaction demo CLI")
     {
         demo::CaptureRequest request;
         check_throws_as(demo::select_mode(
-                            { mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_MJPEG, 1U) },
+                            { mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_MJPEG, 1U) },
                             request),
                         std::invalid_argument);
         check_throws_as(demo::select_mode(
-                            { mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 1U) },
+                            { mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 1U) },
                             request),
                         std::invalid_argument);
     }
