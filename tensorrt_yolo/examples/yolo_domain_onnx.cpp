@@ -57,6 +57,16 @@ std::size_t checked_multiply(std::size_t left, std::size_t right,
     return left * right;
 }
 
+std::size_t checked_add(std::size_t left, std::size_t right,
+                        const char* object)
+{
+    if (right > (std::numeric_limits<std::size_t>::max)() - left)
+    {
+        throw_resource(std::string(object) + " byte count overflow");
+    }
+    return left + right;
+}
+
 void validate_options(const OnnxDetectorOptions& options)
 {
     if (options.intra_op_threads < 0 || options.inter_op_threads < 0)
@@ -115,13 +125,47 @@ std::size_t source_span(const ImageView& image)
     {
         throw_invalid("CPU backend accepts Host images only");
     }
+    const std::size_t width = static_cast<std::size_t>(image.width);
+    const std::size_t height = static_cast<std::size_t>(image.height);
+    if (image.pixel_format == PixelFormat::Nv12 ||
+        image.pixel_format == PixelFormat::I420)
+    {
+        if ((image.width & 1) != 0 || (image.height & 1) != 0)
+        {
+            throw_invalid("NV12 and I420 image dimensions must be even");
+        }
+        if (image.row_stride < width || (image.row_stride & 1U) != 0U)
+        {
+            throw_invalid("YUV image row stride must be even and at least the width");
+        }
+        const std::size_t y_storage = checked_multiply(
+            image.row_stride, height, "source span");
+        const std::size_t chroma_rows = height / 2U;
+        if (image.pixel_format == PixelFormat::Nv12)
+        {
+            return checked_add(
+                y_storage,
+                checked_add(checked_multiply(chroma_rows - 1U, image.row_stride,
+                                              "source span"),
+                            width, "source span"),
+                "source span");
+        }
+        const std::size_t chroma_stride = image.row_stride / 2U;
+        const std::size_t u_storage = checked_multiply(
+            chroma_stride, chroma_rows, "source span");
+        const std::size_t v_span = checked_add(
+            checked_multiply(chroma_rows - 1U, chroma_stride, "source span"),
+            width / 2U, "source span");
+        return checked_add(checked_add(y_storage, u_storage, "source span"),
+                           v_span, "source span");
+    }
     if (image.pixel_format != PixelFormat::Bgr8 &&
         image.pixel_format != PixelFormat::Rgb8)
     {
-        throw_invalid("image pixel format must be Bgr8 or Rgb8");
+        throw_invalid("image pixel format must be Bgr8, Rgb8, Nv12, or I420");
     }
     const std::size_t row_bytes = checked_multiply(
-        static_cast<std::size_t>(image.width), kChannels, "source row");
+        width, kChannels, "source row");
     if (image.row_stride < row_bytes)
     {
         throw_invalid("image row stride is smaller than a packed row");
@@ -137,14 +181,30 @@ std::size_t source_span(const ImageView& image)
 
 kfcore::image::ImageView to_image_view(const ImageView& image)
 {
+    kfcore::image::PixelFormat format = kfcore::image::PixelFormat::Rgb8;
+    switch (image.pixel_format)
+    {
+    case PixelFormat::Bgr8:
+        format = kfcore::image::PixelFormat::Bgr8;
+        break;
+    case PixelFormat::Rgb8:
+        format = kfcore::image::PixelFormat::Rgb8;
+        break;
+    case PixelFormat::Nv12:
+        format = kfcore::image::PixelFormat::Nv12;
+        break;
+    case PixelFormat::I420:
+        format = kfcore::image::PixelFormat::I420;
+        break;
+    default:
+        throw_invalid("image pixel format is unsupported");
+    }
     return { image.data,
              source_span(image),
              image.width,
              image.height,
              image.row_stride,
-             image.pixel_format == PixelFormat::Bgr8
-                 ? kfcore::image::PixelFormat::Bgr8
-                 : kfcore::image::PixelFormat::Rgb8,
+             format,
              kfcore::image::MemoryKind::Host };
 }
 
@@ -315,6 +375,7 @@ DetectionFrame OnnxDomainDetector::detect(const ImageView& image)
         kfcore::image::PreprocessOptions preprocess;
         preprocess.output_format = kfcore::image::PixelFormat::Rgb8;
         preprocess.border_value = impl_->options.border_value;
+        preprocess.mirror_horizontal = impl_->options.mirror_horizontal;
         kfcore::image::LetterboxTransform transform;
         std::vector<float> input = kfcore::image::CpuImageProcessor::letterbox_nchw(
             source, impl_->input_width_value, impl_->input_height_value, preprocess,

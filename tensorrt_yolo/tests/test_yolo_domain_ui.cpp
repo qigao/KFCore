@@ -3,10 +3,9 @@
 
 #include "tinytest.hpp"
 
-#include <opencv2/core.hpp>
-
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
@@ -22,26 +21,44 @@ spec("YOLOv8 domain frame UI and metrics")
         rgb.height = 1;
         rgb.format = TURBO_VIDEO_CAPTURE_FORMAT_RGB24;
         rgb.pixels = { 10U, 20U, 30U };
-        cv::Mat bgr = to_bgr(rgb);
-        check(bgr.type() == CV_8UC3);
-        check(bgr.rows == 1);
-        check(bgr.cols == 1);
-        check(bgr.isContinuous());
-        check(bgr.at<cv::Vec3b>(0, 0)[0] == 30U);
+        kfcore::image::BgrImage bgr = to_bgr(rgb, 1024U);
+        check(bgr.height == 1);
+        check(bgr.width == 1);
+        check(bgr.pixels[0] == 30U);
         rgb.pixels[0] = 99U;
-        check(bgr.at<cv::Vec3b>(0, 0)[2] == 10U);
+        check(bgr.pixels[2] == 10U);
 
         CapturedFrame nv12;
         nv12.width = 2;
         nv12.height = 2;
         nv12.format = TURBO_VIDEO_CAPTURE_FORMAT_NV12;
         nv12.pixels = { 16U, 16U, 16U, 16U, 128U, 128U };
-        const cv::Mat nv12_bgr = to_bgr(nv12);
-        check(nv12_bgr.rows == 2);
-        check(nv12_bgr.cols == 2);
+        const kfcore::image::BgrImage nv12_bgr = to_bgr(nv12, 1024U);
+        check(nv12_bgr.height == 2);
+        check(nv12_bgr.width == 2);
 
         nv12.pixels.pop_back();
-        check_throws_as(to_bgr(nv12), std::invalid_argument);
+        check_throws_as(to_bgr(nv12, 1024U), std::invalid_argument);
+    }
+
+    it("round trips a bounded PNG without OpenCV")
+    {
+        kfcore::image::BgrImage original;
+        original.width = 2;
+        original.height = 2;
+        original.pixels = {
+            0, 0, 255, 0, 255, 0,
+            255, 0, 0, 255, 255, 255,
+        };
+        char* path = tt_make_temp_file("kfcore-yolo-domain", ".png");
+        check_not_null(path);
+        save_bgr(path, original, 1024U);
+        const kfcore::image::BgrImage decoded = load_bgr(path, 1024U, 1024U);
+        check(decoded.width == original.width);
+        check(decoded.height == original.height);
+        check_eq_container(decoded.pixels, original.pixels);
+        check(tt_remove_file(path) == 0);
+        std::free(path);
     }
 
     it("keeps bounded timing samples and computes reproducible percentiles")
@@ -95,8 +112,11 @@ spec("YOLOv8 domain frame UI and metrics")
 
     it("draws readable overlays without mutating tracking facts")
     {
-        cv::Mat image(240, 640, CV_8UC3, cv::Scalar::all(220));
-        const cv::Mat before = image.clone();
+        kfcore::image::BgrImage image;
+        image.width = 640;
+        image.height = 240;
+        image.pixels.assign(640U * 240U * 3U, 220U);
+        const std::vector<std::uint8_t> before = image.pixels;
         TrackFrame tracks {
             640, 240,
             { { { { 100.0F, 80.0F, 240.0F, 200.0F }, 0.75F, 1 }, 9U } }
@@ -112,12 +132,12 @@ spec("YOLOv8 domain frame UI and metrics")
         state.model_load_ms = 12.5;
         state.fps = 30.0;
         draw_overlay(image, state);
-        check(cv::norm(image, before, cv::NORM_INF) > 0.0);
+        check(image.pixels != before);
         check(tracks.detections.size() == original.detections.size());
         check(tracks.detections[0].track_id == original.detections[0].track_id);
-        const cv::Vec3b header_pixel = image.at<cv::Vec3b>(4, 4);
-        check(header_pixel[0] < 80U);
-        check(header_pixel[1] < 80U);
-        check(header_pixel[2] < 80U);
+        const std::size_t header_offset = (4U * 640U + 4U) * 3U;
+        check(image.pixels[header_offset] < 80U);
+        check(image.pixels[header_offset + 1U] < 80U);
+        check(image.pixels[header_offset + 2U] < 80U);
     }
 }

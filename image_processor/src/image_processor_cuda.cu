@@ -55,6 +55,16 @@ namespace
         }
     }
 
+    void validate_preprocess_source_format(PixelFormat format)
+    {
+        if (format != PixelFormat::Rgb8 && format != PixelFormat::Bgr8 &&
+            format != PixelFormat::Nv12 && format != PixelFormat::I420)
+        {
+            throw_invalid(
+                "CUDA preprocessing stage: source pixel format is unsupported");
+        }
+    }
+
     void validate_options(const PreprocessOptions& options)
     {
         validate_pixel_format(options.output_format, "output");
@@ -182,6 +192,47 @@ namespace
         return output_format == PixelFormat::Rgb8 ? output_channel : 2 - output_channel;
     }
 
+    __device__ void yuv_rgb_pixel(const std::uint8_t* source,
+                                  std::size_t source_stride,
+                                  std::int32_t source_height, int x, int y,
+                                  PixelFormat source_format, float& red,
+                                  float& green, float& blue)
+    {
+        const std::size_t source_y = static_cast<std::size_t>(y);
+        const std::size_t source_x = static_cast<std::size_t>(x);
+        const std::size_t y_storage =
+            source_stride * static_cast<std::size_t>(source_height);
+        const int y_value = source[source_y * source_stride + source_x];
+        int u_value = 0;
+        int v_value = 0;
+        if (source_format == PixelFormat::Nv12)
+        {
+            const std::size_t uv_offset = y_storage +
+                static_cast<std::size_t>(y / 2) * source_stride +
+                static_cast<std::size_t>(x / 2) * 2U;
+            u_value = source[uv_offset];
+            v_value = source[uv_offset + 1U];
+        }
+        else
+        {
+            const std::size_t chroma_stride = source_stride / 2U;
+            const std::size_t chroma_rows =
+                static_cast<std::size_t>(source_height) / 2U;
+            const std::size_t chroma_offset =
+                static_cast<std::size_t>(y / 2) * chroma_stride +
+                static_cast<std::size_t>(x / 2);
+            u_value = source[y_storage + chroma_offset];
+            v_value = source[y_storage + chroma_stride * chroma_rows + chroma_offset];
+        }
+        const int c = max(0, y_value - 16);
+        const int d = u_value - 128;
+        const int e = v_value - 128;
+        red = static_cast<float>(max(0, min((298 * c + 409 * e + 128) / 256, 255)));
+        green = static_cast<float>(
+            max(0, min((298 * c - 100 * d - 208 * e + 128) / 256, 255)));
+        blue = static_cast<float>(max(0, min((298 * c + 516 * d + 128) / 256, 255)));
+    }
+
     __device__ float pixel_channel(const std::uint8_t* source, std::size_t source_stride,
                                    std::int32_t source_width, std::int32_t source_height, int x,
                                    int y, int output_channel, PixelFormat source_format,
@@ -190,6 +241,15 @@ namespace
         x                     = max(0, min(x, source_width - 1));
         y                     = max(0, min(y, source_height - 1));
         const int rgb_channel = rgb_channel_for_output(output_channel, output_format);
+        if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420)
+        {
+            float red = 0.0F;
+            float green = 0.0F;
+            float blue = 0.0F;
+            yuv_rgb_pixel(source, source_stride, source_height, x, y,
+                          source_format, red, green, blue);
+            return rgb_channel == 0 ? red : (rgb_channel == 1 ? green : blue);
+        }
         const int source_channel =
             source_format == PixelFormat::Rgb8 ? rgb_channel : 2 - rgb_channel;
         return static_cast<float>(
@@ -201,7 +261,7 @@ namespace
                                       const LetterboxTransform& transform, int destination_x,
                                       int destination_y, int output_channel,
                                       PixelFormat source_format, PixelFormat output_format,
-                                      float border_value)
+                                      float border_value, bool mirror_horizontal)
     {
         const float destination_center_x = static_cast<float>(destination_x) + 0.5f;
         const float destination_center_y = static_cast<float>(destination_y) + 0.5f;
@@ -219,6 +279,10 @@ namespace
         float source_y = (destination_center_y - transform.pad_y) / transform.scale - 0.5f;
         source_x = fminf(fmaxf(source_x, 0.0f), static_cast<float>(transform.source_width - 1));
         source_y = fminf(fmaxf(source_y, 0.0f), static_cast<float>(transform.source_height - 1));
+        if (mirror_horizontal)
+        {
+            source_x = static_cast<float>(transform.source_width - 1) - source_x;
+        }
         const int   x0       = static_cast<int>(floorf(source_x));
         const int   y0       = static_cast<int>(floorf(source_y));
         const int   x1       = min(x0 + 1, transform.source_width - 1);
@@ -243,13 +307,78 @@ namespace
         return top + (bottom - top) * y_weight;
     }
 
+    __device__ bool bilinear_yuv_rgb(
+        const std::uint8_t* source, std::size_t source_stride,
+        const LetterboxTransform& transform, int destination_x,
+        int destination_y, PixelFormat source_format, bool mirror_horizontal,
+        float& red, float& green, float& blue)
+    {
+        const float center_x = static_cast<float>(destination_x) + 0.5F;
+        const float center_y = static_cast<float>(destination_y) + 0.5F;
+        const float content_right =
+            transform.pad_x + static_cast<float>(transform.source_width) * transform.scale;
+        const float content_bottom =
+            transform.pad_y + static_cast<float>(transform.source_height) * transform.scale;
+        if (center_x < transform.pad_x || center_x >= content_right ||
+            center_y < transform.pad_y || center_y >= content_bottom)
+        {
+            return false;
+        }
+        float source_x = (center_x - transform.pad_x) / transform.scale - 0.5F;
+        float source_y = (center_y - transform.pad_y) / transform.scale - 0.5F;
+        source_x = fminf(fmaxf(source_x, 0.0F),
+                         static_cast<float>(transform.source_width - 1));
+        source_y = fminf(fmaxf(source_y, 0.0F),
+                         static_cast<float>(transform.source_height - 1));
+        if (mirror_horizontal)
+        {
+            source_x = static_cast<float>(transform.source_width - 1) - source_x;
+        }
+        const int x0 = static_cast<int>(floorf(source_x));
+        const int y0 = static_cast<int>(floorf(source_y));
+        const int x1 = min(x0 + 1, transform.source_width - 1);
+        const int y1 = min(y0 + 1, transform.source_height - 1);
+        const float fx = source_x - static_cast<float>(x0);
+        const float fy = source_y - static_cast<float>(y0);
+        float top_left[3] {};
+        float top_right[3] {};
+        float bottom_left[3] {};
+        float bottom_right[3] {};
+        yuv_rgb_pixel(source, source_stride, transform.source_height, x0, y0,
+                      source_format, top_left[0], top_left[1], top_left[2]);
+        if (fx == 0.0F && fy == 0.0F)
+        {
+            red = top_left[0];
+            green = top_left[1];
+            blue = top_left[2];
+            return true;
+        }
+        yuv_rgb_pixel(source, source_stride, transform.source_height, x1, y0,
+                      source_format, top_right[0], top_right[1], top_right[2]);
+        yuv_rgb_pixel(source, source_stride, transform.source_height, x0, y1,
+                      source_format, bottom_left[0], bottom_left[1], bottom_left[2]);
+        yuv_rgb_pixel(source, source_stride, transform.source_height, x1, y1,
+                      source_format, bottom_right[0], bottom_right[1], bottom_right[2]);
+        float* output[3] = { &red, &green, &blue };
+        for (int channel = 0; channel < 3; ++channel)
+        {
+            const float top = top_left[channel] +
+                              (top_right[channel] - top_left[channel]) * fx;
+            const float bottom = bottom_left[channel] +
+                                 (bottom_right[channel] - bottom_left[channel]) * fx;
+            *output[channel] = top + (bottom - top) * fy;
+        }
+        return true;
+    }
+
     template <typename Destination>
     __global__ void preprocess_kernel(const std::uint8_t* source, std::size_t source_stride,
                                       PixelFormat source_format, PixelFormat output_format,
                                       Destination* destination, std::int32_t destination_width,
                                       std::size_t total_pixels, LetterboxTransform transform,
                                       float mean0, float mean1, float mean2, float stddev0,
-                                      float stddev1, float stddev2, float border_value)
+                                      float stddev1, float stddev2, float border_value,
+                                      bool mirror_horizontal)
     {
         const float       means[3]               = { mean0, mean1, mean2 };
         const float       standard_deviations[3] = { stddev0, stddev1, stddev2 };
@@ -261,11 +390,34 @@ namespace
                 static_cast<int>(pixel_index % static_cast<std::size_t>(destination_width));
             const int y =
                 static_cast<int>(pixel_index / static_cast<std::size_t>(destination_width));
+            if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420)
+            {
+                float rgb[3] {};
+                if (!bilinear_yuv_rgb(source, source_stride, transform, x, y,
+                                      source_format, mirror_horizontal,
+                                      rgb[0], rgb[1], rgb[2]))
+                {
+                    rgb[0] = border_value;
+                    rgb[1] = border_value;
+                    rgb[2] = border_value;
+                }
+                for (int channel = 0; channel < 3; ++channel)
+                {
+                    const int semantic_channel =
+                        rgb_channel_for_output(channel, output_format);
+                    const float normalized =
+                        (rgb[semantic_channel] * kPixelScale - means[channel]) /
+                        standard_deviations[channel];
+                    destination[static_cast<std::size_t>(channel) * total_pixels +
+                                pixel_index] = convert_destination<Destination>(normalized);
+                }
+                continue;
+            }
             for (int channel = 0; channel < 3; ++channel)
             {
-                const float pixel =
-                    bilinear_channel(source, source_stride, transform, x, y, channel, source_format,
-                                     output_format, border_value);
+                const float pixel = bilinear_channel(
+                    source, source_stride, transform, x, y, channel,
+                    source_format, output_format, border_value, mirror_horizontal);
                 const float normalized =
                     (pixel * kPixelScale - means[channel]) / standard_deviations[channel];
                 destination[static_cast<std::size_t>(channel) * total_pixels + pixel_index] =
@@ -294,14 +446,16 @@ namespace
                 source, source_stride, source_format, options.output_format,
                 static_cast<__half*>(destination_data), destination.width, total_pixels, transform,
                 options.mean[0], options.mean[1], options.mean[2], options.stddev[0],
-                options.stddev[1], options.stddev[2], options.border_value);
+                options.stddev[1], options.stddev[2], options.border_value,
+                options.mirror_horizontal);
             break;
         case TensorElementType::Float32:
             preprocess_kernel<<<grid, block, 0, stream>>>(
                 source, source_stride, source_format, options.output_format,
                 static_cast<float*>(destination_data), destination.width, total_pixels, transform,
                 options.mean[0], options.mean[1], options.mean[2], options.stddev[0],
-                options.stddev[1], options.stddev[2], options.border_value);
+                options.stddev[1], options.stddev[2], options.border_value,
+                options.mirror_horizontal);
             break;
         default:
             throw_invalid("CUDA preprocessing stage: tensor element type is unsupported");
@@ -760,7 +914,7 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
     validate_workspaces(plan, pinned_host_workspace, device_workspace, current_device);
     for (const ImageView& image : images)
     {
-        validate_pixel_format(image.pixel_format, "source");
+        validate_preprocess_source_format(image.pixel_format);
         if (image.memory_kind == MemoryKind::CudaDevice)
         {
             validate_device_pointer(image.data, current_device, "source image validation");
@@ -788,7 +942,11 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
         {
             source        = reinterpret_cast<const std::uint8_t*>(staged_device_bytes +
                                                                   image_plan.staging_offset);
-            source_stride = image_plan.packed_bytes / static_cast<std::size_t>(image.height);
+            source_stride =
+                image.pixel_format == PixelFormat::Nv12 ||
+                        image.pixel_format == PixelFormat::I420
+                    ? static_cast<std::size_t>(image.width)
+                    : static_cast<std::size_t>(image.width) * 3U;
         }
         else
         {

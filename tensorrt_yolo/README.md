@@ -129,7 +129,7 @@ ctest --preset win-yolov8-applications-release-user -R '^test_yolo_domain_' --ou
 $pkgRoot = 'C:/projects/cpp/external/pkgs'
 $appBin = "$PWD/build/Msvc-YOLOv8-Applications/bin"
 $env:PATH = "$pkgRoot/onnxruntime/lib;$env:TENSORRT_ROOT/bin;$env:CUDA_PATH_V12_8/bin;" +
-            "$pkgRoot/opencv-lite/bin;$appBin;$pkgRoot/turboparser/release/bin;" +
+            "$appBin;$pkgRoot/turboparser/release/bin;" +
             "$pkgRoot/turboutils/release/bin;$pkgRoot/turbonet/release/bin;$env:PATH"
 
 # CPU：有界图片目录处理
@@ -156,6 +156,11 @@ build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
 没有精确 NV12 mode 时程序直接报错；可以先用 `--list-cameras` 查出 mode，再通过
 `--mode <id>` 显式使用 I420、RGB24 或 BGRA。MJPEG 会列出但不解码。摄像头回调使用有界的
 latest-frame mailbox，推理跟不上采集时覆盖尚未消费的旧帧，并在 `coalesced` 中明确计数。
+
+应用目标不链接 OpenCV。图片目录支持 PNG/JPEG/BMP，通过仓库已有 stb 依赖做有界编解码；
+Windows 窗口使用 Win32 GDI，其他平台应使用 `--headless`。NV12/I420 不先转整帧 BGR：CPU 与
+CUDA 都把 YUV 转换、可选镜像、letterbox、归一化和 NCHW 写入融合到 tensor 预处理。只有显示
+窗口时才额外生成 BGR；headless 相机路径保留一份 mailbox 所有权复制后直接推理。
 
 TensorRT engine 必须在部署机器上由可信 ONNX 生成。TensorRT 11.2 的 strongly typed 构建示例：
 

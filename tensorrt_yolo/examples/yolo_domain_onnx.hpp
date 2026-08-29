@@ -20,6 +20,7 @@ struct OnnxDetectorOptions
     std::size_t max_output_bytes = 16U * 1024U * 1024U;
     std::size_t max_detections   = 1000U;
     float       border_value     = 114.0F;
+    bool        mirror_horizontal = false;
 };
 
 class OnnxDomainDetector final

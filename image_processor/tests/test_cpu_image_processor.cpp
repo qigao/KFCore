@@ -105,6 +105,74 @@ spec("CPU image processor")
         check_true(approximately_equal(tensor[3], 114.0F / 255.0F));
     }
 
+    it("converts packed NV12 and I420 red pixels to identical BGR and RGB tensors")
+    {
+        const std::array<std::uint8_t, 6> nv12 = {
+            81, 81, 81, 81, 90, 240,
+        };
+        const std::array<std::uint8_t, 6> i420 = {
+            81, 81, 81, 81, 90, 240,
+        };
+        const std::array<ImageView, 2> views = {
+            ImageView { nv12.data(), nv12.size(), 2, 2, 2,
+                        PixelFormat::Nv12, MemoryKind::Host },
+            ImageView { i420.data(), i420.size(), 2, 2, 2,
+                        PixelFormat::I420, MemoryKind::Host },
+        };
+
+        std::vector<float> reference;
+        for (const ImageView& view : views)
+        {
+            const BgrImage bgr = CpuImageProcessor::copy_bgr(view, 1024);
+            check_eq_container(bgr.pixels,
+                               std::vector<std::uint8_t>({ 0, 0, 255, 0, 0, 255,
+                                                           0, 0, 255, 0, 0, 255 }));
+
+            PreprocessOptions options;
+            options.output_format = PixelFormat::Rgb8;
+            LetterboxTransform transform;
+            const std::vector<float> tensor = CpuImageProcessor::letterbox_nchw(
+                view, 2, 2, options, 1024, 1024, &transform);
+            check_true(approximately_equal(tensor[0], 1.0F));
+            check_true(approximately_equal(tensor[4], 0.0F));
+            check_true(approximately_equal(tensor[8], 0.0F));
+            if (reference.empty())
+            {
+                reference = tensor;
+            }
+            else
+            {
+                check_eq_container(tensor, reference);
+            }
+        }
+    }
+
+    it("mirrors packed NV12 in fused letterbox source coordinates")
+    {
+        const std::array<std::uint8_t, 12> nv12 = {
+            16, 235, 81, 145,
+            16, 235, 81, 145,
+            128, 128, 128, 128,
+        };
+        const ImageView view { nv12.data(), nv12.size(), 4, 2, 4,
+                               PixelFormat::Nv12, MemoryKind::Host };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.mirror_horizontal = true;
+        LetterboxTransform transform;
+
+        const std::vector<float> tensor = CpuImageProcessor::letterbox_nchw(
+            view, 4, 2, options, 1024, 1024, &transform);
+
+        check_true(approximately_equal(tensor[0], 150.0F / 255.0F));
+        check_true(approximately_equal(tensor[1], 76.0F / 255.0F));
+        check_true(approximately_equal(tensor[2], 1.0F));
+        check_true(approximately_equal(tensor[3], 0.0F));
+        check_true(approximately_equal(tensor[4], tensor[0]));
+        check_true(approximately_equal(tensor[8], tensor[0]));
+        check_true(approximately_equal(tensor[16], tensor[0]));
+    }
+
     it("rejects device input and malformed owned storage")
     {
         const std::array<std::uint8_t, 3> source = { 0, 0, 0 };

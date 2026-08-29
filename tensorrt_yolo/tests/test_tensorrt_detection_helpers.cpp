@@ -87,6 +87,22 @@ spec("TensorRT YOLO detection helpers")
         check(plan.processor.host_staging_bytes == 12);
         check(plan.input_bytes == 48);
 
+        std::uint8_t nv12_pixels[12] {};
+        const ImageView nv12 = host_view(
+            nv12_pixels, 4, 2, 4, PixelFormat::Nv12);
+        const BatchInputPlan nv12_plan =
+            prepare_batch({ nv12 }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
+        check(nv12_plan.processor.images.size() == 1U);
+        check(nv12_plan.processor.images[0].packed_bytes == 12U);
+        check(nv12_plan.processor.host_staging_bytes == 12U);
+
+        std::uint8_t i420_pixels[12] {};
+        const ImageView i420 = host_view(
+            i420_pixels, 4, 2, 4, PixelFormat::I420);
+        const BatchInputPlan i420_plan =
+            prepare_batch({ i420 }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
+        check(i420_plan.processor.images[0].packed_bytes == 12U);
+
         ImageView bad = valid;
         bad.data      = nullptr;
         expect_yolo_error(

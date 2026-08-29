@@ -91,6 +91,10 @@ namespace
             return kfcore::image::PixelFormat::Bgr8;
         case PixelFormat::Rgb8:
             return kfcore::image::PixelFormat::Rgb8;
+        case PixelFormat::Nv12:
+            return kfcore::image::PixelFormat::Nv12;
+        case PixelFormat::I420:
+            return kfcore::image::PixelFormat::I420;
         }
         throw_invalid("input validation stage: unsupported pixel format");
     }
@@ -114,6 +118,53 @@ namespace
             return (std::numeric_limits<std::size_t>::max)();
         }
         const std::size_t width = static_cast<std::size_t>(image.width);
+        const std::size_t height = static_cast<std::size_t>(image.height);
+        if (image.pixel_format == PixelFormat::Nv12 ||
+            image.pixel_format == PixelFormat::I420)
+        {
+            if ((image.width & 1) != 0 || (image.height & 1) != 0 ||
+                image.row_stride < width || (image.row_stride & 1U) != 0U)
+            {
+                return (std::numeric_limits<std::size_t>::max)();
+            }
+            if (height > (std::numeric_limits<std::size_t>::max)() /
+                             image.row_stride)
+            {
+                return (std::numeric_limits<std::size_t>::max)();
+            }
+            const std::size_t y_storage = height * image.row_stride;
+            const std::size_t chroma_rows = height / 2U;
+            if (image.pixel_format == PixelFormat::Nv12)
+            {
+                if (chroma_rows - 1U >
+                    ((std::numeric_limits<std::size_t>::max)() - width) /
+                        image.row_stride)
+                {
+                    return (std::numeric_limits<std::size_t>::max)();
+                }
+                const std::size_t chroma_span =
+                    (chroma_rows - 1U) * image.row_stride + width;
+                if (chroma_span > (std::numeric_limits<std::size_t>::max)() - y_storage)
+                {
+                    return (std::numeric_limits<std::size_t>::max)();
+                }
+                return y_storage + chroma_span;
+            }
+            const std::size_t chroma_stride = image.row_stride / 2U;
+            if (chroma_rows > (std::numeric_limits<std::size_t>::max)() /
+                                  chroma_stride)
+            {
+                return (std::numeric_limits<std::size_t>::max)();
+            }
+            const std::size_t u_storage = chroma_rows * chroma_stride;
+            const std::size_t v_span = (chroma_rows - 1U) * chroma_stride + width / 2U;
+            if (u_storage > (std::numeric_limits<std::size_t>::max)() - y_storage ||
+                v_span > (std::numeric_limits<std::size_t>::max)() - y_storage - u_storage)
+            {
+                return (std::numeric_limits<std::size_t>::max)();
+            }
+            return y_storage + u_storage + v_span;
+        }
         if (width > (std::numeric_limits<std::size_t>::max)() / 3U)
         {
             return (std::numeric_limits<std::size_t>::max)();

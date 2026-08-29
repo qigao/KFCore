@@ -3,6 +3,7 @@
 #include "yolo_domain_frame.hpp"
 #include "yolo_domain_profile.hpp"
 #include "yolo_domain_ui.hpp"
+#include "yolo_domain_window.hpp"
 
 #include "kfcore/yolo/tracking.hpp"
 
@@ -12,10 +13,6 @@
 #if defined(KFCORE_YOLO_APP_HAS_TENSORRT)
 #include "kfcore/yolo/tensorrt.hpp"
 #endif
-
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -29,6 +26,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -42,15 +40,13 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 using kfcore::yolo::DetectionFrame;
 using kfcore::yolo::ImageView;
-using kfcore::yolo::MemoryKind;
-using kfcore::yolo::PixelFormat;
+using kfcore::image::BgrImage;
 using namespace kfcore::yolo::demo;
 
 constexpr std::size_t kMaximumImagePaths = 100000U;
 constexpr std::size_t kTimingWindowCapacity = 300U;
 constexpr std::uint64_t kMetricsRefreshFrames = 30U;
 constexpr auto kCaptureTimeout = std::chrono::milliseconds(5000);
-constexpr int kDisplayDelayMs = 1;
 constexpr std::size_t kMaximumDecodedImageBytes = 64U * 1024U * 1024U;
 constexpr const char* kWindowName = "KFCore YOLOv8 Domain Applications";
 
@@ -163,6 +159,7 @@ public:
             OnnxDetectorOptions options;
             options.intra_op_threads = arguments.intra_op_threads;
             options.inter_op_threads = arguments.inter_op_threads;
+            options.mirror_horizontal = arguments.mirror;
             result.cpu_ = OnnxDomainDetector::load(arguments.model, options);
 #else
             fail("CPU backend was not compiled into this executable");
@@ -172,7 +169,9 @@ public:
         {
 #if defined(KFCORE_YOLO_APP_HAS_TENSORRT)
             result.engine_ = kfcore::yolo::Engine::load(arguments.model);
-            result.tensorrt_ = result.engine_->create_detector();
+            kfcore::yolo::DetectorOptions options;
+            options.mirror_horizontal = arguments.mirror;
+            result.tensorrt_ = result.engine_->create_detector(options);
 #else
             fail("TensorRT backend was not compiled into this executable");
 #endif
@@ -208,31 +207,6 @@ private:
 #endif
 };
 
-ImageView image_view(const cv::Mat& image)
-{
-    if (image.empty() || image.type() != CV_8UC3 || !image.isContinuous() ||
-        image.cols <= 0 || image.rows <= 0)
-    {
-        fail("inference requires a non-empty continuous packed BGR image");
-    }
-    return { image.data, image.cols, image.rows, image.step[0], PixelFormat::Bgr8,
-             MemoryKind::Host };
-}
-
-void validate_decoded_image(const cv::Mat& image, const fs::path& path)
-{
-    if (image.empty() || image.type() != CV_8UC3 || image.cols <= 0 || image.rows <= 0)
-    {
-        fail("failed to decode image as BGR: " + path.string());
-    }
-    const std::uint64_t bytes = static_cast<std::uint64_t>(image.cols) *
-                                static_cast<std::uint64_t>(image.rows) * 3U;
-    if (bytes > kMaximumDecodedImageBytes)
-    {
-        fail("decoded image exceeds the application byte limit: " + path.string());
-    }
-}
-
 std::string lower_extension(const fs::path& path)
 {
     std::string value = path.extension().string();
@@ -246,7 +220,7 @@ std::string lower_extension(const fs::path& path)
 bool is_supported_image(const fs::path& path)
 {
     static const std::vector<std::string> extensions {
-        ".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"
+        ".bmp", ".jpeg", ".jpg", ".png"
     };
     const std::string extension = lower_extension(path);
     return std::find(extensions.begin(), extensions.end(), extension) !=
@@ -349,25 +323,17 @@ struct ProcessedFrame
     kfcore::yolo::TrackFrame tracks;
     DomainSummary            summary;
     FrameTimings             timings;
-    Clock::time_point        processing_start;
 };
 
-ProcessedFrame infer_and_track(ProcessingState& state, cv::Mat& image,
+ProcessedFrame infer_and_track(ProcessingState& state, const ImageView& image,
                                double capture_wait_ms, double convert_ms)
 {
     ProcessedFrame result;
-    if (state.arguments.mirror)
-    {
-        const auto mirror_start = Clock::now();
-        cv::flip(image, image, 1);
-        convert_ms += elapsed_ms(mirror_start, Clock::now());
-    }
-    result.processing_start = Clock::now();
     result.timings.capture_wait_ms = capture_wait_ms;
     result.timings.convert_ms = convert_ms;
 
     const auto detect_start = Clock::now();
-    DetectionFrame detections = state.detector.detect(image_view(image));
+    DetectionFrame detections = state.detector.detect(image);
     detections = filter_detections(detections, state.profile,
                                    state.arguments.score_threshold);
     const auto track_start = Clock::now();
@@ -401,8 +367,8 @@ void finish_timing(ProcessingState& state, ProcessedFrame& frame,
     const auto end = Clock::now();
     frame.timings.render_ms = elapsed_ms(render_start, end);
     frame.timings.total_ms = frame.timings.capture_wait_ms +
-                             frame.timings.convert_ms +
-                             elapsed_ms(frame.processing_start, end);
+                             frame.timings.convert_ms + frame.timings.detect_ms +
+                             frame.timings.track_ms + frame.timings.render_ms;
     state.timings.add(frame.timings);
     ++state.frame_count;
     if (state.frame_count == 1U ||
@@ -440,21 +406,21 @@ void run_images(const Arguments& arguments, ProcessingState& state)
     for (const auto& path : paths)
     {
         const auto convert_start = Clock::now();
-        cv::Mat image = cv::imread(path.string(), cv::IMREAD_COLOR);
-        validate_decoded_image(image, path);
-        if (!image.isContinuous())
-        {
-            image = image.clone();
-        }
+        BgrImage image = load_bgr(path, kMaximumDecodedImageBytes,
+                                  kMaximumDecodedImageBytes);
         const double convert_ms = elapsed_ms(convert_start, Clock::now());
-        ProcessedFrame frame = infer_and_track(state, image, 0.0, convert_ms);
+        ProcessedFrame frame = infer_and_track(
+            state, bgr_image_view(image), 0.0, convert_ms);
+        if (arguments.mirror)
+        {
+            const auto mirror_start = Clock::now();
+            mirror_bgr_horizontal(image);
+            frame.timings.convert_ms += elapsed_ms(mirror_start, Clock::now());
+        }
         const auto render_start = Clock::now();
         draw_overlay(image, overlay_state(state, frame, {}));
         const fs::path destination = *arguments.output / path.filename();
-        if (!cv::imwrite(destination.string(), image))
-        {
-            fail("failed to write annotated image: " + destination.string());
-        }
+        save_bgr(destination, image, kMaximumDecodedImageBytes);
         finish_timing(state, frame, render_start);
     }
     print_final_metrics(state, {});
@@ -481,6 +447,11 @@ void run_camera(const Arguments& arguments, ProcessingState& state)
 
     LatestFrameMailbox mailbox(arguments.capture.max_frame_bytes);
     CapturedFrame captured = mailbox.make_consumer_frame();
+    std::unique_ptr<NativeWindow> window;
+    if (!arguments.headless)
+    {
+        window = std::make_unique<NativeWindow>(kWindowName, mode.width, mode.height);
+    }
     CameraCapture camera(device.id, mode, mailbox);
     camera.start();
     while (!arguments.max_frames.has_value() ||
@@ -497,19 +468,44 @@ void run_camera(const Arguments& arguments, ProcessingState& state)
         {
             fail("camera capture closed before the requested frame count");
         }
-        const auto convert_start = Clock::now();
-        cv::Mat image = to_bgr(captured);
-        const double convert_ms = elapsed_ms(convert_start, Clock::now());
-        ProcessedFrame frame = infer_and_track(
-            state, image, elapsed_ms(wait_start, wait_end), convert_ms);
+        std::optional<BgrImage> image;
+        double convert_ms = 0.0;
+        ImageView inference_view;
+        if (captured.format == TURBO_VIDEO_CAPTURE_FORMAT_BGRA)
+        {
+            const auto convert_start = Clock::now();
+            image = to_bgr(captured, kMaximumDecodedImageBytes);
+            convert_ms = elapsed_ms(convert_start, Clock::now());
+            inference_view = bgr_image_view(*image);
+        }
+        else
+        {
+            inference_view = capture_image_view(captured);
+        }
+        ProcessedFrame frame = infer_and_track(state, inference_view,
+                                                elapsed_ms(wait_start, wait_end),
+                                                convert_ms);
+        if (!arguments.headless)
+        {
+            const auto convert_start = Clock::now();
+            if (!image.has_value())
+            {
+                image = to_bgr(captured, kMaximumDecodedImageBytes);
+            }
+            if (arguments.mirror)
+            {
+                mirror_bgr_horizontal(*image);
+            }
+            frame.timings.convert_ms += elapsed_ms(convert_start, Clock::now());
+        }
         const auto render_start = Clock::now();
         const CaptureCounters counters = mailbox.counters();
-        draw_overlay(image, overlay_state(state, frame, counters));
         KeyAction action = KeyAction::None;
         if (!arguments.headless)
         {
-            cv::imshow(kWindowName, image);
-            action = decode_key(cv::waitKey(kDisplayDelayMs));
+            draw_overlay(*image, overlay_state(state, frame, counters));
+            window->present(*image);
+            action = decode_key(window->poll_key());
         }
         finish_timing(state, frame, render_start);
         if (action == KeyAction::Reset)
@@ -523,10 +519,6 @@ void run_camera(const Arguments& arguments, ProcessingState& state)
     }
     camera.stop();
     mailbox.close();
-    if (!arguments.headless)
-    {
-        cv::destroyWindow(kWindowName);
-    }
     print_final_metrics(state, mailbox.counters());
 }
 

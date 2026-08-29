@@ -2,8 +2,7 @@
 
 #include "yolo_domain_capture.hpp"
 #include "yolo_domain_profile.hpp"
-
-#include <opencv2/core.hpp>
+#include "kfcore/image_processor/types.hpp"
 
 #include <cstddef>
 #include <string>
@@ -82,6 +81,6 @@ void update_current_metrics(MetricsSnapshot& snapshot,
                             const FrameTimings& timings,
                             std::size_t sample_count);
 [[nodiscard]] KeyAction decode_key(int key) noexcept;
-void draw_overlay(cv::Mat& image, const OverlayState& state);
+void draw_overlay(kfcore::image::BgrImage& image, const OverlayState& state);
 
 } // namespace kfcore::yolo::demo

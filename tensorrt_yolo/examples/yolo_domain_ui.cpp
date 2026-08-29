@@ -1,11 +1,14 @@
 #include "yolo_domain_ui.hpp"
 
-#include <opencv2/imgproc.hpp>
+#include <stb_easy_font.h>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -17,9 +20,129 @@ namespace
 
 constexpr int kHeaderHeight = 123;
 constexpr int kLineHeight = 23;
-constexpr double kFontScale = 0.55;
-constexpr int kTextThickness = 1;
 constexpr int kBoxThickness = 2;
+constexpr int kFontScale = 2;
+constexpr std::size_t kMaximumTextCharacters = 220U;
+constexpr std::size_t kFontVertexBufferBytes = 64U * 1024U;
+
+using Color = std::array<std::uint8_t, 3>;
+
+struct FontVertex
+{
+    float x;
+    float y;
+    float z;
+    std::uint8_t color[4];
+};
+
+void validate_image(const kfcore::image::BgrImage& image)
+{
+    if (image.width <= 0 || image.height <= 0)
+    {
+        throw std::invalid_argument("overlay image dimensions must be positive");
+    }
+    const std::size_t width = static_cast<std::size_t>(image.width);
+    const std::size_t height = static_cast<std::size_t>(image.height);
+    if (height > (std::numeric_limits<std::size_t>::max)() / width ||
+        width * height > (std::numeric_limits<std::size_t>::max)() / 3U ||
+        image.pixels.size() != width * height * 3U)
+    {
+        throw std::invalid_argument("overlay image storage is malformed");
+    }
+}
+
+void fill_rectangle(kfcore::image::BgrImage& image, int left, int top,
+                    int right, int bottom, const Color& color)
+{
+    left = (std::clamp)(left, 0, image.width);
+    right = (std::clamp)(right, 0, image.width);
+    top = (std::clamp)(top, 0, image.height);
+    bottom = (std::clamp)(bottom, 0, image.height);
+    if (left >= right || top >= bottom)
+    {
+        return;
+    }
+    for (int y = top; y < bottom; ++y)
+    {
+        std::uint8_t* pixel = image.pixels.data() +
+            (static_cast<std::size_t>(y) * image.width + left) * 3U;
+        for (int x = left; x < right; ++x)
+        {
+            pixel[0] = color[0];
+            pixel[1] = color[1];
+            pixel[2] = color[2];
+            pixel += 3;
+        }
+    }
+}
+
+void stroke_rectangle(kfcore::image::BgrImage& image, int left, int top,
+                      int right, int bottom, const Color& color)
+{
+    fill_rectangle(image, left, top, right, top + kBoxThickness, color);
+    fill_rectangle(image, left, bottom - kBoxThickness, right, bottom, color);
+    fill_rectangle(image, left, top, left + kBoxThickness, bottom, color);
+    fill_rectangle(image, right - kBoxThickness, top, right, bottom, color);
+}
+
+int text_width(const std::string& text)
+{
+    if (text.size() > kMaximumTextCharacters)
+    {
+        throw std::length_error("overlay text exceeds the configured character limit");
+    }
+    std::array<char, kMaximumTextCharacters + 1U> ascii {};
+    for (std::size_t index = 0U; index < text.size(); ++index)
+    {
+        const unsigned char character = static_cast<unsigned char>(text[index]);
+        ascii[index] = character >= 32U && character <= 126U
+                           ? static_cast<char>(character)
+                           : '?';
+    }
+    return stb_easy_font_width(ascii.data()) * kFontScale;
+}
+
+void draw_text(kfcore::image::BgrImage& image, const std::string& text,
+               int x, int y, const Color& color)
+{
+    if (text.size() > kMaximumTextCharacters)
+    {
+        throw std::length_error("overlay text exceeds the configured character limit");
+    }
+    std::array<char, kMaximumTextCharacters + 1U> ascii {};
+    for (std::size_t index = 0U; index < text.size(); ++index)
+    {
+        const unsigned char character = static_cast<unsigned char>(text[index]);
+        ascii[index] = character >= 32U && character <= 126U
+                           ? static_cast<char>(character)
+                           : '?';
+    }
+    alignas(float) std::array<std::byte, kFontVertexBufferBytes> vertices {};
+    const int quads = stb_easy_font_print(
+        0.0F, 0.0F, ascii.data(), nullptr, vertices.data(),
+        static_cast<int>(vertices.size()));
+    const auto* typed = reinterpret_cast<const FontVertex*>(vertices.data());
+    for (int quad = 0; quad < quads; ++quad)
+    {
+        float minimum_x = typed[quad * 4].x;
+        float maximum_x = minimum_x;
+        float minimum_y = typed[quad * 4].y;
+        float maximum_y = minimum_y;
+        for (int vertex = 1; vertex < 4; ++vertex)
+        {
+            const FontVertex& value = typed[quad * 4 + vertex];
+            minimum_x = (std::min)(minimum_x, value.x);
+            maximum_x = (std::max)(maximum_x, value.x);
+            minimum_y = (std::min)(minimum_y, value.y);
+            maximum_y = (std::max)(maximum_y, value.y);
+        }
+        fill_rectangle(
+            image, x + static_cast<int>(std::floor(minimum_x * kFontScale)),
+            y + static_cast<int>(std::floor(minimum_y * kFontScale)),
+            x + static_cast<int>(std::ceil(maximum_x * kFontScale)),
+            y + static_cast<int>(std::ceil(maximum_y * kFontScale)), color);
+    }
+}
 
 void validate_timing(const FrameTimings& timings)
 {
@@ -63,25 +186,23 @@ StageStatistics statistics(const std::vector<FrameTimings>& samples,
     return result;
 }
 
-cv::Scalar track_color(const TrackedDetection& tracked)
+Color track_color(const TrackedDetection& tracked)
 {
-    static const std::array<cv::Scalar, 8> palette {
-        cv::Scalar(0, 220, 255), cv::Scalar(255, 170, 0),
-        cv::Scalar(70, 255, 70), cv::Scalar(255, 80, 220),
-        cv::Scalar(30, 150, 255), cv::Scalar(255, 220, 40),
-        cv::Scalar(180, 90, 255), cv::Scalar(80, 255, 210)
+    static const std::array<Color, 8> palette {
+        Color { 0, 220, 255 }, Color { 255, 170, 0 },
+        Color { 70, 255, 70 }, Color { 255, 80, 220 },
+        Color { 30, 150, 255 }, Color { 255, 220, 40 },
+        Color { 180, 90, 255 }, Color { 80, 255, 210 }
     };
     const std::uint64_t key = tracked.track_id.value_or(
         static_cast<std::uint64_t>(tracked.detection.class_id));
     return palette[static_cast<std::size_t>(key % palette.size())];
 }
 
-void draw_text_line(cv::Mat& image, const std::string& text, int line,
-                    const cv::Scalar& color)
+void draw_text_line(kfcore::image::BgrImage& image, const std::string& text,
+                    int line, const Color& color)
 {
-    cv::putText(image, text, cv::Point(10, 20 + line * kLineHeight),
-                cv::FONT_HERSHEY_SIMPLEX, kFontScale, color, kTextThickness,
-                cv::LINE_AA);
+    draw_text(image, text, 10, 4 + line * kLineHeight, color);
 }
 
 std::string current_metrics_line(const MetricsSnapshot& metrics)
@@ -230,15 +351,16 @@ KeyAction decode_key(int key) noexcept
     return KeyAction::None;
 }
 
-void draw_overlay(cv::Mat& image, const OverlayState& state)
+void draw_overlay(kfcore::image::BgrImage& image, const OverlayState& state)
 {
-    if (image.empty() || image.type() != CV_8UC3 || state.profile == nullptr ||
-        state.tracks == nullptr || state.summary == nullptr)
+    validate_image(image);
+    if (state.profile == nullptr || state.tracks == nullptr ||
+        state.summary == nullptr)
     {
         throw std::invalid_argument("overlay image and state pointers must be valid");
     }
-    if (state.tracks->image_width != image.cols ||
-        state.tracks->image_height != image.rows)
+    if (state.tracks->image_width != image.width ||
+        state.tracks->image_height != image.height)
     {
         throw std::invalid_argument("overlay track frame dimensions do not match the image");
     }
@@ -250,43 +372,36 @@ void draw_overlay(cv::Mat& image, const OverlayState& state)
         const int top = static_cast<int>(std::floor(box.top));
         const int right = static_cast<int>(std::ceil(box.right));
         const int bottom = static_cast<int>(std::ceil(box.bottom));
-        const cv::Scalar color = track_color(tracked);
-        cv::rectangle(image, cv::Point(left, top), cv::Point(right, bottom),
-                      color, kBoxThickness, cv::LINE_AA);
+        const Color color = track_color(tracked);
+        stroke_rectangle(image, left, top, right, bottom, color);
         const std::string label = track_label(*state.profile, tracked);
-        int baseline = 0;
-        const cv::Size size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX,
-                                              kFontScale, kTextThickness, &baseline);
-        const int label_top = (std::max)(0, top - size.height - 8);
-        const int label_right = (std::min)(image.cols - 1, left + size.width + 8);
-        cv::rectangle(image, cv::Point(left, label_top),
-                      cv::Point(label_right, (std::min)(image.rows - 1, top)),
-                      cv::Scalar(12, 12, 12), cv::FILLED);
-        cv::putText(image, label, cv::Point(left + 4, (std::max)(size.height + 2, top - 5)),
-                    cv::FONT_HERSHEY_SIMPLEX, kFontScale, cv::Scalar(255, 255, 255),
-                    kTextThickness, cv::LINE_AA);
+        constexpr int kFontHeight = 12 * kFontScale;
+        const int label_top = (std::max)(0, top - kFontHeight - 6);
+        const int label_right = (std::min)(image.width, left + text_width(label) + 8);
+        fill_rectangle(image, left, label_top, label_right,
+                       (std::min)(image.height, top), Color { 12, 12, 12 });
+        draw_text(image, label, left + 4, label_top + 2, Color { 255, 255, 255 });
     }
 
-    cv::rectangle(image, cv::Point(0, 0),
-                  cv::Point(image.cols - 1, (std::min)(kHeaderHeight, image.rows - 1)),
-                  cv::Scalar(18, 18, 18), cv::FILLED);
+    fill_rectangle(image, 0, 0, image.width,
+                   (std::min)(kHeaderHeight, image.height), Color { 18, 18, 18 });
     std::ostringstream first;
     first << state.profile->name << " backend=" << state.backend
           << " FPS=" << std::fixed << std::setprecision(1) << state.fps
           << " load=" << std::setprecision(2) << state.model_load_ms << "ms";
-    draw_text_line(image, first.str(), 0, cv::Scalar(90, 255, 255));
+    draw_text_line(image, first.str(), 0, Color { 90, 255, 255 });
     draw_text_line(image, format_summary(*state.profile, *state.summary), 1,
-                   cv::Scalar(255, 255, 255));
+                   Color { 255, 255, 255 });
     draw_text_line(image, current_metrics_line(state.metrics), 2,
-                   cv::Scalar(120, 255, 120));
+                   Color { 120, 255, 120 });
     draw_text_line(image, percentile_metrics_line(state.metrics), 3,
-                   cv::Scalar(120, 255, 120));
+                   Color { 120, 255, 120 });
     std::ostringstream capture;
     capture << "capture=" << state.capture.captured_frames
             << " consumed=" << state.capture.consumed_frames
             << " coalesced=" << state.capture.coalesced_frames
             << " rejected=" << state.capture.rejected_frames;
-    draw_text_line(image, capture.str(), 4, cv::Scalar(255, 210, 120));
+    draw_text_line(image, capture.str(), 4, Color { 255, 210, 120 });
 }
 
 } // namespace kfcore::yolo::demo
