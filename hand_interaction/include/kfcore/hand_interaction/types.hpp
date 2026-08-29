@@ -20,7 +20,7 @@ struct GestureFrameContext
 
 struct HandIdentityOptions
 {
-    int         reacquire_frames              = 45;
+    int         reacquire_frames              = 180;
     float       minimum_confidence             = 0.85F;
     float       maximum_distance_scale_ratio  = 1.75F;
     float       maximum_linear_scale_ratio    = 2.75F;
@@ -28,12 +28,18 @@ struct HandIdentityOptions
     float       scale_cost_weight             = 0.25F;
     float       age_cost_weight               = 0.10F;
     float       raw_id_continuity_bonus       = 0.08F;
+    float       handedness_conflict_cost      = 1.0F;
     float       velocity_observation_weight   = 0.65F;
     int         maximum_prediction_frames     = 2;
     std::size_t maximum_identities             = 32;
     float       maximum_shape_distance         = 0.20F;
     float       shape_cost_weight              = 2.0F;
     float       shape_update_weight            = 0.20F;
+    float       maximum_appearance_distance    = 0.18F;
+    float       maximum_appearance_part_distance = 0.45F;
+    float       appearance_cost_weight         = 3.0F;
+    float       appearance_update_weight       = 0.10F;
+    std::size_t minimum_comparable_appearance_parts = 2;
 };
 
 struct HandPoseOptions
@@ -99,11 +105,23 @@ struct HandPrimitiveOptions
     HandSpatialOptions  spatial;
 };
 
+enum class HandIdentityAssociation
+{
+    UnreliableObservation,
+    NewIdentity,
+    RawTrackContinuity,
+    ShapeReacquired,
+    Ambiguous,
+    AppearanceReacquired,
+};
+
 struct CanonicalHand
 {
-    std::size_t input_index    = 0;
-    int         raw_track_id   = -1;
-    int         canonical_id   = 0;
+    std::size_t             input_index  = 0;
+    int                     raw_track_id = -1;
+    int                     canonical_id = 0;
+    HandIdentityAssociation association =
+        HandIdentityAssociation::UnreliableObservation;
 };
 
 struct PrimitiveFrame

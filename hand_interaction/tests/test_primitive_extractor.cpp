@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -13,12 +14,15 @@ namespace
 {
 
 using kfcore::hand_interaction::GestureFrameContext;
+using kfcore::hand_interaction::HandIdentityAssociation;
 using kfcore::hand_interaction::HandPrimitiveExtractor;
 using kfcore::hand_interaction::HandPrimitiveOptions;
 using kfcore::thig::Observation;
 using kfcore::vision_models::Gesture;
 using kfcore::vision_models::HandFrame;
 using kfcore::vision_models::HandResult;
+using kfcore::vision_models::HandAppearanceDescriptor;
+using kfcore::vision_models::HandAppearancePart;
 
 constexpr int kImageWidth  = 640;
 constexpr int kImageHeight = 480;
@@ -80,6 +84,64 @@ HandResult identity_hand(int track_id = 0)
         }};
     hand.landmarks = kLandmarks;
     return hand;
+}
+
+void set_appearance(HandResult& hand, float luminance, float red_chroma,
+                    float green_chroma)
+{
+    HandAppearanceDescriptor descriptor;
+    descriptor.valid_parts = kfcore::vision_models::kAllHandAppearanceParts;
+    descriptor.quality.fill(1.0F);
+    for (std::size_t part_index = 0U;
+         part_index < kfcore::vision_models::kHandAppearancePartCount;
+         ++part_index)
+    {
+        const auto part = static_cast<HandAppearancePart>(part_index);
+        const std::size_t offset =
+            kfcore::vision_models::hand_appearance_feature_offset(part);
+        const std::size_t count =
+            kfcore::vision_models::hand_appearance_feature_count(part);
+        const std::size_t texture_count = count / 2U;
+        const std::size_t chroma_count = count / 4U;
+        std::fill_n(descriptor.values.begin() + offset, texture_count, luminance);
+        std::fill_n(descriptor.values.begin() + offset + texture_count,
+                    chroma_count, red_chroma);
+        std::fill_n(descriptor.values.begin() + offset + texture_count + chroma_count,
+                    chroma_count, green_chroma);
+    }
+    hand.appearance = descriptor;
+}
+
+void set_appearance_part(HandResult& hand, HandAppearancePart part,
+                         float luminance, float red_chroma, float green_chroma)
+{
+    const std::size_t offset =
+        kfcore::vision_models::hand_appearance_feature_offset(part);
+    const std::size_t count =
+        kfcore::vision_models::hand_appearance_feature_count(part);
+    const std::size_t texture_count = count / 2U;
+    const std::size_t chroma_count = count / 4U;
+    std::fill_n(hand.appearance->values.begin() + offset, texture_count, luminance);
+    std::fill_n(hand.appearance->values.begin() + offset + texture_count,
+                chroma_count, red_chroma);
+    std::fill_n(hand.appearance->values.begin() + offset + texture_count + chroma_count,
+                chroma_count, green_chroma);
+}
+
+void keep_appearance_parts(HandResult& hand, std::uint8_t valid_parts)
+{
+    hand.appearance->valid_parts = valid_parts;
+    for (std::size_t part_index = 0U;
+         part_index < kfcore::vision_models::kHandAppearancePartCount;
+         ++part_index)
+    {
+        const auto part = static_cast<HandAppearancePart>(part_index);
+        if ((valid_parts &
+             kfcore::vision_models::hand_appearance_part_bit(part)) == 0U)
+        {
+            hand.appearance->quality[part_index] = 0.0F;
+        }
+    }
 }
 
 void stretch_finger(HandResult& hand, std::size_t mcp_index, float factor)
@@ -297,7 +359,27 @@ spec("hand primitive extractor")
         const auto second = extractor.process(second_frame, frame_context(2, 33));
 
         check(first.hands[0].canonical_id > 0);
+        check(first.hands[0].association ==
+              HandIdentityAssociation::NewIdentity);
         check(second.hands[0].canonical_id == first.hands[0].canonical_id);
+        check(second.hands[0].association ==
+              HandIdentityAssociation::ShapeReacquired);
+    }
+
+    it("reports raw ByteTrack continuity for an unchanged track id")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(base_hand(4));
+        (void)extractor.process(first_frame, frame_context(1));
+
+        HandFrame second_frame;
+        second_frame.hands.push_back(base_hand(4));
+        translate_hand(second_frame.hands[0], 8.0F, 4.0F);
+        const auto second = extractor.process(second_frame, frame_context(2, 33));
+
+        check(second.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
     }
 
     it("keeps a canonical identity while ByteTrack is temporarily unconfirmed")
@@ -434,6 +516,159 @@ spec("hand primitive extractor")
         check(different_shape.hands[0].canonical_id != first.hands[0].canonical_id);
     }
 
+    it("does not create a new identity for a one-frame shape outlier on a stable raw track")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(4));
+        set_appearance(first_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        HandFrame outlier_frame;
+        outlier_frame.hands.push_back(identity_hand(4));
+        stretch_finger(outlier_frame.hands[0], 5U, 2.0F);
+        set_appearance(outlier_frame.hands[0], 0.8F, 0.80F, 0.10F);
+        const auto outlier = extractor.process(outlier_frame, frame_context(2));
+
+        check(outlier.hands[0].canonical_id == first.hands[0].canonical_id);
+        check(outlier.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
+    }
+
+    it("keeps two stable raw identities through alternating descriptor outliers")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(4));
+        initial_frame.hands.push_back(identity_hand(9));
+        set_appearance(initial_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        set_appearance(initial_frame.hands[1], 0.8F, 0.80F, 0.10F);
+        translate_hand(initial_frame.hands[1], 240.0F, 0.0F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        for (std::uint64_t frame_index = 2; frame_index <= 80; ++frame_index)
+        {
+            HandFrame frame;
+            frame.hands.push_back(identity_hand(4));
+            frame.hands.push_back(identity_hand(9));
+            set_appearance(frame.hands[0], -0.8F, 0.10F, 0.80F);
+            set_appearance(frame.hands[1], 0.8F, 0.80F, 0.10F);
+            translate_hand(frame.hands[1], 240.0F, 0.0F);
+
+            const std::size_t outlier_index =
+                static_cast<std::size_t>(frame_index % 2U);
+            stretch_finger(frame.hands[outlier_index], 5U, 2.0F);
+            set_appearance(frame.hands[outlier_index], 0.0F, 0.45F, 0.45F);
+
+            const auto result = extractor.process(
+                frame, frame_context(frame_index, (frame_index - 1U) * 33U));
+            check(result.hands[0].canonical_id ==
+                  initial.hands[0].canonical_id);
+            check(result.hands[1].canonical_id ==
+                  initial.hands[1].canonical_id);
+            check(result.hands[0].association ==
+                  HandIdentityAssociation::RawTrackContinuity);
+            check(result.hands[1].association ==
+                  HandIdentityAssociation::RawTrackContinuity);
+        }
+    }
+
+    it("retains a known raw identity through low-confidence observations")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(3));
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        for (std::uint64_t frame_index = 2; frame_index <= 80; ++frame_index)
+        {
+            HandFrame low_confidence_frame;
+            low_confidence_frame.hands.push_back(identity_hand(3));
+            low_confidence_frame.hands[0].palm.confidence = 0.80F;
+            const auto retained = extractor.process(
+                low_confidence_frame,
+                frame_context(frame_index, (frame_index - 1U) * 33U));
+            check(retained.hands[0].canonical_id ==
+                  initial.hands[0].canonical_id);
+            check(retained.hands[0].association ==
+                  HandIdentityAssociation::UnreliableObservation);
+            check_empty(retained.observations);
+        }
+
+        HandFrame recovered_frame;
+        recovered_frame.hands.push_back(identity_hand(3));
+        const auto recovered =
+            extractor.process(recovered_frame, frame_context(81, 2640));
+        check(recovered.hands[0].canonical_id ==
+              initial.hands[0].canonical_id);
+        check(recovered.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
+    }
+
+    it("does not let incompatible raw observations overwrite appearance")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(10));
+        set_appearance(initial_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        for (std::uint64_t frame_index = 2; frame_index <= 24; ++frame_index)
+        {
+            HandFrame outlier_frame;
+            outlier_frame.hands.push_back(identity_hand(10));
+            stretch_finger(outlier_frame.hands[0], 5U, 2.0F);
+            set_appearance(outlier_frame.hands[0], 0.8F, 0.80F, 0.10F);
+            const auto outlier = extractor.process(
+                outlier_frame,
+                frame_context(frame_index, (frame_index - 1U) * 33U));
+            check(outlier.hands[0].canonical_id ==
+                  initial.hands[0].canonical_id);
+        }
+
+        HandFrame reacquired_frame;
+        reacquired_frame.hands.push_back(identity_hand(20));
+        stretch_finger(reacquired_frame.hands[0], 5U, 2.0F);
+        set_appearance(reacquired_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto reacquired =
+            extractor.process(reacquired_frame, frame_context(25, 792));
+        check(reacquired.hands[0].canonical_id ==
+              initial.hands[0].canonical_id);
+        check(reacquired.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("keeps a raw binding unique after appearance-based reassignment")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(10));
+        initial_frame.hands.push_back(identity_hand(20));
+        set_appearance(initial_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        set_appearance(initial_frame.hands[1], 0.8F, 0.80F, 0.10F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        HandFrame reassigned_frame;
+        reassigned_frame.hands.push_back(identity_hand(20));
+        set_appearance(reassigned_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto reassigned =
+            extractor.process(reassigned_frame, frame_context(2, 33));
+        check(reassigned.hands[0].canonical_id ==
+              initial.hands[0].canonical_id);
+        check(reassigned.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+
+        HandFrame raw_only_frame;
+        raw_only_frame.hands.push_back(identity_hand(20));
+        raw_only_frame.hands[0].appearance.reset();
+        const auto raw_only =
+            extractor.process(raw_only_frame, frame_context(3, 66));
+        check(raw_only.hands[0].canonical_id ==
+              initial.hands[0].canonical_id);
+        check(raw_only.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
+    }
+
     it("preserves two shape identities when their positions swap inside the horizon")
     {
         HandPrimitiveOptions options;
@@ -478,6 +713,70 @@ spec("hand primitive extractor")
         check(right.hands[0].canonical_id != left.hands[0].canonical_id);
     }
 
+    it("keeps a stable raw identity through a one-frame handedness flip")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame left_frame;
+        left_frame.hands.push_back(identity_hand(4));
+        const auto left = extractor.process(left_frame, frame_context(1));
+
+        HandFrame flipped_frame;
+        flipped_frame.hands.push_back(identity_hand(4));
+        flipped_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        const auto flipped = extractor.process(flipped_frame, frame_context(2));
+
+        check(flipped.hands[0].canonical_id == left.hands[0].canonical_id);
+        check(flipped.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
+    }
+
+    it("keeps a spatially isolated raw identity through handedness noise")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(8));
+        initial_frame.hands.push_back(identity_hand(2));
+        initial_frame.hands[1].handedness =
+            kfcore::vision_models::Handedness::Right;
+        translate_hand(initial_frame.hands[1], 400.0F, 0.0F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        HandFrame noisy_frame = initial_frame;
+        noisy_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        const auto noisy = extractor.process(noisy_frame, frame_context(2, 33));
+
+        check(noisy.hands[0].canonical_id == initial.hands[0].canonical_id);
+        check(noisy.hands[0].association ==
+              HandIdentityAssociation::RawTrackContinuity);
+        check(noisy.hands[1].canonical_id == initial.hands[1].canonical_id);
+    }
+
+    it("prefers handedness-consistent evidence when a raw track crosses hands")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(10));
+        initial_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        initial_frame.hands.push_back(identity_hand(20));
+        set_appearance(initial_frame.hands[0], 0.1F, 0.35F, 0.35F);
+        set_appearance(initial_frame.hands[1], 0.1F, 0.35F, 0.35F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        HandFrame crossed_frame;
+        crossed_frame.hands.push_back(identity_hand(10));
+        set_appearance(crossed_frame.hands[0], 0.1F, 0.35F, 0.35F);
+        const auto crossed =
+            extractor.process(crossed_frame, frame_context(2, 33));
+
+        check(crossed.hands[0].canonical_id ==
+              initial.hands[1].canonical_id);
+        check(crossed.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
     it("withholds an indistinguishable shape match while retention evidence is fresh")
     {
         HandPrimitiveOptions options;
@@ -500,6 +799,8 @@ spec("hand primitive extractor")
             extractor.process(ambiguous_frame, frame_context(2));
 
         check(ambiguous.hands[0].canonical_id == 0);
+        check(ambiguous.hands[0].association ==
+              HandIdentityAssociation::Ambiguous);
     }
 
     it("withholds duplicate competitors independent of input order")
@@ -789,6 +1090,8 @@ spec("hand primitive extractor")
         const auto result = extractor.process(frame, frame_context(1));
 
         check(result.hands[0].canonical_id == 0);
+        check(result.hands[0].association ==
+              HandIdentityAssociation::UnreliableObservation);
     }
 
     it("withholds identity for a fully degenerate landmark shape")
@@ -879,6 +1182,283 @@ spec("hand primitive extractor")
         check(separated.hands[0].canonical_id == start.hands[0].canonical_id);
         check(separated.hands[1].canonical_id == start.hands[1].canonical_id);
         check_empty(overlapping.observations);
+    }
+
+    it("reacquires physical hands by appearance when raw ids and positions swap")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(10));
+        first_frame.hands.push_back(identity_hand(20));
+        set_appearance(first_frame.hands[0], -0.4F, 0.60F, 0.25F);
+        set_appearance(first_frame.hands[1], 0.5F, 0.25F, 0.50F);
+        translate_hand(first_frame.hands[1], 200.0F, 0.0F);
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        HandFrame crossed_frame;
+        crossed_frame.hands.push_back(identity_hand(20));
+        crossed_frame.hands.push_back(identity_hand(10));
+        set_appearance(crossed_frame.hands[0], -0.4F, 0.60F, 0.25F);
+        set_appearance(crossed_frame.hands[1], 0.5F, 0.25F, 0.50F);
+        translate_hand(crossed_frame.hands[0], 160.0F, 0.0F);
+        translate_hand(crossed_frame.hands[1], 40.0F, 0.0F);
+        const auto crossed =
+            extractor.process(crossed_frame, frame_context(2, 33));
+
+        check(crossed.hands[0].canonical_id == first.hands[0].canonical_id);
+        check(crossed.hands[1].canonical_id == first.hands[1].canonical_id);
+        check(crossed.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+        check(crossed.hands[1].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("keeps a dormant appearance identity through a long crossing gap")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame initial_frame;
+        initial_frame.hands.push_back(identity_hand(0));
+        initial_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        set_appearance(initial_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        initial_frame.hands.push_back(identity_hand(1));
+        set_appearance(initial_frame.hands[1], 0.8F, 0.80F, 0.10F);
+        translate_hand(initial_frame.hands[1], 300.0F, 0.0F);
+        const auto initial = extractor.process(initial_frame, frame_context(1));
+
+        HandFrame tracker_reassigned_frame;
+        tracker_reassigned_frame.hands.push_back(identity_hand(0));
+        set_appearance(tracker_reassigned_frame.hands[0], 0.8F, 0.80F, 0.10F);
+        translate_hand(tracker_reassigned_frame.hands[0], 300.0F, 0.0F);
+        const auto reassigned = extractor.process(
+            tracker_reassigned_frame, frame_context(2, 33));
+        check(reassigned.hands[0].canonical_id ==
+              initial.hands[1].canonical_id);
+
+        for (std::uint64_t frame_index = 3; frame_index <= 101; ++frame_index)
+        {
+            HandFrame unreliable_frame;
+            unreliable_frame.hands.push_back(identity_hand(2));
+            unreliable_frame.hands[0].handedness =
+                kfcore::vision_models::Handedness::Right;
+            unreliable_frame.hands[0].palm.confidence = 0.80F;
+            set_appearance(unreliable_frame.hands[0], -0.8F, 0.10F, 0.80F);
+            const auto unreliable = extractor.process(
+                unreliable_frame,
+                frame_context(frame_index, (frame_index - 1U) * 33U));
+            check(unreliable.hands[0].canonical_id == 0);
+        }
+
+        HandFrame recovered_frame;
+        recovered_frame.hands.push_back(identity_hand(2));
+        recovered_frame.hands[0].handedness =
+            kfcore::vision_models::Handedness::Right;
+        set_appearance(recovered_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto recovered = extractor.process(
+            recovered_frame, frame_context(102, 3333));
+
+        check(recovered.hands[0].canonical_id ==
+              initial.hands[0].canonical_id);
+        check(recovered.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("reacquires a gesture-changed hand after its raw track id changes")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame open_frame;
+        open_frame.hands.push_back(identity_hand(10));
+        set_appearance(open_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto open = extractor.process(open_frame, frame_context(1));
+
+        HandFrame changed_gesture_frame;
+        changed_gesture_frame.hands.push_back(identity_hand(20));
+        set_appearance(changed_gesture_frame.hands[0], 0.8F, 0.80F, 0.10F);
+        const auto changed =
+            extractor.process(changed_gesture_frame, frame_context(2, 33));
+
+        check(changed.hands[0].canonical_id == open.hands[0].canonical_id);
+        check(changed.hands[0].association ==
+              HandIdentityAssociation::ShapeReacquired);
+    }
+
+    it("reacquires by appearance when raw id and landmark shape both change")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(10));
+        set_appearance(first_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        HandFrame reacquired_frame;
+        reacquired_frame.hands.push_back(identity_hand(20));
+        stretch_finger(reacquired_frame.hands[0], 5U, 2.0F);
+        set_appearance(reacquired_frame.hands[0], -0.8F, 0.10F, 0.80F);
+        const auto reacquired =
+            extractor.process(reacquired_frame, frame_context(2, 33));
+
+        check(reacquired.hands[0].canonical_id ==
+              first.hands[0].canonical_id);
+        check(reacquired.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("preserves an occluded distinctive finger prototype across a crossing")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(10));
+        first_frame.hands.push_back(identity_hand(20));
+        set_appearance(first_frame.hands[0], 0.1F, 0.35F, 0.35F);
+        set_appearance(first_frame.hands[1], 0.1F, 0.35F, 0.35F);
+        set_appearance_part(first_frame.hands[0], HandAppearancePart::Ring,
+                            -0.8F, 0.75F, 0.10F);
+        set_appearance_part(first_frame.hands[1], HandAppearancePart::Ring,
+                            0.8F, 0.10F, 0.75F);
+        translate_hand(first_frame.hands[1], 200.0F, 0.0F);
+        const auto first = extractor.process(first_frame, frame_context(1));
+
+        constexpr std::uint8_t kVisibleParts =
+            kfcore::vision_models::hand_appearance_part_bit(
+                HandAppearancePart::Palm) |
+            kfcore::vision_models::hand_appearance_part_bit(
+                HandAppearancePart::Index);
+        HandFrame occluded_frame;
+        occluded_frame.hands.push_back(identity_hand(10));
+        occluded_frame.hands.push_back(identity_hand(20));
+        set_appearance(occluded_frame.hands[0], 0.1F, 0.35F, 0.35F);
+        set_appearance(occluded_frame.hands[1], 0.1F, 0.35F, 0.35F);
+        keep_appearance_parts(occluded_frame.hands[0], kVisibleParts);
+        keep_appearance_parts(occluded_frame.hands[1], kVisibleParts);
+        translate_hand(occluded_frame.hands[1], 200.0F, 0.0F);
+        (void)extractor.process(occluded_frame, frame_context(2, 33));
+
+        HandFrame crossed_frame;
+        crossed_frame.hands.push_back(identity_hand(20));
+        crossed_frame.hands.push_back(identity_hand(10));
+        set_appearance(crossed_frame.hands[0], 0.1F, 0.35F, 0.35F);
+        set_appearance(crossed_frame.hands[1], 0.1F, 0.35F, 0.35F);
+        set_appearance_part(crossed_frame.hands[0], HandAppearancePart::Ring,
+                            -0.8F, 0.75F, 0.10F);
+        set_appearance_part(crossed_frame.hands[1], HandAppearancePart::Ring,
+                            0.8F, 0.10F, 0.75F);
+        translate_hand(crossed_frame.hands[0], 160.0F, 0.0F);
+        translate_hand(crossed_frame.hands[1], 40.0F, 0.0F);
+        const auto crossed =
+            extractor.process(crossed_frame, frame_context(3, 66));
+
+        check(crossed.hands[0].canonical_id == first.hands[0].canonical_id);
+        check(crossed.hands[1].canonical_id == first.hands[1].canonical_id);
+        check(crossed.hands[0].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+        check(crossed.hands[1].association ==
+              HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("updates accepted appearance prototypes at the configured rate")
+    {
+        const auto resolve = [](float update_weight) {
+            HandPrimitiveOptions options;
+            options.identity.maximum_appearance_distance = 0.16F;
+            options.identity.appearance_update_weight = update_weight;
+            HandPrimitiveExtractor extractor(options);
+
+            HandFrame first_frame;
+            first_frame.hands.push_back(identity_hand(4));
+            set_appearance(first_frame.hands[0], 0.0F, 0.20F, 0.20F);
+            const auto first = extractor.process(first_frame, frame_context(1));
+
+            HandFrame intermediate_frame;
+            intermediate_frame.hands.push_back(identity_hand(4));
+            set_appearance(intermediate_frame.hands[0], 0.10F, 0.30F, 0.30F);
+            (void)extractor.process(intermediate_frame, frame_context(2));
+
+            HandFrame later_frame;
+            later_frame.hands.push_back(identity_hand(19));
+            set_appearance(later_frame.hands[0], 0.22F, 0.42F, 0.42F);
+            const auto later = extractor.process(later_frame, frame_context(3));
+            check(later.hands[0].canonical_id == first.hands[0].canonical_id);
+            return later.hands[0].association;
+        };
+
+        const auto slow = resolve(0.10F);
+        const auto immediate = resolve(1.0F);
+        check(slow == HandIdentityAssociation::ShapeReacquired);
+        check(immediate == HandIdentityAssociation::AppearanceReacquired);
+    }
+
+    it("rejects malformed appearance without consuming identity state")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame invalid_frame;
+        invalid_frame.hands.push_back(identity_hand(4));
+        set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        invalid_frame.hands[0].appearance->values[0] =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(extractor.process(invalid_frame, frame_context(1)),
+                        std::invalid_argument);
+
+        set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        invalid_frame.hands[0].appearance->valid_parts |= 0x80U;
+        check_throws_as(extractor.process(invalid_frame, frame_context(1)),
+                        std::invalid_argument);
+
+        set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        invalid_frame.hands[0].appearance->quality[0] = 0.0F;
+        check_throws_as(extractor.process(invalid_frame, frame_context(1)),
+                        std::invalid_argument);
+
+        set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        invalid_frame.hands[0].appearance->valid_parts &=
+            static_cast<std::uint8_t>(
+                ~kfcore::vision_models::hand_appearance_part_bit(
+                    HandAppearancePart::Pinky));
+        check_throws_as(extractor.process(invalid_frame, frame_context(1)),
+                        std::invalid_argument);
+
+        set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        const std::size_t palm_chroma_offset =
+            kfcore::vision_models::hand_appearance_feature_offset(
+                HandAppearancePart::Palm) +
+            kfcore::vision_models::hand_appearance_feature_count(
+                HandAppearancePart::Palm) /
+                2U;
+        invalid_frame.hands[0].appearance->values[palm_chroma_offset] = 1.1F;
+        check_throws_as(extractor.process(invalid_frame, frame_context(1)),
+                        std::invalid_argument);
+
+        HandFrame valid_frame;
+        valid_frame.hands.push_back(identity_hand(4));
+        set_appearance(valid_frame.hands[0], 0.0F, 0.20F, 0.20F);
+        const auto valid = extractor.process(valid_frame, frame_context(1));
+        check(valid.hands[0].canonical_id == 1);
+    }
+
+    it("keeps identical appearance observations ambiguous at exact overlap")
+    {
+        HandPrimitiveExtractor extractor;
+        HandFrame first_frame;
+        first_frame.hands.push_back(identity_hand(10));
+        first_frame.hands.push_back(identity_hand(20));
+        set_appearance(first_frame.hands[0], 0.1F, 0.45F, 0.35F);
+        set_appearance(first_frame.hands[1], 0.1F, 0.45F, 0.35F);
+        translate_hand(first_frame.hands[1], 200.0F, 0.0F);
+        (void)extractor.process(first_frame, frame_context(1));
+
+        HandFrame overlap;
+        overlap.hands.push_back(identity_hand(20));
+        overlap.hands.push_back(identity_hand(10));
+        set_appearance(overlap.hands[0], 0.1F, 0.45F, 0.35F);
+        set_appearance(overlap.hands[1], 0.1F, 0.45F, 0.35F);
+        translate_hand(overlap.hands[0], 100.0F, 0.0F);
+        translate_hand(overlap.hands[1], 100.0F, 0.0F);
+        const auto result = extractor.process(overlap, frame_context(2, 33));
+
+        check(result.hands[0].canonical_id == 0);
+        check(result.hands[1].canonical_id == 0);
+        check(result.hands[0].association == HandIdentityAssociation::Ambiguous);
+        check(result.hands[1].association == HandIdentityAssociation::Ambiguous);
+        check_empty(result.observations);
     }
 
     it("derives directional motion and stationarity from timestamped palm anchors")
@@ -1057,6 +1637,15 @@ spec("hand primitive extractor")
         options = {};
         options.identity.velocity_observation_weight = 1.5F;
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.handedness_conflict_cost = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.handedness_conflict_cost =
+            std::numeric_limits<float>::quiet_NaN();
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 
     it("rejects invalid shape identity configuration")
@@ -1119,6 +1708,38 @@ spec("hand primitive extractor")
             std::numeric_limits<float>::infinity();
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
 
+    }
+
+    it("rejects invalid appearance identity configuration")
+    {
+        HandPrimitiveOptions options;
+        options.identity.maximum_appearance_distance = 0.0F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.maximum_appearance_part_distance = 0.0F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.maximum_appearance_part_distance = 2.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.appearance_cost_weight = -0.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.appearance_update_weight = 1.1F;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.minimum_comparable_appearance_parts = 0U;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
+
+        options = {};
+        options.identity.minimum_comparable_appearance_parts =
+            kfcore::vision_models::kHandAppearancePartCount + 1U;
+        check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 
     it("accepts a zero shape ranking cost")

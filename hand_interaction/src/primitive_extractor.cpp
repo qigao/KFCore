@@ -346,6 +346,8 @@ void validate_options(const HandPrimitiveOptions& options)
         options.identity.age_cost_weight < 0.0F ||
         !std::isfinite(options.identity.raw_id_continuity_bonus) ||
         options.identity.raw_id_continuity_bonus < 0.0F ||
+        !std::isfinite(options.identity.handedness_conflict_cost) ||
+        options.identity.handedness_conflict_cost < 0.0F ||
         !std::isfinite(options.identity.velocity_observation_weight) ||
         options.identity.velocity_observation_weight < 0.0F ||
         options.identity.velocity_observation_weight > 1.0F ||
@@ -357,7 +359,21 @@ void validate_options(const HandPrimitiveOptions& options)
         options.identity.shape_cost_weight < 0.0F ||
         !std::isfinite(options.identity.shape_update_weight) ||
         options.identity.shape_update_weight <= 0.0F ||
-        options.identity.shape_update_weight > 1.0F)
+        options.identity.shape_update_weight > 1.0F ||
+        !std::isfinite(options.identity.maximum_appearance_distance) ||
+        options.identity.maximum_appearance_distance <= 0.0F ||
+        options.identity.maximum_appearance_distance > 2.0F ||
+        !std::isfinite(options.identity.maximum_appearance_part_distance) ||
+        options.identity.maximum_appearance_part_distance <= 0.0F ||
+        options.identity.maximum_appearance_part_distance > 2.0F ||
+        !std::isfinite(options.identity.appearance_cost_weight) ||
+        options.identity.appearance_cost_weight < 0.0F ||
+        !std::isfinite(options.identity.appearance_update_weight) ||
+        options.identity.appearance_update_weight <= 0.0F ||
+        options.identity.appearance_update_weight > 1.0F ||
+        options.identity.minimum_comparable_appearance_parts == 0U ||
+        options.identity.minimum_comparable_appearance_parts >
+            vision_models::kHandAppearancePartCount)
     {
         throw std::invalid_argument("invalid canonical hand identity configuration");
     }
@@ -545,12 +561,20 @@ detail::HandIdentityConfig identity_config(const HandIdentityOptions& options)
     result.scale_cost_weight            = options.scale_cost_weight;
     result.age_cost_weight              = options.age_cost_weight;
     result.raw_id_continuity_bonus      = options.raw_id_continuity_bonus;
+    result.handedness_conflict_cost     = options.handedness_conflict_cost;
     result.velocity_observation_weight  = options.velocity_observation_weight;
     result.maximum_prediction_frames    = options.maximum_prediction_frames;
     result.maximum_identities            = options.maximum_identities;
     result.maximum_shape_distance        = options.maximum_shape_distance;
     result.shape_cost_weight             = options.shape_cost_weight;
     result.shape_update_weight           = options.shape_update_weight;
+    result.maximum_appearance_distance   = options.maximum_appearance_distance;
+    result.maximum_appearance_part_distance =
+        options.maximum_appearance_part_distance;
+    result.appearance_cost_weight        = options.appearance_cost_weight;
+    result.appearance_update_weight      = options.appearance_update_weight;
+    result.minimum_comparable_appearance_parts =
+        options.minimum_comparable_appearance_parts;
     return result;
 }
 
@@ -889,11 +913,18 @@ PrimitiveFrame HandPrimitiveExtractor::process(
               geometries[index].scale,
               geometry_valid[index] ? confidence : 0.0F,
               shape,
+              hand.appearance,
               hand.handedness });
     }
 
-    const std::vector<int> canonical_ids =
+    const std::vector<detail::HandIdentityResolution> identity_resolutions =
         impl_->identities.Resolve(identity_observations);
+    std::vector<int> canonical_ids;
+    canonical_ids.reserve(identity_resolutions.size());
+    for (const auto& resolution : identity_resolutions)
+    {
+        canonical_ids.push_back(resolution.canonical_id);
+    }
     PrimitiveFrame result;
     result.hands.reserve(frame.hands.size());
     result.observations.reserve(frame.hands.size() * 8U + potential_pairs);
@@ -908,7 +939,9 @@ PrimitiveFrame HandPrimitiveExtractor::process(
     {
         const HandResult& hand = frame.hands[index];
         const int canonical_id = canonical_ids[index];
-        result.hands.push_back({ index, hand.track_id, canonical_id });
+        result.hands.push_back(
+            { index, hand.track_id, canonical_id,
+              identity_resolutions[index].association });
         const float confidence = observation_confidence(hand);
         if (canonical_id <= 0 || !geometry_valid[index] ||
             confidence < impl_->options.pose.minimum_confidence)

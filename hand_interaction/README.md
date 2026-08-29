@@ -66,20 +66,41 @@ landmark 指针。frame serial 必须严格递增，timestamp 必须单调不减
 ## Canonical hand identity
 
 canonical hand ID 由 registry 单独拥有；它在有限重获时间窗内以 20 条已标注手部骨架边的归一化三维
-长度作为形状连续性证据，再把 palm 几何、handedness 和 raw ByteTrack ID 用作排序证据。该描述符对
+长度作为形状连续性证据，并在 `HandResult::appearance` 双方存在足够共同有效分区时加入整手外观 Re-ID，
+再把 palm 几何、handedness 和 raw ByteTrack ID 用作排序证据。骨架描述符对
 平移、统一缩放和图像平面内旋转保持不变，采用 L1 距离比较；它是从 21 个 landmark 的五条
 wrist-to-finger 链构成的固定值，不分配堆内存。它不是 OpenCV Hu moments，也不构成生物识别、人员
 识别或跨会话身份保证。
+
+内置描述子由掌心、拇指、食指、中指、无名指和小指六个固定分区组成，共 256 个 `float`。掌心使用
+6x8 亮度纹理与红/绿色度，共 96 维；每根手指沿四个 landmark 采样 8x2 条带，共 32 维。描述子不保留
+图像指针，也不是人员生物识别。只比较双方共同有效且覆盖率合格的分区；共同分区数至少为
+`minimum_comparable_appearance_parts` 才形成外观证据。质量加权整体距离
+`maximum_appearance_distance` 与最差单分区距离 `maximum_appearance_part_distance` 用于判定外观是否可信，
+后者防止某根有辨识度的手指被整手平均稀释。超过阈值不会删除候选：手势改变会移动或遮挡手指纹理，
+因此不兼容外观只作为有界负成本，仍允许骨架、运动、尺度和 handedness 在 raw Track ID 改变后重获同一
+canonical ID；此时关联原因是 `ShapeReacquired`，不会错误标记成 `AppearanceReacquired`。匹配提交后仅对
+本帧有效分区做 EMA，遮挡分区保留历史原型。描述子非法则整帧 fail fast。完全遮挡导致候选同成本时，
+canonical ID 仍为 `0`，不会强制猜测物理身份。
 
 所有 landmark 分量和边长必须有限，20 条边的总长度必须为正；否则形状证据无效，该手的 canonical
 ID 为 `0`，不会退回为仅按位置匹配。候选还必须满足 `maximum_shape_distance`；形状不兼容的可靠手会
 尝试分配新 canonical ID。若容量已耗尽，处理会以 `std::length_error` fail fast，而不是把资源耗尽
 伪装成 ID `0`。
 
-`reacquire_frames` 是 canonical identity 的保留 horizon：在每帧匹配前，年龄超过该值的原型会被删除。
-因此只在该时间窗内可因形状、空间、尺度与 raw-ID 连续性重获同一 ID；超出时间窗的同形状观测会分配
-新 ID，避免另一用户继承旧的 THIG 状态。双方 handedness 已知且冲突时不是候选；`Unknown` 与任意值
-兼容。若两个观测对同一最佳 ID 的成本差小于 `ambiguity_cost_margin`，两者均为 `0`，不按输入顺序取胜。
+`reacquire_frames` 是 canonical identity 的有界候选保留 horizon，默认 `180` 帧：在每帧匹配前，年龄
+超过该值的原型会被删除。保留时间本身不决定身份；窗口内仍必须由外观、形状、空间、尺度或 raw-ID
+连续性证据完成匹配。超出时间窗的同形状观测会分配新 ID，避免另一用户继承旧的 THIG 状态。
+双方 handedness 已知且冲突时通常不是候选；若同一 raw-ID 的预测位置明显独立于其他候选，则把单帧
+handedness 翻转视为分类噪声，但在双手交叉或外观冲突时仍不强制归属。若两个观测对同一最佳 ID 的
+成本差小于 `ambiguity_cost_margin`，两者均为 `0`，不按输入顺序取胜。
+
+`PrimitiveFrame::hands[].association` 由同一个 registry 在提交匹配时生成，是 canonical ID 来源的唯一事实源：
+`NewIdentity` 表示新分配，`RawTrackContinuity` 表示沿用同一 raw ByteTrack ID，`ShapeReacquired` 表示 raw
+ID 已变化或暂不可用且仅由形状等证据重获，`AppearanceReacquired` 表示 raw ID 变化后有可比较外观证据
+参与重获，`Ambiguous` 表示可靠观测无法唯一归属，
+`UnreliableObservation` 表示置信度、几何或形状证据不可用。UI 和其他消费者只能展示该值，不应从 ID
+变化反推原因。
 
 `maximum_distance_scale_ratio` 与 `maximum_linear_scale_ratio` 是有限的软证据饱和值：预测距离分别按前者
 线性归一化到 `[0, 1]`，尺度比的对数差按 `log(后者)` 归一化到 `[0, 1]`。它们不会放宽形状或
@@ -95,9 +116,18 @@ handedness gate；部署应以实际镜头、手势和 landmark 噪声校准这�
 | `maximum_shape_distance` | `0.20F` | 保守的形状候选 L1 gate（范围 `(0, 2]`）；应按实际 landmark 噪声校准 |
 | `shape_cost_weight` | `2.0F` | 形状距离在候选成本中的权重 |
 | `shape_update_weight` | `0.20F` | 已接受形状写入原型的 EMA 权重（范围 `(0, 1]`） |
+| `maximum_appearance_distance` | `0.18F` | 共同分区质量加权平均绝对距离可信阈值（范围 `(0, 2]`） |
+| `maximum_appearance_part_distance` | `0.45F` | 任一共同分区的最大平均绝对距离可信阈值（范围 `(0, 2]`） |
+| `appearance_cost_weight` | `3.0F` | 可比较外观距离在候选成本中的权重 |
+| `appearance_update_weight` | `0.10F` | 已接受外观写入原型的 EMA 权重（范围 `(0, 1]`） |
+| `minimum_comparable_appearance_parts` | `2` | 外观证据生效所需的最少共同有效分区（范围 `[1, 6]`） |
 
-这三个字段被追加到公开 `HandIdentityOptions` 末尾。源码默认构造和短 aggregate 初始化保持可用，但其
-对象布局已变化；所有二进制下游消费者必须重新构建。
+整手分区描述子直接替换旧的掌心专用布局，不提供 V1 kind、转换或双读兼容。公开
+`HandAppearanceDescriptor`、`HandResult`、`HandPipelineOptions` 和 `HandIdentityOptions` 的对象布局均已变化；
+所有二进制下游消费者必须使用当前头文件重新构建。
+
+`CanonicalHand` 末尾另追加了 `association` 字段；短 aggregate 初始化仍使用默认值，但该结构的二进制
+布局同样发生变化，使用旧头文件编译的下游模块必须重新构建。
 
 ## 状态、并发与容量
 
@@ -255,7 +285,8 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 
 窗口只在显示层镜像画面及手部/FaceMesh 坐标，模型仍消费原始相机帧。状态栏的 `FPS` 是按实际
 消费帧间隔计算的指数平滑值；每只手明确显示 THIG `Hand ID`、tracker `Track ID`、原始分类与
-派生 primitive。
+派生 primitive，并以 `Match` 显示 canonical ID 的关联来源。所有状态栏和手部标签均使用深色描边；
+顶部状态栏另有深色底板，使文字在明暗相机画面上都保持可读。
 
 手框中的 `Raw` 只表示 keypoint classifier 的 `Open/Closed/Pointer` 原始三分类；`Derived`、
 `Motion`、`Direction`、`Rotation`、`Axis` 和可选的 `Pose:OK` 来自当前帧 21 点几何 primitive。

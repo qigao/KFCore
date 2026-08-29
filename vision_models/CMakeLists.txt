@@ -2,6 +2,7 @@ add_library(kfcore_vision_model_core SHARED
   src/decode.cpp
   src/error.cpp
   src/geometry.cpp
+  src/hand_appearance.cpp
   src/pipeline.cpp)
 target_include_directories(kfcore_vision_model_core
   PUBLIC

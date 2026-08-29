@@ -38,6 +38,7 @@ using kfcore::hand_interaction::HandInteractionPipeline;
 using kfcore::vision_models::HandFrame;
 using kfcore::vision_models::HandInferenceBackend;
 using kfcore::vision_models::HandPipeline;
+using kfcore::vision_models::HandPipelineOptions;
 using kfcore::vision_models::FaceMeshFrame;
 
 constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction + FaceMesh";
@@ -188,7 +189,10 @@ int run(const demo::Arguments& arguments)
     const auto& mode = modes.at(demo::select_mode(modes, arguments.capture));
 
     const auto model_load_started = std::chrono::steady_clock::now();
-    auto       model_pipeline = HandPipeline::create(make_backend(arguments));
+    HandPipelineOptions hand_pipeline_options;
+    hand_pipeline_options.appearance.enabled = true;
+    auto       model_pipeline = HandPipeline::create(
+        make_backend(arguments), hand_pipeline_options);
     auto       face_pipeline = demo::make_face_pipeline(arguments);
     const auto model_load_finished = std::chrono::steady_clock::now();
     const auto model_load_ms = std::chrono::duration<double, std::milli>(
@@ -212,6 +216,7 @@ int run(const demo::Arguments& arguments)
     camera.start();
     bool running = true;
     std::uint64_t processed_frames = 0U;
+    std::vector<demo::HandIdentityDiagnostic> previous_identity_diagnostics;
     std::optional<std::chrono::steady_clock::time_point> previous_frame_started;
     double displayed_fps = 0.0;
     while (running && window.is_open())
@@ -258,6 +263,15 @@ int run(const demo::Arguments& arguments)
         };
         HandInteractionFrame interaction = interaction_pipeline.process(hands, context);
         const auto thig_finished = std::chrono::steady_clock::now();
+        const std::vector<demo::HandIdentityDiagnostic> identity_diagnostics =
+            demo::make_identity_diagnostics(hands, interaction);
+        if (identity_diagnostics != previous_identity_diagnostics)
+        {
+            std::cout << demo::format_identity_diagnostic_line(
+                             captured.serial, hands, interaction)
+                      << std::endl;
+            previous_identity_diagnostics = identity_diagnostics;
+        }
 
         demo::DemoThigStatus thig_status;
         thig_status.recent_actions =
@@ -287,6 +301,7 @@ int run(const demo::Arguments& arguments)
             model_pipeline->reset();
             interaction_pipeline.reset();
             action_history.reset();
+            previous_identity_diagnostics.clear();
         }
         else if (action == demo::DemoAction::Quit)
         {
