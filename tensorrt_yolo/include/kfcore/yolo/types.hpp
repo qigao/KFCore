@@ -7,7 +7,7 @@
 
 namespace kfcore::yolo {
 
-enum class PixelFormat { Bgr8, Rgb8, Nv12, I420 };
+enum class PixelFormat { Bgr8, Rgb8, Nv12, I420, Nv21, Yuy2, Uyvy };
 enum class MemoryKind { Host, CudaDevice };
 
 struct ImageView {

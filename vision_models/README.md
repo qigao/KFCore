@@ -1,16 +1,17 @@
 # Hand 与 MediaPipe Landmark
 
 `vision_models/` 提供同一套手部几何、结果类型和 ByteTrack/Kalman 编排，以及显式分离的
-ONNX Runtime CPU 与 TensorRT CUDA 后端。它不依赖 OpenCV，也不引入 MediaPipe face
-detector：现有 YOLOv12-face 仍负责产生人脸框，468 点模型只消费调用方给出的 `RectF`。
+ONNX Runtime CPU 与 TensorRT CUDA 后端。它不依赖 OpenCV；CPU 后端用 ONNX Runtime
+YOLOv12-face，TensorRT 后端通过 `KFCore::tensorrt_yolo` 提供同语义的人脸框，468 点模型
+只消费 detector 产生的 `RectF`。
 
 ## 模块与数据流
 
 | CMake target | 输入 | 推理设备 | 图像处理 | 状态 |
 |---|---|---|---|---|
 | `KFCore::vision_model_core` | backend 返回的手部结果 | 无 | 共享几何/解码 | 每个 `HandPipeline` 独占一份 KFCore ByteTrack/Kalman |
-| `KFCore::vision_models_cpu` | Host BGR/RGB/Gray `ImageView` | CPU（ONNX Runtime） | `CpuImageProcessor` | 每个 backend 独占 sessions |
-| `KFCore::vision_models_tensorrt` | Host 或 CUDA BGR/RGB/Gray `ImageView` | GPU（TensorRT） | `CudaImageProcessor` | 每个 backend 独占 processor、engines 与 executors |
+| `KFCore::vision_models_cpu` | Host BGR/RGB/NV12/I420/NV21/YUY2/UYVY `ImageView` | CPU（ONNX Runtime） | `CpuImageProcessor` | 每个 backend 独占 sessions |
+| `KFCore::vision_models_tensorrt` | Host 或 CUDA BGR/RGB/NV12/I420/NV21/YUY2/UYVY `ImageView` | GPU（TensorRT） | `CudaImageProcessor` + TensorRT YOLO | 每个 backend 独占 processor、engines 与 executors |
 | `KFCore::hand_interaction` | 已跟踪的 `HandFrame` | 无额外推理 | 21 点几何 primitive + THIG | 每个实例独占身份、运动历史和时序图状态 |
 
 手部路径是：
@@ -21,15 +22,17 @@ image -> Palm [N,8] -> rotated hand ROI -> 21 landmarks
       -> HandPrimitiveExtractor -> THIG -> semantic ActionEvent
 ```
 
-GPU backend 每次 `infer()` 只调用一次 `stage()`。Host 图像在此处上传；CUDA 图像在同一
-device 上复制到 processor-owned storage。Palm letterbox 和每个 hand ROI 都从这份 staged
-image 生成 CUDA FP32 NCHW tensor，并在下一次复用 tensor buffer 之前同步完成推理。这里只有
-小型输出、解码、关键点特征和跟踪回到 CPU；不存在 CPU inference fallback。
+单 backend 直接接收 Host 图像时，每次 `infer()` 只调用一次 `stage()`。组合计算应先用
+`TensorRtVisionInput::prepare()` 把该帧上传一次，再把同一个 `VisionFrameView` 交给 hand 与
+FaceMesh pipeline；backend 收到 CUDA `compute` 后直接借用，不再做 device-to-device stage。
+Palm letterbox 和每个 hand ROI 都从这份共享图像生成 CUDA FP32 NCHW tensor，并在下一次复用
+tensor buffer 之前同步完成推理。这里只有小型输出、解码、关键点特征和跟踪回到 CPU；不存在
+CPU inference fallback。
 
 人脸路径是：
 
 ```text
-YOLOv12-face/caller RectF -> expanded square ROI -> MediaPipe 468 landmarks
+YOLOv12-face -> best class-0 RectF -> expanded square ROI -> MediaPipe 468 landmarks
 ```
 
 ## 严格模型契约
@@ -61,7 +64,7 @@ cmake --build --preset win-vision-models-cpu-release-user
 ctest --preset win-vision-models-cpu-release-user --output-on-failure
 ```
 
-GPU：
+CPU + GPU（同一安装包，可由应用运行时选择）：
 
 ```powershell
 $env:TENSORRT_ROOT = "C:\projects\TensorRT-11.2.1.2"
@@ -114,7 +117,7 @@ auto backend = kfcore::vision_models::CpuHandBackend::load(paths);
 
 kfcore::vision_models::HandPipelineOptions pipeline_options;
 pipeline_options.tracker.minimum_consecutive_frames = 1;
-// Host BGR8/RGB8 only. The returned HandResult owns the fixed descriptor.
+// Host BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY. The returned HandResult owns the fixed descriptor.
 pipeline_options.appearance.enabled = true;
 auto pipeline = kfcore::vision_models::HandPipeline::create(
     std::move(backend), pipeline_options);
@@ -122,19 +125,24 @@ const auto frame = pipeline->process(image_view);
 ```
 
 TensorRT 用法只需把 paths/options 类型换为 `HandTensorRtEnginePaths` 和
-`TensorRtVisionOptions`。输入 bytes 只借用到同步调用结束；返回值拥有全部结果。一个实例不允许
-重入，不同实例可以并行并拥有独立 tracker/session/executor 状态。
+`TensorRtVisionOptions`。人脸流水线由 `TensorRtFaceDetector::load()` 与
+`TensorRtFaceLandmarker::load()` 注入 `FaceMeshPipeline`。多模型处理同一帧时，调用方创建一个
+`TensorRtVisionInput`，每帧调用一次 `prepare(host_view)`，再把返回的 `VisionFrameView` 依次交给
+各 pipeline。`source` 借用调用方原图；`compute` 借用 preparer 的 CUDA storage，并在下一次
+`prepare()` 或 preparer 析构时失效。所有 pipeline 调用必须在失效前同步完成。返回值拥有全部
+结果。一个实例不允许重入，不同实例可以并行并拥有独立 tracker/session/executor 状态。
 
 CPU 和 TensorRT backend 都产生相同的 `HandFrame`，复杂手势统一进入
 `KFCore::hand_interaction`，不会在两个推理后端各维护一套时序规则。完整动作、容量、外部
 区域观察与 reset 契约见 [hand_interaction/README.md](../hand_interaction/README.md)。
 
-`appearance.enabled` 默认关闭，以保持 CUDA-device `ImageView` 调用和成本不变。启用后，内置提取器从
-同步调用期间借用的 Host BGR8/RGB8 原图与 landmark 生成 256 维六分区描述子：掌心 96 维，拇指、食指、
+`appearance.enabled` 默认关闭。启用后，内置提取器从 `VisionFrameView::source` 的 Host
+BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY 原图与 landmark 生成 256 维六分区描述子：掌心 96 维，拇指、食指、
 中指、无名指和小指各 32 维。`valid_parts` 和 `quality` 分别表示分区有效掩码与采样覆盖率。若传入
-CUDA-device、Gray8、非法 stride/byte size，则在模型推理前返回 `InvalidArgument`，不会静默下载或
-切换路径。USB capture 的 CPU/TensorRT demo 输入都是 Host BGR，因此显式启用同一 CPU Re-ID 提取器。
-对纯 device 流，调用方应保持该选项关闭，直到提供经过验证的 CUDA/learned descriptor producer。
+CUDA-device source、Gray8、非法 stride/byte size，则在模型推理前返回 `InvalidArgument`，不会静默
+下载或切换路径。`compute` 可以是同帧的 CUDA view，因此 USB capture 的 TensorRT demo 能在共享一次
+上传的同时继续使用同一 CPU Re-ID 提取器。对没有 Host source 的纯 device 流，调用方应保持该选项
+关闭，直到提供经过验证的 CUDA/learned descriptor producer。
 
 旧的掌心专用 96 维契约不再兼容：没有 kind 标记、转换器或双读路径。所有使用
 `HandAppearanceDescriptor`、`HandResult` 或 `HandPipelineOptions` 的 C++ 下游必须用当前头文件重新编译。

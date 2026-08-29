@@ -200,6 +200,55 @@ spec("ImageProcessor CUDA contract")
         check(downloaded[5] == std::uint8_t { 30 });
     }
 
+    it("samples RGB NV12 and I420 composition bases into packed BGR output")
+    {
+        const std::array<std::uint8_t, 12> rgb_base = {
+            255, 1, 0, 255, 1, 0, 255, 1, 0, 255, 1, 0,
+        };
+        const std::array<std::uint8_t, 6> nv12 = { 82, 82, 82, 82, 90, 240 };
+        const std::array<std::uint8_t, 6> i420 = { 82, 82, 82, 82, 90, 240 };
+        const std::array<float, 12> rgb {};
+        std::array<float, 4> mask {};
+        const std::array<std::uint8_t, 12> expected = {
+            0, 1, 255, 0, 1, 255, 0, 1, 255, 0, 1, 255,
+        };
+
+        auto processor = CudaImageProcessor::create();
+        const TensorView aligned =
+            processor->acquire_tensor(1, 3, 2, 2, TensorElementType::Float32);
+        check(cudaMemcpy(aligned.data, rgb.data(), aligned.byte_size,
+                         cudaMemcpyHostToDevice) == cudaSuccess);
+        const TensorView alpha = {
+            mask.data(), mask.size() * sizeof(float), 1, 1, 2, 2,
+            TensorElementType::Float32, TensorLayout::Nchw, MemoryKind::Host,
+        };
+
+        const ImageView staged_rgb = processor->stage(
+            { rgb_base.data(), rgb_base.size(), 2, 2, 6, PixelFormat::Rgb8,
+              MemoryKind::Host });
+        const ImageView composed_rgb =
+            processor->composite_affine(staged_rgb, aligned, alpha, {}, {});
+        std::array<std::uint8_t, 12> downloaded_rgb {};
+        processor->download_bgr(composed_rgb,
+                                { downloaded_rgb.data(), downloaded_rgb.size() });
+        check(downloaded_rgb == expected);
+
+        for (const auto format : { PixelFormat::Nv12, PixelFormat::I420 })
+        {
+            const auto& bytes = format == PixelFormat::Nv12 ? nv12 : i420;
+            const ImageView base = processor->stage(
+                { bytes.data(), bytes.size(), 2, 2, 2, format, MemoryKind::Host });
+            const ImageView composed =
+                processor->composite_affine(base, aligned, alpha, {}, {});
+            check(composed.pixel_format == PixelFormat::Bgr8);
+            check(composed.row_stride == 6U);
+            std::array<std::uint8_t, 12> downloaded {};
+            processor->download_bgr(composed,
+                                    { downloaded.data(), downloaded.size() });
+            check(downloaded == expected);
+        }
+    }
+
     it("rejects malformed affine composition inputs")
     {
         const std::array<std::uint8_t, 3> pixel = { 0, 0, 0 };
@@ -332,6 +381,181 @@ spec("ImageProcessor CUDA contract")
             20.0F / 255.0F, 7.0F / 255.0F,  30.0F / 255.0F,
         };
         check_fp32(output, expected);
+    }
+
+    it("stages packed NV12 and I420 once for affine preprocessing")
+    {
+        const std::array<std::uint8_t, 12> nv12 = {
+            16, 81, 145, 235,
+            32, 96, 160, 224,
+            90, 240, 128, 128,
+        };
+        const std::array<std::uint8_t, 12> i420 = {
+            16, 81, 145, 235,
+            32, 96, 160, 224,
+            90, 128,
+            240, 128,
+        };
+        auto processor = CudaImageProcessor::create();
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+
+        const auto verify = [&](const auto& pixels, PixelFormat format) {
+            const ImageView host = {
+                pixels.data(), pixels.size(), 4, 2, 4, format, MemoryKind::Host,
+            };
+            const ImageView staged = processor->stage(host);
+            check(staged.memory_kind == MemoryKind::CudaDevice);
+            check(staged.pixel_format == format);
+            check(staged.row_stride == (std::size_t)4U);
+            check(staged.byte_size == pixels.size());
+
+            std::array<std::uint8_t, 12> staged_pixels {};
+            check(cudaMemcpy(staged_pixels.data(), staged.data, staged.byte_size,
+                             cudaMemcpyDeviceToHost) == cudaSuccess);
+            check(staged_pixels == pixels);
+
+            const BgrImage bgr = CpuImageProcessor::copy_bgr(host, 1024U);
+            const std::vector<float> expected =
+                CpuImageProcessor::to_nchw(bgr, options, 1024U);
+            const TensorView tensor = processor->process_affine(
+                staged, 4, 2, {}, options, TensorElementType::Float32);
+            std::vector<float> actual(expected.size());
+            check(cudaMemcpy(actual.data(), tensor.data, tensor.byte_size,
+                             cudaMemcpyDeviceToHost) == cudaSuccess);
+            for (std::size_t index = 0U; index < actual.size(); ++index)
+            {
+                check(std::fabs(actual[index] - expected[index]) < 1.0e-5F);
+            }
+        };
+
+        verify(nv12, PixelFormat::Nv12);
+        verify(i420, PixelFormat::I420);
+    }
+
+    it("packs padded host YUV planes into one compact CUDA image")
+    {
+        const std::array<std::uint8_t, 16> nv12 = {
+            16, 81, 145, 235, 1, 2,
+            32, 96, 160, 224, 3, 4,
+            90, 240, 128, 128,
+        };
+        const std::array<std::uint8_t, 17> i420 = {
+            16, 81, 145, 235, 1, 2,
+            32, 96, 160, 224, 3, 4,
+            90, 128, 5,
+            240, 128,
+        };
+        const std::array<std::uint8_t, 12> expected_nv12 = {
+            16, 81, 145, 235,
+            32, 96, 160, 224,
+            90, 240, 128, 128,
+        };
+        const std::array<std::uint8_t, 12> expected_i420 = {
+            16, 81, 145, 235,
+            32, 96, 160, 224,
+            90, 128, 240, 128,
+        };
+        auto processor = CudaImageProcessor::create();
+        const auto verify = [&](const auto& pixels, PixelFormat format,
+                                const auto& expected) {
+            const ImageView source = {
+                pixels.data(), pixels.size(), 4, 2, 6, format, MemoryKind::Host,
+            };
+            const ImageView staged = processor->stage(source);
+            check(staged.byte_size == expected.size());
+            check(staged.row_stride == (std::size_t)4U);
+            std::array<std::uint8_t, 12> actual {};
+            check(cudaMemcpy(actual.data(), staged.data, actual.size(),
+                             cudaMemcpyDeviceToHost) == cudaSuccess);
+            check(actual == expected);
+        };
+        verify(nv12, PixelFormat::Nv12, expected_nv12);
+        verify(i420, PixelFormat::I420, expected_i420);
+    }
+
+    it("packs padded NV21 YUY2 and UYVY host rows into compact CUDA images")
+    {
+        struct Case
+        {
+            std::vector<std::uint8_t> storage;
+            std::vector<std::uint8_t> expected;
+            std::int32_t width;
+            std::int32_t height;
+            std::size_t stride;
+            PixelFormat format;
+        };
+        const std::array<Case, 3> cases = {
+            Case { { 16, 81, 145, 235, 1, 2,
+                     32, 96, 160, 224, 3, 4,
+                     240, 90, 128, 128 },
+                   { 16, 81, 145, 235, 32, 96, 160, 224, 240, 90, 128, 128 },
+                   4, 2, 6, PixelFormat::Nv21 },
+            Case { { 81, 90, 81, 240, 145, 128, 145, 128, 1, 2,
+                     81, 90, 81, 240, 145, 128, 145, 128, 3, 4 },
+                   { 81, 90, 81, 240, 145, 128, 145, 128,
+                     81, 90, 81, 240, 145, 128, 145, 128 },
+                   4, 2, 10, PixelFormat::Yuy2 },
+            Case { { 90, 81, 240, 81, 128, 145, 128, 145, 1, 2,
+                     90, 81, 240, 81, 128, 145, 128, 145, 3, 4 },
+                   { 90, 81, 240, 81, 128, 145, 128, 145,
+                     90, 81, 240, 81, 128, 145, 128, 145 },
+                   4, 2, 10, PixelFormat::Uyvy },
+        };
+        auto processor = CudaImageProcessor::create();
+
+        for (const Case& item : cases)
+        {
+            const ImageView source = { item.storage.data(), item.storage.size(),
+                                       item.width, item.height, item.stride,
+                                       item.format, MemoryKind::Host };
+            const ImageView staged = processor->stage(source);
+            check(staged.pixel_format == item.format);
+            check(staged.byte_size == item.expected.size());
+            std::vector<std::uint8_t> actual(item.expected.size());
+            check(cudaMemcpy(actual.data(), staged.data, actual.size(),
+                             cudaMemcpyDeviceToHost) == cudaSuccess);
+            check_eq_container(actual, item.expected);
+        }
+    }
+
+    it("matches CPU preprocessing for NV21 YUY2 and UYVY")
+    {
+        struct Case
+        {
+            std::vector<std::uint8_t> pixels;
+            std::int32_t width;
+            std::int32_t height;
+            std::size_t stride;
+            PixelFormat format;
+        };
+        const std::array<Case, 3> cases = {
+            Case { { 81, 81, 81, 81, 240, 90 }, 2, 2, 2, PixelFormat::Nv21 },
+            Case { { 81, 90, 81, 240 }, 2, 1, 4, PixelFormat::Yuy2 },
+            Case { { 90, 81, 240, 81 }, 2, 1, 4, PixelFormat::Uyvy },
+        };
+        auto processor = CudaImageProcessor::create();
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+
+        for (const Case& item : cases)
+        {
+            const ImageView source = { item.pixels.data(), item.pixels.size(),
+                                       item.width, item.height, item.stride,
+                                       item.format, MemoryKind::Host };
+            LetterboxTransform cpu_transform;
+            const std::vector<float> expected = CpuImageProcessor::letterbox_nchw(
+                source, item.width, item.height, options, 1024, 1024, &cpu_transform);
+            const TensorView tensor = processor->process_affine(
+                source, item.width, item.height, {}, options, TensorElementType::Float32);
+            std::vector<float> actual(expected.size());
+            check(cudaMemcpy(actual.data(), tensor.data, tensor.byte_size,
+                             cudaMemcpyDeviceToHost) == cudaSuccess);
+            for (std::size_t index = 0U; index < actual.size(); ++index)
+            {
+                check(std::fabs(actual[index] - expected[index]) < 1.0e-5F);
+            }
+        }
     }
 
     it("fails fast when affine preprocessing exceeds configured source capacity")

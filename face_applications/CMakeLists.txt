@@ -1,10 +1,7 @@
-find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
-
 add_library(kfcore_face_applications SHARED
   src/composer.cpp
   src/error.cpp
-  src/geometry.cpp
-  src/preprocess.cpp)
+  src/geometry.cpp)
 target_sources(kfcore_face_applications PRIVATE src/tensorrt.cpp)
 target_include_directories(kfcore_face_applications
   PUBLIC
@@ -12,14 +9,10 @@ target_include_directories(kfcore_face_applications
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(kfcore_face_applications PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_applications
-  PRIVATE
-    KFCore::image_processor
   PUBLIC
+    KFCore::image_processor
     KFCore::face_models
-    KFCore::tensorrt_yolo
-    KFCore::yolo_opencv
-    OpenCVLite::core
-    OpenCVLite::imgproc)
+    KFCore::tensorrt_yolo)
 set_target_properties(kfcore_face_applications PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
@@ -33,13 +26,14 @@ cmake_config_target(kfcore_face_applications
   FOLDER "face_applications")
 
 if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
-  find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs highgui)
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs highgui)
   add_executable(face_swap_image
     examples/face_swap_cli.cpp
     examples/face_swap_image.cpp)
   target_include_directories(face_swap_image PRIVATE examples)
   target_link_libraries(face_swap_image PRIVATE
     KFCore::face_applications
+    OpenCVLite::core
     OpenCVLite::imgcodecs
     TurboUtils::Core)
   set_target_properties(face_swap_image PROPERTIES
@@ -54,6 +48,8 @@ if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
   target_include_directories(face_swap_demo PRIVATE examples)
   target_link_libraries(face_swap_demo PRIVATE
     KFCore::face_applications
+    OpenCVLite::core
+    OpenCVLite::imgproc
     OpenCVLite::imgcodecs
     OpenCVLite::highgui
     TurboUtils::Core)
@@ -63,6 +59,7 @@ if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
 endif()
 
 if(BUILD_TESTS)
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
   add_executable(test_face_swap_cli
     tests/test_face_swap_cli.cpp
     examples/face_swap_cli.cpp)
@@ -98,25 +95,6 @@ if(BUILD_TESTS)
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
     FOLDER "face_applications/tests")
   add_test(NAME test_face_geometry COMMAND test_face_geometry)
-
-  add_executable(test_face_preprocess tests/test_preprocess.cpp)
-  target_link_libraries(test_face_preprocess PRIVATE
-    KFCore::face_applications
-    TurboUtils::TinyTest)
-  set_target_properties(test_face_preprocess PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-    FOLDER "face_applications/tests")
-  add_test(NAME test_face_preprocess COMMAND test_face_preprocess)
-
-  add_executable(benchmark_face_preprocess tests/benchmark_preprocess.cpp)
-  target_link_libraries(benchmark_face_preprocess PRIVATE
-    KFCore::face_applications
-    KFCore::image_processor
-    CUDA::cudart
-    TurboUtils::TinyTest)
-  set_target_properties(benchmark_face_preprocess PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-    FOLDER "face_applications/benchmarks")
 
   add_executable(test_face_composer tests/test_composer.cpp)
   target_link_libraries(test_face_composer PRIVATE
@@ -163,15 +141,19 @@ if(BUILD_TESTS)
         "KFCORE_TEST_ARCFACE_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}\""
         "KFCORE_TEST_INSWAPPER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}\""
         "KFCORE_TEST_GFPGAN_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}\""
+        "KFCORE_TEST_AGE_GENDER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}\""
         "KFCORE_TEST_INSWAPPER_MATRIX=\"${KFCORE_FACE_APPLICATION_TEST_MATRIX}\""
         "KFCORE_TEST_SOURCE_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE}\""
         "KFCORE_TEST_TARGET_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE}\"")
     endfunction()
 
     add_executable(test_face_swap_integration tests/test_face_swap_integration.cpp)
+    target_include_directories(test_face_swap_integration PRIVATE examples)
     target_link_libraries(test_face_swap_integration PRIVATE
       KFCore::face_applications
+      OpenCVLite::core
       OpenCVLite::imgcodecs
+      OpenCVLite::imgproc
       TurboUtils::TinyTest)
     _kfcore_configure_face_application_test_assets(test_face_swap_integration)
     set_target_properties(test_face_swap_integration PROPERTIES
@@ -190,6 +172,7 @@ if(BUILD_TESTS)
     target_include_directories(benchmark_face_swap_pipeline PRIVATE examples)
     target_link_libraries(benchmark_face_swap_pipeline PRIVATE
       KFCore::face_applications
+      OpenCVLite::core
       OpenCVLite::imgcodecs
       TurboUtils::TinyTest)
     _kfcore_configure_face_application_test_assets(benchmark_face_swap_pipeline)
@@ -199,7 +182,7 @@ if(BUILD_TESTS)
   endif()
 
   if(WIN32)
-    set_tests_properties(test_face_swap_cli test_face_swap_demo_ui test_face_geometry test_face_preprocess test_face_composer
+    set_tests_properties(test_face_swap_cli test_face_swap_demo_ui test_face_geometry test_face_composer
       test_face_application_validation PROPERTIES
       ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR};PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin;PATH=path_list_prepend:$ENV{TURBOUTILS_ROOT}/bin")
@@ -221,7 +204,6 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_face_application_consumer_ninja}"
         "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
         "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
-        "-DKFCORE_CONSUMER_OPENCV_LITE_ROOT=$ENV{OPENCV_LITE_ROOT}"
         "-DKFCORE_CONSUMER_TURBOUTILS_ROOT=$ENV{TURBOUTILS_ROOT}"
         -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_face_application_installed_consumer.cmake")
   endif()

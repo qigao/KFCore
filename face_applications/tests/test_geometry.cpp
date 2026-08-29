@@ -9,33 +9,22 @@ using namespace kfcore::face_applications;
 
 namespace
 {
-
 bool approximately_equal(float actual, float expected, float tolerance = 1.0e-3F)
 {
     return std::fabs(actual - expected) <= tolerance;
 }
-
 } // namespace
 
 spec("face application geometry")
 {
-    it("builds the reference Face68 square crop and inverse maps points")
+    it("builds the reference Face68 transform and inverse maps points")
     {
-        cv::Mat image(300, 400, CV_8UC3, cv::Scalar::all(0));
-        const FaceBox box { 100.0F, 80.0F, 220.0F, 180.0F };
-        const FaceTransform transform = face68_transform(box);
-        const AlignedFace crop = crop_face68(image, box);
-
-        check(crop.image.rows == 256);
-        check(crop.image.cols == 256);
-        check_true(approximately_equal(transform.source_to_aligned(0, 0),
-                                       crop.source_to_aligned(0, 0)));
-        check_true(approximately_equal(transform.aligned_to_source(0, 2),
-                                       crop.aligned_to_source(0, 2)));
-        const cv::Point2f center = transform_point(crop.source_to_aligned, { 160.0F, 130.0F });
+        const FaceTransform transform = face68_transform({ 100.0F, 80.0F, 220.0F, 180.0F });
+        const Point2f center = transform_point(transform.source_to_aligned,
+                                               { 160.0F, 130.0F });
         check_true(approximately_equal(center.x, 128.0F));
         check_true(approximately_equal(center.y, 128.0F));
-        const cv::Point2f restored = transform_point(crop.aligned_to_source, center);
+        const Point2f restored = transform_point(transform.aligned_to_source, center);
         check_true(approximately_equal(restored.x, 160.0F));
         check_true(approximately_equal(restored.y, 130.0F));
     }
@@ -65,23 +54,24 @@ spec("face application geometry")
 
     it("solves a deterministic similarity transform")
     {
-        const FiveLandmarks source = { cv::Point2f(0.0F, 0.0F), cv::Point2f(2.0F, 0.0F),
-                                       cv::Point2f(1.0F, 1.0F), cv::Point2f(0.0F, 2.0F),
-                                       cv::Point2f(2.0F, 2.0F) };
+        const FiveLandmarks source = {
+            Point2f { 0.0F, 0.0F }, Point2f { 2.0F, 0.0F }, Point2f { 1.0F, 1.0F },
+            Point2f { 0.0F, 2.0F }, Point2f { 2.0F, 2.0F },
+        };
         FiveLandmarks target {};
         for (std::size_t index = 0; index < source.size(); ++index)
         {
             target[index] = { 3.0F - 2.0F * source[index].y,
                               4.0F + 2.0F * source[index].x };
         }
-        const cv::Matx23f transform = similarity_transform(source, target);
+        const AffineMatrix transform = similarity_transform(source, target);
         const FaceTransform pair = alignment_transform(source, target);
         for (std::size_t index = 0; index < source.size(); ++index)
         {
-            const cv::Point2f actual = transform_point(transform, source[index]);
+            const Point2f actual = transform_point(transform, source[index]);
             check_true(approximately_equal(actual.x, target[index].x));
             check_true(approximately_equal(actual.y, target[index].y));
-            const cv::Point2f restored = transform_point(pair.aligned_to_source, target[index]);
+            const Point2f restored = transform_point(pair.aligned_to_source, target[index]);
             check_true(approximately_equal(restored.x, source[index].x));
             check_true(approximately_equal(restored.y, source[index].y));
         }
@@ -96,20 +86,10 @@ spec("face application geometry")
         check_true(approximately_equal(gfpgan_template()[4].y, 371.1511808F));
     }
 
-    it("rejects invalid images boxes and landmarks")
+    it("rejects invalid boxes and landmarks")
     {
-        cv::Mat empty;
-        check_throws_as(crop_face68(empty, { 0.0F, 0.0F, 10.0F, 10.0F }),
+        check_throws_as(face68_transform({ 5.0F, 5.0F, 5.0F, 10.0F }),
                         FaceApplicationError);
-
-        cv::Mat gray(20, 20, CV_8UC1, cv::Scalar::all(0));
-        check_throws_as(crop_face68(gray, { 0.0F, 0.0F, 10.0F, 10.0F }),
-                        FaceApplicationError);
-
-        cv::Mat image(20, 20, CV_8UC3, cv::Scalar::all(0));
-        check_throws_as(crop_face68(image, { 5.0F, 5.0F, 5.0F, 10.0F }),
-                        FaceApplicationError);
-
         FiveLandmarks invalid = arcface_template();
         invalid[0].x = (std::numeric_limits<float>::quiet_NaN)();
         check_throws_as(similarity_transform(invalid, arcface_template()),

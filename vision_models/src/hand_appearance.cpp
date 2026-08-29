@@ -52,6 +52,26 @@ struct RgbSample
                            "hand appearance stage: " + detail);
 }
 
+std::size_t checked_multiply(std::size_t left, std::size_t right,
+                             const char* description)
+{
+    if (left != 0U && right > (std::numeric_limits<std::size_t>::max)() / left)
+    {
+        throw_invalid(std::string(description) + " byte count overflows size_t");
+    }
+    return left * right;
+}
+
+std::size_t checked_add(std::size_t left, std::size_t right,
+                        const char* description)
+{
+    if (right > (std::numeric_limits<std::size_t>::max)() - left)
+    {
+        throw_invalid(std::string(description) + " byte count overflows size_t");
+    }
+    return left + right;
+}
+
 bool finite(const HandLandmark& point)
 {
     return std::isfinite(point.x) && std::isfinite(point.y) &&
@@ -66,29 +86,99 @@ RgbSample sample_bilinear(const image::ImageView& image, float x, float y)
     {
         return {};
     }
-    const auto* bytes = static_cast<const std::uint8_t*>(image.data);
     const std::int32_t x0 = static_cast<std::int32_t>(std::floor(x));
     const std::int32_t y0 = static_cast<std::int32_t>(std::floor(y));
     const std::int32_t x1 = std::min(x0 + 1, image.width - 1);
     const std::int32_t y1 = std::min(y0 + 1, image.height - 1);
     const float wx = x - static_cast<float>(x0);
     const float wy = y - static_cast<float>(y0);
-    const auto channel = [&](std::int32_t px, std::int32_t py,
-                             std::size_t component) {
+    const auto pixel = [&](std::int32_t px, std::int32_t py) {
+        const auto* bytes = static_cast<const std::uint8_t*>(image.data);
+        if (image.pixel_format == image::PixelFormat::Nv12 ||
+            image.pixel_format == image::PixelFormat::I420 ||
+            image.pixel_format == image::PixelFormat::Nv21 ||
+            image.pixel_format == image::PixelFormat::Yuy2 ||
+            image.pixel_format == image::PixelFormat::Uyvy)
+        {
+            const std::size_t sx = static_cast<std::size_t>(px);
+            const std::size_t sy = static_cast<std::size_t>(py);
+            const std::size_t height = static_cast<std::size_t>(image.height);
+            int y_value = 0;
+            int u_value = 0;
+            int v_value = 0;
+            if (image.pixel_format == image::PixelFormat::Yuy2 ||
+                image.pixel_format == image::PixelFormat::Uyvy)
+            {
+                const auto* pair = bytes + sy * image.row_stride + (sx / 2U) * 4U;
+                if (image.pixel_format == image::PixelFormat::Yuy2)
+                {
+                    y_value = pair[(sx & 1U) == 0U ? 0U : 2U];
+                    u_value = pair[1];
+                    v_value = pair[3];
+                }
+                else
+                {
+                    y_value = pair[(sx & 1U) == 0U ? 1U : 3U];
+                    u_value = pair[0];
+                    v_value = pair[2];
+                }
+            }
+            else
+            {
+                const std::size_t y_storage = image.row_stride * height;
+                y_value = bytes[sy * image.row_stride + sx];
+                if (image.pixel_format == image::PixelFormat::Nv12 ||
+                    image.pixel_format == image::PixelFormat::Nv21)
+                {
+                    const std::size_t offset = y_storage + (sy / 2U) * image.row_stride +
+                                               (sx / 2U) * 2U;
+                    const bool uv_order = image.pixel_format == image::PixelFormat::Nv12;
+                    u_value = bytes[offset + (uv_order ? 0U : 1U)];
+                    v_value = bytes[offset + (uv_order ? 1U : 0U)];
+                }
+                else
+                {
+                    const std::size_t chroma_stride = image.row_stride / 2U;
+                    const std::size_t chroma_rows = height / 2U;
+                    const std::size_t offset = (sy / 2U) * chroma_stride + sx / 2U;
+                    u_value = bytes[y_storage + offset];
+                    v_value = bytes[y_storage + chroma_stride * chroma_rows + offset];
+                }
+            }
+            const int c = std::max(0, y_value - 16);
+            const int d = u_value - 128;
+            const int e = v_value - 128;
+            const auto channel = [](int value) {
+                return static_cast<float>(std::clamp(value, 0, 255));
+            };
+            return RgbSample {
+                channel((298 * c + 409 * e + 128) / 256),
+                channel((298 * c - 100 * d - 208 * e + 128) / 256),
+                channel((298 * c + 516 * d + 128) / 256), true,
+            };
+        }
         const std::size_t offset = static_cast<std::size_t>(py) * image.row_stride +
-                                   static_cast<std::size_t>(px) * 3U + component;
-        return static_cast<float>(bytes[offset]);
+                                   static_cast<std::size_t>(px) * 3U;
+        const bool bgr = image.pixel_format == image::PixelFormat::Bgr8;
+        return RgbSample {
+            static_cast<float>(bytes[offset + (bgr ? 2U : 0U)]),
+            static_cast<float>(bytes[offset + 1U]),
+            static_cast<float>(bytes[offset + (bgr ? 0U : 2U)]), true,
+        };
     };
-    const auto interpolate = [&](std::size_t component) {
-        const float top = channel(x0, y0, component) * (1.0F - wx) +
-                          channel(x1, y0, component) * wx;
-        const float bottom = channel(x0, y1, component) * (1.0F - wx) +
-                             channel(x1, y1, component) * wx;
+    const RgbSample top_left = pixel(x0, y0);
+    const RgbSample top_right = pixel(x1, y0);
+    const RgbSample bottom_left = pixel(x0, y1);
+    const RgbSample bottom_right = pixel(x1, y1);
+    const auto interpolate = [&](float RgbSample::*component) {
+        const float top = top_left.*component * (1.0F - wx) +
+                          top_right.*component * wx;
+        const float bottom = bottom_left.*component * (1.0F - wx) +
+                             bottom_right.*component * wx;
         return top * (1.0F - wy) + bottom * wy;
     };
-    const bool bgr = image.pixel_format == image::PixelFormat::Bgr8;
-    return { interpolate(bgr ? 2U : 0U), interpolate(1U),
-             interpolate(bgr ? 0U : 2U), true };
+    return { interpolate(&RgbSample::red), interpolate(&RgbSample::green),
+             interpolate(&RgbSample::blue), true };
 }
 
 template <std::size_t Rows, std::size_t Columns>
@@ -280,17 +370,39 @@ void validate_hand_appearance_source(const image::ImageView& image)
 {
     if (image.memory_kind != image::MemoryKind::Host ||
         (image.pixel_format != image::PixelFormat::Bgr8 &&
-         image.pixel_format != image::PixelFormat::Rgb8))
+         image.pixel_format != image::PixelFormat::Rgb8 &&
+         image.pixel_format != image::PixelFormat::Nv12 &&
+         image.pixel_format != image::PixelFormat::I420 &&
+         image.pixel_format != image::PixelFormat::Nv21 &&
+         image.pixel_format != image::PixelFormat::Yuy2 &&
+         image.pixel_format != image::PixelFormat::Uyvy))
     {
-        throw_invalid("built-in extraction requires a host BGR8/RGB8 image");
+        throw_invalid(
+            "built-in extraction requires a host BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY image");
     }
     const std::size_t width = static_cast<std::size_t>(image.width);
     const std::size_t height = static_cast<std::size_t>(image.height);
-    if (width > (std::numeric_limits<std::size_t>::max)() / 3U)
+    const bool yuv420 = image.pixel_format == image::PixelFormat::Nv12 ||
+                        image.pixel_format == image::PixelFormat::I420 ||
+                        image.pixel_format == image::PixelFormat::Nv21;
+    const bool yuv422 = image.pixel_format == image::PixelFormat::Yuy2 ||
+                        image.pixel_format == image::PixelFormat::Uyvy;
+    if (yuv420 && ((image.width & 1) != 0 || (image.height & 1) != 0))
     {
-        throw_invalid("image row byte count overflows size_t");
+        throw_invalid("NV12/I420/NV21 dimensions must be even");
     }
-    const std::size_t row_bytes = width * 3U;
+    if (yuv422 && (image.width & 1) != 0)
+    {
+        throw_invalid("YUY2/UYVY width must be even");
+    }
+    const std::size_t bytes_per_pixel = yuv422 ? 2U : 3U;
+    if ((!yuv420 && width > (std::numeric_limits<std::size_t>::max)() / bytes_per_pixel) ||
+        (yuv420 && (image.row_stride < width || (image.row_stride & 1U) != 0U)))
+    {
+        throw_invalid(yuv420 ? "YUV420 row_stride must be even and at least image width"
+                             : "image row byte count overflows size_t");
+    }
+    const std::size_t row_bytes = yuv420 ? width : width * bytes_per_pixel;
     if (image.row_stride < row_bytes)
     {
         throw_invalid("row_stride is smaller than one packed image row");
@@ -301,7 +413,35 @@ void validate_hand_appearance_source(const image::ImageView& image)
     {
         throw_invalid("image byte_size calculation overflows size_t");
     }
-    const std::size_t required = (height - 1U) * image.row_stride + row_bytes;
+    std::size_t required = checked_add(
+        checked_multiply(height - 1U, image.row_stride, "image"), row_bytes, "image");
+    if (yuv420)
+    {
+        const std::size_t chroma_rows = height / 2U;
+        const std::size_t y_storage = checked_multiply(image.row_stride, height, "Y plane");
+        if (image.pixel_format == image::PixelFormat::Nv12 ||
+            image.pixel_format == image::PixelFormat::Nv21)
+        {
+            required = checked_add(
+                y_storage,
+                checked_add(checked_multiply(chroma_rows - 1U, image.row_stride,
+                                              "NV12 chroma plane"),
+                            width, "NV12 chroma plane"),
+                "NV12 image");
+        }
+        else
+        {
+            const std::size_t chroma_stride = image.row_stride / 2U;
+            required = checked_add(
+                checked_add(y_storage,
+                            checked_multiply(chroma_stride, chroma_rows, "I420 U plane"),
+                            "I420 image"),
+                checked_add(checked_multiply(chroma_rows - 1U, chroma_stride,
+                                              "I420 V plane"),
+                            width / 2U, "I420 V plane"),
+                "I420 image");
+        }
+    }
     if (image.byte_size < required)
     {
         throw_invalid("image byte_size is smaller than the declared rows");

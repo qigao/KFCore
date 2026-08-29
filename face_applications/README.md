@@ -8,9 +8,12 @@
 ONNX：图像处理、仿射对齐、mask、paste 与 blend 均由 `KFCore::image_core` 完成，不依赖
 OpenCV、TensorRT 或 CUDA。两个后端由调用方显式选择，不会在运行失败后自动切换。
 
-CPU 入口接收 `kfcore::image::BgrImage`，同步且单实例不可重入；不同任务可以各自创建应用
-实例并行运行。`analyze()` 返回检测框、68/5 点、ArcFace embedding 和可选 Age/Gender
-logits；`swap()` 返回拥有像素内存的 BGR 图，`swap_profiled()` 额外返回逐阶段 wall time。
+CPU 入口接收拥有内存的 `kfcore::image::BgrImage`，也接收 borrowed Host
+`kfcore::image::ImageView`（BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY）。`ImageView` 路线在入口做一次有界的
+YUV/RGB→BGR 转换，然后复用既有 CPU pipeline；CUDA memory 会明确失败。应用同步且单实例
+不可重入，不同任务可以各自创建实例并行运行。`analyze()` 返回检测框、68/5 点、ArcFace
+embedding 和可选 Age/Gender logits；`swap()` 返回拥有像素内存的 BGR 图，
+`swap_profiled()` 额外返回逐阶段 wall time。
 
 ```cpp
 auto application = kfcore::face_applications::OnnxFaceSwapApplication::load(paths);
@@ -20,7 +23,7 @@ const auto result = application->swap_profiled(source_bgr, target_bgr);
 ## 数据流与状态边界
 
 ```text
-BGR source/target (borrowed CV_8UC3)
+ImageView source/target (borrowed BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY, Host/CUDA)
   -> YOLOv12-face: highest-score class 0 face
   -> Face68: bbox affine crop -> 68 landmarks -> source coordinates
   -> five landmarks: eye averages + nose[30] + mouth[48,54]
@@ -29,28 +32,31 @@ BGR source/target (borrowed CV_8UC3)
   -> InSwapper: target 128x128 alignment + projected embedding
   -> bounded mask and inverse-affine paste-back
   -> optional GFPGAN 512x512 alignment, paste-back, configured blend
-  -> owned CV_8UC3 output
+  -> owned BgrImage output
 ```
 
-`TensorRtFaceSwapApplication` 通过 `KFCore::image_processor` 为每个 CUDA device 每帧只做一次
-上传。YOLO 检测复用该 device image，Face68、ArcFace、InSwapper 和 GFPGAN 直接消费 CUDA
-生成的 FP32 NCHW tensor。InSwapper 与可选 GFPGAN 的输出、仿射 mask 合成和两模型之间的 image
-保持在同一 CUDA device，只有最终 packed BGR 图像回传 host；两模型配置为不同 device 时加载即
-失败。可选 Age/Gender 保留参考 CPU ROI resize，以维持 OpenCV 边界语义。
+`TensorRtFaceSwapApplication` 通过 `KFCore::image_processor` 为每个 CUDA device、每个分析帧
+最多 stage 一次。YOLO 检测复用该 device image；Face68、ArcFace、Age/Gender、InSwapper 和
+GFPGAN 从 BGR/RGB/NV12/I420/NV21/YUY2/UYVY device image 直接生成各自的 FP32 NCHW tensor。
+模型本身不接收 raw YUV。InSwapper 与可选 GFPGAN 的输出、仿射 mask 合成和两模型之间的 image 保持在同一
+CUDA device；第一次合成可直接采样 YUV target，并始终产生 packed BGR8。只有最终 BGR 图像
+回传 host；两模型配置为不同 device 时加载即失败。
 
-`TensorRtFaceSwapApplication` 同步且单实例不可重入。输入 `cv::Mat` 只在调用期间借用且不被
-修改，成功结果拥有自己的像素内存；任一阶段失败时抛出带阶段上下文的
+`TensorRtFaceSwapApplication` 同步且单实例不可重入。输入 `ImageView` 只在调用期间借用且
+不被修改，成功结果 `BgrImage` 拥有自己的像素内存；任一阶段失败时抛出带阶段上下文的
 `FaceApplicationError`，不会返回部分结果。若要并行处理，应为每个任务加载独立实例。
+核心公开头文件与动态库不依赖 OpenCV；OpenCV Lite 只用于示例和真实模型测试中的图片
+解码、显示与编码适配。
 
 ## 分阶段耗时
 
-需要诊断时使用 `swap_profiled(source_bgr, target_bgr)`；返回的
+需要诊断时使用 `swap_profiled(source_view, target_view)`；返回的
 `ProfiledFaceSwapResult` 同时包含拥有像素内存的 `image` 和 `FaceSwapTimingReport`。
-参数、线程约束、错误条件与 `swap()` 相同，原有 `swap()` 接口及行为保持不变：
+参数、线程约束、错误条件与 `swap()` 相同：
 
 ```cpp
 const kfcore::face_applications::ProfiledFaceSwapResult result =
-    application->swap_profiled(source_bgr, target_bgr);
+    application->swap_profiled(source_view, target_view);
 const double total_ms =
     std::chrono::duration<double, std::milli>(result.timings.total).count();
 ```
@@ -87,7 +93,7 @@ projector 不可变拥有。模型实际 binding 与上表不一致时应通过 
 
 ## 构建
 
-Windows 使用调用方提供的 TensorRT 和 OpenCV Lite：
+Windows 核心库使用调用方提供的 TensorRT；构建图片 CLI/桌面 demo 时额外使用 OpenCV Lite：
 
 ```powershell
 $env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
@@ -98,8 +104,9 @@ ctest --preset win-face-applications-release-user -R '^test_face_' --output-on-f
 ```
 
 对应配置开启 `KFCORE_BUILD_TENSORRT_RUNTIME`、`KFCORE_BUILD_FACE_MODELS`、
-`KFCORE_BUILD_TENSORRT_YOLO`、`KFCORE_BUILD_YOLO_OPENCV`、
-`KFCORE_BUILD_FACE_APPLICATIONS` 和 `KFCORE_BUILD_FACE_APPLICATION_EXAMPLES`。
+`KFCORE_BUILD_TENSORRT_YOLO`、`KFCORE_BUILD_FACE_APPLICATIONS` 和
+`KFCORE_BUILD_FACE_APPLICATION_EXAMPLES`。该 preset 显式关闭 `KFCORE_BUILD_YOLO_OPENCV`；
+OpenCV Lite 只链接到示例和相应测试目标，不会出现在 `KFCore::face_applications` 的公开依赖中。
 
 无 GPU 的 CPU 路线使用独立 preset；`ONNXRUNTIME_ROOT` 必须包含匹配版本的 `include/`、
 import library 和 runtime DLL：
@@ -162,7 +169,8 @@ face_swap_demo.exe `
 - `KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE`
 - `KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE`
 
-若 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN` 也存在，同一测试额外验证增强路径。验收内容是
-TensorRT 执行成功、输出可重新解码为 `CV_8UC3`、输出尺寸等于 target，且 source/target
-内存不变，并验证必需计时为正、可选计时与模型配置一致；这不是模型 accuracy 或身份相似度
-的 golden test。
+若 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN` 或
+`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER` 存在，同一测试额外验证对应路径。验收内容
+包括真实 I420 输入、TensorRT 执行成功、owned BGR 输出可重新编码/解码、输出尺寸等于 target，
+source/target 内存不变，以及必需计时为正、可选计时与模型配置一致；这不是模型 accuracy 或
+身份相似度的 golden test。

@@ -1,4 +1,5 @@
 #include "kfcore/vision_models/core.hpp"
+#include "kfcore/image_processor/cpu.hpp"
 #include "tinytest.hpp"
 
 #include <cstdint>
@@ -57,6 +58,69 @@ struct TestImage
                  kfcore::image::MemoryKind::Host };
     }
 };
+
+struct YuvTestImage
+{
+    std::vector<std::uint8_t> pixels;
+    kfcore::image::PixelFormat format = kfcore::image::PixelFormat::Nv12;
+    std::size_t row_stride = 256U;
+
+    [[nodiscard]] kfcore::image::ImageView view() const
+    {
+        return { pixels.data(), pixels.size(), 256, 256, row_stride, format,
+                 kfcore::image::MemoryKind::Host };
+    }
+};
+
+YuvTestImage patterned_yuv_image(kfcore::image::PixelFormat format)
+{
+    YuvTestImage image;
+    image.format = format;
+    if (format == kfcore::image::PixelFormat::Yuy2 ||
+        format == kfcore::image::PixelFormat::Uyvy)
+    {
+        image.row_stride = 256U * 2U;
+        image.pixels.resize(image.row_stride * 256U);
+        for (std::size_t y = 0U; y < 256U; ++y)
+        {
+            for (std::size_t x = 0U; x < 256U; x += 2U)
+            {
+                const std::uint8_t y0 = static_cast<std::uint8_t>(
+                    32U + (x * 3U + y * 5U) % 192U);
+                const std::uint8_t y1 = static_cast<std::uint8_t>(
+                    32U + ((x + 1U) * 3U + y * 5U) % 192U);
+                auto* pair = image.pixels.data() + y * image.row_stride + x * 2U;
+                if (format == kfcore::image::PixelFormat::Yuy2)
+                {
+                    pair[0] = y0;
+                    pair[1] = 128U;
+                    pair[2] = y1;
+                    pair[3] = 128U;
+                }
+                else
+                {
+                    pair[0] = 128U;
+                    pair[1] = y0;
+                    pair[2] = 128U;
+                    pair[3] = y1;
+                }
+            }
+        }
+        return image;
+    }
+    image.pixels.resize(256U * 256U * 3U / 2U);
+    for (std::size_t y = 0U; y < 256U; ++y)
+    {
+        for (std::size_t x = 0U; x < 256U; ++x)
+        {
+            image.pixels[y * 256U + x] = static_cast<std::uint8_t>(
+                32U + (x * 3U + y * 5U) % 192U);
+        }
+    }
+    std::fill(image.pixels.begin() + 256U * 256U, image.pixels.end(),
+              std::uint8_t { 128U });
+    return image;
+}
 
 TestImage patterned_image(float brightness, bool swap_red_blue,
                           kfcore::image::PixelFormat format)
@@ -167,6 +231,35 @@ private:
     std::size_t index_ = 0;
 };
 
+struct ImageObservation
+{
+    const void*               data = nullptr;
+    kfcore::image::MemoryKind memory_kind = kfcore::image::MemoryKind::Host;
+    std::size_t               calls = 0U;
+};
+
+class RecordingHandBackend final : public HandInferenceBackend
+{
+public:
+    explicit RecordingHandBackend(std::shared_ptr<ImageObservation> observation)
+        : observation_(std::move(observation))
+    {
+    }
+
+    HandFrame infer(const kfcore::image::ImageView& image) override
+    {
+        observation_->data        = image.data;
+        observation_->memory_kind = image.memory_kind;
+        ++observation_->calls;
+        HandFrame frame;
+        frame.hands.push_back(appearance_hand());
+        return frame;
+    }
+
+private:
+    std::shared_ptr<ImageObservation> observation_;
+};
+
 class FixtureFaceDetector final : public FaceDetectorBackend
 {
 public:
@@ -227,6 +320,51 @@ public:
     }
 };
 
+class RecordingFaceDetector final : public FaceDetectorBackend
+{
+public:
+    explicit RecordingFaceDetector(std::shared_ptr<ImageObservation> observation)
+        : observation_(std::move(observation))
+    {
+    }
+
+    FaceDetectionResult infer(const kfcore::image::ImageView& image) override
+    {
+        observation_->data        = image.data;
+        observation_->memory_kind = image.memory_kind;
+        ++observation_->calls;
+        FaceDetectionResult result;
+        result.face = FaceDetection { { 10.0F, 20.0F, 30.0F, 40.0F }, 0.90F };
+        return result;
+    }
+
+private:
+    std::shared_ptr<ImageObservation> observation_;
+};
+
+class RecordingFaceLandmarker final : public FaceLandmarkBackend
+{
+public:
+    explicit RecordingFaceLandmarker(std::shared_ptr<ImageObservation> observation)
+        : observation_(std::move(observation))
+    {
+    }
+
+    FaceLandmarkResult infer(const kfcore::image::ImageView& image,
+                             const RectF&) override
+    {
+        observation_->data        = image.data;
+        observation_->memory_kind = image.memory_kind;
+        ++observation_->calls;
+        FaceLandmarkResult result;
+        result.confidence = 0.90F;
+        return result;
+    }
+
+private:
+    std::shared_ptr<ImageObservation> observation_;
+};
+
 kfcore::image::ImageView one_pixel_image()
 {
     static const std::uint8_t pixel[3] = { 0, 0, 0 };
@@ -263,6 +401,45 @@ void check_error(const std::function<void()>& operation, VisionModelErrorCode co
 
 spec("vision hand pipeline")
 {
+    it("routes shared compute pixels to inference and source pixels to appearance")
+    {
+        const TestImage source_image = patterned_image(
+            1.0F, false, kfcore::image::PixelFormat::Bgr8);
+        const auto source = source_image.view();
+        static const std::uint8_t device_sentinel = 0U;
+        auto compute = source;
+        compute.data = &device_sentinel;
+        compute.memory_kind = kfcore::image::MemoryKind::CudaDevice;
+        const auto observation = std::make_shared<ImageObservation>();
+        HandPipelineOptions options = immediate_tracking_options();
+        options.appearance.enabled = true;
+        auto pipeline = HandPipeline::create(
+            std::make_unique<RecordingHandBackend>(observation), options);
+
+        const HandFrame result = pipeline->process(
+            VisionFrameView { source, compute });
+
+        check_true(observation->calls == 1U);
+        check_true(observation->data == compute.data);
+        check(observation->memory_kind == kfcore::image::MemoryKind::CudaDevice);
+        check_true(result.hands.front().appearance.has_value());
+    }
+
+    it("rejects shared source and compute views with different shapes")
+    {
+        const auto source = one_pixel_image();
+        auto compute = source;
+        compute.width = 2;
+        auto pipeline = HandPipeline::create(
+            std::make_unique<SequenceBackend>(
+                std::vector<std::vector<HandResult>> { { hand_at(0.0F) } }),
+            immediate_tracking_options());
+
+        check_error(
+            [&] { (void)pipeline->process(VisionFrameView { source, compute }); },
+            VisionModelErrorCode::InvalidArgument, "same frame");
+    }
+
     it("extracts owned palm and five-finger appearance invariant to channel order and brightness")
     {
         HandPipelineOptions options = immediate_tracking_options();
@@ -336,6 +513,42 @@ spec("vision hand pipeline")
                                        HandAppearancePart::Index) > 0.10);
     }
 
+    it("extracts equivalent appearance directly from supported packed YUV layouts")
+    {
+        HandPipelineOptions options = immediate_tracking_options();
+        options.appearance.enabled = true;
+        const auto infer = [&](const kfcore::image::ImageView& image) {
+            auto pipeline = HandPipeline::create(
+                std::make_unique<SequenceBackend>(
+                    std::vector<std::vector<HandResult>> { { appearance_hand() } }),
+                options);
+            return pipeline->process(image).hands[0].appearance;
+        };
+
+        for (kfcore::image::PixelFormat format : {
+                 kfcore::image::PixelFormat::Nv12,
+                 kfcore::image::PixelFormat::I420,
+                 kfcore::image::PixelFormat::Nv21,
+                 kfcore::image::PixelFormat::Yuy2,
+                 kfcore::image::PixelFormat::Uyvy })
+        {
+            const YuvTestImage yuv = patterned_yuv_image(format);
+            const kfcore::image::BgrImage bgr =
+                kfcore::image::CpuImageProcessor::copy_bgr(yuv.view(), 256U * 256U * 3U);
+            const kfcore::image::ImageView bgr_view = {
+                bgr.pixels.data(), bgr.pixels.size(), bgr.width, bgr.height,
+                static_cast<std::size_t>(bgr.width) * 3U,
+                kfcore::image::PixelFormat::Bgr8,
+                kfcore::image::MemoryKind::Host,
+            };
+            const auto yuv_appearance = infer(yuv.view());
+            const auto bgr_appearance = infer(bgr_view);
+            check_true(yuv_appearance.has_value());
+            check_true(bgr_appearance.has_value());
+            check(appearance_distance(*yuv_appearance, *bgr_appearance) < 0.0001);
+        }
+    }
+
     it("rejects unsupported appearance sources before invoking the backend")
     {
         HandPipelineOptions options = immediate_tracking_options();
@@ -349,11 +562,19 @@ spec("vision hand pipeline")
                 std::vector<std::vector<HandResult>> { { appearance_hand() } }),
             options);
         check_error([&] { (void)pipeline->process(device); },
-                    VisionModelErrorCode::InvalidArgument, "host BGR8/RGB8");
+                    VisionModelErrorCode::InvalidArgument,
+                    "host BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY");
 
         kfcore::image::ImageView undersized = image.view();
         undersized.byte_size = 3U;
         check_error([&] { (void)pipeline->process(undersized); },
+                    VisionModelErrorCode::InvalidArgument, "byte_size");
+
+        YuvTestImage malformed = patterned_yuv_image(
+            kfcore::image::PixelFormat::Nv12);
+        kfcore::image::ImageView malformed_view = malformed.view();
+        malformed_view.byte_size -= 1U;
+        check_error([&] { (void)pipeline->process(malformed_view); },
                     VisionModelErrorCode::InvalidArgument, "byte_size");
     }
 
@@ -441,6 +662,34 @@ spec("vision hand pipeline")
 
 spec("vision FaceMesh pipeline")
 {
+    it("shares one compute image view between detector and landmarker")
+    {
+        const auto source = one_pixel_image();
+        static const std::uint8_t device_sentinel = 0U;
+        auto compute = source;
+        compute.data = &device_sentinel;
+        compute.memory_kind = kfcore::image::MemoryKind::CudaDevice;
+        const auto detector_observation = std::make_shared<ImageObservation>();
+        const auto landmark_observation = std::make_shared<ImageObservation>();
+        auto pipeline = FaceMeshPipeline::create(
+            std::make_unique<RecordingFaceDetector>(detector_observation),
+            std::make_unique<RecordingFaceLandmarker>(landmark_observation));
+
+        const FaceMeshFrame result = pipeline->process(
+            VisionFrameView { source, compute });
+
+        check_true(result.detection.has_value());
+        check_true(result.landmarks.has_value());
+        check_true(detector_observation->calls == 1U);
+        check_true(landmark_observation->calls == 1U);
+        check_true(detector_observation->data == compute.data);
+        check_true(landmark_observation->data == compute.data);
+        check(detector_observation->memory_kind ==
+              kfcore::image::MemoryKind::CudaDevice);
+        check(landmark_observation->memory_kind ==
+              kfcore::image::MemoryKind::CudaDevice);
+    }
+
     it("composes detection and landmark results with stage timings")
     {
         auto pipeline = FaceMeshPipeline::create(

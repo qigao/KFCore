@@ -23,7 +23,7 @@ set(KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR "" CACHE PATH
     "Directory containing trusted YOLOv8 domain ONNX integration models")
 option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
-option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
+option(KFCORE_BUILD_FACE_APPLICATIONS "Build TensorRT face applications" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS_CPU
        "Build OpenCV-free ONNX Runtime CPU face applications" OFF)
 option(KFCORE_BUILD_VISION_MODELS
@@ -60,7 +60,7 @@ cmake_dependent_option(
   OFF
   "KFCORE_BUILD_VISION_MODELS_TENSORRT"
   OFF)
-foreach(_vision_engine IN ITEMS PALM HAND CLASSIFIER FACE)
+foreach(_vision_engine IN ITEMS PALM HAND CLASSIFIER FACE FACE_DETECTOR)
   set(KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}
       "$ENV{KFCORE_VISION_MODEL_TEST_ENGINE_${_vision_engine}}" CACHE FILEPATH
       "Trusted ${_vision_engine} engine used by TensorRT vision-model integration tests")

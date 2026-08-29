@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <type_traits>
 
 using namespace kfcore::face_applications;
 
@@ -50,5 +51,17 @@ spec("ONNX CPU face application validation")
         options.max_image_bytes = 0;
         check_throws_as(OnnxFaceSwapApplication::load(paths, options),
                         CpuFaceApplicationError);
+    }
+
+    it("exposes both owned-BGR and borrowed-ImageView entry points")
+    {
+        using AnalyzeView = CpuFaceAnalysis (OnnxFaceSwapApplication::*)(
+            const kfcore::image::ImageView&);
+        using SwapView = kfcore::image::BgrImage (OnnxFaceSwapApplication::*)(
+            const kfcore::image::ImageView&, const kfcore::image::ImageView&);
+        check_true((std::is_same_v<decltype(static_cast<AnalyzeView>(
+                                      &OnnxFaceSwapApplication::analyze)), AnalyzeView>));
+        check_true((std::is_same_v<decltype(static_cast<SwapView>(
+                                      &OnnxFaceSwapApplication::swap)), SwapView>));
     }
 }

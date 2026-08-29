@@ -158,7 +158,7 @@ build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
 latest-frame mailbox，推理跟不上采集时覆盖尚未消费的旧帧，并在 `coalesced` 中明确计数。
 
 应用目标不链接 OpenCV。图片目录支持 PNG/JPEG/BMP，通过仓库已有 stb 依赖做有界编解码；
-Windows 窗口使用 Win32 GDI，其他平台应使用 `--headless`。NV12/I420 不先转整帧 BGR：CPU 与
+Windows 窗口使用 Win32 GDI，其他平台应使用 `--headless`。NV12/I420/NV21/YUY2/UYVY 不先转整帧 BGR：CPU 与
 CUDA 都把 YUV 转换、可选镜像、letterbox、归一化和 NCHW 写入融合到 tensor 预处理。只有显示
 窗口时才额外生成 BGR；headless 相机路径保留一份 mailbox 所有权复制后直接推理。
 

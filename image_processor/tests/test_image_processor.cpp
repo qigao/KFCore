@@ -296,6 +296,28 @@ spec("ImageProcessor CPU contract")
         expect_processor_error(
             [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
             ImageProcessorErrorCode::InvalidArgument, "image capacity");
+
+        std::array<std::uint8_t, 16> packed_pixels {};
+        const ImageView packed = yuv_host_view(
+            packed_pixels.data(), packed_pixels.size(), 4, 2, 8, PixelFormat::Yuy2);
+
+        invalid = packed;
+        invalid.width = 3;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "even");
+
+        invalid = packed;
+        invalid.row_stride = 7;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "row stride");
+
+        invalid = packed;
+        invalid.byte_size = packed_pixels.size() - 1U;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "image capacity");
     }
 
     it("rejects invalid images, tensor contracts, limits, and workspace capacity")

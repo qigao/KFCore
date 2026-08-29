@@ -1,7 +1,8 @@
 # KFCore ImageProcessor
 
 `KFCore::image_processor` 是独立于推理 runtime 的图像处理模块。当前支持 Host
-Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8/NV12/I420 的 Host 或同设备 CUDA 输入输出 CUDA
+Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY 的 Host 或同设备
+CUDA 输入输出 CUDA
 FP16/FP32 NCHW Tensor；一次 fused kernel
 完成可选水平镜像、BT.601 YUV 转换、双线性 letterbox、RGB/BGR 通道排列、`pixel / 255`、
 mean/stddev 归一化和 HWC→NCHW。
@@ -93,15 +94,16 @@ Host 灰度输出不需要 CUDA stream 或工作区。先用
 指针；source 与 destination 不得重叠。CUDA-device 输入会明确失败，不会隐式执行 device-to-host
 复制。
 
-NV12/I420 要求偶数宽高；`row_stride` 是偶数 Y stride。NV12 的 UV plane 紧随完整 Y plane，
-并使用同一 stride；I420 的 U/V plane 依次紧随 Y plane，chroma stride 为 Y stride 的一半。
-Host staging 会去除每个 plane 的 padding。`mirror_horizontal` 在 letterbox 源坐标中融合执行，
-不会先分配或写出一张镜像图。
+NV12/NV21/I420 要求偶数宽高；`row_stride` 是偶数 Y stride。NV12/NV21 的交错 UV/VU plane
+紧随完整 Y plane并使用同一 stride；I420 的 U/V plane 依次紧随 Y plane，chroma stride 为 Y
+stride 的一半。YUY2/UYVY 要求偶数宽度，每两个像素分别按 `Y0 U Y1 V` / `U Y0 V Y1`
+占用四字节，`row_stride >= width * 2`。Host staging 会去除 padding。`mirror_horizontal` 在
+letterbox 源坐标中融合执行，不会先分配或写出一张镜像图。
 
 参数错误、容量不足、溢出、不支持格式、CUDA 指针设备不匹配和 CUDA 调用失败分别通过
-`ImageProcessorError::{code(),what()}` 报告。Tensor 路径只接受连续 NCHW Tensor 和 BGR8/RGB8
-单平面或上述 packed NV12/I420 图像；Gray8 仅用于 Host 灰度输出。独立 stride 的多 plane、
-YUY2 及 CUDA 图像输出尚不属于该契约，当前不会隐式 fallback。
+`ImageProcessorError::{code(),what()}` 报告。Tensor 路径只接受连续 NCHW Tensor 和上述连续
+单指针图像；Gray8 仅用于 Host 灰度输出。独立指针/stride 的多 plane、P010 及 CUDA array
+尚不属于该契约，当前不会隐式 fallback。
 
 `CudaImageProcessor` 是同步、单实例不可重入的便利 facade：
 
@@ -109,9 +111,10 @@ YUY2 及 CUDA 图像输出尚不属于该契约，当前不会隐式 fallback。
 - `process_affine()` 返回 processor-owned preprocess tensor；下次同名调用使该 view 失效。
 - `acquire_tensor()` 返回可由任意 CUDA inference backend 写入的独立 tensor storage；下次
   `acquire_tensor()` 使该 view 失效。
-- `composite_affine()` 接收 CUDA RGB NCHW、Host/CUDA FP32 alpha 和 destination-to-aligned
-  transform，返回独立 packed CUDA image；允许把上一次合成结果原位作为 base。下次合成会更新
-  同一 owned storage。
+- `composite_affine()` 接收 CUDA RGB NCHW、Host/CUDA FP32 alpha、
+  BGR/RGB/NV12/I420/NV21/YUY2/UYVY CUDA
+  base 和 destination-to-aligned transform，始终返回独立 packed CUDA BGR8；允许把上一次合成
+  结果原位作为 base。下次合成会更新同一 owned storage。
 - `download_bgr()` 是显式同步 device→host 边界，目标 buffer 由调用方拥有。
 
 这几类 storage 彼此独立，因此可按“预处理 → 外部推理写入 → 合成 → 再预处理”的顺序复用，

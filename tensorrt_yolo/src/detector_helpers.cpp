@@ -95,6 +95,12 @@ namespace
             return kfcore::image::PixelFormat::Nv12;
         case PixelFormat::I420:
             return kfcore::image::PixelFormat::I420;
+        case PixelFormat::Nv21:
+            return kfcore::image::PixelFormat::Nv21;
+        case PixelFormat::Yuy2:
+            return kfcore::image::PixelFormat::Yuy2;
+        case PixelFormat::Uyvy:
+            return kfcore::image::PixelFormat::Uyvy;
         }
         throw_invalid("input validation stage: unsupported pixel format");
     }
@@ -120,7 +126,8 @@ namespace
         const std::size_t width = static_cast<std::size_t>(image.width);
         const std::size_t height = static_cast<std::size_t>(image.height);
         if (image.pixel_format == PixelFormat::Nv12 ||
-            image.pixel_format == PixelFormat::I420)
+            image.pixel_format == PixelFormat::I420 ||
+            image.pixel_format == PixelFormat::Nv21)
         {
             if ((image.width & 1) != 0 || (image.height & 1) != 0 ||
                 image.row_stride < width || (image.row_stride & 1U) != 0U)
@@ -134,7 +141,8 @@ namespace
             }
             const std::size_t y_storage = height * image.row_stride;
             const std::size_t chroma_rows = height / 2U;
-            if (image.pixel_format == PixelFormat::Nv12)
+            if (image.pixel_format == PixelFormat::Nv12 ||
+                image.pixel_format == PixelFormat::Nv21)
             {
                 if (chroma_rows - 1U >
                     ((std::numeric_limits<std::size_t>::max)() - width) /
@@ -165,11 +173,15 @@ namespace
             }
             return y_storage + u_storage + v_span;
         }
-        if (width > (std::numeric_limits<std::size_t>::max)() / 3U)
+        const bool packed_422 = image.pixel_format == PixelFormat::Yuy2 ||
+                                image.pixel_format == PixelFormat::Uyvy;
+        const std::size_t bytes_per_pixel = packed_422 ? 2U : 3U;
+        if ((packed_422 && (image.width & 1) != 0) ||
+            width > (std::numeric_limits<std::size_t>::max)() / bytes_per_pixel)
         {
             return (std::numeric_limits<std::size_t>::max)();
         }
-        const std::size_t row_bytes = width * 3U;
+        const std::size_t row_bytes = width * bytes_per_pixel;
         if (image.row_stride < row_bytes)
         {
             return (std::numeric_limits<std::size_t>::max)();

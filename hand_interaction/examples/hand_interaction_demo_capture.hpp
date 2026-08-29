@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kfcore/image_processor/types.hpp"
+
 #include <turbo_capture.h>
 
 #include <chrono>
@@ -43,6 +45,11 @@ enum class TakeStatus
 
 [[nodiscard]] std::optional<std::size_t>
 packed_frame_bytes(int width, int height, int format) noexcept;
+
+[[nodiscard]] bool inference_view_compatible(int format) noexcept;
+
+// Borrows CapturedFrame::pixels; the view expires when the frame storage changes.
+[[nodiscard]] image::ImageView inference_view(const CapturedFrame& frame);
 
 class LatestFrameMailbox final
 {

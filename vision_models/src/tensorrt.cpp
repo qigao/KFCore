@@ -2,11 +2,13 @@
 
 #include "decode.hpp"
 #include "geometry.hpp"
+#include "tensorrt_image_source.hpp"
 #include "tensorrt_models.hpp"
 
 #include "kfcore/image_processor/error.hpp"
 #include "kfcore/image_processor/image_processor.hpp"
 #include "kfcore/tensorrt/error.hpp"
+#include "kfcore/yolo/tensorrt.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -63,7 +65,8 @@ void validate_options(const TensorRtVisionOptions& options)
 {
     if (options.max_engine_bytes == 0U || options.max_source_bytes == 0U ||
         options.max_tensor_bytes == 0U || options.max_output_bytes == 0U ||
-        options.max_palm_candidates == 0U || options.max_hands == 0U)
+        options.max_palm_candidates == 0U || options.max_hands == 0U ||
+        options.max_face_detections == 0U)
     {
         throw_resource("all CUDA resource limits must be positive");
     }
@@ -81,6 +84,12 @@ void validate_options(const TensorRtVisionOptions& options)
         options.hand_score_threshold < 0.0F || options.hand_score_threshold > 1.0F)
     {
         throw_invalid("model score thresholds must be finite within [0,1]");
+    }
+    if (!std::isfinite(options.face_detection_score_threshold) ||
+        options.face_detection_score_threshold < 0.0F ||
+        options.face_detection_score_threshold > 1.0F)
+    {
+        throw_invalid("face detection score threshold must be finite within [0,1]");
     }
 
     std::size_t largest_tensor = checked_multiply(
@@ -201,6 +210,33 @@ VisionModelErrorCode map_tensorrt_error(tensorrt::TensorRtErrorCode code)
     throw_vision(code, error.what());
 }
 
+VisionModelErrorCode map_yolo_error(yolo::YoloErrorCode code)
+{
+    using yolo::YoloErrorCode;
+    switch (code)
+    {
+    case YoloErrorCode::InvalidArgument:
+        return VisionModelErrorCode::InvalidArgument;
+    case YoloErrorCode::FileIo:
+    case YoloErrorCode::EngineDeserialize:
+        return VisionModelErrorCode::InvalidModelAsset;
+    case YoloErrorCode::EngineContractMismatch:
+        return VisionModelErrorCode::ModelContractMismatch;
+    case YoloErrorCode::ResourceLimitExceeded:
+        return VisionModelErrorCode::ResourceLimitExceeded;
+    case YoloErrorCode::TensorRtFailure:
+    case YoloErrorCode::CudaFailure:
+    case YoloErrorCode::TrackerAllocationFailure:
+        return VisionModelErrorCode::RuntimeFailure;
+    }
+    return VisionModelErrorCode::RuntimeFailure;
+}
+
+[[noreturn]] void rethrow_yolo(const yolo::YoloError& error)
+{
+    throw_vision(map_yolo_error(error.code()), error.what());
+}
+
 class UseGuard final
 {
 public:
@@ -224,6 +260,76 @@ private:
 };
 
 } // namespace
+
+struct TensorRtVisionInput::Impl final
+{
+    explicit Impl(const TensorRtVisionOptions& options)
+        : processor(image::CudaImageProcessor::create(processor_options(options)))
+    {
+    }
+
+    std::unique_ptr<image::CudaImageProcessor> processor;
+    std::atomic_flag                           in_use = ATOMIC_FLAG_INIT;
+};
+
+TensorRtVisionInput::TensorRtVisionInput(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+TensorRtVisionInput::~TensorRtVisionInput() = default;
+
+std::unique_ptr<TensorRtVisionInput> TensorRtVisionInput::create(
+    const TensorRtVisionOptions& options)
+{
+    validate_options(options);
+    try
+    {
+        return std::unique_ptr<TensorRtVisionInput>(
+            new TensorRtVisionInput(std::make_unique<Impl>(options)));
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        rethrow_image(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("shared frame input allocation failed");
+    }
+}
+
+VisionFrameView TensorRtVisionInput::prepare(const image::ImageView& source)
+{
+    if (!impl_)
+    {
+        throw_invalid("shared frame input state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const image::ImageView compute = detail::stage_host_or_borrow_cuda(
+            source, [this](const image::ImageView& host) {
+                return impl_->processor->stage(host);
+            });
+        return { source, compute };
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        rethrow_image(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("shared frame input preparation failed");
+    }
+}
 
 struct TensorRtHandBackend::Impl final
 {
@@ -295,7 +401,10 @@ HandFrame TensorRtHandBackend::infer(const image::ImageView& source)
         HandFrame result;
 
         const Clock::time_point palm_preprocess_started = Clock::now();
-        const image::ImageView staged = impl_->processor->stage(source);
+        const image::ImageView staged = detail::stage_host_or_borrow_cuda(
+            source, [this](const image::ImageView& host) {
+                return impl_->processor->stage(host);
+            });
         const image::LetterboxTransform letterbox = image::ImageProcessor::letterbox_transform(
             staged.width, staged.height, kPalmInputExtent, kPalmInputExtent);
         const image::TensorView palm_input = impl_->processor->process_affine(
@@ -399,6 +508,143 @@ HandFrame TensorRtHandBackend::infer(const image::ImageView& source)
     }
 }
 
+struct TensorRtFaceDetector::Impl final
+{
+    Impl(const std::filesystem::path& path, const TensorRtVisionOptions& options_value)
+        : options(options_value)
+    {
+        yolo::EngineOptions engine_options;
+        engine_options.device_id       = options.device_id;
+        engine_options.max_batch       = 1U;
+        engine_options.max_detections  = options.max_face_detections;
+        engine_options.max_input_bytes = options.max_tensor_bytes;
+        engine_options.max_output_bytes = options.max_output_bytes;
+        engine   = yolo::Engine::load(path, engine_options);
+        detector = engine->create_detector();
+    }
+
+    TensorRtVisionOptions                 options;
+    std::shared_ptr<const yolo::Engine>   engine;
+    std::unique_ptr<yolo::TensorRtDetector> detector;
+    std::atomic_flag                      in_use = ATOMIC_FLAG_INIT;
+};
+
+TensorRtFaceDetector::TensorRtFaceDetector(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+TensorRtFaceDetector::~TensorRtFaceDetector() = default;
+
+std::unique_ptr<TensorRtFaceDetector> TensorRtFaceDetector::load(
+    const std::filesystem::path& engine_path, const TensorRtVisionOptions& options)
+{
+    validate_options(options);
+    validate_model_asset(engine_path, "face detector", options.max_engine_bytes);
+    try
+    {
+        auto impl = std::make_unique<Impl>(engine_path, options);
+        return std::unique_ptr<TensorRtFaceDetector>(
+            new TensorRtFaceDetector(std::move(impl)));
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const yolo::YoloError& error)
+    {
+        rethrow_yolo(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("face detector allocation failed");
+    }
+}
+
+FaceDetectionResult TensorRtFaceDetector::infer(const image::ImageView& source)
+{
+    if (!impl_)
+    {
+        throw_invalid("face detector state is unavailable");
+    }
+    yolo::PixelFormat yolo_format = yolo::PixelFormat::Bgr8;
+    switch (source.pixel_format)
+    {
+    case image::PixelFormat::Bgr8:
+        yolo_format = yolo::PixelFormat::Bgr8;
+        break;
+    case image::PixelFormat::Rgb8:
+        yolo_format = yolo::PixelFormat::Rgb8;
+        break;
+    case image::PixelFormat::Nv12:
+        yolo_format = yolo::PixelFormat::Nv12;
+        break;
+    case image::PixelFormat::I420:
+        yolo_format = yolo::PixelFormat::I420;
+        break;
+    case image::PixelFormat::Nv21:
+        yolo_format = yolo::PixelFormat::Nv21;
+        break;
+    case image::PixelFormat::Yuy2:
+        yolo_format = yolo::PixelFormat::Yuy2;
+        break;
+    case image::PixelFormat::Uyvy:
+        yolo_format = yolo::PixelFormat::Uyvy;
+        break;
+    default:
+        throw_invalid(
+            "face detector requires BGR8, RGB8, NV12, I420, NV21, YUY2, or UYVY input");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const Clock::time_point started = Clock::now();
+        const yolo::ImageView view {
+            source.data,
+            source.width,
+            source.height,
+            source.row_stride,
+            yolo_format,
+            source.memory_kind == image::MemoryKind::Host
+                ? yolo::MemoryKind::Host
+                : yolo::MemoryKind::CudaDevice
+        };
+        const yolo::DetectionFrame detections = impl_->detector->detect(view);
+        FaceDetectionResult result;
+        for (const yolo::Detection& detection : detections.detections)
+        {
+            if (detection.class_id != 0 ||
+                detection.score < impl_->options.face_detection_score_threshold ||
+                (result.face.has_value() &&
+                 detection.score <= result.face->confidence))
+            {
+                continue;
+            }
+            result.face = FaceDetection {
+                { detection.box.left, detection.box.top,
+                  detection.box.right - detection.box.left,
+                  detection.box.bottom - detection.box.top },
+                detection.score
+            };
+        }
+        result.inference_ms = elapsed_ms(started);
+        result.total_ms     = result.inference_ms;
+        return result;
+    }
+    catch (const VisionModelError&)
+    {
+        throw;
+    }
+    catch (const yolo::YoloError& error)
+    {
+        rethrow_yolo(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("face detection allocation failed");
+    }
+}
+
 struct TensorRtFaceLandmarker::Impl final
 {
     Impl(const std::filesystem::path& path, const TensorRtVisionOptions& options_value)
@@ -469,7 +715,10 @@ FaceLandmarkResult TensorRtFaceLandmarker::infer(const image::ImageView& source,
         const Clock::time_point total_started = Clock::now();
         FaceLandmarkResult result;
         const Clock::time_point preprocess_started = Clock::now();
-        const image::ImageView staged = impl_->processor->stage(source);
+        const image::ImageView staged = detail::stage_host_or_borrow_cuda(
+            source, [this](const image::ImageView& host) {
+                return impl_->processor->stage(host);
+            });
         const detail::FaceRoi roi = detail::make_face_roi(
             face_box, kFaceLandmarkInputExtent);
         const image::TensorView input = impl_->processor->process_affine(

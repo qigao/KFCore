@@ -147,6 +147,40 @@ spec("CPU image processor")
         }
     }
 
+    it("converts NV21 VU chroma into BGR pixels")
+    {
+        const std::array<std::uint8_t, 6> nv21 = {
+            81, 81, 81, 81, 240, 90,
+        };
+        const ImageView view { nv21.data(), nv21.size(), 2, 2, 2,
+                               PixelFormat::Nv21, MemoryKind::Host };
+
+        const BgrImage bgr = CpuImageProcessor::copy_bgr(view, 1024);
+
+        check_eq_container(bgr.pixels,
+                           std::vector<std::uint8_t>({ 0, 0, 255, 0, 0, 255,
+                                                       0, 0, 255, 0, 0, 255 }));
+    }
+
+    it("converts packed YUY2 and UYVY 422 pairs into BGR pixels")
+    {
+        const std::array<std::uint8_t, 4> yuy2 = { 81, 90, 81, 240 };
+        const std::array<std::uint8_t, 4> uyvy = { 90, 81, 240, 81 };
+        const std::array<ImageView, 2> views = {
+            ImageView { yuy2.data(), yuy2.size(), 2, 1, 4,
+                        PixelFormat::Yuy2, MemoryKind::Host },
+            ImageView { uyvy.data(), uyvy.size(), 2, 1, 4,
+                        PixelFormat::Uyvy, MemoryKind::Host },
+        };
+
+        for (const ImageView& view : views)
+        {
+            const BgrImage bgr = CpuImageProcessor::copy_bgr(view, 1024);
+            check_eq_container(bgr.pixels,
+                               std::vector<std::uint8_t>({ 0, 0, 255, 0, 0, 255 }));
+        }
+    }
+
     it("mirrors packed NV12 in fused letterbox source coordinates")
     {
         const std::array<std::uint8_t, 12> nv12 = {

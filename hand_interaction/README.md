@@ -176,18 +176,20 @@ TensorRT CUDA backend 只提供同一种 `HandFrame`，因此使用同一套 can
 `hand_interaction_demo` 是可选的桌面示例，不改变已安装库的接口或依赖。数据流为：
 
 ```text
-USB camera -> Turbo Capture -> bounded latest-frame mailbox -> owning BGR image
+USB camera -> Turbo Capture -> bounded latest-frame mailbox -> owning native frame
            +-> CPU ONNX Runtime 或 TensorRT/ImageProcessor -> HandPipeline -> THIG --+
            +-> 可选 YOLOv12-face -> MediaPipe FaceMesh 468 点 -----------------------+-> HighGUI
 ```
 
 Capture 回调中的像素指针只在回调期间有效，因此示例在回调返回前复制一次。邮箱固定保留两个
 受 `--max-frame-bytes` 限制的 vector；推理落后时以最新帧替换未消费帧并增加 `coalesced`，不会
-让采集线程等待。BGR 图像由示例拥有，并同时借给显示和所选推理后端；TensorRT 后端再由现有
-ImageProcessor 上传和预处理。手部与人脸流程共享同一个只读 host BGR `ImageView`；当前
-TensorRT detector 与 landmarker 各自拥有 CUDA stream、staging 和 tensor buffer，因此这不是
-GPU tensor 级零拷贝共享。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
-`KFCore::hand_interaction` 的传递依赖。
+让采集线程等待。mailbox 中的 RGB24/NV12/I420 原生存储是唯一 host 事实源。CPU 模式的
+`VisionFrameView::{source,compute}` 都指向这一份只读 host 帧；TensorRT 模式每帧只由
+`TensorRtVisionInput::prepare()` 上传一次，手部、face detector 与 face landmarker 共享返回的
+CUDA `compute` view，手部 appearance 直接从 host YUV 采样。CUDA view 在下一次 `prepare()`
+时失效，所有 pipeline 均在此前同步完成。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
+`KFCore::hand_interaction` 的传递依赖。完成手部、FaceMesh 和 THIG 后才为 overlay/HighGUI
+物化 BGR；BGRA 因不是 ImageProcessor 输入格式，在 demo 边界显式转为 BGR。
 
 ### 构建
 
@@ -277,7 +279,7 @@ CPU 路径会分别报告两项。
 示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
 `R` 同时重置 tracker 与 THIG 状态，`Q`、Escape 或关闭窗口正常退出。
 
-启动时输出全部已启用模型的总加载耗时；窗口逐帧显示 Capture-to-BGR 转换、preprocess、Palm、landmark、
+启动时输出全部已启用模型的总加载耗时；窗口逐帧显示推理后的 Display-to-BGR 转换、preprocess、Palm、landmark、
 classifier、tracking、model 总计、THIG 和整条处理 pipeline 的耗时，以及
 FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh inference 与 face 总计，
 以及 `captured/consumed/coalesced/rejected` 计数。这些是当前帧和当前运行的诊断数据，不等同于

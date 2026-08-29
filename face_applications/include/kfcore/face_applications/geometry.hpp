@@ -2,12 +2,16 @@
 
 #include "kfcore/face_models/types.hpp"
 
-#include <opencv2/core.hpp>
-
 #include <array>
 
 namespace kfcore::face_applications
 {
+
+struct Point2f
+{
+    float x = 0.0F;
+    float y = 0.0F;
+};
 
 struct FaceBox
 {
@@ -17,37 +21,31 @@ struct FaceBox
     float bottom = 0.0F;
 };
 
-using FiveLandmarks = std::array<cv::Point2f, 5>;
+using FiveLandmarks = std::array<Point2f, 5>;
+
+struct AffineMatrix
+{
+    std::array<float, 6> values { 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F };
+};
 
 struct FaceTransform
 {
-    cv::Matx23f source_to_aligned;
-    cv::Matx23f aligned_to_source;
+    AffineMatrix source_to_aligned;
+    AffineMatrix aligned_to_source;
 };
 
-struct AlignedFace
-{
-    cv::Mat     image;
-    cv::Matx23f source_to_aligned;
-    cv::Matx23f aligned_to_source;
-};
-
-[[nodiscard]] cv::Point2f transform_point(const cv::Matx23f& transform,
-                                          const cv::Point2f& point);
+[[nodiscard]] Point2f transform_point(const AffineMatrix& transform, Point2f point);
+[[nodiscard]] AffineMatrix inverse_affine(const AffineMatrix& transform);
 [[nodiscard]] FaceTransform face68_transform(const FaceBox& box);
-[[nodiscard]] AlignedFace crop_face68(const cv::Mat& bgr_image, const FaceBox& box);
 [[nodiscard]] kfcore::face_models::Face68Result map_face68_to_source(
     const kfcore::face_models::Face68Result& landmarks,
-    const cv::Matx23f& aligned_to_source);
+    const AffineMatrix& aligned_to_source);
 [[nodiscard]] FiveLandmarks extract_five_landmarks(
     const kfcore::face_models::Face68Result& landmarks);
-[[nodiscard]] cv::Matx23f similarity_transform(const FiveLandmarks& source,
-                                               const FiveLandmarks& target);
+[[nodiscard]] AffineMatrix similarity_transform(const FiveLandmarks& source,
+                                                const FiveLandmarks& target);
 [[nodiscard]] FaceTransform alignment_transform(const FiveLandmarks& source,
                                                 const FiveLandmarks& target);
-[[nodiscard]] AlignedFace align_face(const cv::Mat& bgr_image,
-                                     const FiveLandmarks& source,
-                                     const FiveLandmarks& target, int extent);
 
 [[nodiscard]] const FiveLandmarks& arcface_template() noexcept;
 [[nodiscard]] const FiveLandmarks& inswapper_template() noexcept;

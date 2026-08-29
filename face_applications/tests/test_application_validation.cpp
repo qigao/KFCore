@@ -115,5 +115,13 @@ spec("TensorRT face application validation")
     {
         check_false(std::is_copy_constructible_v<TensorRtFaceSwapApplication>);
         check_false(std::is_copy_assignable_v<TensorRtFaceSwapApplication>);
+        using AnalyzeSignature = FaceAnalysis (TensorRtFaceSwapApplication::*)(
+            const kfcore::image::ImageView&);
+        using SwapSignature = kfcore::image::BgrImage (TensorRtFaceSwapApplication::*)(
+            const kfcore::image::ImageView&, const kfcore::image::ImageView&);
+        check_true((std::is_same_v<decltype(&TensorRtFaceSwapApplication::analyze),
+                                   AnalyzeSignature>));
+        check_true((std::is_same_v<decltype(&TensorRtFaceSwapApplication::swap),
+                                   SwapSignature>));
     }
 }

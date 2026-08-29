@@ -140,12 +140,19 @@ public:
 
     // Calls are synchronous and non-reentrant. Inputs are borrowed and never mutated.
     [[nodiscard]] CpuFaceAnalysis analyze(const kfcore::image::BgrImage& image);
+    [[nodiscard]] CpuFaceAnalysis analyze(const kfcore::image::ImageView& image);
     [[nodiscard]] kfcore::image::BgrImage swap(
         const kfcore::image::BgrImage& source,
         const kfcore::image::BgrImage& target);
+    [[nodiscard]] kfcore::image::BgrImage swap(
+        const kfcore::image::ImageView& source,
+        const kfcore::image::ImageView& target);
     [[nodiscard]] ProfiledCpuFaceSwapResult swap_profiled(
         const kfcore::image::BgrImage& source,
         const kfcore::image::BgrImage& target);
+    [[nodiscard]] ProfiledCpuFaceSwapResult swap_profiled(
+        const kfcore::image::ImageView& source,
+        const kfcore::image::ImageView& target);
 
 private:
     struct Impl;

@@ -1,6 +1,7 @@
 #include "face_swap_cli.hpp"
 #include "face_swap_demo_metrics.hpp"
 #include "face_swap_demo_ui.hpp"
+#include "opencv_image_adapter.hpp"
 
 #include "kfcore/face_applications/tensorrt.hpp"
 
@@ -39,11 +40,19 @@ cv::Mat read_bgr(const std::string& path, const char* role)
     return image;
 }
 
+void require_valid_output(const kfcore::image::BgrImage& output, const cv::Mat& target)
+{
+    if (output.width != target.cols || output.height != target.rows || output.empty())
+    {
+        fail("swap returned an invalid output image");
+    }
+}
+
 void require_valid_output(const cv::Mat& output, const cv::Mat& target)
 {
     if (output.empty() || output.type() != CV_8UC3 || output.size() != target.size())
     {
-        fail("swap returned an invalid output image");
+        fail("display output image is invalid");
     }
 }
 
@@ -113,9 +122,12 @@ int main(int argc, char** argv)
         const auto run_swap = [&]() {
             show(source, target, result, "Running TensorRT face swap...", timing_rows,
                  timing_history.sample_count());
-            auto profiled = application->swap_profiled(source, target);
+            auto profiled = application->swap_profiled(
+                kfcore::face_applications::demo::borrowed_bgr(source, "source"),
+                kfcore::face_applications::demo::borrowed_bgr(target, "target"));
             require_valid_output(profiled.image, target);
-            result = std::move(profiled.image);
+            result = kfcore::face_applications::demo::borrowed_bgr(
+                         profiled.image, "result").clone();
             status = completed_status(profiled.timings.total);
             timing_history.add(profiled.timings);
             timing_rows = timing_history.rows();

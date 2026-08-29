@@ -57,6 +57,37 @@ std::optional<std::size_t> packed_frame_bytes(int width, int height, int format)
     }
 }
 
+bool inference_view_compatible(int format) noexcept
+{
+    return format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24 ||
+           format == TURBO_VIDEO_CAPTURE_FORMAT_NV12 ||
+           format == TURBO_VIDEO_CAPTURE_FORMAT_I420;
+}
+
+image::ImageView inference_view(const CapturedFrame& frame)
+{
+    const auto expected = packed_frame_bytes(frame.width, frame.height, frame.format);
+    if (!inference_view_compatible(frame.format) || !expected.has_value() ||
+        frame.pixels.empty() || frame.pixels.size() != *expected)
+    {
+        throw std::invalid_argument(
+            "capture inference view requires packed RGB24, NV12, or I420 storage");
+    }
+    image::PixelFormat pixel_format = image::PixelFormat::Rgb8;
+    if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_NV12)
+    {
+        pixel_format = image::PixelFormat::Nv12;
+    }
+    else if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_I420)
+    {
+        pixel_format = image::PixelFormat::I420;
+    }
+    const std::size_t row_stride = static_cast<std::size_t>(frame.width) *
+        (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24 ? 3U : 1U);
+    return { frame.pixels.data(), frame.pixels.size(), frame.width, frame.height,
+             row_stride, pixel_format, image::MemoryKind::Host };
+}
+
 LatestFrameMailbox::LatestFrameMailbox(std::size_t max_frame_bytes)
     : max_frame_bytes_(max_frame_bytes)
 {

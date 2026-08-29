@@ -84,6 +84,38 @@ spec("hand interaction demo capture mailbox")
                                     TURBO_VIDEO_CAPTURE_FORMAT_I420, 0U));
     }
 
+    it("borrows inference-compatible capture storage without copying")
+    {
+        const auto verify = [](int format, kfcore::image::PixelFormat expected_format,
+                               int width, int height) {
+            demo::CapturedFrame frame;
+            frame.width = width;
+            frame.height = height;
+            frame.format = format;
+            frame.pixels.resize(*demo::packed_frame_bytes(width, height, format));
+            const kfcore::image::ImageView view = demo::inference_view(frame);
+            check(view.data == frame.pixels.data());
+            check_equal(view.byte_size, frame.pixels.size());
+            check_equal(view.row_stride,
+                        static_cast<std::size_t>(format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24
+                                                     ? width * 3
+                                                     : width));
+            check(view.pixel_format == expected_format);
+            check(view.memory_kind == kfcore::image::MemoryKind::Host);
+        };
+
+        verify(TURBO_VIDEO_CAPTURE_FORMAT_RGB24, kfcore::image::PixelFormat::Rgb8, 2, 2);
+        verify(TURBO_VIDEO_CAPTURE_FORMAT_NV12, kfcore::image::PixelFormat::Nv12, 2, 2);
+        verify(TURBO_VIDEO_CAPTURE_FORMAT_I420, kfcore::image::PixelFormat::I420, 2, 2);
+
+        demo::CapturedFrame bgra;
+        bgra.width = 2;
+        bgra.height = 2;
+        bgra.format = TURBO_VIDEO_CAPTURE_FORMAT_BGRA;
+        bgra.pixels.resize(*demo::packed_frame_bytes(2, 2, bgra.format));
+        check_throws_as(demo::inference_view(bgra), std::invalid_argument);
+    }
+
     it("returns timeout when no frame is available")
     {
         demo::LatestFrameMailbox mailbox(16U);

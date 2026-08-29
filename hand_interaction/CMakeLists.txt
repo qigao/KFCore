@@ -64,8 +64,7 @@ if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES)
     target_compile_definitions(hand_interaction_demo PRIVATE
       KFCORE_HAND_DEMO_HAS_TENSORRT=1)
     target_link_libraries(hand_interaction_demo PRIVATE
-      KFCore::vision_models_tensorrt
-      KFCore::tensorrt_yolo)
+      KFCore::vision_models_tensorrt)
   endif()
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
@@ -113,6 +112,7 @@ if(BUILD_TESTS)
     target_include_directories(test_hand_interaction_demo_capture PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/examples)
     target_link_libraries(test_hand_interaction_demo_capture PRIVATE
+      KFCore::image_core
       TurboParser::Capture
       TurboUtils::Core
       TurboUtils::TinyTest)

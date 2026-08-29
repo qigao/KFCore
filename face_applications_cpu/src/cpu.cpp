@@ -582,6 +582,34 @@ CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::BgrImage& 
     }
 }
 
+CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::ImageView& image)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        const kfcore::image::BgrImage owned = kfcore::image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_image_bytes);
+        return impl_->analyze_internal(owned, nullptr);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "CPU face analysis allocation failed");
+    }
+}
+
 kfcore::image::BgrImage OnnxFaceSwapApplication::swap(
     const kfcore::image::BgrImage& source,
     const kfcore::image::BgrImage& target)
@@ -590,6 +618,40 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap(
     try
     {
         return swap_internal(source, target, nullptr);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "CPU face swap allocation failed");
+    }
+}
+
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap(
+    const kfcore::image::ImageView& source,
+    const kfcore::image::ImageView& target)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        const kfcore::image::BgrImage source_bgr =
+            kfcore::image::CpuImageProcessor::copy_bgr(
+                source, impl_->options.max_image_bytes);
+        const kfcore::image::BgrImage target_bgr =
+            kfcore::image::CpuImageProcessor::copy_bgr(
+                target, impl_->options.max_image_bytes);
+        return swap_internal(source_bgr, target_bgr, nullptr);
     }
     catch (const CpuFaceApplicationError&)
     {
@@ -619,6 +681,57 @@ ProfiledCpuFaceSwapResult OnnxFaceSwapApplication::swap_profiled(
     {
         ProfiledCpuFaceSwapResult result;
         result.image = swap_internal(source, target, &result.timings);
+        return result;
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "profiled CPU face swap allocation failed");
+    }
+}
+
+ProfiledCpuFaceSwapResult OnnxFaceSwapApplication::swap_profiled(
+    const kfcore::image::ImageView& source,
+    const kfcore::image::ImageView& target)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        const auto source_started = std::chrono::steady_clock::now();
+        const kfcore::image::BgrImage source_bgr =
+            kfcore::image::CpuImageProcessor::copy_bgr(
+                source, impl_->options.max_image_bytes);
+        const CpuFaceSwapDuration source_conversion =
+            std::chrono::duration_cast<CpuFaceSwapDuration>(
+                std::chrono::steady_clock::now() - source_started);
+
+        const auto target_started = std::chrono::steady_clock::now();
+        const kfcore::image::BgrImage target_bgr =
+            kfcore::image::CpuImageProcessor::copy_bgr(
+                target, impl_->options.max_image_bytes);
+        const CpuFaceSwapDuration target_conversion =
+            std::chrono::duration_cast<CpuFaceSwapDuration>(
+                std::chrono::steady_clock::now() - target_started);
+
+        ProfiledCpuFaceSwapResult result;
+        result.image = swap_internal(source_bgr, target_bgr, &result.timings);
+        result.timings.source_analysis.initial_staging += source_conversion;
+        result.timings.source_analysis.total += source_conversion;
+        result.timings.target_analysis.initial_staging += target_conversion;
+        result.timings.target_analysis.total += target_conversion;
+        result.timings.total += source_conversion + target_conversion;
         return result;
     }
     catch (const CpuFaceApplicationError&)

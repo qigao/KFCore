@@ -53,12 +53,16 @@ public:
     create(const CudaImageProcessorOptions& options = {});
 
     // Calls on one processor are synchronous and non-reentrant.
-    // Synchronously copies one image into owned packed CUDA storage. The returned image view is
+    // Synchronously copies one BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY image into owned packed CUDA
+    // storage. The
+    // returned image view preserves the pixel format and is
     // borrowed until the next stage call or processor destruction; process_affine does not
     // invalidate it.
     [[nodiscard]] ImageView stage(const ImageView& source);
 
-    // Synchronously produces an owned CUDA NCHW tensor. The returned view is borrowed until the
+    // Synchronously produces an owned CUDA NCHW tensor from
+    // BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY. The returned
+    // view is borrowed until the
     // next process_affine call or processor destruction. The source is borrowed only for this call.
     [[nodiscard]] TensorView
     process_affine(const ImageView& source, std::int32_t destination_width,
@@ -73,10 +77,12 @@ public:
         std::int32_t batch, std::int32_t channels, std::int32_t height, std::int32_t width,
         TensorElementType element_type = TensorElementType::Float32);
 
-    // Affinely samples an RGB NCHW tensor and FP32 one-channel alpha tensor into a CUDA RGB/BGR
-    // base image. The transform maps destination image coordinates to aligned tensor coordinates.
-    // The returned packed CUDA image is borrowed until the next composite_affine call or processor
-    // destruction. Passing the previous composite result as base is supported.
+    // Affinely samples an RGB NCHW tensor and FP32 one-channel alpha tensor into a CUDA
+    // BGR/RGB/NV12/I420/NV21/YUY2/UYVY base image. The transform maps destination image
+    // coordinates to aligned
+    // tensor coordinates. The returned image is always packed CUDA BGR8 and is borrowed until the
+    // next composite_affine call or processor destruction. Passing the previous composite result
+    // as base is supported.
     [[nodiscard]] ImageView composite_affine(
         const ImageView& base, const TensorView& aligned_rgb, const TensorView& aligned_alpha,
         const AffineTransform& transform,

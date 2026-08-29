@@ -3,9 +3,8 @@
 #include "kfcore/face_applications/geometry.hpp"
 #include "kfcore/face_models/inswapper_embedding.hpp"
 #include "kfcore/face_models/tensorrt.hpp"
+#include "kfcore/image_processor/types.hpp"
 #include "kfcore/yolo/tensorrt.hpp"
-
-#include <opencv2/core.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -85,7 +84,7 @@ struct FaceSwapTimingReport
 
 struct ProfiledFaceSwapResult
 {
-    cv::Mat image;
+    kfcore::image::BgrImage image;
     FaceSwapTimingReport timings;
 };
 
@@ -104,18 +103,23 @@ public:
     [[nodiscard]] static std::unique_ptr<TensorRtFaceSwapApplication>
     load(const FaceApplicationModelPaths& paths, const FaceSwapOptions& options = {});
 
-    // Calls are synchronous and non-reentrant. Input images are borrowed and never mutated.
-    [[nodiscard]] FaceAnalysis analyze(const cv::Mat& bgr_image);
-    [[nodiscard]] cv::Mat swap(const cv::Mat& source_bgr, const cv::Mat& target_bgr);
-    [[nodiscard]] ProfiledFaceSwapResult swap_profiled(const cv::Mat& source_bgr,
-                                                        const cv::Mat& target_bgr);
+    // Calls are synchronous and non-reentrant. BGR8, RGB8, NV12, I420, NV21, YUY2 and UYVY inputs
+    // are borrowed and never mutated. Host and same-device CUDA inputs are supported.
+    [[nodiscard]] FaceAnalysis analyze(const kfcore::image::ImageView& image);
+    [[nodiscard]] kfcore::image::BgrImage swap(
+        const kfcore::image::ImageView& source,
+        const kfcore::image::ImageView& target);
+    [[nodiscard]] ProfiledFaceSwapResult swap_profiled(
+        const kfcore::image::ImageView& source,
+        const kfcore::image::ImageView& target);
 
 private:
     struct Impl;
     explicit TensorRtFaceSwapApplication(std::unique_ptr<Impl> impl);
-    [[nodiscard]] cv::Mat swap_internal(const cv::Mat& source_bgr,
-                                        const cv::Mat& target_bgr,
-                                        FaceSwapTimingReport* timings);
+    [[nodiscard]] kfcore::image::BgrImage swap_internal(
+        const kfcore::image::ImageView& source,
+        const kfcore::image::ImageView& target,
+        FaceSwapTimingReport* timings);
     std::unique_ptr<Impl> impl_;
 };
 

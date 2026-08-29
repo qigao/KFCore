@@ -176,6 +176,7 @@
             "cacheVariables": {
                 "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
                 "KFCORE_BUILD_FACE_MODELS": "ON",
+                "KFCORE_BUILD_YOLO_OPENCV": "OFF",
                 "KFCORE_BUILD_FACE_APPLICATIONS": "ON",
                 "KFCORE_BUILD_FACE_APPLICATION_EXAMPLES": "ON"
             }
@@ -220,12 +221,13 @@
         },
         {
             "name": "win-vision-models-tensorrt-release-user",
-            "displayName": "Vision Models TensorRT CUDA Release Build (Windows, User)",
+            "displayName": "Vision Models CPU + TensorRT Release Build (Windows, User)",
             "inherits": "win-release-user",
             "binaryDir": "${sourceDir}/build/Msvc-Vision-TensorRT",
             "environment": {
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime-gpu",
                 "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
-                "PATH": "$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Vision-TensorRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Vision-TensorRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "cacheVariables": {
                 "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
@@ -233,12 +235,18 @@
                 "KFCORE_BUILD_VISION_MODELS": "ON",
                 "KFCORE_BUILD_THIG": "ON",
                 "KFCORE_BUILD_HAND_INTERACTION": "ON",
+                "KFCORE_BUILD_YOLO_TRACKING": "ON",
+                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
+                "KFCORE_BUILD_VISION_MODELS_CPU": "ON",
+                "KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS": "ON",
                 "KFCORE_BUILD_VISION_MODELS_TENSORRT": "ON",
                 "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "ON",
+                "KFCORE_VISION_MODEL_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
                 "KFCORE_VISION_MODEL_TEST_ENGINE_PALM": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_PALM}",
                 "KFCORE_VISION_MODEL_TEST_ENGINE_HAND": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_HAND}",
                 "KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}",
                 "KFCORE_VISION_MODEL_TEST_ENGINE_FACE": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_FACE}",
+                "KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}",
                 "KFCORE_VISION_MODEL_TEST_HAND_IMAGE": "C:/projects/cpp/learnopencv/HandPose/hand.jpg",
                 "KFCORE_VISION_MODEL_TEST_FACE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg"
             }

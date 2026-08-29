@@ -1,5 +1,7 @@
 #include "kfcore/image_processor/image_processor.hpp"
 
+#include "image_layout.hpp"
+
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
@@ -58,10 +60,105 @@ namespace
     void validate_preprocess_source_format(PixelFormat format)
     {
         if (format != PixelFormat::Rgb8 && format != PixelFormat::Bgr8 &&
-            format != PixelFormat::Nv12 && format != PixelFormat::I420)
+            format != PixelFormat::Nv12 && format != PixelFormat::I420 &&
+            format != PixelFormat::Nv21 && format != PixelFormat::Yuy2 &&
+            format != PixelFormat::Uyvy)
         {
             throw_invalid(
                 "CUDA preprocessing stage: source pixel format is unsupported");
+        }
+    }
+
+    void pack_host_source(const ImageView& source, const detail::PackedImageLayout& layout,
+                          void* destination)
+    {
+        auto* packed = static_cast<std::byte*>(destination);
+        const auto* input = static_cast<const std::byte*>(source.data);
+        for (std::int32_t row = 0; row < source.height; ++row)
+        {
+            std::memcpy(packed + static_cast<std::size_t>(row) * layout.row_bytes,
+                        input + static_cast<std::size_t>(row) * source.row_stride,
+                        layout.row_bytes);
+        }
+        if (source.pixel_format == PixelFormat::Rgb8 ||
+            source.pixel_format == PixelFormat::Bgr8 ||
+            source.pixel_format == PixelFormat::Yuy2 ||
+            source.pixel_format == PixelFormat::Uyvy)
+        {
+            return;
+        }
+
+        const std::size_t height = static_cast<std::size_t>(source.height);
+        const std::byte* source_chroma = input + source.row_stride * height;
+        std::byte* packed_chroma = packed + layout.row_bytes * height;
+        if (source.pixel_format == PixelFormat::Nv12 ||
+            source.pixel_format == PixelFormat::Nv21)
+        {
+            for (std::size_t row = 0U; row < layout.chroma_rows; ++row)
+            {
+                std::memcpy(packed_chroma + row * layout.chroma_row_bytes,
+                            source_chroma + row * source.row_stride,
+                            layout.chroma_row_bytes);
+            }
+            return;
+        }
+
+        const std::size_t source_chroma_stride = source.row_stride / 2U;
+        for (std::size_t plane = 0U; plane < 2U; ++plane)
+        {
+            const std::byte* source_plane =
+                source_chroma + plane * source_chroma_stride * layout.chroma_rows;
+            std::byte* packed_plane =
+                packed_chroma + plane * layout.chroma_row_bytes * layout.chroma_rows;
+            for (std::size_t row = 0U; row < layout.chroma_rows; ++row)
+            {
+                std::memcpy(packed_plane + row * layout.chroma_row_bytes,
+                            source_plane + row * source_chroma_stride,
+                            layout.chroma_row_bytes);
+            }
+        }
+    }
+
+    void copy_device_source(const ImageView& source, const detail::PackedImageLayout& layout,
+                            void* destination, cudaStream_t stream)
+    {
+        const auto* input = static_cast<const std::byte*>(source.data);
+        auto* packed = static_cast<std::byte*>(destination);
+        const std::size_t height = static_cast<std::size_t>(source.height);
+        check_cuda(cudaMemcpy2DAsync(packed, layout.row_bytes, input, source.row_stride,
+                                     layout.row_bytes, height, cudaMemcpyDeviceToDevice, stream),
+                   "cudaMemcpy2DAsync", "CUDA image staging luma/RGB copy");
+        if (source.pixel_format == PixelFormat::Rgb8 ||
+            source.pixel_format == PixelFormat::Bgr8 ||
+            source.pixel_format == PixelFormat::Yuy2 ||
+            source.pixel_format == PixelFormat::Uyvy)
+        {
+            return;
+        }
+
+        const std::byte* source_chroma = input + source.row_stride * height;
+        std::byte* packed_chroma = packed + layout.row_bytes * height;
+        if (source.pixel_format == PixelFormat::Nv12 ||
+            source.pixel_format == PixelFormat::Nv21)
+        {
+            check_cuda(cudaMemcpy2DAsync(
+                           packed_chroma, layout.chroma_row_bytes, source_chroma,
+                           source.row_stride, layout.chroma_row_bytes, layout.chroma_rows,
+                           cudaMemcpyDeviceToDevice, stream),
+                       "cudaMemcpy2DAsync", "CUDA image staging NV12/NV21 chroma copy");
+            return;
+        }
+
+        const std::size_t source_chroma_stride = source.row_stride / 2U;
+        for (std::size_t plane = 0U; plane < 2U; ++plane)
+        {
+            check_cuda(cudaMemcpy2DAsync(
+                           packed_chroma + plane * layout.chroma_row_bytes * layout.chroma_rows,
+                           layout.chroma_row_bytes,
+                           source_chroma + plane * source_chroma_stride * layout.chroma_rows,
+                           source_chroma_stride, layout.chroma_row_bytes, layout.chroma_rows,
+                           cudaMemcpyDeviceToDevice, stream),
+                       "cudaMemcpy2DAsync", "CUDA image staging I420 chroma copy");
         }
     }
 
@@ -198,31 +295,55 @@ namespace
                                   PixelFormat source_format, float& red,
                                   float& green, float& blue)
     {
-        const std::size_t source_y = static_cast<std::size_t>(y);
-        const std::size_t source_x = static_cast<std::size_t>(x);
-        const std::size_t y_storage =
-            source_stride * static_cast<std::size_t>(source_height);
-        const int y_value = source[source_y * source_stride + source_x];
+        int y_value = 0;
         int u_value = 0;
         int v_value = 0;
-        if (source_format == PixelFormat::Nv12)
+        if (source_format == PixelFormat::Yuy2 ||
+            source_format == PixelFormat::Uyvy)
         {
-            const std::size_t uv_offset = y_storage +
-                static_cast<std::size_t>(y / 2) * source_stride +
-                static_cast<std::size_t>(x / 2) * 2U;
-            u_value = source[uv_offset];
-            v_value = source[uv_offset + 1U];
+            const std::uint8_t* pair = source + static_cast<std::size_t>(y) * source_stride +
+                                       static_cast<std::size_t>(x / 2) * 4U;
+            if (source_format == PixelFormat::Yuy2)
+            {
+                y_value = pair[(x & 1) == 0 ? 0 : 2];
+                u_value = pair[1];
+                v_value = pair[3];
+            }
+            else
+            {
+                y_value = pair[(x & 1) == 0 ? 1 : 3];
+                u_value = pair[0];
+                v_value = pair[2];
+            }
         }
         else
         {
-            const std::size_t chroma_stride = source_stride / 2U;
-            const std::size_t chroma_rows =
-                static_cast<std::size_t>(source_height) / 2U;
-            const std::size_t chroma_offset =
-                static_cast<std::size_t>(y / 2) * chroma_stride +
-                static_cast<std::size_t>(x / 2);
-            u_value = source[y_storage + chroma_offset];
-            v_value = source[y_storage + chroma_stride * chroma_rows + chroma_offset];
+            const std::size_t source_y = static_cast<std::size_t>(y);
+            const std::size_t source_x = static_cast<std::size_t>(x);
+            const std::size_t y_storage =
+                source_stride * static_cast<std::size_t>(source_height);
+            y_value = source[source_y * source_stride + source_x];
+            if (source_format == PixelFormat::Nv12 ||
+                source_format == PixelFormat::Nv21)
+            {
+                const std::size_t uv_offset = y_storage +
+                    static_cast<std::size_t>(y / 2) * source_stride +
+                    static_cast<std::size_t>(x / 2) * 2U;
+                const bool uv_order = source_format == PixelFormat::Nv12;
+                u_value = source[uv_offset + (uv_order ? 0U : 1U)];
+                v_value = source[uv_offset + (uv_order ? 1U : 0U)];
+            }
+            else
+            {
+                const std::size_t chroma_stride = source_stride / 2U;
+                const std::size_t chroma_rows =
+                    static_cast<std::size_t>(source_height) / 2U;
+                const std::size_t chroma_offset =
+                    static_cast<std::size_t>(y / 2) * chroma_stride +
+                    static_cast<std::size_t>(x / 2);
+                u_value = source[y_storage + chroma_offset];
+                v_value = source[y_storage + chroma_stride * chroma_rows + chroma_offset];
+            }
         }
         const int c = max(0, y_value - 16);
         const int d = u_value - 128;
@@ -241,7 +362,9 @@ namespace
         x                     = max(0, min(x, source_width - 1));
         y                     = max(0, min(y, source_height - 1));
         const int rgb_channel = rgb_channel_for_output(output_channel, output_format);
-        if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420)
+        if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420 ||
+            source_format == PixelFormat::Nv21 || source_format == PixelFormat::Yuy2 ||
+            source_format == PixelFormat::Uyvy)
         {
             float red = 0.0F;
             float green = 0.0F;
@@ -390,7 +513,9 @@ namespace
                 static_cast<int>(pixel_index % static_cast<std::size_t>(destination_width));
             const int y =
                 static_cast<int>(pixel_index / static_cast<std::size_t>(destination_width));
-            if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420)
+            if (source_format == PixelFormat::Nv12 || source_format == PixelFormat::I420 ||
+                source_format == PixelFormat::Nv21 || source_format == PixelFormat::Yuy2 ||
+                source_format == PixelFormat::Uyvy)
             {
                 float rgb[3] {};
                 if (!bilinear_yuv_rgb(source, source_stride, transform, x, y,
@@ -715,18 +840,18 @@ namespace
                                              0.0F),
                                       1.0F) *
                                 strength;
-            const std::size_t base_offset =
-                static_cast<std::size_t>(y) * base_stride + static_cast<std::size_t>(x) * 3U;
             const std::size_t output_offset =
                 static_cast<std::size_t>(y) * destination_stride +
                 static_cast<std::size_t>(x) * 3U;
             for (int channel = 0; channel < 3; ++channel)
             {
-                const int rgb_channel = base_format == PixelFormat::Bgr8 ? 2 - channel : channel;
+                const int rgb_channel = 2 - channel;
                 const float foreground = bilinear_tensor_channel(
                     aligned_rgb, aligned_width, aligned_height, source_x, source_y, rgb_channel,
                     input_range);
-                const float background = static_cast<float>(base[base_offset + channel]);
+                const float background = pixel_channel(
+                    base, base_stride, destination_width, destination_height, x, y, channel,
+                    base_format, PixelFormat::Bgr8);
                 const float value = alpha * foreground + (1.0F - alpha) * background;
                 destination[output_offset + channel] = static_cast<std::uint8_t>(
                     fminf(fmaxf(value, 0.0F), 255.0F));
@@ -942,11 +1067,21 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
         {
             source        = reinterpret_cast<const std::uint8_t*>(staged_device_bytes +
                                                                   image_plan.staging_offset);
-            source_stride =
-                image.pixel_format == PixelFormat::Nv12 ||
-                        image.pixel_format == PixelFormat::I420
-                    ? static_cast<std::size_t>(image.width)
-                    : static_cast<std::size_t>(image.width) * 3U;
+            if (image.pixel_format == PixelFormat::Nv12 ||
+                image.pixel_format == PixelFormat::I420 ||
+                image.pixel_format == PixelFormat::Nv21)
+            {
+                source_stride = static_cast<std::size_t>(image.width);
+            }
+            else if (image.pixel_format == PixelFormat::Yuy2 ||
+                     image.pixel_format == PixelFormat::Uyvy)
+            {
+                source_stride = static_cast<std::size_t>(image.width) * 2U;
+            }
+            else
+            {
+                source_stride = static_cast<std::size_t>(image.width) * 3U;
+            }
         }
         else
         {
@@ -1091,7 +1226,7 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
     {
         throw_invalid("CUDA image staging stage: processor state is unavailable");
     }
-    validate_pixel_format(source.pixel_format, "staging source");
+    validate_preprocess_source_format(source.pixel_format);
     if (source.memory_kind != MemoryKind::Host && source.memory_kind != MemoryKind::CudaDevice)
     {
         throw_invalid("CUDA image staging stage: source memory kind is unsupported");
@@ -1100,24 +1235,14 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
     {
         throw_invalid("CUDA image staging stage: pointer and dimensions must be valid");
     }
-    const std::size_t row_bytes =
-        checked_multiply(static_cast<std::size_t>(source.width), 3U, "staging source row");
-    if (source.row_stride < row_bytes)
-    {
-        throw_invalid("CUDA image staging stage: source row stride is too small");
-    }
-    const std::size_t source_span =
-        checked_add(checked_multiply(static_cast<std::size_t>(source.height - 1), source.row_stride,
-                                     "staging source span"),
-                    row_bytes, "staging source span");
-    if (source_span > source.byte_size)
+    const detail::PackedImageLayout layout =
+        detail::packed_image_layout(source, "CUDA image staging");
+    if (layout.source_span > source.byte_size)
     {
         throw_invalid("CUDA image staging stage: source capacity is too small");
     }
-    const std::size_t packed_bytes = checked_multiply(
-        row_bytes, static_cast<std::size_t>(source.height), "staging packed source");
-    if (source_span > impl_->options.max_source_bytes ||
-        packed_bytes > impl_->options.max_source_bytes)
+    if (layout.source_span > impl_->options.max_source_bytes ||
+        layout.packed_bytes > impl_->options.max_source_bytes)
     {
         throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
                                   "CUDA image staging stage: source limit exceeded");
@@ -1138,31 +1263,23 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
             validate_device_pointer(source.data, impl_->options.device_id,
                                     "staging source validation");
         }
-        impl_->device_source.reserve(packed_bytes, impl_->options.max_source_bytes);
-        if (source.data != impl_->device_source.data() || source.row_stride != row_bytes)
+        impl_->device_source.reserve(layout.packed_bytes, impl_->options.max_source_bytes);
+        if (source.data != impl_->device_source.data() ||
+            source.row_stride != layout.row_bytes)
         {
             if (source.memory_kind == MemoryKind::Host)
             {
-                impl_->pinned_source.reserve(packed_bytes, impl_->options.max_source_bytes);
-                auto*       packed = static_cast<std::byte*>(impl_->pinned_source.data());
-                const auto* input  = static_cast<const std::byte*>(source.data);
-                for (std::int32_t row = 0; row < source.height; ++row)
-                {
-                    std::memcpy(packed + static_cast<std::size_t>(row) * row_bytes,
-                                input + static_cast<std::size_t>(row) * source.row_stride,
-                                row_bytes);
-                }
+                impl_->pinned_source.reserve(layout.packed_bytes,
+                                             impl_->options.max_source_bytes);
+                pack_host_source(source, layout, impl_->pinned_source.data());
                 check_cuda(cudaMemcpyAsync(impl_->device_source.data(), impl_->pinned_source.data(),
-                                           packed_bytes, cudaMemcpyHostToDevice, impl_->stream),
+                                           layout.packed_bytes, cudaMemcpyHostToDevice,
+                                           impl_->stream),
                            "cudaMemcpyAsync", "CUDA image staging upload");
             }
             else
             {
-                check_cuda(cudaMemcpy2DAsync(impl_->device_source.data(), row_bytes, source.data,
-                                             source.row_stride, row_bytes,
-                                             static_cast<std::size_t>(source.height),
-                                             cudaMemcpyDeviceToDevice, impl_->stream),
-                           "cudaMemcpy2DAsync", "CUDA image staging copy");
+                copy_device_source(source, layout, impl_->device_source.data(), impl_->stream);
             }
             work_pending = true;
             check_cuda(cudaStreamSynchronize(impl_->stream), "cudaStreamSynchronize",
@@ -1175,10 +1292,10 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
                        "CUDA image staging device restoration");
         }
         return { impl_->device_source.data(),
-                 packed_bytes,
+                 layout.packed_bytes,
                  source.width,
                  source.height,
-                 row_bytes,
+                 layout.row_bytes,
                  source.pixel_format,
                  MemoryKind::CudaDevice };
     }
@@ -1208,7 +1325,7 @@ TensorView CudaImageProcessor::process_affine(const ImageView&         source,
         throw_invalid("CUDA affine preprocessing stage: processor state is unavailable");
     }
     validate_options(options);
-    validate_pixel_format(source.pixel_format, "affine source");
+    validate_preprocess_source_format(source.pixel_format);
     if (source.memory_kind != MemoryKind::Host && source.memory_kind != MemoryKind::CudaDevice)
     {
         throw_invalid("CUDA affine preprocessing stage: source memory kind is unsupported");
@@ -1226,21 +1343,14 @@ TensorView CudaImageProcessor::process_affine(const ImageView&         source,
         }
     }
 
-    const std::size_t source_row_bytes =
-        checked_multiply(static_cast<std::size_t>(source.width), 3U, "source row");
-    if (source.row_stride < source_row_bytes)
-    {
-        throw_invalid("CUDA affine preprocessing stage: source row stride is too small");
-    }
-    const std::size_t source_span =
-        checked_add(checked_multiply(static_cast<std::size_t>(source.height - 1), source.row_stride,
-                                     "source span"),
-                    source_row_bytes, "source span");
-    if (source_span > source.byte_size)
+    const detail::PackedImageLayout layout =
+        detail::packed_image_layout(source, "CUDA affine preprocessing");
+    if (layout.source_span > source.byte_size)
     {
         throw_invalid("CUDA affine preprocessing stage: source capacity is too small");
     }
-    if (source_span > impl_->options.max_source_bytes)
+    if (layout.source_span > impl_->options.max_source_bytes ||
+        layout.packed_bytes > impl_->options.max_source_bytes)
     {
         throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
                                   "CUDA affine preprocessing stage: source limit exceeded");
@@ -1282,24 +1392,15 @@ TensorView CudaImageProcessor::process_affine(const ImageView&         source,
         }
         else
         {
-            const std::size_t packed_bytes = checked_multiply(
-                source_row_bytes, static_cast<std::size_t>(source.height), "packed source");
-            impl_->pinned_source.reserve(packed_bytes, impl_->options.max_source_bytes);
-            impl_->device_source.reserve(packed_bytes, impl_->options.max_source_bytes);
-            auto*       packed = static_cast<std::byte*>(impl_->pinned_source.data());
-            const auto* input  = static_cast<const std::byte*>(source.data);
-            for (std::int32_t row = 0; row < source.height; ++row)
-            {
-                std::memcpy(packed + static_cast<std::size_t>(row) * source_row_bytes,
-                            input + static_cast<std::size_t>(row) * source.row_stride,
-                            source_row_bytes);
-            }
+            impl_->pinned_source.reserve(layout.packed_bytes, impl_->options.max_source_bytes);
+            impl_->device_source.reserve(layout.packed_bytes, impl_->options.max_source_bytes);
+            pack_host_source(source, layout, impl_->pinned_source.data());
             check_cuda(cudaMemcpyAsync(impl_->device_source.data(), impl_->pinned_source.data(),
-                                       packed_bytes, cudaMemcpyHostToDevice, impl_->stream),
+                                       layout.packed_bytes, cudaMemcpyHostToDevice, impl_->stream),
                        "cudaMemcpyAsync", "CUDA affine source upload");
             work_pending  = true;
             device_pixels = static_cast<const std::uint8_t*>(impl_->device_source.data());
-            device_stride = source_row_bytes;
+            device_stride = layout.row_bytes;
         }
         impl_->device_tensor.reserve(tensor_bytes, impl_->options.max_tensor_bytes);
         TensorView result {
@@ -1418,24 +1519,19 @@ ImageView CudaImageProcessor::composite_affine(const ImageView& base,
     {
         throw_invalid("CUDA affine composition stage: processor state is unavailable");
     }
-    validate_pixel_format(base.pixel_format, "composition base");
+    validate_preprocess_source_format(base.pixel_format);
     if (base.memory_kind != MemoryKind::CudaDevice || base.data == nullptr || base.width <= 0 ||
         base.height <= 0)
     {
         throw_invalid("CUDA affine composition stage: base must be a valid CUDA image");
     }
-    const std::size_t base_row_bytes =
+    const detail::PackedImageLayout base_layout =
+        detail::packed_image_layout(base, "CUDA affine composition base");
+    const std::size_t output_row_bytes =
         checked_multiply(static_cast<std::size_t>(base.width), 3U, "composition base row");
-    if (base.row_stride < base_row_bytes)
-    {
-        throw_invalid("CUDA affine composition stage: base row stride is too small");
-    }
-    const std::size_t base_span = checked_add(
-        checked_multiply(static_cast<std::size_t>(base.height - 1), base.row_stride,
-                         "composition base span"),
-        base_row_bytes, "composition base span");
+    const std::size_t base_span = base_layout.source_span;
     const std::size_t packed_bytes = checked_multiply(
-        base_row_bytes, static_cast<std::size_t>(base.height), "composition output bytes");
+        output_row_bytes, static_cast<std::size_t>(base.height), "composition output bytes");
     if (base_span > base.byte_size)
     {
         throw_invalid("CUDA affine composition stage: base capacity is too small");
@@ -1541,7 +1637,9 @@ ImageView CudaImageProcessor::composite_affine(const ImageView& base,
         };
         const bool base_overlaps_output = overlaps_output(base.data, base_span);
         if (base_overlaps_output &&
-            (base.data != impl_->device_composite.data() || base.row_stride != base_row_bytes))
+            (base.data != impl_->device_composite.data() ||
+             base.pixel_format != PixelFormat::Bgr8 ||
+             base.row_stride != output_row_bytes))
         {
             throw_invalid("CUDA affine composition stage: base partially overlaps output storage");
         }
@@ -1597,7 +1695,7 @@ ImageView CudaImageProcessor::composite_affine(const ImageView& base,
                        "CUDA affine composition device restoration");
         }
         return { impl_->device_composite.data(), packed_bytes, base.width, base.height,
-                 base_row_bytes, base.pixel_format, MemoryKind::CudaDevice };
+                 output_row_bytes, PixelFormat::Bgr8, MemoryKind::CudaDevice };
     }
     catch (...)
     {

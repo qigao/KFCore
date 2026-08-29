@@ -102,6 +102,16 @@ void validate_face_landmarks(const FaceLandmarkResult& result)
     }
 }
 
+bool describes_same_frame(const VisionFrameView& frame) noexcept
+{
+    return frame.source.data != nullptr && frame.compute.data != nullptr &&
+           frame.source.width > 0 && frame.source.height > 0 &&
+           frame.compute.width > 0 && frame.compute.height > 0 &&
+           frame.source.width == frame.compute.width &&
+           frame.source.height == frame.compute.height &&
+           frame.source.pixel_format == frame.compute.pixel_format;
+}
+
 void validate_unit(float value, const char* name)
 {
     if (!std::isfinite(value) || value < 0.0F || value > 1.0F)
@@ -251,22 +261,28 @@ std::unique_ptr<HandPipeline> HandPipeline::create(
 
 HandFrame HandPipeline::process(const image::ImageView& image)
 {
+    return process(VisionFrameView::borrow(image));
+}
+
+HandFrame HandPipeline::process(const VisionFrameView& frame_view)
+{
     if (!impl_)
     {
         throw_invalid("pipeline state is unavailable");
     }
     UseGuard guard(impl_->in_use, "hand pipeline");
-    if (image.data == nullptr || image.width <= 0 || image.height <= 0)
+    if (!describes_same_frame(frame_view))
     {
-        throw_invalid("image data and dimensions must be valid");
+        throw_invalid("image data and dimensions must be valid; source and compute "
+                      "images must describe the same frame");
     }
     if (impl_->options.appearance.enabled)
     {
-        detail::validate_hand_appearance_source(image);
+        detail::validate_hand_appearance_source(frame_view.source);
     }
 
     const Clock::time_point total_started = Clock::now();
-    HandFrame frame = impl_->backend->infer(image);
+    HandFrame frame = impl_->backend->infer(frame_view.compute);
     if (frame.hands.size() > impl_->options.max_hands)
     {
         throw_resource("backend hand count exceeds max_hands");
@@ -285,7 +301,7 @@ HandFrame HandPipeline::process(const image::ImageView& image)
         if (impl_->options.appearance.enabled)
         {
             hand.appearance = detail::make_hand_appearance_descriptor(
-                image, hand.landmarks, impl_->options.appearance);
+                frame_view.source, hand.landmarks, impl_->options.appearance);
         }
         hand.track_id = -1;
         const RectF& box = hand.palm.box;
@@ -407,19 +423,25 @@ std::unique_ptr<FaceMeshPipeline> FaceMeshPipeline::create(
 
 FaceMeshFrame FaceMeshPipeline::process(const image::ImageView& image)
 {
+    return process(VisionFrameView::borrow(image));
+}
+
+FaceMeshFrame FaceMeshPipeline::process(const VisionFrameView& frame_view)
+{
     if (!impl_)
     {
         throw_face_invalid("pipeline state is unavailable");
     }
     UseGuard guard(impl_->in_use, "FaceMesh pipeline");
-    if (image.data == nullptr || image.width <= 0 || image.height <= 0)
+    if (!describes_same_frame(frame_view))
     {
-        throw_face_invalid("image data and dimensions must be valid");
+        throw_face_invalid("image data and dimensions must be valid; source and compute "
+                           "images must describe the same frame");
     }
 
     const Clock::time_point total_started = Clock::now();
     FaceMeshFrame frame;
-    const FaceDetectionResult detection = impl_->detector->infer(image);
+    const FaceDetectionResult detection = impl_->detector->infer(frame_view.compute);
     validate_face_detection_result(detection);
     frame.timings.detection_preprocess_ms = detection.preprocess_ms;
     frame.timings.detection_inference_ms  = detection.inference_ms;
@@ -430,7 +452,8 @@ FaceMeshFrame FaceMeshPipeline::process(const image::ImageView& image)
     }
 
     frame.detection = detection.face;
-    FaceLandmarkResult landmarks = impl_->landmarker->infer(image, detection.face->box);
+    FaceLandmarkResult landmarks = impl_->landmarker->infer(
+        frame_view.compute, detection.face->box);
     validate_face_landmarks(landmarks);
     frame.timings.landmark_preprocess_ms = landmarks.preprocess_ms;
     frame.timings.landmark_inference_ms  = landmarks.inference_ms;

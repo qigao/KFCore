@@ -1,5 +1,7 @@
 #include "kfcore/image_processor/image_processor.hpp"
 
+#include "image_layout.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -71,82 +73,12 @@ namespace
         case PixelFormat::Rgb8:
         case PixelFormat::Nv12:
         case PixelFormat::I420:
+        case PixelFormat::Nv21:
+        case PixelFormat::Yuy2:
+        case PixelFormat::Uyvy:
             return;
         }
         throw_invalid(std::string(stage) + " stage: pixel format is unsupported");
-    }
-
-    struct PackedLayout
-    {
-        std::size_t row_bytes = 0U;
-        std::size_t chroma_row_bytes = 0U;
-        std::size_t chroma_rows = 0U;
-        std::size_t source_span = 0U;
-        std::size_t packed_bytes = 0U;
-    };
-
-    PackedLayout packed_layout(const ImageView& image, const char* stage)
-    {
-        const std::size_t width = static_cast<std::size_t>(image.width);
-        const std::size_t height = static_cast<std::size_t>(image.height);
-        PackedLayout result;
-        if (image.pixel_format == PixelFormat::Bgr8 ||
-            image.pixel_format == PixelFormat::Rgb8)
-        {
-            result.row_bytes = checked_multiply(width, kImageChannels, stage);
-            if (image.row_stride < result.row_bytes)
-            {
-                throw_invalid(std::string(stage) +
-                              " stage: row stride is smaller than packed RGB8");
-            }
-            result.source_span = checked_add(
-                checked_multiply(height - 1U, image.row_stride, stage),
-                result.row_bytes, stage);
-            result.packed_bytes = checked_multiply(result.row_bytes, height, stage);
-            return result;
-        }
-
-        if ((image.width & 1) != 0 || (image.height & 1) != 0)
-        {
-            throw_invalid(std::string(stage) +
-                          " stage: NV12 and I420 dimensions must be even");
-        }
-        if (image.row_stride < width || (image.row_stride & 1U) != 0U)
-        {
-            throw_invalid(std::string(stage) +
-                          " stage: YUV row stride must be even and at least the width");
-        }
-
-        result.row_bytes = width;
-        result.chroma_rows = height / 2U;
-        const std::size_t y_storage = checked_multiply(image.row_stride, height, stage);
-        const std::size_t y_packed = checked_multiply(width, height, stage);
-        if (image.pixel_format == PixelFormat::Nv12)
-        {
-            result.chroma_row_bytes = width;
-            result.source_span = checked_add(
-                y_storage,
-                checked_add(checked_multiply(result.chroma_rows - 1U,
-                                              image.row_stride, stage),
-                            result.chroma_row_bytes, stage),
-                stage);
-        }
-        else
-        {
-            const std::size_t chroma_stride = image.row_stride / 2U;
-            result.chroma_row_bytes = width / 2U;
-            const std::size_t chroma_storage =
-                checked_multiply(chroma_stride, result.chroma_rows, stage);
-            result.source_span = checked_add(
-                checked_add(y_storage, chroma_storage, stage),
-                checked_add(checked_multiply(result.chroma_rows - 1U,
-                                              chroma_stride, stage),
-                            result.chroma_row_bytes, stage),
-                stage);
-        }
-        result.packed_bytes = checked_add(
-            y_packed, checked_multiply(width, result.chroma_rows, stage), stage);
-        return result;
     }
 
     std::size_t grayscale_source_channels(PixelFormat format)
@@ -263,7 +195,8 @@ namespace
             }
             validate_pixel_format(image.pixel_format, "host staging");
             validate_memory_kind(image.memory_kind, "host staging");
-            const PackedLayout layout = packed_layout(image, "host staging");
+            const detail::PackedImageLayout layout =
+                detail::packed_image_layout(image, "host staging");
             if (layout.source_span > image.byte_size)
             {
                 throw_invalid(
@@ -466,7 +399,8 @@ BatchPlan ImageProcessor::plan(const std::vector<ImageView>& images, const Tenso
             validate_pixel_format(image.pixel_format, "input validation");
             validate_memory_kind(image.memory_kind, "input validation");
 
-            const PackedLayout layout = packed_layout(image, "input validation");
+            const detail::PackedImageLayout layout =
+                detail::packed_image_layout(image, "input validation");
             if (layout.source_span > image.byte_size)
             {
                 throw_invalid(
@@ -556,6 +490,18 @@ void ImageProcessor::stage_host_inputs(const std::vector<ImageView>& images, con
             continue;
         }
 
+        if (image.pixel_format == PixelFormat::Yuy2 ||
+            image.pixel_format == PixelFormat::Uyvy)
+        {
+            const std::size_t row_bytes = width * 2U;
+            for (std::size_t row = 0U; row < height; ++row)
+            {
+                std::memcpy(packed + row * row_bytes,
+                            source + row * image.row_stride, row_bytes);
+            }
+            continue;
+        }
+
         for (std::size_t row = 0U; row < height; ++row)
         {
             std::memcpy(packed + row * width,
@@ -564,7 +510,8 @@ void ImageProcessor::stage_host_inputs(const std::vector<ImageView>& images, con
         const std::size_t chroma_rows = height / 2U;
         const std::byte* source_chroma = source + image.row_stride * height;
         std::byte* packed_chroma = packed + width * height;
-        if (image.pixel_format == PixelFormat::Nv12)
+        if (image.pixel_format == PixelFormat::Nv12 ||
+            image.pixel_format == PixelFormat::Nv21)
         {
             for (std::size_t row = 0U; row < chroma_rows; ++row)
             {

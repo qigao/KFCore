@@ -15,6 +15,9 @@ enum class PixelFormat
     Gray8,
     Nv12,
     I420,
+    Nv21,
+    Yuy2,
+    Uyvy,
 };
 
 enum class MemoryKind

@@ -132,6 +132,14 @@ spec("TensorRT CUDA vision real-engine integration")
         const HandFrame host_frame = backend->infer(image.view());
         check_hand_frame(host_frame, options.max_hands);
 
+        auto shared_input = TensorRtVisionInput::create(options);
+        const VisionFrameView shared_frame = shared_input->prepare(image.view());
+        check(shared_frame.source.memory_kind == kfcore::image::MemoryKind::Host);
+        check(shared_frame.compute.memory_kind ==
+              kfcore::image::MemoryKind::CudaDevice);
+        const HandFrame prepared_frame = backend->infer(shared_frame.compute);
+        check_hand_frame(prepared_frame, options.max_hands);
+
         const DeviceImage device_image(image);
         const HandFrame device_frame = backend->infer(device_image.view());
         check_hand_frame(device_frame, options.max_hands);
@@ -153,21 +161,24 @@ spec("TensorRT CUDA vision real-engine integration")
         check_true(tracked.timings.tracking_ms > 0.0);
     }
 
-    it("runs the MediaPipe 468 face landmark engine on the CUDA preprocessing path")
+    it("runs YOLO face detection and MediaPipe 468 landmarks as one pipeline")
     {
         TensorRtVisionOptions options;
-        auto landmarker = TensorRtFaceLandmarker::load(
-            KFCORE_VISION_TRT_TEST_FACE, options);
+        auto pipeline = FaceMeshPipeline::create(
+            TensorRtFaceDetector::load(
+                KFCORE_VISION_TRT_TEST_FACE_DETECTOR, options),
+            TensorRtFaceLandmarker::load(
+                KFCORE_VISION_TRT_TEST_FACE, options));
         const kfcore::image::BgrImage image = read_bgr(
             KFCORE_VISION_TRT_TEST_FACE_IMAGE);
-        const FaceLandmarkResult result = landmarker->infer(
-            image.view(), { 0.0F, 0.0F, static_cast<float>(image.width),
-                            static_cast<float>(image.height) });
-        check_true(std::isfinite(result.confidence));
-        check_true(result.preprocess_ms > 0.0);
-        check_true(result.inference_ms > 0.0);
-        check_true(result.total_ms > 0.0);
-        for (const Point3f& point : result.landmarks)
+        auto shared_input = TensorRtVisionInput::create(options);
+        const VisionFrameView shared_frame = shared_input->prepare(image.view());
+        const FaceMeshFrame result = pipeline->process(shared_frame);
+        check_true(result.detection.has_value());
+        check_true(result.landmarks.has_value());
+        check_true(result.timings.detection_inference_ms > 0.0);
+        check_true(result.timings.total_ms > 0.0);
+        for (const Point3f& point : result.landmarks->landmarks)
         {
             check_true(std::isfinite(point.x));
             check_true(std::isfinite(point.y));

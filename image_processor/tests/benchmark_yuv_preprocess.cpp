@@ -164,6 +164,19 @@ spec("640x480 NV12 preprocessing benchmark")
             { device_workspace.get(), plan.device_staging_bytes }, options, stream.get());
         check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
 
+        auto shared_processor = CudaImageProcessor::create();
+        (void)shared_processor->stage(source);
+        benchmark_batch("CUDA one shared NV12 stage", kCudaSamples)
+        {
+            (void)shared_processor->stage(source);
+        }
+        benchmark_batch("CUDA three independent NV12 stages", kCudaSamples)
+        {
+            (void)shared_processor->stage(source);
+            (void)shared_processor->stage(source);
+            (void)shared_processor->stage(source);
+        }
+
         benchmark_batch("CUDA fused NV12 upload and letterbox", kCudaSamples)
         {
             ImageProcessor::stage_host_inputs(

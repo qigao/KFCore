@@ -194,6 +194,14 @@ int run(const demo::Arguments& arguments)
     auto       model_pipeline = HandPipeline::create(
         make_backend(arguments), hand_pipeline_options);
     auto       face_pipeline = demo::make_face_pipeline(arguments);
+#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
+    std::unique_ptr<kfcore::vision_models::TensorRtVisionInput> tensor_rt_input;
+    if (arguments.backend == demo::Backend::TensorRt)
+    {
+        tensor_rt_input =
+            kfcore::vision_models::TensorRtVisionInput::create();
+    }
+#endif
     const auto model_load_finished = std::chrono::steady_clock::now();
     const auto model_load_ms = std::chrono::duration<double, std::milli>(
                                    model_load_finished - model_load_started)
@@ -248,9 +256,25 @@ int run(const demo::Arguments& arguments)
             }
         }
         previous_frame_started = frame_started;
-        const cv::Mat bgr = demo::to_bgr(captured);
-        const auto converted = std::chrono::steady_clock::now();
-        const kfcore::image::ImageView frame_view = image_view(bgr);
+        cv::Mat inference_bgr;
+        kfcore::image::ImageView source_view;
+        if (demo::inference_view_compatible(captured.format))
+        {
+            source_view = demo::inference_view(captured);
+        }
+        else
+        {
+            inference_bgr = demo::to_bgr(captured);
+            source_view = image_view(inference_bgr);
+        }
+        auto frame_view =
+            kfcore::vision_models::VisionFrameView::borrow(source_view);
+#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
+        if (tensor_rt_input)
+        {
+            frame_view = tensor_rt_input->prepare(source_view);
+        }
+#endif
         HandFrame hands = model_pipeline->process(frame_view);
         FaceMeshFrame face;
         if (face_pipeline)
@@ -280,17 +304,22 @@ int run(const demo::Arguments& arguments)
         thig_status.wave_state = interaction_pipeline.graph_state(kWaveGraph);
         thig_status.click_state = interaction_pipeline.graph_state(kScreenClickGraph);
 
+        const auto display_conversion_started = std::chrono::steady_clock::now();
+        const cv::Mat bgr = inference_bgr.empty() ? demo::to_bgr(captured) : inference_bgr;
+        const auto converted = std::chrono::steady_clock::now();
+
         demo::DemoMetrics metrics;
         metrics.capture = mailbox.counters();
         metrics.model   = hands.timings;
         metrics.face    = face.timings;
         metrics.fps     = displayed_fps;
         metrics.convert_ms =
-            std::chrono::duration<double, std::milli>(converted - frame_started).count();
+            std::chrono::duration<double, std::milli>(
+                converted - display_conversion_started).count();
         metrics.thig_ms =
             std::chrono::duration<double, std::milli>(thig_finished - thig_started).count();
         metrics.frame_ms =
-            std::chrono::duration<double, std::milli>(thig_finished - frame_started).count();
+            std::chrono::duration<double, std::milli>(converted - frame_started).count();
         cv::imshow(kWindowTitle, demo::compose_overlay(
             bgr, hands, interaction, thig_status,
             face_pipeline ? &face : nullptr, metrics));

@@ -128,11 +128,12 @@ std::size_t source_span(const ImageView& image)
     const std::size_t width = static_cast<std::size_t>(image.width);
     const std::size_t height = static_cast<std::size_t>(image.height);
     if (image.pixel_format == PixelFormat::Nv12 ||
-        image.pixel_format == PixelFormat::I420)
+        image.pixel_format == PixelFormat::I420 ||
+        image.pixel_format == PixelFormat::Nv21)
     {
         if ((image.width & 1) != 0 || (image.height & 1) != 0)
         {
-            throw_invalid("NV12 and I420 image dimensions must be even");
+            throw_invalid("NV12, I420, and NV21 image dimensions must be even");
         }
         if (image.row_stride < width || (image.row_stride & 1U) != 0U)
         {
@@ -141,7 +142,8 @@ std::size_t source_span(const ImageView& image)
         const std::size_t y_storage = checked_multiply(
             image.row_stride, height, "source span");
         const std::size_t chroma_rows = height / 2U;
-        if (image.pixel_format == PixelFormat::Nv12)
+        if (image.pixel_format == PixelFormat::Nv12 ||
+            image.pixel_format == PixelFormat::Nv21)
         {
             return checked_add(
                 y_storage,
@@ -159,13 +161,20 @@ std::size_t source_span(const ImageView& image)
         return checked_add(checked_add(y_storage, u_storage, "source span"),
                            v_span, "source span");
     }
+    const bool packed_422 = image.pixel_format == PixelFormat::Yuy2 ||
+                            image.pixel_format == PixelFormat::Uyvy;
     if (image.pixel_format != PixelFormat::Bgr8 &&
-        image.pixel_format != PixelFormat::Rgb8)
+        image.pixel_format != PixelFormat::Rgb8 && !packed_422)
     {
-        throw_invalid("image pixel format must be Bgr8, Rgb8, Nv12, or I420");
+        throw_invalid(
+            "image pixel format must be Bgr8, Rgb8, Nv12, I420, Nv21, Yuy2, or Uyvy");
+    }
+    if (packed_422 && (image.width & 1) != 0)
+    {
+        throw_invalid("YUY2 and UYVY image width must be even");
     }
     const std::size_t row_bytes = checked_multiply(
-        width, kChannels, "source row");
+        width, packed_422 ? 2U : kChannels, "source row");
     if (image.row_stride < row_bytes)
     {
         throw_invalid("image row stride is smaller than a packed row");
@@ -195,6 +204,15 @@ kfcore::image::ImageView to_image_view(const ImageView& image)
         break;
     case PixelFormat::I420:
         format = kfcore::image::PixelFormat::I420;
+        break;
+    case PixelFormat::Nv21:
+        format = kfcore::image::PixelFormat::Nv21;
+        break;
+    case PixelFormat::Yuy2:
+        format = kfcore::image::PixelFormat::Yuy2;
+        break;
+    case PixelFormat::Uyvy:
+        format = kfcore::image::PixelFormat::Uyvy;
         break;
     default:
         throw_invalid("image pixel format is unsupported");

@@ -1,4 +1,5 @@
 #include "face_swap_demo_metrics.hpp"
+#include "opencv_image_adapter.hpp"
 
 #include "kfcore/face_applications/tensorrt.hpp"
 #include "tinytest.hpp"
@@ -77,9 +78,13 @@ void run_pipeline(const char* name, const cv::Mat& source, const cv::Mat& target
     const auto load_started = Clock::now();
     auto application = TensorRtFaceSwapApplication::load(paths);
     const double load_ms = elapsed_milliseconds(load_started);
+    const kfcore::image::ImageView source_view =
+        demo::borrowed_bgr(source, "source");
+    const kfcore::image::ImageView target_view =
+        demo::borrowed_bgr(target, "target");
 
     const auto first_swap_started = Clock::now();
-    cv::Mat output = application->swap(source, target);
+    kfcore::image::BgrImage output = application->swap(source_view, target_view);
     const double first_swap_ms = elapsed_milliseconds(first_swap_started);
     std::cout << "      cold phase " << name << ": load=" << std::fixed
               << std::setprecision(3) << load_ms << " ms, first_swap=" << first_swap_ms
@@ -89,21 +94,22 @@ void run_pipeline(const char* name, const cv::Mat& source, const cv::Mat& target
 
     for (std::size_t iteration = 1U; iteration < kWarmupIterations; ++iteration)
     {
-        output = application->swap(source, target);
+        output = application->swap(source_view, target_view);
     }
 
     benchmark_batch(name, kMeasuredSamples)
     {
-        output = application->swap(source, target);
+        output = application->swap(source_view, target_view);
     }
     check_false(output.empty());
-    check(output.type() == CV_8UC3);
-    check(output.size() == target.size());
+    check(output.width == target.cols);
+    check(output.height == target.rows);
 
     demo::TimingHistory history;
     for (std::size_t sample = 0U; sample < kMeasuredSamples; ++sample)
     {
-        ProfiledFaceSwapResult profiled = application->swap_profiled(source, target);
+        ProfiledFaceSwapResult profiled =
+            application->swap_profiled(source_view, target_view);
         history.add(profiled.timings);
         output = std::move(profiled.image);
     }

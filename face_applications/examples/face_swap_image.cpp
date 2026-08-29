@@ -1,4 +1,5 @@
 #include "face_swap_cli.hpp"
+#include "opencv_image_adapter.hpp"
 
 #include "kfcore/face_applications/tensorrt.hpp"
 
@@ -49,12 +50,15 @@ int main(int argc, char** argv)
         };
         auto application =
             kfcore::face_applications::TensorRtFaceSwapApplication::load(paths);
-        const cv::Mat output = application->swap(source, target);
-        if (output.empty() || output.type() != CV_8UC3 || output.size() != target.size())
+        kfcore::image::BgrImage output = application->swap(
+            kfcore::face_applications::demo::borrowed_bgr(source, "source"),
+            kfcore::face_applications::demo::borrowed_bgr(target, "target"));
+        if (output.width != target.cols || output.height != target.rows)
         {
             fail("swap returned an invalid output image");
         }
-        if (!cv::imwrite(arguments.output, output))
+        if (!cv::imwrite(arguments.output,
+                         kfcore::face_applications::demo::borrowed_bgr(output, "output")))
         {
             fail("failed to write output image: " + arguments.output);
         }

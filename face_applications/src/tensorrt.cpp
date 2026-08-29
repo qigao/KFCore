@@ -2,12 +2,8 @@
 
 #include "kfcore/face_applications/composer.hpp"
 #include "kfcore/face_applications/error.hpp"
-#include "kfcore/face_applications/preprocess.hpp"
 #include "kfcore/image_processor/image_processor.hpp"
 #include "kfcore/yolo/error.hpp"
-#include "kfcore/yolo/opencv.hpp"
-
-#include <opencv2/core.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -200,34 +196,24 @@ kfcore::tensorrt::MutableTensorView mutable_device_image_tensor(
              kfcore::tensorrt::MemoryKind::CudaDevice };
 }
 
-kfcore::image::TensorView host_alpha_tensor(const cv::Mat& alpha)
+kfcore::image::TensorView host_alpha_tensor(const FloatMask& alpha)
 {
-    if (alpha.empty() || alpha.type() != CV_32FC1 || !alpha.isContinuous())
+    if (alpha.width <= 0 || alpha.height <= 0 ||
+        alpha.values.size() != static_cast<std::size_t>(alpha.width) * alpha.height)
     {
         throw FaceApplicationError(
             FaceApplicationErrorCode::ImageProcessingFailure,
-            "face application mask stage: alpha mask must be continuous CV_32FC1");
+            "face application mask stage: alpha mask storage is malformed");
     }
-    return { alpha.data,
-             alpha.total() * alpha.elemSize(),
+    return { const_cast<float*>(alpha.values.data()),
+             alpha.values.size() * sizeof(float),
              1,
              1,
-             alpha.rows,
-             alpha.cols,
+             alpha.height,
+             alpha.width,
              kfcore::image::TensorElementType::Float32,
              kfcore::image::TensorLayout::Nchw,
              kfcore::image::MemoryKind::Host };
-}
-
-kfcore::tensorrt::TensorView host_image_tensor(const std::string& name, std::int64_t extent,
-                                               const std::vector<float>& values)
-{
-    return { name,
-             kfcore::tensorrt::DataType::Float32,
-             { 1, kfcore::face_models::kFaceModelInputChannels, extent, extent },
-             values.data(),
-             values.size() * sizeof(float),
-             kfcore::tensorrt::MemoryKind::Host };
 }
 
 kfcore::tensorrt::TensorView embedding_tensor(const std::string& name,
@@ -247,42 +233,61 @@ FaceBox face_box(const kfcore::yolo::Detection& detection)
              detection.box.bottom };
 }
 
-cv::Rect face_roi(const cv::Mat& image, const kfcore::yolo::Detection& detection)
+kfcore::image::AffineTransform age_gender_transform(
+    const kfcore::image::ImageView& image,
+    const kfcore::yolo::Detection& detection)
 {
     const int left = (std::clamp)(static_cast<int>(std::floor(detection.box.left)), 0,
-                                  image.cols - 1);
+                                  image.width - 1);
     const int top = (std::clamp)(static_cast<int>(std::floor(detection.box.top)), 0,
-                                 image.rows - 1);
+                                 image.height - 1);
     const int right = (std::clamp)(static_cast<int>(std::ceil(detection.box.right)), left + 1,
-                                   image.cols);
+                                   image.width);
     const int bottom = (std::clamp)(static_cast<int>(std::ceil(detection.box.bottom)), top + 1,
-                                    image.rows);
-    return { left, top, right - left, bottom - top };
+                                    image.height);
+    const float scale_x = static_cast<float>(right - left) /
+                          static_cast<float>(kfcore::face_models::kAgeGenderInputExtent);
+    const float scale_y = static_cast<float>(bottom - top) /
+                          static_cast<float>(kfcore::face_models::kAgeGenderInputExtent);
+    return { { scale_x, 0.0F, static_cast<float>(left) + 0.5F * scale_x - 0.5F,
+               0.0F, scale_y, static_cast<float>(top) + 0.5F * scale_y - 0.5F } };
 }
 
-kfcore::image::ImageView borrowed_bgr(const cv::Mat& image)
+kfcore::image::AffineTransform affine_transform(const AffineMatrix& destination_to_source)
 {
-    const kfcore::yolo::ImageView validated = kfcore::yolo::image_view(image);
-    const std::size_t row_bytes = static_cast<std::size_t>(validated.width) * 3U;
-    const std::size_t span =
-        static_cast<std::size_t>(validated.height - 1) * validated.row_stride + row_bytes;
-    return { validated.data, span, validated.width, validated.height, validated.row_stride,
-             kfcore::image::PixelFormat::Bgr8, kfcore::image::MemoryKind::Host };
-}
-
-kfcore::image::AffineTransform affine_transform(const cv::Matx23f& destination_to_source)
-{
-    return { { destination_to_source(0, 0), destination_to_source(0, 1),
-               destination_to_source(0, 2), destination_to_source(1, 0),
-               destination_to_source(1, 1), destination_to_source(1, 2) } };
+    return { destination_to_source.values };
 }
 
 kfcore::yolo::ImageView yolo_image_view(const kfcore::image::ImageView& image)
 {
-    return { image.data, image.width, image.height, image.row_stride,
-             image.pixel_format == kfcore::image::PixelFormat::Rgb8
-                 ? kfcore::yolo::PixelFormat::Rgb8
-                 : kfcore::yolo::PixelFormat::Bgr8,
+    kfcore::yolo::PixelFormat format = kfcore::yolo::PixelFormat::Bgr8;
+    switch (image.pixel_format)
+    {
+    case kfcore::image::PixelFormat::Bgr8:
+        break;
+    case kfcore::image::PixelFormat::Rgb8:
+        format = kfcore::yolo::PixelFormat::Rgb8;
+        break;
+    case kfcore::image::PixelFormat::Nv12:
+        format = kfcore::yolo::PixelFormat::Nv12;
+        break;
+    case kfcore::image::PixelFormat::I420:
+        format = kfcore::yolo::PixelFormat::I420;
+        break;
+    case kfcore::image::PixelFormat::Nv21:
+        format = kfcore::yolo::PixelFormat::Nv21;
+        break;
+    case kfcore::image::PixelFormat::Yuy2:
+        format = kfcore::yolo::PixelFormat::Yuy2;
+        break;
+    case kfcore::image::PixelFormat::Uyvy:
+        format = kfcore::yolo::PixelFormat::Uyvy;
+        break;
+    case kfcore::image::PixelFormat::Gray8:
+        throw FaceApplicationError(FaceApplicationErrorCode::InvalidArgument,
+                                   "face application detect stage: Gray8 is unsupported");
+    }
+    return { image.data, image.width, image.height, image.row_stride, format,
              kfcore::yolo::MemoryKind::CudaDevice };
 }
 
@@ -307,6 +312,14 @@ kfcore::image::PreprocessOptions rgb_signed_options()
     kfcore::image::PreprocessOptions result = rgb_unit_options();
     result.mean = { 0.5F, 0.5F, 0.5F };
     result.stddev = { 0.5F, 0.5F, 0.5F };
+    return result;
+}
+
+kfcore::image::PreprocessOptions age_gender_options()
+{
+    kfcore::image::PreprocessOptions result = rgb_unit_options();
+    result.mean = { 0.485F, 0.456F, 0.406F };
+    result.stddev = { 0.229F, 0.224F, 0.225F };
     return result;
 }
 
@@ -388,13 +401,13 @@ struct TensorRtFaceSwapApplication::Impl final
         , age_gender(std::move(age_gender_in))
     {
         inswapper_mask = create_static_box_mask(
-            { static_cast<int>(kfcore::face_models::kInSwapperInputExtent),
-              static_cast<int>(kfcore::face_models::kInSwapperInputExtent) });
+            static_cast<int>(kfcore::face_models::kInSwapperInputExtent),
+            static_cast<int>(kfcore::face_models::kInSwapperInputExtent));
         if (gfpgan)
         {
             gfpgan_mask = create_static_box_mask(
-                { static_cast<int>(kfcore::face_models::kGfpGanInputExtent),
-                  static_cast<int>(kfcore::face_models::kGfpGanInputExtent) });
+                static_cast<int>(kfcore::face_models::kGfpGanInputExtent),
+                static_cast<int>(kfcore::face_models::kGfpGanInputExtent));
         }
         add_processor(options.detector_engine.device_id);
         add_processor(options.face68.engine.device_id);
@@ -403,6 +416,10 @@ struct TensorRtFaceSwapApplication::Impl final
         if (gfpgan)
         {
             add_processor(options.gfpgan.engine.device_id);
+        }
+        if (age_gender)
+        {
+            add_processor(options.age_gender.engine.device_id);
         }
     }
 
@@ -455,7 +472,8 @@ struct TensorRtFaceSwapApplication::Impl final
         ++frame_generation;
     }
 
-    const kfcore::image::ImageView& stage_for(const cv::Mat& image, int device_id)
+    const kfcore::image::ImageView& stage_for(
+        const kfcore::image::ImageView& image, int device_id)
     {
         const auto found = std::find_if(
             processors.begin(), processors.end(),
@@ -468,7 +486,7 @@ struct TensorRtFaceSwapApplication::Impl final
         }
         if (found->staged_generation != frame_generation)
         {
-            found->staged_image = found->processor->stage(borrowed_bgr(image));
+            found->staged_image = found->processor->stage(image);
             found->staged_generation = frame_generation;
         }
         return found->staged_image;
@@ -484,7 +502,7 @@ struct TensorRtFaceSwapApplication::Impl final
             kfcore::image::TensorElementType::Float32);
     }
 
-    FaceAnalysis analyze_internal(const cv::Mat& bgr_image,
+    FaceAnalysis analyze_internal(const kfcore::image::ImageView& image,
                                   FaceAnalysisTimingReport* timings = nullptr)
     {
         StageTimer total_timer(timings != nullptr ? &timings->total : nullptr);
@@ -492,7 +510,7 @@ struct TensorRtFaceSwapApplication::Impl final
         {
             StageTimer timer(timings != nullptr ? &timings->initial_staging : nullptr);
             begin_frame();
-            detector_image = &stage_for(bgr_image, options.detector_engine.device_id);
+            detector_image = &stage_for(image, options.detector_engine.device_id);
         }
         std::optional<kfcore::yolo::Detection> detection;
         {
@@ -514,7 +532,7 @@ struct TensorRtFaceSwapApplication::Impl final
             StageTimer timer(timings != nullptr ? &timings->face68_preprocess : nullptr);
             face68_aligned = face68_transform(face_box(*detection));
             const kfcore::image::ImageView& face68_image =
-                stage_for(bgr_image, options.face68.engine.device_id);
+                stage_for(image, options.face68.engine.device_id);
             face68_values = preprocess(
                 face68_image,
                 static_cast<std::int32_t>(kfcore::face_models::kFace68InputExtent),
@@ -547,7 +565,7 @@ struct TensorRtFaceSwapApplication::Impl final
             const FaceTransform arcface_aligned =
                 alignment_transform(landmarks, arcface_template());
             const kfcore::image::ImageView& arcface_image =
-                stage_for(bgr_image, options.arcface.engine.device_id);
+                stage_for(image, options.arcface.engine.device_id);
             arcface_values = preprocess(
                 arcface_image,
                 static_cast<std::int32_t>(kfcore::face_models::kArcFaceInputExtent),
@@ -578,11 +596,17 @@ struct TensorRtFaceSwapApplication::Impl final
                 timings->age_gender.emplace();
             }
             StageTimer timer(timings != nullptr ? &*timings->age_gender : nullptr);
-            const cv::Rect roi = face_roi(bgr_image, *detection);
-            const std::vector<float> age_values = preprocess_age_gender(bgr_image(roi));
+            const kfcore::image::ImageView& age_image =
+                stage_for(image, options.age_gender.engine.device_id);
+            const kfcore::image::TensorView age_values = preprocess(
+                age_image,
+                static_cast<std::int32_t>(kfcore::face_models::kAgeGenderInputExtent),
+                age_gender_transform(image, *detection), age_gender_options(),
+                options.age_gender.engine.device_id);
             const auto logits = age_gender->infer(
-                host_image_tensor(options.age_gender.input_name,
-                                  kfcore::face_models::kAgeGenderInputExtent, age_values));
+                device_image_tensor(options.age_gender.input_name,
+                                    kfcore::face_models::kAgeGenderInputExtent,
+                                    age_values));
             if (logits.size() != 1U)
             {
                 throw FaceApplicationError(
@@ -603,8 +627,8 @@ struct TensorRtFaceSwapApplication::Impl final
     kfcore::face_models::InSwapperEmbeddingProjector projector;
     std::unique_ptr<kfcore::face_models::TensorRtGfpGan> gfpgan;
     std::unique_ptr<kfcore::face_models::TensorRtAgeGender> age_gender;
-    cv::Mat inswapper_mask;
-    cv::Mat gfpgan_mask;
+    FloatMask inswapper_mask;
+    FloatMask gfpgan_mask;
     std::vector<DeviceProcessor> processors;
     std::uint64_t frame_generation = 0;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
@@ -680,12 +704,12 @@ TensorRtFaceSwapApplication::load(const FaceApplicationModelPaths& paths,
     }
 }
 
-FaceAnalysis TensorRtFaceSwapApplication::analyze(const cv::Mat& bgr_image)
+FaceAnalysis TensorRtFaceSwapApplication::analyze(const kfcore::image::ImageView& image)
 {
     try
     {
         ApplicationCallGuard guard(impl_->in_use);
-        return impl_->analyze_internal(bgr_image);
+        return impl_->analyze_internal(image);
     }
     catch (const FaceApplicationError&)
     {
@@ -703,11 +727,6 @@ FaceAnalysis TensorRtFaceSwapApplication::analyze(const cv::Mat& bgr_image)
     {
         rethrow_image(error, "analysis");
     }
-    catch (const cv::Exception& error)
-    {
-        throw FaceApplicationError(FaceApplicationErrorCode::ImageProcessingFailure,
-                                   std::string("face application analysis stage: ") + error.what());
-    }
     catch (const std::bad_alloc&)
     {
         throw FaceApplicationError(FaceApplicationErrorCode::ResourceLimitExceeded,
@@ -715,32 +734,35 @@ FaceAnalysis TensorRtFaceSwapApplication::analyze(const cv::Mat& bgr_image)
     }
 }
 
-cv::Mat TensorRtFaceSwapApplication::swap(const cv::Mat& source_bgr,
-                                          const cv::Mat& target_bgr)
+kfcore::image::BgrImage TensorRtFaceSwapApplication::swap(
+    const kfcore::image::ImageView& source,
+    const kfcore::image::ImageView& target)
 {
-    return swap_internal(source_bgr, target_bgr, nullptr);
+    return swap_internal(source, target, nullptr);
 }
 
 ProfiledFaceSwapResult TensorRtFaceSwapApplication::swap_profiled(
-    const cv::Mat& source_bgr, const cv::Mat& target_bgr)
+    const kfcore::image::ImageView& source,
+    const kfcore::image::ImageView& target)
 {
     FaceSwapTimingReport timings;
-    cv::Mat image = swap_internal(source_bgr, target_bgr, &timings);
+    kfcore::image::BgrImage image = swap_internal(source, target, &timings);
     return { std::move(image), std::move(timings) };
 }
 
-cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
-                                                   const cv::Mat& target_bgr,
-                                                   FaceSwapTimingReport* timings)
+kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_internal(
+    const kfcore::image::ImageView& source_image,
+    const kfcore::image::ImageView& target_image,
+    FaceSwapTimingReport* timings)
 {
     try
     {
         StageTimer total_timer(timings != nullptr ? &timings->total : nullptr);
         ApplicationCallGuard guard(impl_->in_use);
         const FaceAnalysis source = impl_->analyze_internal(
-            source_bgr, timings != nullptr ? &timings->source_analysis : nullptr);
+            source_image, timings != nullptr ? &timings->source_analysis : nullptr);
         const FaceAnalysis target = impl_->analyze_internal(
-            target_bgr, timings != nullptr ? &timings->target_analysis : nullptr);
+            target_image, timings != nullptr ? &timings->target_analysis : nullptr);
         kfcore::face_models::ArcFaceResult projected;
         {
             StageTimer timer(timings != nullptr ? &timings->embedding_projection : nullptr);
@@ -756,7 +778,7 @@ cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
             StageTimer timer(timings != nullptr ? &timings->inswapper_preprocess : nullptr);
             swap_aligned = alignment_transform(target.landmarks, inswapper_template());
             target_device_image = &impl_->stage_for(
-                target_bgr, impl_->options.inswapper.engine.device_id);
+                target_image, impl_->options.inswapper.engine.device_id);
             swap_values = impl_->preprocess(
                 *target_device_image,
                 static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent),
@@ -779,7 +801,7 @@ cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
                                             kfcore::face_models::kInSwapperInputExtent,
                                             swap_output));
         }
-        cv::Mat result;
+        kfcore::image::BgrImage result;
         kfcore::image::ImageView final_device_image;
         {
             StageTimer timer(timings != nullptr ? &timings->inswapper_composition : nullptr);
@@ -788,9 +810,11 @@ cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
                 affine_transform(swap_aligned.source_to_aligned));
             if (!impl_->gfpgan)
             {
-                result.create(target_bgr.rows, target_bgr.cols, CV_8UC3);
+                result.width = target_image.width;
+                result.height = target_image.height;
+                result.pixels.resize(final_device_image.byte_size);
                 final_processor.download_bgr(
-                    final_device_image, { result.data, result.total() * result.elemSize() });
+                    final_device_image, { result.pixels.data(), result.pixels.size() });
             }
         }
 
@@ -837,9 +861,11 @@ cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
                 final_device_image = final_processor.composite_affine(
                     final_device_image, enhance_output, host_alpha_tensor(impl_->gfpgan_mask),
                     affine_transform(enhance_aligned.source_to_aligned), composite_options);
-                result.create(target_bgr.rows, target_bgr.cols, CV_8UC3);
+                result.width = target_image.width;
+                result.height = target_image.height;
+                result.pixels.resize(final_device_image.byte_size);
                 final_processor.download_bgr(
-                    final_device_image, { result.data, result.total() * result.elemSize() });
+                    final_device_image, { result.pixels.data(), result.pixels.size() });
             }
         }
         return result;
@@ -859,11 +885,6 @@ cv::Mat TensorRtFaceSwapApplication::swap_internal(const cv::Mat& source_bgr,
     catch (const kfcore::image::ImageProcessorError& error)
     {
         rethrow_image(error, "swap");
-    }
-    catch (const cv::Exception& error)
-    {
-        throw FaceApplicationError(FaceApplicationErrorCode::ImageProcessingFailure,
-                                   std::string("face application swap stage: ") + error.what());
     }
     catch (const std::bad_alloc&)
     {

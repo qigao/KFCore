@@ -8,6 +8,20 @@
 namespace kfcore::vision_models
 {
 
+struct VisionFrameView
+{
+    // Both views describe the same immutable frame. source is the authoritative
+    // representation used by host-only stages; compute may be the same view or
+    // a backend-prepared representation. Neither view owns its pixels.
+    image::ImageView source;
+    image::ImageView compute;
+
+    [[nodiscard]] static VisionFrameView borrow(const image::ImageView& image) noexcept
+    {
+        return { image, image };
+    }
+};
+
 class HandInferenceBackend
 {
 public:
@@ -50,6 +64,7 @@ public:
            const HandPipelineOptions& options = {});
 
     HandFrame process(const image::ImageView& image);
+    HandFrame process(const VisionFrameView& frame);
     void      reset();
 
 private:
@@ -77,6 +92,7 @@ public:
     // must not overlap; invalid input and backend contract violations raise
     // VisionModelError with the corresponding error code.
     FaceMeshFrame process(const image::ImageView& image);
+    FaceMeshFrame process(const VisionFrameView& frame);
 
 private:
     struct Impl;

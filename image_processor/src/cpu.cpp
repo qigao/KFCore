@@ -1,5 +1,7 @@
 #include "kfcore/image_processor/cpu.hpp"
 
+#include "image_layout.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -113,95 +115,77 @@ BorrowedPlan validate_borrowed(const ImageView& source, std::size_t limit)
         throw_invalid("source image must use Host memory");
     }
     (void)packed_bytes(source.width, source.height, "source image");
-    const std::size_t width = static_cast<std::size_t>(source.width);
-    const std::size_t height = static_cast<std::size_t>(source.height);
-    std::size_t row_bytes = 0U;
-    std::size_t span = 0U;
-    if (source.pixel_format == PixelFormat::Bgr8 ||
-        source.pixel_format == PixelFormat::Rgb8)
+    if (source.pixel_format != PixelFormat::Bgr8 &&
+        source.pixel_format != PixelFormat::Rgb8 &&
+        source.pixel_format != PixelFormat::Nv12 &&
+        source.pixel_format != PixelFormat::I420 &&
+        source.pixel_format != PixelFormat::Nv21 &&
+        source.pixel_format != PixelFormat::Yuy2 &&
+        source.pixel_format != PixelFormat::Uyvy)
     {
-        row_bytes = checked_multiply(width, kChannels, "source row");
-        if (source.row_stride < row_bytes)
-        {
-            throw_invalid("source row stride is smaller than a packed row");
-        }
-        span = checked_add(checked_multiply(height - 1U, source.row_stride,
-                                            "source span"),
-                           row_bytes, "source span");
+        throw_invalid(
+            "source pixel format must be Bgr8, Rgb8, Nv12, I420, Nv21, Yuy2, or Uyvy");
     }
-    else if (source.pixel_format == PixelFormat::Nv12 ||
-             source.pixel_format == PixelFormat::I420)
-    {
-        if ((source.width & 1) != 0 || (source.height & 1) != 0)
-        {
-            throw_invalid("NV12 and I420 source dimensions must be even");
-        }
-        if (source.row_stride < width || (source.row_stride & 1U) != 0U)
-        {
-            throw_invalid("YUV source row stride must be even and at least the width");
-        }
-        row_bytes = width;
-        const std::size_t chroma_rows = height / 2U;
-        const std::size_t y_storage = checked_multiply(source.row_stride, height,
-                                                       "source span");
-        if (source.pixel_format == PixelFormat::Nv12)
-        {
-            const std::size_t uv_span = checked_add(
-                checked_multiply(chroma_rows - 1U, source.row_stride, "source span"),
-                width, "source span");
-            span = checked_add(y_storage, uv_span, "source span");
-        }
-        else
-        {
-            const std::size_t chroma_stride = source.row_stride / 2U;
-            const std::size_t u_storage = checked_multiply(chroma_stride, chroma_rows,
-                                                           "source span");
-            const std::size_t v_span = checked_add(
-                checked_multiply(chroma_rows - 1U, chroma_stride, "source span"),
-                width / 2U, "source span");
-            span = checked_add(checked_add(y_storage, u_storage, "source span"),
-                               v_span, "source span");
-        }
-    }
-    else
-    {
-        throw_invalid("source pixel format must be Bgr8, Rgb8, Nv12, or I420");
-    }
-    validate_limit(span, limit, "source image");
-    if (source.byte_size < span)
+    const detail::PackedImageLayout layout =
+        detail::packed_image_layout(source, "source image");
+    validate_limit(layout.source_span, limit, "source image");
+    if (source.byte_size < layout.source_span)
     {
         throw_invalid("source capacity is smaller than its dimensions and stride");
     }
-    return { row_bytes, span };
+    return { layout.row_bytes, layout.source_span };
 }
 
 std::array<std::uint8_t, 3> yuv_rgb(const ImageView& source, int x, int y)
 {
     const auto* bytes = static_cast<const std::uint8_t*>(source.data);
-    const std::size_t width = static_cast<std::size_t>(source.width);
     const std::size_t height = static_cast<std::size_t>(source.height);
-    const int y_value = bytes[static_cast<std::size_t>(y) * source.row_stride +
-                              static_cast<std::size_t>(x)];
+    int y_value = 0;
     int u_value = 0;
     int v_value = 0;
-    const std::size_t y_storage = source.row_stride * height;
-    if (source.pixel_format == PixelFormat::Nv12)
+    if (source.pixel_format == PixelFormat::Yuy2 ||
+        source.pixel_format == PixelFormat::Uyvy)
     {
-        const std::size_t uv_offset = y_storage +
-            static_cast<std::size_t>(y / 2) * source.row_stride +
-            static_cast<std::size_t>(x / 2) * 2U;
-        u_value = bytes[uv_offset];
-        v_value = bytes[uv_offset + 1U];
+        const auto* pair = bytes + static_cast<std::size_t>(y) * source.row_stride +
+                           static_cast<std::size_t>(x / 2) * 4U;
+        if (source.pixel_format == PixelFormat::Yuy2)
+        {
+            y_value = pair[(x & 1) == 0 ? 0U : 2U];
+            u_value = pair[1];
+            v_value = pair[3];
+        }
+        else
+        {
+            y_value = pair[(x & 1) == 0 ? 1U : 3U];
+            u_value = pair[0];
+            v_value = pair[2];
+        }
     }
     else
     {
-        const std::size_t chroma_stride = source.row_stride / 2U;
-        const std::size_t chroma_rows = height / 2U;
-        const std::size_t chroma_offset =
-            static_cast<std::size_t>(y / 2) * chroma_stride +
-            static_cast<std::size_t>(x / 2);
-        u_value = bytes[y_storage + chroma_offset];
-        v_value = bytes[y_storage + chroma_stride * chroma_rows + chroma_offset];
+        y_value = bytes[static_cast<std::size_t>(y) * source.row_stride +
+                        static_cast<std::size_t>(x)];
+        const std::size_t y_storage = source.row_stride * height;
+        if (source.pixel_format == PixelFormat::Nv12 ||
+            source.pixel_format == PixelFormat::Nv21)
+        {
+            const std::size_t uv_offset = y_storage +
+                static_cast<std::size_t>(y / 2) * source.row_stride +
+                static_cast<std::size_t>(x / 2) * 2U;
+            const bool uv_order = source.pixel_format == PixelFormat::Nv12;
+            u_value = bytes[uv_offset + (uv_order ? 0U : 1U)];
+            v_value = bytes[uv_offset + (uv_order ? 1U : 0U)];
+        }
+        else
+        {
+            const std::size_t chroma_stride = source.row_stride / 2U;
+            const std::size_t chroma_rows = height / 2U;
+            const std::size_t chroma_offset =
+                static_cast<std::size_t>(y / 2) * chroma_stride +
+                static_cast<std::size_t>(x / 2);
+            u_value = bytes[y_storage + chroma_offset];
+            v_value = bytes[y_storage + chroma_stride * chroma_rows + chroma_offset];
+        }
     }
 
     const int c = (std::max)(0, y_value - 16);
@@ -228,7 +212,10 @@ float borrowed_channel(const ImageView& source, int x, int y, int output_channel
     const bool output_rgb = output_format == PixelFormat::Rgb8;
     const int semantic_channel = output_rgb ? output_channel : 2 - output_channel;
     if (source.pixel_format == PixelFormat::Nv12 ||
-        source.pixel_format == PixelFormat::I420)
+        source.pixel_format == PixelFormat::I420 ||
+        source.pixel_format == PixelFormat::Nv21 ||
+        source.pixel_format == PixelFormat::Yuy2 ||
+        source.pixel_format == PixelFormat::Uyvy)
     {
         const auto rgb = yuv_rgb(source, x, y);
         return static_cast<float>(rgb[static_cast<std::size_t>(semantic_channel)]);
@@ -301,7 +288,10 @@ BgrImage CpuImageProcessor::copy_bgr(const ImageView& source, std::size_t max_im
                 continue;
             }
             if (source.pixel_format == PixelFormat::Nv12 ||
-                source.pixel_format == PixelFormat::I420)
+                source.pixel_format == PixelFormat::I420 ||
+                source.pixel_format == PixelFormat::Nv21 ||
+                source.pixel_format == PixelFormat::Yuy2 ||
+                source.pixel_format == PixelFormat::Uyvy)
             {
                 for (std::int32_t column = 0; column < source.width; ++column)
                 {
@@ -548,7 +538,10 @@ std::vector<float> CpuImageProcessor::letterbox_nchw(
                 const float fy = source_y - static_cast<float>(y0);
                 const std::size_t pixel = static_cast<std::size_t>(y) * destination_width + x;
                 const bool yuv_source = source.pixel_format == PixelFormat::Nv12 ||
-                                        source.pixel_format == PixelFormat::I420;
+                                        source.pixel_format == PixelFormat::I420 ||
+                                        source.pixel_format == PixelFormat::Nv21 ||
+                                        source.pixel_format == PixelFormat::Yuy2 ||
+                                        source.pixel_format == PixelFormat::Uyvy;
                 std::array<std::uint8_t, 3> top_left_rgb {};
                 std::array<std::uint8_t, 3> top_right_rgb {};
                 std::array<std::uint8_t, 3> bottom_left_rgb {};

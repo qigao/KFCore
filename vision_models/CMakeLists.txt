@@ -74,7 +74,10 @@ if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
   target_compile_features(kfcore_vision_models_tensorrt PUBLIC cxx_std_17)
   target_link_libraries(kfcore_vision_models_tensorrt
     PUBLIC KFCore::vision_model_core
-    PRIVATE KFCore::image_processor KFCore::tensorrt_runtime)
+    PRIVATE
+      KFCore::image_processor
+      KFCore::tensorrt_runtime
+      KFCore::tensorrt_yolo)
   set_target_properties(kfcore_vision_models_tensorrt PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
@@ -195,6 +198,8 @@ if(BUILD_TESTS)
   if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
     add_executable(test_vision_models_tensorrt_validation
       tests/test_tensorrt_backend_validation.cpp)
+    target_include_directories(test_vision_models_tensorrt_validation PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(test_vision_models_tensorrt_validation PRIVATE
       KFCore::vision_models_tensorrt
       TurboUtils::TinyTest)
@@ -213,6 +218,7 @@ if(BUILD_TESTS)
           "${KFCORE_VISION_MODEL_TEST_ENGINE_HAND}"
           "${KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}"
           "${KFCORE_VISION_MODEL_TEST_ENGINE_FACE}"
+          "${KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}"
           "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}"
           "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}")
         if(NOT IS_ABSOLUTE "${_vision_trt_asset}" OR
@@ -238,6 +244,7 @@ if(BUILD_TESTS)
         "KFCORE_VISION_TRT_TEST_HAND=\"${KFCORE_VISION_MODEL_TEST_ENGINE_HAND}\""
         "KFCORE_VISION_TRT_TEST_CLASSIFIER=\"${KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}\""
         "KFCORE_VISION_TRT_TEST_FACE=\"${KFCORE_VISION_MODEL_TEST_ENGINE_FACE}\""
+        "KFCORE_VISION_TRT_TEST_FACE_DETECTOR=\"${KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}\""
         "KFCORE_VISION_TRT_TEST_HAND_IMAGE=\"${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}\""
         "KFCORE_VISION_TRT_TEST_FACE_IMAGE=\"${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}\"")
       target_link_libraries(test_vision_models_tensorrt_integration PRIVATE
@@ -260,12 +267,10 @@ if(BUILD_TESTS)
     include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
     kfcore_require_ninja(_vision_models_consumer_ninja)
     set(_vision_models_consumer_kind cpu)
-    set(_vision_models_consumer_cpu ON)
-    set(_vision_models_consumer_tensorrt OFF)
-    if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
+    if(KFCORE_BUILD_VISION_MODELS_CPU AND KFCORE_BUILD_VISION_MODELS_TENSORRT)
+      set(_vision_models_consumer_kind combined)
+    elseif(KFCORE_BUILD_VISION_MODELS_TENSORRT)
       set(_vision_models_consumer_kind tensorrt)
-      set(_vision_models_consumer_cpu OFF)
-      set(_vision_models_consumer_tensorrt ON)
     endif()
     set(_vision_models_consumer_root
       "${CMAKE_BINARY_DIR}/tests/vision_models_${_vision_models_consumer_kind}_installed_consumer")
@@ -278,8 +283,8 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_KFCORE_DIR=${_vision_models_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
         "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
         "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_vision_models_consumer_ninja}"
-        "-DKFCORE_CONSUMER_EXPECT_CPU=${_vision_models_consumer_cpu}"
-        "-DKFCORE_CONSUMER_EXPECT_TENSORRT=${_vision_models_consumer_tensorrt}"
+        "-DKFCORE_CONSUMER_EXPECT_CPU=${KFCORE_BUILD_VISION_MODELS_CPU}"
+        "-DKFCORE_CONSUMER_EXPECT_TENSORRT=${KFCORE_BUILD_VISION_MODELS_TENSORRT}"
         "-DKFCORE_CONSUMER_EXPECT_HAND_INTERACTION=${KFCORE_BUILD_HAND_INTERACTION}"
         "-DKFCORE_CONSUMER_ONNXRUNTIME_ROOT=$ENV{ONNXRUNTIME_ROOT}"
         "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"

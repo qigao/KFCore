@@ -103,6 +103,27 @@ spec("TensorRT YOLO detection helpers")
             prepare_batch({ i420 }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
         check(i420_plan.processor.images[0].packed_bytes == 12U);
 
+        std::uint8_t nv21_pixels[12] {};
+        const ImageView nv21 = host_view(
+            nv21_pixels, 4, 2, 4, PixelFormat::Nv21);
+        const BatchInputPlan nv21_plan =
+            prepare_batch({ nv21 }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
+        check(nv21_plan.processor.images[0].packed_bytes == 12U);
+
+        std::uint8_t yuy2_pixels[16] {};
+        const ImageView yuy2 = host_view(
+            yuy2_pixels, 4, 2, 8, PixelFormat::Yuy2);
+        const BatchInputPlan yuy2_plan =
+            prepare_batch({ yuy2 }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
+        check(yuy2_plan.processor.images[0].packed_bytes == 16U);
+
+        std::uint8_t uyvy_pixels[16] {};
+        const ImageView uyvy = host_view(
+            uyvy_pixels, 4, 2, 8, PixelFormat::Uyvy);
+        const BatchInputPlan uyvy_plan =
+            prepare_batch({ uyvy }, 1, 1, 4, 2, TensorDataType::Float32, 1024);
+        check(uyvy_plan.processor.images[0].packed_bytes == 16U);
+
         ImageView bad = valid;
         bad.data      = nullptr;
         expect_yolo_error(

@@ -49,7 +49,10 @@ endif()
 if(KFCORE_EXPECT_TENSORRT AND
    (NOT DEFINED KFCore_HAS_VISION_MODELS_TENSORRT OR
     NOT KFCore_HAS_VISION_MODELS_TENSORRT OR
-    NOT TARGET KFCore::vision_models_tensorrt))
+    NOT DEFINED KFCore_HAS_TENSORRT_YOLO OR
+    NOT KFCore_HAS_TENSORRT_YOLO OR
+    NOT TARGET KFCore::vision_models_tensorrt OR
+    NOT TARGET KFCore::tensorrt_yolo))
   message(FATAL_ERROR
     "Installed KFCore package does not report/export the TensorRT vision backend")
 endif()
