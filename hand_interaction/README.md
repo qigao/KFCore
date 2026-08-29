@@ -273,7 +273,7 @@ build\HandTRT\bin\hand_interaction_demo.exe `
 CPU 路径会分别报告两项。
 
 `--mode` 与 `--width/--height/--fps` 二选一，且只接受精确匹配。省略时请求
-1280x720@30；同一规格按 NV12、I420、BGRA、RGB24 的顺序选择。MJPEG 会被明确拒绝，因为
+640x480@30；同一规格按 NV12、I420、BGRA、RGB24 的顺序选择。MJPEG 会被明确拒绝，因为
 示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
 `R` 同时重置 tracker 与 THIG 状态，`Q`、Escape 或关闭窗口正常退出。
 
