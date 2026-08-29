@@ -85,8 +85,13 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
     repeated_kfcore)
 endif()
 
-if(KFCORE_BUILD_YOLO_OPENCV)
+if(KFCORE_BUILD_YOLO_APPLICATIONS)
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs highgui)
+elseif(KFCORE_BUILD_YOLO_OPENCV)
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
+endif()
+
+if(KFCORE_BUILD_YOLO_OPENCV)
 
   add_library(kfcore_yolo_opencv SHARED src/opencv.cpp)
   target_link_libraries(kfcore_yolo_opencv
@@ -111,6 +116,122 @@ if(KFCORE_BUILD_YOLO_OPENCV)
 endif()
 
 if(BUILD_TESTS)
+  if(KFCORE_BUILD_YOLO_APPLICATIONS)
+    add_executable(test_yolo_domain_profile
+      tests/test_yolo_domain_profile.cpp
+      examples/yolo_domain_profile.cpp)
+    target_include_directories(test_yolo_domain_profile PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_yolo_domain_profile PRIVATE
+      KFCore::yolo_tracking
+      TurboUtils::TinyTest)
+    target_compile_features(test_yolo_domain_profile PRIVATE cxx_std_17)
+    set_target_properties(test_yolo_domain_profile PROPERTIES
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_yolo_domain_profile COMMAND test_yolo_domain_profile)
+
+    add_executable(test_yolo_domain_cli
+      tests/test_yolo_domain_cli.cpp
+      examples/yolo_domain_cli.cpp
+      examples/yolo_domain_profile.cpp)
+    target_include_directories(test_yolo_domain_cli PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_yolo_domain_cli PRIVATE
+      KFCore::yolo_tracking
+      TurboParser::Capture
+      TurboUtils::TinyTest)
+    target_compile_features(test_yolo_domain_cli PRIVATE cxx_std_17)
+    add_test(NAME test_yolo_domain_cli COMMAND test_yolo_domain_cli)
+
+    add_executable(test_yolo_domain_capture
+      tests/test_yolo_domain_capture.cpp
+      examples/yolo_domain_capture.cpp)
+    target_include_directories(test_yolo_domain_capture PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_yolo_domain_capture PRIVATE
+      TurboParser::Capture
+      TurboUtils::TinyTest)
+    target_compile_features(test_yolo_domain_capture PRIVATE cxx_std_17)
+    add_test(NAME test_yolo_domain_capture COMMAND test_yolo_domain_capture)
+
+    add_executable(test_yolo_domain_ui
+      tests/test_yolo_domain_ui.cpp
+      examples/yolo_domain_capture.cpp
+      examples/yolo_domain_frame.cpp
+      examples/yolo_domain_profile.cpp
+      examples/yolo_domain_ui.cpp)
+    target_include_directories(test_yolo_domain_ui PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_yolo_domain_ui PRIVATE
+      KFCore::yolo_tracking
+      OpenCVLite::core
+      OpenCVLite::imgproc
+      TurboParser::Capture
+      TurboUtils::TinyTest)
+    target_compile_features(test_yolo_domain_ui PRIVATE cxx_std_17)
+    add_test(NAME test_yolo_domain_ui COMMAND test_yolo_domain_ui)
+  endif()
+
+  if(KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
+    add_executable(test_yolo_domain_onnx
+      tests/test_yolo_domain_onnx.cpp)
+    target_include_directories(test_yolo_domain_onnx PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    target_link_libraries(test_yolo_domain_onnx PRIVATE
+      kfcore_yolo_domain_onnx
+      TurboUtils::TinyTest)
+    target_compile_features(test_yolo_domain_onnx PRIVATE cxx_std_17)
+    set_target_properties(test_yolo_domain_onnx PROPERTIES
+      FOLDER "tensorrt_yolo/tests")
+    add_test(NAME test_yolo_domain_onnx COMMAND test_yolo_domain_onnx)
+    if(WIN32)
+      set_tests_properties(test_yolo_domain_onnx PROPERTIES
+        ENVIRONMENT_MODIFICATION
+          "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
+    endif()
+
+    if(KFCORE_BUILD_YOLO_APPLICATION_INTEGRATION_TESTS)
+      set(_yolo_domain_drone
+        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-drone.onnx")
+      set(_yolo_domain_football
+        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-football.onnx")
+      set(_yolo_domain_parking
+        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-parking.onnx")
+      foreach(_yolo_domain_model IN ITEMS
+          "${_yolo_domain_drone}" "${_yolo_domain_football}"
+          "${_yolo_domain_parking}")
+        if(NOT IS_ABSOLUTE "${_yolo_domain_model}" OR
+           NOT EXISTS "${_yolo_domain_model}" OR IS_DIRECTORY "${_yolo_domain_model}")
+          message(FATAL_ERROR
+            "YOLO application integration model must be an existing absolute file: "
+            "${_yolo_domain_model}")
+        endif()
+      endforeach()
+      add_executable(test_yolo_domain_onnx_integration
+        tests/test_yolo_domain_onnx_integration.cpp
+        examples/yolo_domain_profile.cpp)
+      target_include_directories(test_yolo_domain_onnx_integration PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+      target_compile_definitions(test_yolo_domain_onnx_integration PRIVATE
+        "KFCORE_YOLO_TEST_DRONE=\"${_yolo_domain_drone}\""
+        "KFCORE_YOLO_TEST_FOOTBALL=\"${_yolo_domain_football}\""
+        "KFCORE_YOLO_TEST_PARKING=\"${_yolo_domain_parking}\"")
+      target_link_libraries(test_yolo_domain_onnx_integration PRIVATE
+        kfcore_yolo_domain_onnx
+        TurboUtils::TinyTest)
+      target_compile_features(test_yolo_domain_onnx_integration PRIVATE cxx_std_17)
+      set_target_properties(test_yolo_domain_onnx_integration PROPERTIES
+        FOLDER "tensorrt_yolo/tests")
+      add_test(NAME test_yolo_domain_onnx_integration
+        COMMAND test_yolo_domain_onnx_integration)
+      if(WIN32)
+        set_tests_properties(test_yolo_domain_onnx_integration PROPERTIES
+          ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
+      endif()
+    endif()
+  endif()
+
   add_executable(test_tensorrt_contract tests/test_tensorrt_contract.cpp)
   target_include_directories(test_tensorrt_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -159,6 +280,86 @@ if(KFCORE_BUILD_YOLO_OPENCV AND BUILD_TESTS)
   add_test(NAME test_yolo_opencv COMMAND test_yolo_opencv)
 endif()
 
+if(KFCORE_BUILD_TENSORRT_YOLO OR KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
+  add_library(kfcore_yolo_compact_nms STATIC
+    src/compact_nms.cpp)
+  target_include_directories(kfcore_yolo_compact_nms PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(kfcore_yolo_compact_nms PUBLIC
+    KFCore::yolo_tracking
+    KFCore::image_core)
+  target_compile_features(kfcore_yolo_compact_nms PUBLIC cxx_std_17)
+  set_target_properties(kfcore_yolo_compact_nms PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/internal")
+endif()
+
+if(KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
+  add_library(kfcore_yolo_domain_onnx STATIC
+    examples/yolo_domain_onnx.cpp)
+  target_include_directories(kfcore_yolo_domain_onnx PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+  target_link_libraries(kfcore_yolo_domain_onnx
+    PUBLIC KFCore::yolo_tracking
+    PRIVATE
+      kfcore_yolo_compact_nms
+      KFCore::image_core
+      ONNXRuntime::ONNXRuntime)
+  target_compile_features(kfcore_yolo_domain_onnx PUBLIC cxx_std_17)
+  set_target_properties(kfcore_yolo_domain_onnx PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/internal")
+  if(WIN32)
+    add_custom_command(TARGET kfcore_yolo_domain_onnx POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:ONNXRuntime::ONNXRuntime>
+              ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+  endif()
+endif()
+
+if(KFCORE_BUILD_YOLO_APPLICATIONS)
+  if(NOT TARGET TurboParser::Capture)
+    message(FATAL_ERROR
+      "KFCORE_BUILD_YOLO_APPLICATIONS requires TurboParser::Capture")
+  endif()
+  add_executable(yolov8_domain_demo
+    examples/yolov8_domain_demo.cpp
+    examples/yolo_domain_capture.cpp
+    examples/yolo_domain_cli.cpp
+    examples/yolo_domain_frame.cpp
+    examples/yolo_domain_profile.cpp
+    examples/yolo_domain_ui.cpp)
+  target_include_directories(yolov8_domain_demo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+  target_link_libraries(yolov8_domain_demo PRIVATE
+    KFCore::yolo_tracking
+    OpenCVLite::core
+    OpenCVLite::imgproc
+    OpenCVLite::imgcodecs
+    OpenCVLite::highgui
+    TurboParser::Capture)
+  if(KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
+    target_compile_definitions(yolov8_domain_demo PRIVATE
+      KFCORE_YOLO_APP_HAS_CPU=1)
+    target_link_libraries(yolov8_domain_demo PRIVATE
+      kfcore_yolo_domain_onnx)
+  endif()
+  if(KFCORE_BUILD_TENSORRT_YOLO)
+    target_compile_definitions(yolov8_domain_demo PRIVATE
+      KFCORE_YOLO_APP_HAS_TENSORRT=1)
+    target_link_libraries(yolov8_domain_demo PRIVATE
+      KFCore::tensorrt_yolo)
+  endif()
+  target_compile_features(yolov8_domain_demo PRIVATE cxx_std_17)
+  set_target_properties(yolov8_domain_demo PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "tensorrt_yolo/examples")
+endif()
+
 if(KFCORE_BUILD_TENSORRT_YOLO)
   add_library(tensorrt_yolo SHARED
     src/cuda_buffer.cpp
@@ -176,6 +377,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
   target_link_libraries(tensorrt_yolo
     PUBLIC KFCore::yolo_tracking
     PRIVATE
+      kfcore_yolo_compact_nms
       KFCore::image_processor
       TensorRT::nvinfer
       TensorRT::nvinfer_plugin
@@ -201,6 +403,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
     target_include_directories(test_tensorrt_detection_helpers PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(test_tensorrt_detection_helpers PRIVATE
+      kfcore_yolo_compact_nms
       KFCore::yolo_tracking
       KFCore::image_processor
       TurboUtils::TinyTest)
@@ -213,7 +416,9 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
   endif()
 
   if(KFCORE_BUILD_YOLO_OPENCV)
-    find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
+    if(NOT KFCORE_BUILD_YOLO_APPLICATIONS)
+      find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
+    endif()
     add_executable(track_image_sequence examples/track_image_sequence.cpp)
     target_link_libraries(track_image_sequence PRIVATE
       KFCore::tensorrt_yolo
