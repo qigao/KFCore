@@ -133,6 +133,22 @@
             }
         },
         {
+            "name": "win-yolov8-applications-release-user",
+            "displayName": "YOLOv8 Domain Applications CPU/TensorRT Release Build (Windows, User)",
+            "inherits": "win-yolo-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-YOLOv8-Applications",
+            "environment": {
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-YOLOv8-Applications/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "KFCORE_BUILD_YOLO_APPLICATIONS": "ON",
+                "KFCORE_BUILD_YOLO_APPLICATIONS_CPU": "ON",
+                "KFCORE_BUILD_YOLO_APPLICATION_INTEGRATION_TESTS": "ON",
+                "KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models"
+            }
+        },
+        {
             "name": "win-tensorrt-models-release-user",
             "displayName": "TensorRT Runtime and Face Models Release Build (Windows, User)",
             "inherits": "win-release-user",
@@ -325,6 +341,11 @@
             "configurePreset": "win-yolo-release-user"
         },
         {
+            "name": "win-yolov8-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-yolov8-applications-release-user"
+        },
+        {
             "name": "win-tensorrt-models-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-tensorrt-models-release-user"
@@ -498,6 +519,11 @@
             "name": "win-yolo-release-user",
             "inherits": "win-release-user",
             "configurePreset": "win-yolo-release-user"
+        },
+        {
+            "name": "win-yolov8-applications-release-user",
+            "inherits": "win-yolo-release-user",
+            "configurePreset": "win-yolov8-applications-release-user"
         },
         {
             "name": "win-tensorrt-models-release-user",

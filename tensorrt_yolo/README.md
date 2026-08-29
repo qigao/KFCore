@@ -104,6 +104,73 @@ ctest --preset win-yolo-tracking-dev-user -R '^test_tensorrt_integration_engine_
 TensorRT/CUDA DLL 由部署环境提供；安装包不复制它们。若没有与目标 GPU/TensorRT 版本匹配的
 可信 engine，GPU 推理测试是明确阻塞项，不能用任意 engine 或其他推理后端代替。
 
+## YOLOv8 场景应用
+
+`yolov8_domain_demo` 为以下本地模型提供统一的图片目录和 USB 摄像头应用：
+
+| `--application` | ONNX 输入 | 类别 |
+|---|---:|---|
+| `drone` | `1x3x640x640` | `class-0`、`class-1`（模型没有提供更具体的类别名） |
+| `football` | `1x3x960x960` | `ball`、`goalkeeper`、`player`、`referee` |
+| `parking` | `1x3x640x640` | `space-empty`、`space-occupied` |
+
+CPU 路线使用 ONNX Runtime 和 CPU ImageProcessor；GPU 路线使用 TensorRT 和 CUDA
+ImageProcessor。两条路线产生同一个 `DetectionFrame`，之后共用 KFCore 自有
+`ByteTrackSession`、类别校验、统计和 UI。`--backend` 是强制选择项，加载或推理失败不会切换
+到另一条路线。
+
+```powershell
+$env:TENSORRT_ROOT = 'C:/projects/TensorRT-11.2.1.2'
+cmake --fresh --preset win-yolov8-applications-release-user
+cmake --build --preset win-yolov8-applications-release-user --target yolov8_domain_demo
+ctest --preset win-yolov8-applications-release-user -R '^test_yolo_domain_' --output-on-failure
+
+# preset 的环境只作用于 CMake/CTest 子进程；直接启动 exe 前显式设置 DLL 搜索路径
+$pkgRoot = 'C:/projects/cpp/external/pkgs'
+$appBin = "$PWD/build/Msvc-YOLOv8-Applications/bin"
+$env:PATH = "$pkgRoot/onnxruntime/lib;$env:TENSORRT_ROOT/bin;$env:CUDA_PATH_V12_8/bin;" +
+            "$pkgRoot/opencv-lite/bin;$appBin;$pkgRoot/turboparser/release/bin;" +
+            "$pkgRoot/turboutils/release/bin;$pkgRoot/turbonet/release/bin;$env:PATH"
+
+# CPU：有界图片目录处理
+build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+  --application football --backend cpu `
+  --model C:/projects/cpp/KFCore/yolo-models/yolov8n-football.onnx `
+  --images C:/absolute/input --output C:/absolute/output --max-frames 100
+
+# 查询摄像头及 mode id；此命令不加载模型
+build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe --list-cameras
+
+# GPU：默认严格选择 640x480@30 NV12；Q/Esc 退出，R 清空跟踪状态
+build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+  --application parking --backend tensorrt `
+  --model C:/absolute/yolov8n-parking.engine --camera 0 --mirror
+
+# 无窗口采样必须给定边界
+build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+  --application drone --backend cpu `
+  --model C:/projects/cpp/KFCore/yolo-models/yolov8n-drone.onnx `
+  --camera 0 --headless --max-frames 300
+```
+
+没有精确 NV12 mode 时程序直接报错；可以先用 `--list-cameras` 查出 mode，再通过
+`--mode <id>` 显式使用 I420、RGB24 或 BGRA。MJPEG 会列出但不解码。摄像头回调使用有界的
+latest-frame mailbox，推理跟不上采集时覆盖尚未消费的旧帧，并在 `coalesced` 中明确计数。
+
+TensorRT engine 必须在部署机器上由可信 ONNX 生成。TensorRT 11.2 的 strongly typed 构建示例：
+
+```powershell
+C:/projects/TensorRT-11.2.1.2/bin/trtexec.exe `
+  --onnx=C:/projects/cpp/KFCore/yolo-models/yolov8n-parking.onnx `
+  --saveEngine=C:/absolute/yolov8n-parking.engine --stronglyTyped
+```
+
+最终控制台输出和窗口叠加层包含 model load、capture wait、pixel conversion、detect、track、
+render/output 与 total 的 current/mean/P50/P95。`detect` 包含 letterbox/归一化、后端推理和
+Compact NMS 解码；图片模式的 `render` 还包含编码写盘，摄像头模式包含绘制与窗口提交。
+这些阶段用于同一输入、同一模型下比较 CPU/GPU；不能把不同输入尺寸的 football 与其他模型的
+数字直接当作后端差异。
+
 ## YOLO11 / YOLO11-face 验证记录
 
 **事实（2026-08-26 ImageProcessor 重构前基线）**：通用 `yolo11n` engine 与

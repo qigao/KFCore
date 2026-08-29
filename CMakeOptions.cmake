@@ -9,6 +9,18 @@ option(KFCORE_BUILD_SIFT "Build the reusable SIFT extractor contract" OFF)
 option(KFCORE_BUILD_SIFT_POPSIFT "Build the maintained CUDA SIFT backend" OFF)
 option(KFCORE_BUILD_YOLO_TRACKING "Build YOLO ByteTrack tracking support" OFF)
 option(KFCORE_BUILD_TENSORRT_YOLO "Build TensorRT YOLO detector support" OFF)
+option(KFCORE_BUILD_YOLO_APPLICATIONS
+       "Build YOLOv8 drone football and parking applications" OFF)
+option(KFCORE_BUILD_YOLO_APPLICATIONS_CPU
+       "Build the ONNX Runtime CPU backend for YOLO applications" OFF)
+cmake_dependent_option(
+  KFCORE_BUILD_YOLO_APPLICATION_INTEGRATION_TESTS
+  "Build real-model YOLOv8 application integration tests"
+  OFF
+  "KFCORE_BUILD_YOLO_APPLICATIONS_CPU"
+  OFF)
+set(KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR "" CACHE PATH
+    "Directory containing trusted YOLOv8 domain ONNX integration models")
 option(KFCORE_BUILD_TENSORRT_RUNTIME "Build the model-neutral TensorRT runtime" OFF)
 option(KFCORE_BUILD_FACE_MODELS "Build strict TensorRT face model adapters" OFF)
 option(KFCORE_BUILD_FACE_APPLICATIONS "Build OpenCV TensorRT face applications" OFF)
