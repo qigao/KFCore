@@ -42,6 +42,7 @@ struct DetectorOptions
     std::array<float, 3>                       mean { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>                       stddev { 1.0f, 1.0f, 1.0f };
     float                                      border_value = 114.0f;
+    bool                                       mirror_horizontal = false;
 };
 
 class TensorRtDetector;

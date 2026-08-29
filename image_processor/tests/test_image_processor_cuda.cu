@@ -1,4 +1,5 @@
 #include "kfcore/image_processor/image_processor.hpp"
+#include "kfcore/image_processor/cpu.hpp"
 #include "tinytest.hpp"
 
 #include <cuda_fp16.h>
@@ -411,6 +412,87 @@ spec("ImageProcessor CUDA contract")
                               cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
         check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
         check_fp32(output, expected);
+    }
+
+    it("fuses staged NV12 conversion into the CUDA tensor")
+    {
+        const std::array<std::uint8_t, 6> nv12 = {
+            81, 81, 81, 81, 90, 240,
+        };
+        const ImageView image = {
+            nv12.data(), nv12.size(), 2, 2, 2, PixelFormat::Nv12, MemoryKind::Host,
+        };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        LetterboxTransform cpu_transform;
+        const std::vector<float> expected = CpuImageProcessor::letterbox_nchw(
+            image, 2, 2, options, 1024, 1024, &cpu_transform);
+
+        DeviceAllocation destination(expected.size() * sizeof(float));
+        DeviceAllocation device_workspace(nv12.size());
+        PinnedAllocation pinned_workspace(nv12.size());
+        ExplicitStream stream;
+        std::array<float, 12> output {};
+        const TensorView tensor = fp32_tensor(
+            destination.get(), expected.size() * sizeof(float), 1, 2, 2);
+        const BatchPlan plan = ImageProcessor::plan({ image }, tensor, 1024, 1024);
+        ImageProcessor::stage_host_inputs(
+            { image }, plan, { pinned_workspace.get(), plan.host_staging_bytes });
+
+        ImageProcessor::enqueue(
+            { image }, tensor, plan,
+            { pinned_workspace.get(), plan.host_staging_bytes },
+            { device_workspace.get(), plan.device_staging_bytes }, options, stream.get());
+        check(cudaMemcpyAsync(output.data(), destination.get(), sizeof(output),
+                              cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
+        check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
+        for (std::size_t index = 0U; index < output.size(); ++index)
+        {
+            check(std::fabs(output[index] - expected[index]) < 1.0e-5F);
+        }
+    }
+
+    it("matches CPU I420 preprocessing with horizontal mirror")
+    {
+        const std::array<std::uint8_t, 12> i420 = {
+            16, 235, 81, 145,
+            16, 235, 81, 145,
+            128, 128,
+            128, 128,
+        };
+        DeviceAllocation source(i420.size());
+        DeviceAllocation destination(24U * sizeof(float));
+        ExplicitStream stream;
+        check(cudaMemcpyAsync(source.get(), i420.data(), i420.size(),
+                              cudaMemcpyHostToDevice, stream.get()) == cudaSuccess);
+        const ImageView host_image = {
+            i420.data(), i420.size(), 4, 2, 4, PixelFormat::I420, MemoryKind::Host,
+        };
+        const ImageView device_image = {
+            source.get(), i420.size(), 4, 2, 4, PixelFormat::I420,
+            MemoryKind::CudaDevice,
+        };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Rgb8;
+        options.mirror_horizontal = true;
+        LetterboxTransform cpu_transform;
+        const std::vector<float> expected = CpuImageProcessor::letterbox_nchw(
+            host_image, 4, 2, options, 1024, 1024, &cpu_transform);
+        std::array<float, 24> output {};
+        const TensorView tensor = fp32_tensor(
+            destination.get(), sizeof(output), 1, 2, 4);
+        const BatchPlan plan = ImageProcessor::plan(
+            { device_image }, tensor, 1024, 1024);
+
+        ImageProcessor::enqueue(
+            { device_image }, tensor, plan, {}, {}, options, stream.get());
+        check(cudaMemcpyAsync(output.data(), destination.get(), sizeof(output),
+                              cudaMemcpyDeviceToHost, stream.get()) == cudaSuccess);
+        check(cudaStreamSynchronize(stream.get()) == cudaSuccess);
+        for (std::size_t index = 0U; index < output.size(); ++index)
+        {
+            check(std::fabs(output[index] - expected[index]) < 1.0e-5F);
+        }
     }
 
     it("bilinearly samples the midpoint during non-square FP32 scaling")

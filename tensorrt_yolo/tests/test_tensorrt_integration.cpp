@@ -307,6 +307,7 @@ spec("TensorRT YOLO integration")
         {
             DetectorOptions options;
             options.input_size = spatial_size;
+            options.mirror_horizontal = true;
             auto detector = engine->create_detector(options);
             const std::vector<DetectionFrame> results = detector->detect_batch(batch);
             check(results.size() == profile.minimum_batch);

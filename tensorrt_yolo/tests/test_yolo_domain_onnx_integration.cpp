@@ -3,6 +3,7 @@
 
 #include "tinytest.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -54,6 +55,7 @@ spec("YOLOv8 ONNX Runtime real-model integration")
             OnnxDetectorOptions options;
             options.intra_op_threads = 1;
             options.inter_op_threads = 1;
+            options.mirror_horizontal = true;
             auto detector = OnnxDomainDetector::load(model.path, options);
             check(detector->input_width() == model.extent);
             check(detector->input_height() == model.extent);
@@ -78,6 +80,22 @@ spec("YOLOv8 ONNX Runtime real-model integration")
                 check_true(detection.box.left < detection.box.right);
                 check_true(detection.box.top < detection.box.bottom);
             }
+
+            std::vector<std::uint8_t> nv12(
+                static_cast<std::size_t>(kSourceWidth) * kSourceHeight * 3U / 2U,
+                128U);
+            std::fill_n(nv12.begin(),
+                        static_cast<std::size_t>(kSourceWidth) * kSourceHeight,
+                        81U);
+            const ImageView native_view {
+                nv12.data(), kSourceWidth, kSourceHeight,
+                static_cast<std::size_t>(kSourceWidth), PixelFormat::Nv12,
+                MemoryKind::Host,
+            };
+            const DetectionFrame native_frame = detector->detect(native_view);
+            check(native_frame.image_width == kSourceWidth);
+            check(native_frame.image_height == kSourceHeight);
+            check(native_frame.detections.size() <= detector->max_detections());
         }
     }
 }

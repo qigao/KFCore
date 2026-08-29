@@ -266,6 +266,7 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
                 impl_->options.mean,
                 impl_->options.stddev,
                 impl_->options.border_value,
+                impl_->options.mirror_horizontal,
             };
             // enqueue may have submitted work before surfacing a later launch failure.
             stream_work_pending = true;

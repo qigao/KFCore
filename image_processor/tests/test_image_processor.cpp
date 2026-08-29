@@ -45,6 +45,12 @@ ImageView gray_host_view(const void* data, std::int32_t width, std::int32_t heig
     return { data, byte_size, width, height, stride, PixelFormat::Gray8, MemoryKind::Host };
 }
 
+ImageView yuv_host_view(const void* data, std::size_t byte_size, std::int32_t width,
+                        std::int32_t height, std::size_t stride, PixelFormat format)
+{
+    return { data, byte_size, width, height, stride, format, MemoryKind::Host };
+}
+
 TensorView device_tensor(void* data, std::size_t bytes, std::int32_t batch, std::int32_t height,
                          std::int32_t width, TensorElementType type = TensorElementType::Float32)
 {
@@ -217,6 +223,79 @@ spec("ImageProcessor CPU contract")
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
         };
         check(packed == expected);
+    }
+
+    it("plans and packs padded NV12 and I420 planes without padding")
+    {
+        constexpr std::uint8_t kPadding = 0xeeU;
+        const std::array<std::uint8_t, 16> nv12 = {
+            1, 2, 3, 4, kPadding, kPadding,
+            5, 6, 7, 8, kPadding, kPadding,
+            9, 10, 11, 12,
+        };
+        const std::array<std::uint8_t, 17> i420 = {
+            1, 2, 3, 4, kPadding, kPadding,
+            5, 6, 7, 8, kPadding, kPadding,
+            9, 10, kPadding,
+            11, 12,
+        };
+        std::array<float, 3 * 2 * 4> tensor_placeholder {};
+        const TensorView tensor = device_tensor(
+            tensor_placeholder.data(), sizeof(tensor_placeholder), 1, 2, 4);
+
+        for (const ImageView image : {
+                 yuv_host_view(nv12.data(), nv12.size(), 4, 2, 6, PixelFormat::Nv12),
+                 yuv_host_view(i420.data(), i420.size(), 4, 2, 6, PixelFormat::I420),
+             })
+        {
+            const BatchPlan plan = ImageProcessor::plan({ image }, tensor, 1024, 1024);
+            check(plan.images.size() == 1U);
+            check(plan.images[0].source_span_bytes == image.byte_size);
+            check(plan.images[0].packed_bytes == 12U);
+            check(plan.host_staging_bytes == 12U);
+
+            std::array<std::uint8_t, 12> packed {};
+            ImageProcessor::stage_host_inputs(
+                { image }, plan, { packed.data(), packed.size() });
+            const std::array<std::uint8_t, 12> expected = {
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+            };
+            check(packed == expected);
+        }
+    }
+
+    it("rejects malformed packed YUV dimensions strides and capacities")
+    {
+        std::array<std::uint8_t, 12> pixels {};
+        std::array<float, 3 * 2 * 4> tensor_placeholder {};
+        const TensorView tensor = device_tensor(
+            tensor_placeholder.data(), sizeof(tensor_placeholder), 1, 2, 4);
+        const ImageView valid = yuv_host_view(
+            pixels.data(), pixels.size(), 4, 2, 4, PixelFormat::Nv12);
+
+        ImageView invalid = valid;
+        invalid.width = 3;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "even");
+
+        invalid = valid;
+        invalid.height = 3;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "even");
+
+        invalid = valid;
+        invalid.row_stride = 3;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "row stride");
+
+        invalid = valid;
+        invalid.byte_size = pixels.size() - 1U;
+        expect_processor_error(
+            [&] { (void)ImageProcessor::plan({ invalid }, tensor, 1024, 1024); },
+            ImageProcessorErrorCode::InvalidArgument, "image capacity");
     }
 
     it("rejects invalid images, tensor contracts, limits, and workspace capacity")

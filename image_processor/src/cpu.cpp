@@ -35,6 +35,15 @@ std::size_t checked_multiply(std::size_t left, std::size_t right, const char* su
     return left * right;
 }
 
+std::size_t checked_add(std::size_t left, std::size_t right, const char* subject)
+{
+    if (right > (std::numeric_limits<std::size_t>::max)() - left)
+    {
+        throw_resource(std::string(subject) + " byte count overflow");
+    }
+    return left + right;
+}
+
 std::size_t packed_bytes(std::int32_t width, std::int32_t height, const char* subject)
 {
     if (width <= 0 || height <= 0)
@@ -103,32 +112,110 @@ BorrowedPlan validate_borrowed(const ImageView& source, std::size_t limit)
     {
         throw_invalid("source image must use Host memory");
     }
-    if (source.pixel_format != PixelFormat::Bgr8 &&
-        source.pixel_format != PixelFormat::Rgb8)
-    {
-        throw_invalid("source pixel format must be Bgr8 or Rgb8");
-    }
-    const std::size_t row_bytes = checked_multiply(static_cast<std::size_t>(source.width),
-                                                   kChannels, "source row");
     (void)packed_bytes(source.width, source.height, "source image");
-    if (source.row_stride < row_bytes)
+    const std::size_t width = static_cast<std::size_t>(source.width);
+    const std::size_t height = static_cast<std::size_t>(source.height);
+    std::size_t row_bytes = 0U;
+    std::size_t span = 0U;
+    if (source.pixel_format == PixelFormat::Bgr8 ||
+        source.pixel_format == PixelFormat::Rgb8)
     {
-        throw_invalid("source row stride is smaller than a packed row");
+        row_bytes = checked_multiply(width, kChannels, "source row");
+        if (source.row_stride < row_bytes)
+        {
+            throw_invalid("source row stride is smaller than a packed row");
+        }
+        span = checked_add(checked_multiply(height - 1U, source.row_stride,
+                                            "source span"),
+                           row_bytes, "source span");
     }
-    const std::size_t rows_before_last = static_cast<std::size_t>(source.height - 1);
-    const std::size_t prefix = checked_multiply(rows_before_last, source.row_stride,
-                                                "source span");
-    if (row_bytes > (std::numeric_limits<std::size_t>::max)() - prefix)
+    else if (source.pixel_format == PixelFormat::Nv12 ||
+             source.pixel_format == PixelFormat::I420)
     {
-        throw_resource("source span byte count overflow");
+        if ((source.width & 1) != 0 || (source.height & 1) != 0)
+        {
+            throw_invalid("NV12 and I420 source dimensions must be even");
+        }
+        if (source.row_stride < width || (source.row_stride & 1U) != 0U)
+        {
+            throw_invalid("YUV source row stride must be even and at least the width");
+        }
+        row_bytes = width;
+        const std::size_t chroma_rows = height / 2U;
+        const std::size_t y_storage = checked_multiply(source.row_stride, height,
+                                                       "source span");
+        if (source.pixel_format == PixelFormat::Nv12)
+        {
+            const std::size_t uv_span = checked_add(
+                checked_multiply(chroma_rows - 1U, source.row_stride, "source span"),
+                width, "source span");
+            span = checked_add(y_storage, uv_span, "source span");
+        }
+        else
+        {
+            const std::size_t chroma_stride = source.row_stride / 2U;
+            const std::size_t u_storage = checked_multiply(chroma_stride, chroma_rows,
+                                                           "source span");
+            const std::size_t v_span = checked_add(
+                checked_multiply(chroma_rows - 1U, chroma_stride, "source span"),
+                width / 2U, "source span");
+            span = checked_add(checked_add(y_storage, u_storage, "source span"),
+                               v_span, "source span");
+        }
     }
-    const std::size_t span = prefix + row_bytes;
+    else
+    {
+        throw_invalid("source pixel format must be Bgr8, Rgb8, Nv12, or I420");
+    }
     validate_limit(span, limit, "source image");
     if (source.byte_size < span)
     {
         throw_invalid("source capacity is smaller than its dimensions and stride");
     }
     return { row_bytes, span };
+}
+
+std::array<std::uint8_t, 3> yuv_rgb(const ImageView& source, int x, int y)
+{
+    const auto* bytes = static_cast<const std::uint8_t*>(source.data);
+    const std::size_t width = static_cast<std::size_t>(source.width);
+    const std::size_t height = static_cast<std::size_t>(source.height);
+    const int y_value = bytes[static_cast<std::size_t>(y) * source.row_stride +
+                              static_cast<std::size_t>(x)];
+    int u_value = 0;
+    int v_value = 0;
+    const std::size_t y_storage = source.row_stride * height;
+    if (source.pixel_format == PixelFormat::Nv12)
+    {
+        const std::size_t uv_offset = y_storage +
+            static_cast<std::size_t>(y / 2) * source.row_stride +
+            static_cast<std::size_t>(x / 2) * 2U;
+        u_value = bytes[uv_offset];
+        v_value = bytes[uv_offset + 1U];
+    }
+    else
+    {
+        const std::size_t chroma_stride = source.row_stride / 2U;
+        const std::size_t chroma_rows = height / 2U;
+        const std::size_t chroma_offset =
+            static_cast<std::size_t>(y / 2) * chroma_stride +
+            static_cast<std::size_t>(x / 2);
+        u_value = bytes[y_storage + chroma_offset];
+        v_value = bytes[y_storage + chroma_stride * chroma_rows + chroma_offset];
+    }
+
+    const int c = (std::max)(0, y_value - 16);
+    const int d = u_value - 128;
+    const int e = v_value - 128;
+    const auto channel = [](int value)
+    {
+        return static_cast<std::uint8_t>((std::clamp)(value, 0, 255));
+    };
+    return {
+        channel((298 * c + 409 * e + 128) / 256),
+        channel((298 * c - 100 * d - 208 * e + 128) / 256),
+        channel((298 * c + 516 * d + 128) / 256),
+    };
 }
 
 float borrowed_channel(const ImageView& source, int x, int y, int output_channel,
@@ -138,12 +225,18 @@ float borrowed_channel(const ImageView& source, int x, int y, int output_channel
     {
         return border_value;
     }
+    const bool output_rgb = output_format == PixelFormat::Rgb8;
+    const int semantic_channel = output_rgb ? output_channel : 2 - output_channel;
+    if (source.pixel_format == PixelFormat::Nv12 ||
+        source.pixel_format == PixelFormat::I420)
+    {
+        const auto rgb = yuv_rgb(source, x, y);
+        return static_cast<float>(rgb[static_cast<std::size_t>(semantic_channel)]);
+    }
     const auto* bytes = static_cast<const std::uint8_t*>(source.data);
     const auto* pixel = bytes + static_cast<std::size_t>(y) * source.row_stride +
                         static_cast<std::size_t>(x) * kChannels;
     const bool source_rgb = source.pixel_format == PixelFormat::Rgb8;
-    const bool output_rgb = output_format == PixelFormat::Rgb8;
-    const int semantic_channel = output_rgb ? output_channel : 2 - output_channel;
     const int storage_channel = source_rgb ? semantic_channel : 2 - semantic_channel;
     return static_cast<float>(pixel[storage_channel]);
 }
@@ -188,21 +281,37 @@ BgrImage CpuImageProcessor::copy_bgr(const ImageView& source, std::size_t max_im
     try
     {
         const BorrowedPlan plan = validate_borrowed(source, max_image_bytes);
+        const std::size_t destination_bytes =
+            packed_bytes(source.width, source.height, "owned image");
+        validate_limit(destination_bytes, max_image_bytes, "owned image");
         BgrImage result;
         result.width  = source.width;
         result.height = source.height;
-        result.pixels.resize(checked_multiply(plan.row_bytes,
-                                              static_cast<std::size_t>(source.height),
-                                              "owned image"));
+        result.pixels.resize(destination_bytes);
         const auto* input = static_cast<const std::uint8_t*>(source.data);
         for (std::int32_t row = 0; row < source.height; ++row)
         {
             const auto* source_row = input + static_cast<std::size_t>(row) * source.row_stride;
             auto* destination_row = result.pixels.data() +
-                                    static_cast<std::size_t>(row) * plan.row_bytes;
+                                    static_cast<std::size_t>(row) *
+                                        static_cast<std::size_t>(source.width) * kChannels;
             if (source.pixel_format == PixelFormat::Bgr8)
             {
                 std::memcpy(destination_row, source_row, plan.row_bytes);
+                continue;
+            }
+            if (source.pixel_format == PixelFormat::Nv12 ||
+                source.pixel_format == PixelFormat::I420)
+            {
+                for (std::int32_t column = 0; column < source.width; ++column)
+                {
+                    const auto rgb = yuv_rgb(source, column, row);
+                    auto* output = destination_row +
+                        static_cast<std::size_t>(column) * kChannels;
+                    output[0] = rgb[2];
+                    output[1] = rgb[1];
+                    output[2] = rgb[0];
+                }
                 continue;
             }
             for (std::int32_t column = 0; column < source.width; ++column)
@@ -426,6 +535,10 @@ std::vector<float> CpuImageProcessor::letterbox_nchw(
                                             static_cast<float>(source.width - 1));
                     source_y = (std::clamp)(source_y, 0.0F,
                                             static_cast<float>(source.height - 1));
+                    if (options.mirror_horizontal)
+                    {
+                        source_x = static_cast<float>(source.width - 1) - source_x;
+                    }
                 }
                 const int x0 = static_cast<int>(std::floor(source_x));
                 const int y0 = static_cast<int>(std::floor(source_y));
@@ -434,27 +547,67 @@ std::vector<float> CpuImageProcessor::letterbox_nchw(
                 const float fx = source_x - static_cast<float>(x0);
                 const float fy = source_y - static_cast<float>(y0);
                 const std::size_t pixel = static_cast<std::size_t>(y) * destination_width + x;
+                const bool yuv_source = source.pixel_format == PixelFormat::Nv12 ||
+                                        source.pixel_format == PixelFormat::I420;
+                std::array<std::uint8_t, 3> top_left_rgb {};
+                std::array<std::uint8_t, 3> top_right_rgb {};
+                std::array<std::uint8_t, 3> bottom_left_rgb {};
+                std::array<std::uint8_t, 3> bottom_right_rgb {};
+                if (!border && yuv_source)
+                {
+                    top_left_rgb = yuv_rgb(source, x0, y0);
+                    if (fx == 0.0F && fy == 0.0F)
+                    {
+                        top_right_rgb = top_left_rgb;
+                        bottom_left_rgb = top_left_rgb;
+                        bottom_right_rgb = top_left_rgb;
+                    }
+                    else
+                    {
+                        top_right_rgb = yuv_rgb(source, x1, y0);
+                        bottom_left_rgb = yuv_rgb(source, x0, y1);
+                        bottom_right_rgb = yuv_rgb(source, x1, y1);
+                    }
+                }
                 for (std::size_t channel = 0; channel < kChannels; ++channel)
                 {
                     float value = options.border_value;
                     if (!border)
                     {
-                        const float top = borrowed_channel(source, x0, y0,
-                                                           static_cast<int>(channel),
-                                                           options.output_format,
-                                                           options.border_value) * (1.0F - fx) +
-                                          borrowed_channel(source, x1, y0,
-                                                           static_cast<int>(channel),
-                                                           options.output_format,
-                                                           options.border_value) * fx;
-                        const float bottom = borrowed_channel(source, x0, y1,
-                                                              static_cast<int>(channel),
-                                                              options.output_format,
-                                                              options.border_value) * (1.0F - fx) +
-                                             borrowed_channel(source, x1, y1,
-                                                              static_cast<int>(channel),
-                                                              options.output_format,
-                                                              options.border_value) * fx;
+                        float top = 0.0F;
+                        float bottom = 0.0F;
+                        if (yuv_source)
+                        {
+                            const std::size_t semantic_channel =
+                                options.output_format == PixelFormat::Rgb8
+                                    ? channel
+                                    : 2U - channel;
+                            top = static_cast<float>(top_left_rgb[semantic_channel]) *
+                                      (1.0F - fx) +
+                                  static_cast<float>(top_right_rgb[semantic_channel]) * fx;
+                            bottom = static_cast<float>(bottom_left_rgb[semantic_channel]) *
+                                         (1.0F - fx) +
+                                     static_cast<float>(bottom_right_rgb[semantic_channel]) * fx;
+                        }
+                        else
+                        {
+                            top = borrowed_channel(source, x0, y0,
+                                                   static_cast<int>(channel),
+                                                   options.output_format,
+                                                   options.border_value) * (1.0F - fx) +
+                                  borrowed_channel(source, x1, y0,
+                                                   static_cast<int>(channel),
+                                                   options.output_format,
+                                                   options.border_value) * fx;
+                            bottom = borrowed_channel(source, x0, y1,
+                                                      static_cast<int>(channel),
+                                                      options.output_format,
+                                                      options.border_value) * (1.0F - fx) +
+                                     borrowed_channel(source, x1, y1,
+                                                      static_cast<int>(channel),
+                                                      options.output_format,
+                                                      options.border_value) * fx;
+                        }
                         value = top * (1.0F - fy) + bottom * fy;
                     }
                     result[channel * plane + pixel] = normalize(value, channel, options);

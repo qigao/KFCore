@@ -85,10 +85,12 @@ if(BUILD_TESTS AND KFCORE_INSTALL)
     repeated_kfcore)
 endif()
 
+if(KFCORE_BUILD_YOLO_OPENCV)
+  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs)
+endif()
+
 if(KFCORE_BUILD_YOLO_APPLICATIONS)
-  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs highgui)
-elseif(KFCORE_BUILD_YOLO_OPENCV)
-  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
+  find_package(Stb REQUIRED)
 endif()
 
 if(KFCORE_BUILD_YOLO_OPENCV)
@@ -161,11 +163,11 @@ if(BUILD_TESTS)
       examples/yolo_domain_profile.cpp
       examples/yolo_domain_ui.cpp)
     target_include_directories(test_yolo_domain_ui PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+      ${CMAKE_CURRENT_SOURCE_DIR}/examples
+      ${Stb_INCLUDE_DIR})
     target_link_libraries(test_yolo_domain_ui PRIVATE
       KFCore::yolo_tracking
-      OpenCVLite::core
-      OpenCVLite::imgproc
+      KFCore::image_core
       TurboParser::Capture
       TurboUtils::TinyTest)
     target_compile_features(test_yolo_domain_ui PRIVATE cxx_std_17)
@@ -324,22 +326,31 @@ if(KFCORE_BUILD_YOLO_APPLICATIONS)
     message(FATAL_ERROR
       "KFCORE_BUILD_YOLO_APPLICATIONS requires TurboParser::Capture")
   endif()
+  if(WIN32)
+    set(_kfcore_yolo_domain_window_source
+      examples/yolo_domain_window_win32.cpp)
+  else()
+    set(_kfcore_yolo_domain_window_source
+      examples/yolo_domain_window_stub.cpp)
+  endif()
   add_executable(yolov8_domain_demo
     examples/yolov8_domain_demo.cpp
     examples/yolo_domain_capture.cpp
     examples/yolo_domain_cli.cpp
     examples/yolo_domain_frame.cpp
     examples/yolo_domain_profile.cpp
-    examples/yolo_domain_ui.cpp)
+    examples/yolo_domain_ui.cpp
+    ${_kfcore_yolo_domain_window_source})
   target_include_directories(yolov8_domain_demo PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples
+    ${Stb_INCLUDE_DIR})
   target_link_libraries(yolov8_domain_demo PRIVATE
     KFCore::yolo_tracking
-    OpenCVLite::core
-    OpenCVLite::imgproc
-    OpenCVLite::imgcodecs
-    OpenCVLite::highgui
+    KFCore::image_core
     TurboParser::Capture)
+  if(WIN32)
+    target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)
+  endif()
   if(KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
     target_compile_definitions(yolov8_domain_demo PRIVATE
       KFCORE_YOLO_APP_HAS_CPU=1)
@@ -416,9 +427,6 @@ if(KFCORE_BUILD_TENSORRT_YOLO)
   endif()
 
   if(KFCORE_BUILD_YOLO_OPENCV)
-    if(NOT KFCORE_BUILD_YOLO_APPLICATIONS)
-      find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
-    endif()
     add_executable(track_image_sequence examples/track_image_sequence.cpp)
     target_link_libraries(track_image_sequence PRIVATE
       KFCore::tensorrt_yolo

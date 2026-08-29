@@ -1,9 +1,10 @@
 # KFCore ImageProcessor
 
 `KFCore::image_processor` 是独立于推理 runtime 的图像处理模块。当前支持 Host
-Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8 的 Host 或同设备 CUDA 输入输出 CUDA
+Gray8/BGR8/RGB8 到紧密 Gray8，并支持 BGR8/RGB8/NV12/I420 的 Host 或同设备 CUDA 输入输出 CUDA
 FP16/FP32 NCHW Tensor；一次 fused kernel
-完成双线性 letterbox、RGB/BGR 通道排列、`pixel / 255`、mean/stddev 归一化和 HWC→NCHW。
+完成可选水平镜像、BT.601 YUV 转换、双线性 letterbox、RGB/BGR 通道排列、`pixel / 255`、
+mean/stddev 归一化和 HWC→NCHW。
 同步 facade 还可提供有界、可复用的 CUDA inference-output tensor，并把 RGB NCHW tensor 通过
 FP32 alpha mask 和仿射变换直接合成到 CUDA RGB/BGR 图像，最后按调用方明确的边界下载 packed
 BGR。它适用于 TensorRT 或其他能读写 CUDA pointer 的后端，不依赖特定推理库。
@@ -92,10 +93,15 @@ Host 灰度输出不需要 CUDA stream 或工作区。先用
 指针；source 与 destination 不得重叠。CUDA-device 输入会明确失败，不会隐式执行 device-to-host
 复制。
 
+NV12/I420 要求偶数宽高；`row_stride` 是偶数 Y stride。NV12 的 UV plane 紧随完整 Y plane，
+并使用同一 stride；I420 的 U/V plane 依次紧随 Y plane，chroma stride 为 Y stride 的一半。
+Host staging 会去除每个 plane 的 padding。`mirror_horizontal` 在 letterbox 源坐标中融合执行，
+不会先分配或写出一张镜像图。
+
 参数错误、容量不足、溢出、不支持格式、CUDA 指针设备不匹配和 CUDA 调用失败分别通过
 `ImageProcessorError::{code(),what()}` 报告。Tensor 路径只接受连续 NCHW Tensor 和 BGR8/RGB8
-单平面图像；Gray8 仅用于 Host 灰度输出。NV12/YUY2 及 CUDA 图像输出需在 plane 契约扩展后实现，
-当前不会隐式 fallback。
+单平面或上述 packed NV12/I420 图像；Gray8 仅用于 Host 灰度输出。独立 stride 的多 plane、
+YUY2 及 CUDA 图像输出尚不属于该契约，当前不会隐式 fallback。
 
 `CudaImageProcessor` 是同步、单实例不可重入的便利 facade：
 

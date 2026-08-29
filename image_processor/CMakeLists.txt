@@ -80,6 +80,17 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
     FOLDER "image_processor/tests")
   add_test(NAME test_image_processor_cuda COMMAND test_image_processor_cuda)
+
+  add_executable(benchmark_yuv_preprocess tests/benchmark_yuv_preprocess.cpp)
+  target_link_libraries(benchmark_yuv_preprocess PRIVATE
+    KFCore::image_processor
+    CUDA::cudart
+    TurboUtils::TinyTest)
+  set_target_properties(benchmark_yuv_preprocess PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "image_processor/benchmarks")
   endif()
 
   if(KFCORE_INSTALL AND KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED)

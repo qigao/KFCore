@@ -13,6 +13,8 @@ enum class PixelFormat
     Bgr8,
     Rgb8,
     Gray8,
+    Nv12,
+    I420,
 };
 
 enum class MemoryKind
@@ -113,6 +115,7 @@ struct PreprocessOptions
     std::array<float, 3> mean { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> stddev { 1.0f, 1.0f, 1.0f };
     float                border_value = 114.0f;
+    bool                 mirror_horizontal = false;
 };
 
 struct AffineTransform
