@@ -405,15 +405,7 @@
             ]
         },
         {
-            "name": "install-win-release-user",
-            "configurePreset": "win-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
             "name": "install-win-image-processor-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-image-processor-release-user",
             "targets": [
                 "install"
@@ -437,7 +429,6 @@
         },
         {
             "name": "install-win-yolo-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-yolo-release-user",
             "targets": [
                 "install"
@@ -445,7 +436,6 @@
         },
         {
             "name": "install-win-tensorrt-models-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-tensorrt-models-release-user",
             "targets": [
                 "install"
@@ -461,7 +451,6 @@
         },
         {
             "name": "install-win-face-cpu-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-face-cpu-release-user",
             "targets": [
                 "install"
@@ -469,7 +458,6 @@
         },
         {
             "name": "install-win-vision-models-cpu-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-vision-models-cpu-release-user",
             "targets": [
                 "install"
@@ -477,7 +465,6 @@
         },
         {
             "name": "install-win-vision-models-tensorrt-release-user",
-            "inherits": "install-win-release-user",
             "configurePreset": "win-vision-models-tensorrt-release-user",
             "targets": [
                 "install"
