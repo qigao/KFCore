@@ -5,6 +5,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -21,6 +22,7 @@ constexpr std::string_view kHandRelative =
     "hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx";
 constexpr std::string_view kClassifierRelative =
     "hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx";
+constexpr std::string_view kTensorRtRelative = "hand_gesture_model/tensorrt";
 
 [[noreturn]] void fail(const std::string& message)
 {
@@ -107,10 +109,18 @@ Backend parse_backend(const std::string& text)
     fail("--backend must be cpu or tensorrt");
 }
 
+std::string environment_value(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value != nullptr ? value : "";
+}
+
 } // namespace
 
 Arguments parse_arguments(const std::vector<std::string>& values,
-                          BackendAvailability availability)
+                          BackendAvailability availability,
+                          const std::filesystem::path& model_root,
+                          const std::string& tensorrt_profile)
 {
     if (values.empty())
     {
@@ -276,7 +286,11 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     {
         if (!model_dir.has_value())
         {
-            fail("--model-dir is required for the cpu backend");
+            if (model_root.empty())
+            {
+                fail("--model-dir is required when KFCORE_MODEL_ROOT is not set");
+            }
+            model_dir = model_root.string();
         }
         if (palm.has_value() || hand.has_value() || classifier.has_value())
         {
@@ -295,7 +309,17 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         }
         if (!palm.has_value() || !hand.has_value() || !classifier.has_value())
         {
-            fail("--palm, --hand, and --classifier are required for the tensorrt backend");
+            if (model_root.empty() || tensorrt_profile.empty())
+            {
+                fail("--palm, --hand, and --classifier are required when the "
+                     "TensorRT model root/profile are not set");
+            }
+            const std::filesystem::path root =
+                model_root / kTensorRtRelative / tensorrt_profile;
+            if (!palm.has_value()) palm = (root / "palm_detection.engine").string();
+            if (!hand.has_value()) hand = (root / "hand_landmark.engine").string();
+            if (!classifier.has_value())
+                classifier = (root / "keypoint_classifier.engine").string();
         }
         result.palm_model       = *palm;
         result.hand_model       = *hand;
@@ -311,6 +335,14 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         require_readable_file(*result.face_landmark_model, "face landmark model");
     }
     return result;
+}
+
+Arguments parse_arguments_from_environment(const std::vector<std::string>& values,
+                                           BackendAvailability availability)
+{
+    return parse_arguments(values, availability,
+                           environment_value("KFCORE_MODEL_ROOT"),
+                           environment_value("KFCORE_TENSORRT_ENGINE_PROFILE"));
 }
 
 std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,

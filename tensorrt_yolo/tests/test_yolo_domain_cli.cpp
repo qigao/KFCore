@@ -43,6 +43,27 @@ spec("YOLOv8 domain application CLI")
         check(arguments.max_frames == 10U);
     }
 
+    it("derives application model paths from the configured model root")
+    {
+        const std::filesystem::path root("C:/kfcore-models");
+        const Arguments cpu = parse_arguments(
+            { "demo", "--application", "parking" }, { true, false }, root,
+            "rtx4060-sm89-trt11.2.1-default");
+        check(cpu.model == root / "yolov8n-parking.onnx");
+
+        const Arguments gpu = parse_arguments(
+            { "demo", "--application", "football", "--backend", "tensorrt" },
+            { true, true }, root, "rtx4060-sm89-trt11.2.1-default");
+        check(gpu.model == root / "tensorrt" /
+                               "rtx4060-sm89-trt11.2.1-default" /
+                               "yolov8n-football.engine");
+
+        const Arguments explicit_model = parse_arguments(
+            { "demo", "--application", "drone", "--model", "custom.onnx" },
+            { true, false }, root, "rtx4060-sm89-trt11.2.1-default");
+        check(explicit_model.model == "custom.onnx");
+    }
+
     it("requires an explicit backend when both are compiled")
     {
         check_throws_as(parse_arguments(

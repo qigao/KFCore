@@ -528,8 +528,8 @@ int main(int argc, char** argv)
 {
     try
     {
-        const Arguments arguments = parse_arguments(argument_values(argc, argv),
-                                                    compiled_backends());
+        const Arguments arguments = parse_arguments_from_environment(
+            argument_values(argc, argv), compiled_backends());
         if (arguments.help)
         {
             std::cout << usage_text() << '\n';

@@ -179,22 +179,12 @@ if(BUILD_TESTS)
     endif()
 
     if(KFCORE_ENABLE_YOLO_APPLICATION_INTEGRATION_TESTS)
-      set(_yolo_domain_drone
-        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-drone.onnx")
-      set(_yolo_domain_football
-        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-football.onnx")
-      set(_yolo_domain_parking
-        "${KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR}/yolov8n-parking.onnx")
-      foreach(_yolo_domain_model IN ITEMS
-          "${_yolo_domain_drone}" "${_yolo_domain_football}"
-          "${_yolo_domain_parking}")
-        if(NOT IS_ABSOLUTE "${_yolo_domain_model}" OR
-           NOT EXISTS "${_yolo_domain_model}" OR IS_DIRECTORY "${_yolo_domain_model}")
-          message(FATAL_ERROR
-            "YOLO application integration model must be an existing absolute file: "
-            "${_yolo_domain_model}")
-        endif()
-      endforeach()
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "yolov8n-drone.onnx" _yolo_domain_drone)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "yolov8n-football.onnx" _yolo_domain_football)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "yolov8n-parking.onnx" _yolo_domain_parking)
       add_executable(test_yolo_domain_onnx_integration
         tests/test_yolo_domain_onnx_integration.cpp
         examples/yolo_domain_profile.cpp)
@@ -467,8 +457,7 @@ add_library(tensorrt_yolo SHARED
       "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_VALIDATED}"
       test_tensorrt_integration)
 
-    if(DEFINED ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}
-       AND NOT "$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}" STREQUAL "")
+    if(NOT "${KFCORE_TENSORRT_TEST_ENGINE_FP16}" STREQUAL "")
       add_executable(test_tensorrt_integration_fp16
         tests/test_tensorrt_integration.cpp)
       target_compile_definitions(test_tensorrt_integration_fp16 PRIVATE
@@ -488,7 +477,7 @@ add_library(tensorrt_yolo SHARED
         COMMAND test_tensorrt_integration_fp16)
       set_tests_properties(test_tensorrt_integration_fp16 PROPERTIES
         ENVIRONMENT
-          "KFCORE_TENSORRT_TEST_ENGINE_FP16=$ENV{KFCORE_TENSORRT_TEST_ENGINE_FP16}")
+          "KFCORE_TENSORRT_TEST_ENGINE_FP16=${KFCORE_TENSORRT_TEST_ENGINE_FP16}")
     endif()
 
   endif()

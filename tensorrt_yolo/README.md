@@ -66,29 +66,23 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user
 ```
 
-GPU 集成测试还必须显式启用并提供可信 engine：
+GPU 集成测试还必须显式启用，并指定相对于模型根目录的可信 batch-capable engine：
 
 ```powershell
-$env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
-$env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
-$env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
-$env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
+$profile = $env:KFCORE_TENSORRT_ENGINE_PROFILE
 cmake --fresh --preset win-release-user `
-  -DKFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS=ON
+  -DKFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS=ON `
+  -DKFCORE_TENSORRT_TEST_ENGINE_RELATIVE="tensorrt/$profile/yolo-batch.engine" `
+  -DKFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_RELATIVE="tensorrt/$profile/yolo11-face-batch.engine"
 cmake --build --preset win-release-user
 ctest --preset win-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
 ```
 
-`KFCORE_TENSORRT_TEST_ENGINE` 是 configure-time `FILEPATH` cache 变量（同名环境变量仅用于初始化
-它）。启用集成测试时，空路径、不存在的路径或目录都会在 configure 阶段失败；验证后的规范路径
-会显式写入 `test_tensorrt_integration` 的 CTest environment。
-
-`KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE` 也是 configure-time `FILEPATH` cache 变量，同名环境
-变量仅用于初始化。它是可选缓存：空值明确表示不参加 face 验证，且不会注册额外 CTest；非空值若
-不是现有普通文件，则在 configure 阶段失败。其值有效时，会登记
-`test_tensorrt_integration_yolo11_face`；该测试复用既有的 `test_tensorrt_integration` 二进制，
-只把已验证的 face engine 路径作为该测试的 `KFCORE_TENSORRT_TEST_ENGINE` 环境变量注入。因此两个
-CTest 名称使用相同测试逻辑，但分别加载各自已验证的 engine。
+`KFCORE_MODEL_ROOT` 与 `KFCORE_TENSORRT_ENGINE_PROFILE` 在 `CMakeUserPresets.json` 定义。
+测试 engine 的模型种类、binding 和 batch profile 必须满足集成测试契约，不能用仅支持单帧的
+应用 engine 代替；缺失文件、目录或越出模型根的路径都在 configure 阶段失败。YOLO11-face
+engine 相对路径为空时不注册额外用例。可选 FP16 engine 通过
+`KFCORE_TENSORRT_TEST_ENGINE_FP16_RELATIVE` 指定相对于模型根的路径。
 
 只验证缓存注册和环境注入时，可复现地运行：
 
@@ -121,9 +115,11 @@ cmake --fresh --preset win-release-user -DBUILD_EXAMPLES=ON
 cmake --build --preset win-release-user --target yolov8_domain_demo
 ctest --preset win-release-user -R '^test_yolo_domain_' --output-on-failure
 
-# preset 的环境只作用于 CMake/CTest 子进程；直接启动 exe 前显式设置 DLL 搜索路径
+# preset 的环境只作用于 CMake/build/CTest 子进程；直接启动 exe 前设置运行环境
 $pkgRoot = 'C:/projects/cpp/external/pkgs'
 $appBin = "$PWD/build/Msvc-Release/bin"
+$env:KFCORE_MODEL_ROOT = (Resolve-Path "$PWD/yolo-models").Path
+$env:KFCORE_TENSORRT_ENGINE_PROFILE = 'rtx4060-sm89-trt11.2.1-default'
 $env:PATH = "$pkgRoot/onnxruntime/lib;$env:TENSORRT_ROOT/bin;$env:CUDA_PATH_V12_8/bin;" +
             "$appBin;$pkgRoot/turboparser/release/bin;" +
             "$pkgRoot/turboutils/release/bin;$pkgRoot/turbonet/release/bin;$env:PATH"
@@ -131,7 +127,6 @@ $env:PATH = "$pkgRoot/onnxruntime/lib;$env:TENSORRT_ROOT/bin;$env:CUDA_PATH_V12_
 # CPU：有界图片目录处理
 build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application football --backend cpu `
-  --model C:/projects/cpp/KFCore/yolo-models/yolov8n-football.onnx `
   --images C:/absolute/input --output C:/absolute/output --max-frames 100
 
 # 查询摄像头及 mode id；此命令不加载模型
@@ -140,14 +135,16 @@ build/Msvc-Release/bin/yolov8_domain_demo.exe --list-cameras
 # GPU：默认严格选择 640x480@30 NV12；Q/Esc 退出，R 清空跟踪状态
 build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application parking --backend tensorrt `
-  --model C:/absolute/yolov8n-parking.engine --camera 0 --mirror
+  --camera 0 --mirror
 
 # 无窗口采样必须给定边界
 build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application drone --backend cpu `
-  --model C:/projects/cpp/KFCore/yolo-models/yolov8n-drone.onnx `
   --camera 0 --headless --max-frames 300
 ```
+
+省略 `--model` 时，应用按场景固定映射到 `yolov8n-<application>.onnx` 或
+`tensorrt/<profile>/yolov8n-<application>.engine`。显式 `--model` 优先于环境配置。
 
 没有精确 NV12 mode 时程序直接报错；可以先用 `--list-cameras` 查出 mode，再通过
 `--mode <id>` 显式使用 I420、RGB24 或 BGRA。MJPEG 会列出但不解码。摄像头回调使用有界的
@@ -161,9 +158,11 @@ CUDA 都把 YUV 转换、可选镜像、letterbox、归一化和 NCHW 写入融�
 TensorRT engine 必须在部署机器上由可信 ONNX 生成。TensorRT 11.2 的 strongly typed 构建示例：
 
 ```powershell
-C:/projects/TensorRT-11.2.1.2/bin/trtexec.exe `
-  --onnx=C:/projects/cpp/KFCore/yolo-models/yolov8n-parking.onnx `
-  --saveEngine=C:/absolute/yolov8n-parking.engine --stronglyTyped
+$trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
+$parkingOnnx = Join-Path $modelRoot 'yolov8n-parking.onnx'
+$parkingEngine = Join-Path $engineRoot 'yolov8n-parking.engine'
+& $trtexec `
+  --onnx=$parkingOnnx --saveEngine=$parkingEngine --stronglyTyped
 ```
 
 最终控制台输出和窗口叠加层包含 model load、capture wait、pixel conversion、detect、track、

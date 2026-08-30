@@ -101,7 +101,8 @@ int main(int argc, char** argv)
         {
             values.emplace_back(argv[index]);
         }
-        const auto arguments = kfcore::face_applications::cli::parse_arguments(values);
+        const auto arguments =
+            kfcore::face_applications::cli::parse_arguments_from_environment(values);
         const cv::Mat source = read_bgr(arguments.source, "--source");
         const cv::Mat target = read_bgr(arguments.target, "--target");
 

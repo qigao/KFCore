@@ -641,6 +641,20 @@ target_link_libraries(my_app PRIVATE KFCore::trackers)
 
 ### TensorRT 模型能力矩阵
 
+模型资产统一从 `KFCORE_MODEL_ROOT` 解析；仓库的标准 user preset 默认把它设为
+`${sourceDir}/yolo-models`。ONNX、测试图片和 sidecar matrix 在模块中使用相对此根的路径，
+TensorRT engine 使用
+`tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`；手部 engine 使用
+`hand_gesture_model/tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`。
+应用模型路径的解析顺序为：显式命令行路径、进程环境中的
+`KFCORE_MODEL_ROOT`/`KFCORE_TENSORRT_ENGINE_PROFILE`、明确报错。CPU ONNX 与
+TensorRT engine 都使用固定相对文件名，因此不会扫描目录或猜测模型。GFPGAN、Age/Gender 和
+FaceMesh 等可选阶段仍须显式启用。
+
+`CMakeUserPresets.json` 的 `environment` 只传给 CMake、build 和 CTest 子进程，不会修改启动
+CMake 的 PowerShell。直接运行 `.exe` 时，应在该终端设置同名环境变量，或继续使用显式 CLI
+路径；CLI 始终优先。
+
 `KFCore::tensorrt_runtime` 是模型无关的同步执行边界，`KFCore::face_models`
 在它之上提供严格的 Face68、ArcFace 与年龄/性别合约；两者均随 KFCore 构建。Face adapters
 只接收调用方已经准备好的 NCHW FP32 Tensor（host 或 CUDA device），不会接收原图，也不会
@@ -659,11 +673,10 @@ target_link_libraries(my_app PRIVATE KFCore::trackers)
 TensorRT/CUDA 绑定、执行、输出有限值与结果尺寸；raw outputs 也只保留模型输出语义。两者都不是
 模型 accuracy、标签顺序或业务阈值的验证，部署前仍需使用有 provenance 的 golden samples。
 
-Windows 可从父环境提供 `TENSORRT_ROOT`，以及可选的同名
-`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE`、
-`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER`、
-`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68`，然后通过标准 `win-release-user` 配置、构建和测试。
-engine 变量为空时不注册对应真实 engine 测试。
+Windows 的标准 `win-release-user` 从 `CMakeUserPresets.json` 提供 `TENSORRT_ROOT`、
+`KFCORE_MODEL_ROOT` 与 `KFCORE_TENSORRT_ENGINE_PROFILE`。启用真实模型测试后，Face68、
+ArcFace、Age/Gender、InSwapper 与 GFPGAN engine 都按上述 profile 目录和固定模型文件名解析；
+缺少或越出模型根目录时在 configure 阶段失败。
 
 ### TensorRT 12face 换脸应用
 

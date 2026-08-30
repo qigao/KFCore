@@ -29,8 +29,27 @@ include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
 include(ValidateTensorRtIntegrationEngine)
+include(ModelPaths)
 
 if(KFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS)
+  if(NOT DEFINED KFCORE_TENSORRT_TEST_ENGINE_RELATIVE OR
+     "${KFCORE_TENSORRT_TEST_ENGINE_RELATIVE}" STREQUAL "")
+    message(FATAL_ERROR
+      "KFCORE_TENSORRT_TEST_ENGINE_RELATIVE is required when "
+      "KFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS is enabled")
+  endif()
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${KFCORE_TENSORRT_TEST_ENGINE_RELATIVE}"
+    KFCORE_TENSORRT_TEST_ENGINE)
+  kfcore_resolve_optional_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE_RELATIVE}"
+    KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE)
+  kfcore_resolve_optional_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${KFCORE_TENSORRT_TEST_ENGINE_FP16_RELATIVE}"
+    KFCORE_TENSORRT_TEST_ENGINE_FP16)
   kfcore_validate_tensorrt_integration_engine(
     "${KFCORE_TENSORRT_TEST_ENGINE}"
     KFCORE_TENSORRT_TEST_ENGINE_VALIDATED)
@@ -41,6 +60,34 @@ if(KFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS)
 endif()
 
 if(KFCORE_ENABLE_TENSORRT_RUNTIME_INTEGRATION_TESTS)
+  set(_kfcore_tensorrt_engine_root
+    "tensorrt/$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}")
+  set(_kfcore_hand_engine_root
+    "hand_gesture_model/tensorrt/$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}")
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_hand_engine_root}/palm_detection.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM)
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_tensorrt_engine_root}/2dfan4.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68)
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_tensorrt_engine_root}/arcface_w600k_r50.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE)
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_tensorrt_engine_root}/age-gender.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER)
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_tensorrt_engine_root}/inswapper_128.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER)
+  kfcore_resolve_model_path(
+    "$ENV{KFCORE_MODEL_ROOT}"
+    "${_kfcore_tensorrt_engine_root}/gfpgan_1.4.engine"
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN)
   kfcore_validate_optional_tensorrt_runtime_engine(
     "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}"
     KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
@@ -104,6 +151,11 @@ if(BUILD_TESTS)
       "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
       "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
       -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_safe_test_directory.cmake")
+  add_test(NAME test_model_paths
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+      "-DKFCORE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_model_paths.cmake")
 endif()
 
 add_subdirectory(vendor)

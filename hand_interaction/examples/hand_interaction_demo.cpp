@@ -364,7 +364,8 @@ int main(int argc, char** argv)
         {
             values.emplace_back(argv[index] != nullptr ? argv[index] : "");
         }
-        return run(demo::parse_arguments(values, backend_availability()));
+        return run(demo::parse_arguments_from_environment(values,
+                                                          backend_availability()));
     }
     catch (const std::exception& error)
     {

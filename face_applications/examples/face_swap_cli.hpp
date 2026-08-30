@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,6 +22,11 @@ struct Arguments
     std::optional<std::string> age_gender;
 };
 
-[[nodiscard]] Arguments parse_arguments(const std::vector<std::string>& values);
+[[nodiscard]] Arguments parse_arguments(
+    const std::vector<std::string>& values,
+    const std::filesystem::path& model_root = {},
+    const std::string& tensorrt_profile = {});
+[[nodiscard]] Arguments parse_arguments_from_environment(
+    const std::vector<std::string>& values);
 
 } // namespace kfcore::face_applications::cli

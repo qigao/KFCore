@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <functional>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -40,6 +41,35 @@ struct TempFile final
     TempFile& operator=(const TempFile&) = delete;
 
     char* path = nullptr;
+};
+
+class ModelRootFixture final
+{
+public:
+    ModelRootFixture()
+        : root_(std::filesystem::temp_directory_path() / "kfcore_face_cli_models")
+    {
+        std::filesystem::remove_all(root_);
+        write("tensorrt/test-profile/yolov12n-face.engine");
+        write("tensorrt/test-profile/2dfan4.engine");
+        write("tensorrt/test-profile/arcface_w600k_r50.engine");
+        write("tensorrt/test-profile/inswapper_128.engine");
+        write("model_matrix.bin");
+    }
+
+    ~ModelRootFixture() { std::filesystem::remove_all(root_); }
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return root_; }
+
+private:
+    void write(const std::filesystem::path& relative)
+    {
+        const auto path = root_ / relative;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path, std::ios::binary) << "model";
+    }
+
+    std::filesystem::path root_;
 };
 
 void expect_failure(const std::vector<std::string>& values, const std::string& message)
@@ -85,6 +115,30 @@ spec("face swap CLI arguments")
         check(arguments.matrix == file.path);
         check_true(arguments.gfpgan.has_value());
         check_true(arguments.age_gender.has_value());
+    }
+
+    it("derives required inference paths from the configured model root")
+    {
+        TempFile        input;
+        ModelRootFixture models;
+        const Arguments arguments = parse_arguments(
+            { "face_swap_image", "--source", input.path, "--target", input.path,
+              "--output", "result.png" },
+            models.path(), "test-profile");
+
+        const auto engine_root = models.path() / "tensorrt" / "test-profile";
+        check(arguments.detector == (engine_root / "yolov12n-face.engine").string());
+        check(arguments.face68 == (engine_root / "2dfan4.engine").string());
+        check(arguments.arcface == (engine_root / "arcface_w600k_r50.engine").string());
+        check(arguments.inswapper == (engine_root / "inswapper_128.engine").string());
+        check(arguments.matrix == (models.path() / "model_matrix.bin").string());
+        check_false(arguments.gfpgan.has_value());
+        check_false(arguments.age_gender.has_value());
+
+        std::vector<std::string> explicit_values = required_arguments(input.path);
+        const Arguments explicit_models =
+            parse_arguments(explicit_values, "Z:/unused-model-root", "unused-profile");
+        check(explicit_models.detector == input.path);
     }
 
     it("rejects missing, duplicate, unknown, and valueless options")

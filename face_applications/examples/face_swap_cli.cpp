@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -119,9 +120,44 @@ bool resolves_to_same_file(const std::string& left, const std::string& right)
     return normalized_left == normalized_right;
 }
 
+void derive_required_model_paths(Arguments& arguments,
+                                 const std::filesystem::path& model_root,
+                                 const std::string& tensorrt_profile)
+{
+    if (model_root.empty())
+    {
+        return;
+    }
+    if (arguments.matrix.empty())
+    {
+        arguments.matrix = (model_root / "model_matrix.bin").string();
+    }
+    if (tensorrt_profile.empty())
+    {
+        return;
+    }
+    const std::filesystem::path root = model_root / "tensorrt" / tensorrt_profile;
+    if (arguments.detector.empty())
+        arguments.detector = (root / "yolov12n-face.engine").string();
+    if (arguments.face68.empty())
+        arguments.face68 = (root / "2dfan4.engine").string();
+    if (arguments.arcface.empty())
+        arguments.arcface = (root / "arcface_w600k_r50.engine").string();
+    if (arguments.inswapper.empty())
+        arguments.inswapper = (root / "inswapper_128.engine").string();
+}
+
+std::string environment_value(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value != nullptr ? value : "";
+}
+
 } // namespace
 
-Arguments parse_arguments(const std::vector<std::string>& values)
+Arguments parse_arguments(const std::vector<std::string>& values,
+                          const std::filesystem::path& model_root,
+                          const std::string& tensorrt_profile)
 {
     if (values.empty())
     {
@@ -141,6 +177,8 @@ Arguments parse_arguments(const std::vector<std::string>& values)
         assign(arguments, binding, values[index + 1U]);
     }
 
+    derive_required_model_paths(arguments, model_root, tensorrt_profile);
+
     for (const OptionBinding& binding : kBindings)
     {
         if (binding.optional_member == nullptr && !is_set(arguments, binding))
@@ -158,6 +196,12 @@ Arguments parse_arguments(const std::vector<std::string>& values)
         fail("--output must differ from --source and --target");
     }
     return arguments;
+}
+
+Arguments parse_arguments_from_environment(const std::vector<std::string>& values)
+{
+    return parse_arguments(values, environment_value("KFCORE_MODEL_ROOT"),
+                           environment_value("KFCORE_TENSORRT_ENGINE_PROFILE"));
 }
 
 } // namespace kfcore::face_applications::cli

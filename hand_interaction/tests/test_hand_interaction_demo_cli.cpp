@@ -23,6 +23,9 @@ public:
         write("hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx");
         write("hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx");
         write("hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx");
+        write("hand_gesture_model/tensorrt/test-profile/palm_detection.engine");
+        write("hand_gesture_model/tensorrt/test-profile/hand_landmark.engine");
+        write("hand_gesture_model/tensorrt/test-profile/keypoint_classifier.engine");
         write("yolov12n-face.onnx");
         write("MediaPipeFaceLandmarkDetector.onnx");
     }
@@ -72,6 +75,34 @@ spec("hand interaction demo CLI")
         check_equal(arguments.capture.width, 640);
         check_equal(arguments.capture.height, 480);
         check_equal(arguments.capture.fps, 30);
+    }
+
+    it("derives missing CPU and TensorRT paths from the configured model root")
+    {
+        ModelFixture models;
+        const std::filesystem::path root(models.path());
+
+        const auto cpu = demo::parse_arguments(
+            { "hand_interaction_demo" }, { true, false }, root, "test-profile");
+        check(cpu.palm_model ==
+              root / "hand_gesture_model/palm_detection/"
+                     "palm_detection_full_inf_post_192x192.onnx");
+
+        const auto gpu = demo::parse_arguments(
+            { "hand_interaction_demo", "--backend", "tensorrt" },
+            { true, true }, root, "test-profile");
+        check(gpu.palm_model == root / "hand_gesture_model/tensorrt/test-profile/"
+                                      "palm_detection.engine");
+        check(gpu.hand_model == root / "hand_gesture_model/tensorrt/test-profile/"
+                                      "hand_landmark.engine");
+        check(gpu.classifier_model ==
+              root / "hand_gesture_model/tensorrt/test-profile/"
+                     "keypoint_classifier.engine");
+
+        const auto explicit_model = demo::parse_arguments(
+            { "hand_interaction_demo", "--model-dir", models.path() },
+            { true, false }, "Z:/unused-model-root", "unused-profile");
+        check(explicit_model.palm_model.parent_path().filename() == "palm_detection");
     }
 
     it("enables the optional horizontal palm-axis Wave gate explicitly")

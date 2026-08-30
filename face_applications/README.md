@@ -91,6 +91,47 @@ GPU 完成的时间，也包含 adapter 校验；为兼容已有 API，`*_infere
 projector 不可变拥有。模型实际 binding 与上表不一致时应通过 `FaceSwapOptions` 显式配置，
 不会猜测别名。
 
+## 从 ONNX 生成当前 GPU profile
+
+标准 user preset 定义 `KFCORE_MODEL_ROOT` 与 `KFCORE_TENSORRT_ENGINE_PROFILE`。TensorRT 11.2
+默认使用 strongly typed network；以下命令保持 adapter 要求的 FP32 I/O，并允许默认 TF32
+tactics。ArcFace 与 Age/Gender 的 ONNX batch 维为动态，但应用合约固定为 batch 1：
+
+```powershell
+$models = $env:KFCORE_MODEL_ROOT
+$engines = Join-Path $models "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
+$trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
+
+& $trtexec --onnx="$models/2dfan4.onnx" `
+  --saveEngine="$engines/2dfan4.engine" --skipInference --builderOptimizationLevel=3
+& $trtexec --onnx="$models/arcface_w600k_r50.onnx" `
+  --saveEngine="$engines/arcface_w600k_r50.engine" `
+  --minShapes=input.1:1x3x112x112 --optShapes=input.1:1x3x112x112 `
+  --maxShapes=input.1:1x3x112x112 --skipInference --builderOptimizationLevel=3
+& $trtexec --onnx="$models/inswapper_128.onnx" `
+  --saveEngine="$engines/inswapper_128.engine" --skipInference --builderOptimizationLevel=3
+& $trtexec --onnx="$models/gfpgan_1.4.onnx" `
+  --saveEngine="$engines/gfpgan_1.4.engine" --skipInference --builderOptimizationLevel=3
+& $trtexec --onnx="$models/age-gender.onnx" `
+  --saveEngine="$engines/age-gender.engine" `
+  --minShapes=pixel_values:1x3x224x224 --optShapes=pixel_values:1x3x224x224 `
+  --maxShapes=pixel_values:1x3x224x224 --skipInference --builderOptimizationLevel=3
+```
+
+**事实（2026-08-30，RTX 4060 Laptop / SM89 / TensorRT 11.2.1）**：
+
+| engine | 构建时间 | engine 大小 | 构建峰值 GPU allocator |
+|---|---:|---:|---:|
+| `2dfan4.engine` | 40.6 s | 142.2 MiB | 141 MiB |
+| `arcface_w600k_r50.engine` | 24.6 s | 245.3 MiB | 245 MiB |
+| `inswapper_128.engine` | 41.5 s | 618.4 MiB | 617 MiB |
+| `gfpgan_1.4.engine` | 121.5 s | 761.9 MiB | 891 MiB |
+| `age-gender.engine` | 11.2 s | 329.7 MiB | 329 MiB |
+
+`model_matrix.bin` 从 `inswapper_128.onnx` 的 `buff2fs [512,512]` FP32 initializer 导出，
+不是通过 TensorRT 生成。本次导出结果为 1,048,576 bytes，SHA-256 为
+`370af5bf707dafdbea8a40448d697d9697610bd223ecf92887af9c9cc7055ac8`。
+
 ## 构建
 
 Windows 核心库使用调用方提供的 TensorRT；构建图片 CLI/桌面 demo 时额外使用 OpenCV Lite：
@@ -123,14 +164,18 @@ staging。真实模型集成测试还需显式启用对应选项，并提供六�
 
 ## 命令行应用
 
-所有必需路径都须显式提供；GFPGAN 和 Age/Gender 仅在给出路径时加载：
+直接启动应用前设置与 `CMakeUserPresets.json` 相同的运行时环境。必需的 detector、Face68、
+ArcFace、InSwapper 与 matrix 会从模型根/profile 的固定相对路径解析；显式路径优先。GFPGAN 和
+Age/Gender 仍仅在给出路径时加载：
 
 ```powershell
+$env:KFCORE_MODEL_ROOT = (Resolve-Path "$PWD/yolo-models").Path
+$env:KFCORE_TENSORRT_ENGINE_PROFILE = 'rtx4060-sm89-trt11.2.1-default'
+$modelRoot = $env:KFCORE_MODEL_ROOT
+$engineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 face_swap_image.exe `
   --source source.jpg --target target.jpg --output swapped.png `
-  --detector yolov12n-face.engine --face68 2dfan4.engine `
-  --arcface arcface_w600k_r50.engine --inswapper inswapper_128.engine `
-  --matrix model_matrix.bin --gfpgan gfpgan_1.4.engine
+  --gfpgan (Join-Path $engineRoot 'gfpgan_1.4.engine')
 ```
 
 缺少参数、重复参数、未知参数和不可读输入/模型文件会在加载 engine 前失败。应用只在完整换脸
@@ -142,11 +187,10 @@ face_swap_image.exe `
 输出三联视图：
 
 ```powershell
+$engineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 face_swap_demo.exe `
   --source source.jpg --target target.jpg --output swapped.png `
-  --detector yolov12n-face.engine --face68 2dfan4.engine `
-  --arcface arcface_w600k_r50.engine --inswapper inswapper_128.engine `
-  --matrix model_matrix.bin --gfpgan gfpgan_1.4.engine
+  --gfpgan (Join-Path $engineRoot 'gfpgan_1.4.engine')
 ```
 
 - `R`：使用已加载的 engine 重新运行
@@ -159,18 +203,16 @@ face_swap_demo.exe `
 
 ## 真实模型 opt-in 测试
 
-配置下列任一路径时，必须同时提供全部必需绝对路径；路径完整后集成测试自动注册：
+配置下列任一相对路径时，必须同时提供全部必需项；所有值都从
+`KFCORE_MODEL_ROOT` 解析，路径完整后集成测试自动注册：
 
-- `KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE`
-- `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68`
-- `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE`
-- `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER`
-- `KFCORE_FACE_APPLICATION_TEST_MATRIX`
-- `KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE`
-- `KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE`
+- `KFCORE_FACE_APPLICATION_TEST_MATRIX_RELATIVE`
+- `KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE_RELATIVE`
+- `KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE_RELATIVE`
 
-若 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN` 或
-`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER` 存在，同一测试额外验证对应路径。验收内容
+detector、Face68、ArcFace、InSwapper、GFPGAN 与 Age/Gender 都使用当前 engine profile 下的
+固定文件名；其中 Face68 使用由 `2dfan4.onnx` 生成且满足 Face68 binding 合约的
+`2dfan4.engine`。验收内容
 包括真实 I420 输入、TensorRT 执行成功、owned BGR 输出可重新编码/解码、输出尺寸等于 target，
 source/target 内存不变，以及必需计时为正、可选计时与模型配置一致；这不是模型 accuracy 或
 身份相似度的 golden test。

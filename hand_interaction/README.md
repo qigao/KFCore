@@ -223,12 +223,15 @@ PowerShell 启动 exe 时，父 shell 仍需把这些目录加入 `PATH`。
 build\HandCPU\bin\hand_interaction_demo.exe --list-cameras
 ```
 
-CPU 使用仓库已有的三份 ONNX hand 模型：
+直接启动应用前设置与 `CMakeUserPresets.json` 相同的运行时环境。CPU 使用仓库已有的三份
+ONNX hand 模型；省略 `--model-dir` 时从 `KFCORE_MODEL_ROOT` 推导：
 
 ```powershell
+$env:KFCORE_MODEL_ROOT = (Resolve-Path "$PWD/yolo-models").Path
+$env:KFCORE_TENSORRT_ENGINE_PROFILE = 'rtx4060-sm89-trt11.2.1-default'
+$modelRoot = $env:KFCORE_MODEL_ROOT
 build\HandCPU\bin\hand_interaction_demo.exe `
-  --backend cpu --camera 0 --width 640 --height 480 --fps 30 `
-  --model-dir C:\projects\cpp\KFCore\yolo-models
+  --backend cpu --camera 0 --width 640 --height 480 --fps 30
 ```
 
 在同一窗口启用 FaceMesh 时，额外显式提供 YOLOv12-face detector 与 MediaPipe 468 点模型；
@@ -237,31 +240,26 @@ build\HandCPU\bin\hand_interaction_demo.exe `
 ```powershell
 build\HandCPU\bin\hand_interaction_demo.exe `
   --backend cpu --camera 1 --mode 0 --max-frames 100 `
-  --model-dir C:\projects\cpp\KFCore\yolo-models `
-  --face-detector C:\projects\cpp\KFCore\yolo-models\yolov12n-face.onnx `
-  --facemesh C:\projects\cpp\KFCore\yolo-models\MediaPipeFaceLandmarkDetector.onnx
+  --face-detector (Join-Path $modelRoot 'yolov12n-face.onnx') `
+  --facemesh (Join-Path $modelRoot 'MediaPipeFaceLandmarkDetector.onnx')
 ```
 
-TensorRT 要求显式提供三份可信 engine，不会自动生成 engine 或回退到 CPU：
+TensorRT 从固定 profile 目录解析三份可信 engine，不会自动生成 engine 或回退到 CPU；显式
+`--palm`、`--hand`、`--classifier` 仍可逐项覆盖：
 
 ```powershell
 build\HandTRT\bin\hand_interaction_demo.exe `
-  --backend tensorrt --camera 0 --mode 385 `
-  --palm C:\models\palm.engine `
-  --hand C:\models\hand_landmark.engine `
-  --classifier C:\models\keypoint_classifier.engine
+  --backend tensorrt --camera 0 --mode 385
 ```
 
 TensorRT FaceMesh 使用同模型生成的 strongly typed engine：
 
 ```powershell
+$faceEngineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 build\HandTRT\bin\hand_interaction_demo.exe `
   --backend tensorrt --camera 1 --mode 0 --max-frames 100 `
-  --palm C:\models\palm_detection.engine `
-  --hand C:\models\hand_landmark.engine `
-  --classifier C:\models\keypoint_classifier.engine `
-  --face-detector C:\models\yolov12n-face.engine `
-  --facemesh C:\models\face_landmark.engine
+  --face-detector (Join-Path $faceEngineRoot 'yolov12n-face.engine') `
+  --facemesh (Join-Path $faceEngineRoot 'face_landmark.engine')
 ```
 
 `--face-score` 和 `--facemesh-score` 分别设置 detector 与 landmarks 的 `[0,1]` 置信度阈值，

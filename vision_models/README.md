@@ -74,8 +74,11 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user --output-on-failure
 ```
 
-真实模型 integration tests 只在调用方显式启用对应选项时注册，并要求 cache 中的
-ONNX/engine/图片都是存在的绝对路径。模型和 engine 是部署资产，不会安装或提交到 KFCore。
+真实模型 integration tests 只在调用方显式启用对应选项时注册。ONNX 与 engine 由
+`KFCORE_MODEL_ROOT` 加模块固定相对路径解析；手和人脸测试图分别由
+`KFCORE_VISION_MODEL_TEST_HAND_IMAGE_RELATIVE`、
+`KFCORE_VISION_MODEL_TEST_FACE_IMAGE_RELATIVE` 指定相对路径。模型和 engine 是部署资产，
+不会安装或提交到 KFCore。
 
 ## 从 ONNX 生成 TensorRT engine
 
@@ -83,24 +86,25 @@ ONNX/engine/图片都是存在的绝对路径。模型和 engine 是部署资产
 参数相关；必须在部署环境重新生成并保留 ONNX 来源、hash 和转换命令。
 
 ```powershell
-$models = "C:\path\to\yolo-models"
-$engines = "C:\path\to\engines"
+$models = $env:KFCORE_MODEL_ROOT
+$handEngines = Join-Path $models "hand_gesture_model/tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
+$faceEngines = Join-Path $models "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 $trtexec = Join-Path $env:TENSORRT_ROOT "bin\trtexec.exe"
 
 & $trtexec --onnx="$models\hand_gesture_model\palm_detection\palm_detection_full_inf_post_192x192.onnx" `
-  --saveEngine="$engines\palm.engine" --fp16 --skipInference
+  --saveEngine="$handEngines\palm_detection.engine" --fp16 --skipInference
 
 & $trtexec --onnx="$models\hand_gesture_model\hand_landmark\hand_landmark_sparse_Nx3x224x224.onnx" `
   --minShapes=input:1x3x224x224 --optShapes=input:2x3x224x224 `
-  --maxShapes=input:8x3x224x224 --saveEngine="$engines\hand_landmark.engine" `
+  --maxShapes=input:8x3x224x224 --saveEngine="$handEngines\hand_landmark.engine" `
   --fp16 --skipInference
 
 & $trtexec --onnx="$models\hand_gesture_model\keypoint_classifier\keypoint_classifier.onnx" `
   --minShapes=input:1x42 --optShapes=input:2x42 --maxShapes=input:8x42 `
-  --saveEngine="$engines\keypoint_classifier.engine" --fp16 --skipInference
+  --saveEngine="$handEngines\keypoint_classifier.engine" --fp16 --skipInference
 
 & $trtexec --onnx="$models\MediaPipeFaceLandmarkDetector.onnx" `
-  --saveEngine="$engines\face_landmark.engine" --fp16 --skipInference
+  --saveEngine="$faceEngines\face_landmark.engine" --fp16 --skipInference
 ```
 
 若配置的 `max_hands` 大于 engine 的 classifier dynamic batch maximum，backend 会在加载时

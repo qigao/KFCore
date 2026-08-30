@@ -14,6 +14,8 @@
                 "TENSORRT_ROOT": "C:/projects/TensorRT-11.2.1.2",
                 "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
                 "OPENCV_LITE_ROOT": "$env{PKG_ROOT}/opencv-lite",
+                "KFCORE_MODEL_ROOT": "${sourceDir}/yolo-models",
+                "KFCORE_TENSORRT_ENGINE_PROFILE": "rtx4060-sm89-trt11.2.1-default",
                 "VCPKG_ROOT": "C:/tools/vcpkg",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
             }
@@ -49,6 +51,8 @@
             },
             "environment": {
                 "PKG_ROOT": "/opt",
+                "KFCORE_MODEL_ROOT": "${sourceDir}/yolo-models",
+                "KFCORE_TENSORRT_ENGINE_PROFILE": "$penv{KFCORE_TENSORRT_ENGINE_PROFILE}",
                 "VCPKG_ROOT": "/opt/vcpkg",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
             }

@@ -63,23 +63,27 @@ if(BUILD_TESTS)
   endif()
 
   if(KFCORE_ENABLE_FACE_APPLICATION_CPU_INTEGRATION_TESTS)
-    set(_cpu_face_assets
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/yolov12n-face.onnx"
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/2dfan4.onnx"
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/arcface_w600k_r50.onnx"
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/inswapper_128.onnx"
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/gfpgan_1.4.onnx"
-      "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/age-gender.onnx"
-      "${KFCORE_FACE_CPU_TEST_MATRIX}"
-      "${KFCORE_FACE_CPU_TEST_SOURCE_IMAGE}"
-      "${KFCORE_FACE_CPU_TEST_TARGET_IMAGE}")
-    foreach(_cpu_face_asset IN LISTS _cpu_face_assets)
-      if(NOT IS_ABSOLUTE "${_cpu_face_asset}" OR
-         NOT EXISTS "${_cpu_face_asset}" OR IS_DIRECTORY "${_cpu_face_asset}")
-        message(FATAL_ERROR
-          "CPU face integration assets must be existing absolute files: ${_cpu_face_asset}")
-      endif()
-    endforeach()
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "yolov12n-face.onnx" _cpu_face_detector)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "2dfan4.onnx" _cpu_face_face68)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "arcface_w600k_r50.onnx" _cpu_face_arcface)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "inswapper_128.onnx" _cpu_face_inswapper)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "gfpgan_1.4.onnx" _cpu_face_gfpgan)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "age-gender.onnx" _cpu_face_age_gender)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_MATRIX_RELATIVE}"
+      _cpu_face_matrix)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_SOURCE_IMAGE_RELATIVE}"
+      _cpu_face_source_image)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_TARGET_IMAGE_RELATIVE}"
+      _cpu_face_target_image)
     find_path(KFCORE_CPU_FACE_STB_INCLUDE_DIR
       NAMES stb_image.h
       HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
@@ -95,15 +99,15 @@ if(BUILD_TESTS)
         KFCore::face_applications_cpu
         TurboUtils::TinyTest)
       target_compile_definitions(${target_name} PRIVATE
-        "KFCORE_FACE_CPU_TEST_DETECTOR=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/yolov12n-face.onnx\""
-        "KFCORE_FACE_CPU_TEST_FACE68=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/2dfan4.onnx\""
-        "KFCORE_FACE_CPU_TEST_ARCFACE=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/arcface_w600k_r50.onnx\""
-        "KFCORE_FACE_CPU_TEST_INSWAPPER=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/inswapper_128.onnx\""
-        "KFCORE_FACE_CPU_TEST_GFPGAN=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/gfpgan_1.4.onnx\""
-        "KFCORE_FACE_CPU_TEST_AGE_GENDER=\"${KFCORE_FACE_CPU_TEST_MODEL_DIR}/age-gender.onnx\""
-        "KFCORE_FACE_CPU_TEST_MATRIX=\"${KFCORE_FACE_CPU_TEST_MATRIX}\""
-        "KFCORE_FACE_CPU_TEST_SOURCE_IMAGE=\"${KFCORE_FACE_CPU_TEST_SOURCE_IMAGE}\""
-        "KFCORE_FACE_CPU_TEST_TARGET_IMAGE=\"${KFCORE_FACE_CPU_TEST_TARGET_IMAGE}\"")
+        "KFCORE_FACE_CPU_TEST_DETECTOR=\"${_cpu_face_detector}\""
+        "KFCORE_FACE_CPU_TEST_FACE68=\"${_cpu_face_face68}\""
+        "KFCORE_FACE_CPU_TEST_ARCFACE=\"${_cpu_face_arcface}\""
+        "KFCORE_FACE_CPU_TEST_INSWAPPER=\"${_cpu_face_inswapper}\""
+        "KFCORE_FACE_CPU_TEST_GFPGAN=\"${_cpu_face_gfpgan}\""
+        "KFCORE_FACE_CPU_TEST_AGE_GENDER=\"${_cpu_face_age_gender}\""
+        "KFCORE_FACE_CPU_TEST_MATRIX=\"${_cpu_face_matrix}\""
+        "KFCORE_FACE_CPU_TEST_SOURCE_IMAGE=\"${_cpu_face_source_image}\""
+        "KFCORE_FACE_CPU_TEST_TARGET_IMAGE=\"${_cpu_face_target_image}\"")
       set_target_properties(${target_name} PROPERTIES
         CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
         FOLDER "face_applications_cpu/tests")

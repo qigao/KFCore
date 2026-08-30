@@ -115,13 +115,9 @@ if(BUILD_TESTS)
   add_test(NAME test_face_application_validation COMMAND test_face_application_validation)
 
   set(_kfcore_face_application_required_files
-    KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE
-    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
-    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
-    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER
-    KFCORE_FACE_APPLICATION_TEST_MATRIX
-    KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE
-    KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE)
+    KFCORE_FACE_APPLICATION_TEST_MATRIX_RELATIVE
+    KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE_RELATIVE
+    KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE_RELATIVE)
   set(_kfcore_face_application_has_assets OFF)
   foreach(_kfcore_file_variable IN LISTS _kfcore_face_application_required_files)
     if(DEFINED ${_kfcore_file_variable} AND
@@ -134,26 +130,64 @@ if(BUILD_TESTS)
   if(_kfcore_face_application_has_assets)
     find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
     foreach(_kfcore_file_variable IN LISTS _kfcore_face_application_required_files)
-      if(NOT IS_ABSOLUTE "${${_kfcore_file_variable}}" OR
-         NOT EXISTS "${${_kfcore_file_variable}}" OR
-         IS_DIRECTORY "${${_kfcore_file_variable}}")
+      if(NOT DEFINED ${_kfcore_file_variable} OR
+         "${${_kfcore_file_variable}}" STREQUAL "")
         message(FATAL_ERROR
-          "${_kfcore_file_variable} must name an existing absolute file when "
-          "face-application integration assets are configured")
+          "${_kfcore_file_variable} is required when face-application "
+          "integration assets are configured")
       endif()
     endforeach()
 
+    set(_kfcore_face_engine_root
+      "tensorrt/$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}")
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/yolov12n-face.engine"
+      _kfcore_face_detector_engine)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/2dfan4.engine"
+      _kfcore_face68_engine)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/arcface_w600k_r50.engine"
+      _kfcore_arcface_engine)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/inswapper_128.engine"
+      _kfcore_inswapper_engine)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${KFCORE_FACE_APPLICATION_TEST_MATRIX_RELATIVE}"
+      _kfcore_inswapper_matrix)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE_RELATIVE}"
+      _kfcore_face_source_image)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE_RELATIVE}"
+      _kfcore_face_target_image)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/gfpgan_1.4.engine"
+      _kfcore_gfpgan_engine)
+    kfcore_resolve_model_path(
+      "$ENV{KFCORE_MODEL_ROOT}"
+      "${_kfcore_face_engine_root}/age-gender.engine"
+      _kfcore_age_gender_engine)
+
     function(_kfcore_configure_face_application_test_assets target)
       target_compile_definitions(${target} PRIVATE
-        "KFCORE_TEST_12FACE_ENGINE=\"${KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE}\""
-        "KFCORE_TEST_FACE68_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}\""
-        "KFCORE_TEST_ARCFACE_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}\""
-        "KFCORE_TEST_INSWAPPER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER}\""
-        "KFCORE_TEST_GFPGAN_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN}\""
-        "KFCORE_TEST_AGE_GENDER_ENGINE=\"${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}\""
-        "KFCORE_TEST_INSWAPPER_MATRIX=\"${KFCORE_FACE_APPLICATION_TEST_MATRIX}\""
-        "KFCORE_TEST_SOURCE_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE}\""
-        "KFCORE_TEST_TARGET_IMAGE=\"${KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE}\"")
+        "KFCORE_TEST_12FACE_ENGINE=\"${_kfcore_face_detector_engine}\""
+        "KFCORE_TEST_FACE68_ENGINE=\"${_kfcore_face68_engine}\""
+        "KFCORE_TEST_ARCFACE_ENGINE=\"${_kfcore_arcface_engine}\""
+        "KFCORE_TEST_INSWAPPER_ENGINE=\"${_kfcore_inswapper_engine}\""
+        "KFCORE_TEST_GFPGAN_ENGINE=\"${_kfcore_gfpgan_engine}\""
+        "KFCORE_TEST_AGE_GENDER_ENGINE=\"${_kfcore_age_gender_engine}\""
+        "KFCORE_TEST_INSWAPPER_MATRIX=\"${_kfcore_inswapper_matrix}\""
+        "KFCORE_TEST_SOURCE_IMAGE=\"${_kfcore_face_source_image}\""
+        "KFCORE_TEST_TARGET_IMAGE=\"${_kfcore_face_target_image}\"")
     endfunction()
 
     add_executable(test_face_swap_integration tests/test_face_swap_integration.cpp)

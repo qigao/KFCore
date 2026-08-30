@@ -132,28 +132,30 @@ if(BUILD_TESTS)
     endif()
 
     if(KFCORE_ENABLE_VISION_MODELS_CPU_INTEGRATION_TESTS)
-      set(_vision_cpu_palm
-        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx")
-      set(_vision_cpu_hand
-        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx")
-      set(_vision_cpu_classifier
-        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx")
-      set(_vision_cpu_face
-        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/MediaPipeFaceLandmarkDetector.onnx")
-      set(_vision_cpu_face_detector
-        "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/yolov12n-face.onnx")
-      foreach(_vision_cpu_asset IN ITEMS
-          "${_vision_cpu_palm}" "${_vision_cpu_hand}"
-          "${_vision_cpu_classifier}" "${_vision_cpu_face}"
-          "${_vision_cpu_face_detector}"
-          "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}"
-          "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}")
-        if(NOT IS_ABSOLUTE "${_vision_cpu_asset}" OR
-           NOT EXISTS "${_vision_cpu_asset}" OR IS_DIRECTORY "${_vision_cpu_asset}")
-          message(FATAL_ERROR
-            "CPU vision-model integration assets must be existing absolute files: ${_vision_cpu_asset}")
-        endif()
-      endforeach()
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}"
+        "hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx"
+        _vision_cpu_palm)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}"
+        "hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx"
+        _vision_cpu_hand)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}"
+        "hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx"
+        _vision_cpu_classifier)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "MediaPipeFaceLandmarkDetector.onnx"
+        _vision_cpu_face)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "yolov12n-face.onnx"
+        _vision_cpu_face_detector)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE_RELATIVE}"
+        _vision_cpu_hand_image)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE_RELATIVE}"
+        _vision_cpu_face_image)
       find_path(KFCORE_VISION_CPU_STB_INCLUDE_DIR
         NAMES stb_image.h
         HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
@@ -173,8 +175,8 @@ if(BUILD_TESTS)
         "KFCORE_VISION_CPU_TEST_CLASSIFIER=\"${_vision_cpu_classifier}\""
         "KFCORE_VISION_CPU_TEST_FACE=\"${_vision_cpu_face}\""
         "KFCORE_VISION_CPU_TEST_FACE_DETECTOR=\"${_vision_cpu_face_detector}\""
-        "KFCORE_VISION_CPU_TEST_HAND_IMAGE=\"${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}\""
-        "KFCORE_VISION_CPU_TEST_FACE_IMAGE=\"${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}\"")
+        "KFCORE_VISION_CPU_TEST_HAND_IMAGE=\"${_vision_cpu_hand_image}\""
+        "KFCORE_VISION_CPU_TEST_FACE_IMAGE=\"${_vision_cpu_face_image}\"")
       target_link_libraries(test_vision_models_cpu_integration PRIVATE
         KFCore::vision_models_cpu
         ONNXRuntime::ONNXRuntime
@@ -206,20 +208,31 @@ if(BUILD_TESTS)
     endif()
 
     if(KFCORE_ENABLE_VISION_MODELS_TENSORRT_INTEGRATION_TESTS)
-      foreach(_vision_trt_asset IN ITEMS
-          "${KFCORE_VISION_MODEL_TEST_ENGINE_PALM}"
-          "${KFCORE_VISION_MODEL_TEST_ENGINE_HAND}"
-          "${KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}"
-          "${KFCORE_VISION_MODEL_TEST_ENGINE_FACE}"
-          "${KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}"
-          "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}"
-          "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}")
-        if(NOT IS_ABSOLUTE "${_vision_trt_asset}" OR
-           NOT EXISTS "${_vision_trt_asset}" OR IS_DIRECTORY "${_vision_trt_asset}")
-          message(FATAL_ERROR
-            "TensorRT vision-model integration assets must be existing absolute files: ${_vision_trt_asset}")
-        endif()
-      endforeach()
+      set(_vision_trt_profile "$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}")
+      set(_vision_trt_hand_root
+        "hand_gesture_model/tensorrt/${_vision_trt_profile}")
+      set(_vision_trt_face_root "tensorrt/${_vision_trt_profile}")
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${_vision_trt_hand_root}/palm_detection.engine"
+        _vision_trt_palm)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${_vision_trt_hand_root}/hand_landmark.engine"
+        _vision_trt_hand)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${_vision_trt_hand_root}/keypoint_classifier.engine"
+        _vision_trt_classifier)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${_vision_trt_face_root}/face_landmark.engine"
+        _vision_trt_face)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${_vision_trt_face_root}/yolov12n-face.engine"
+        _vision_trt_face_detector)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_VISION_MODEL_TEST_HAND_IMAGE_RELATIVE}"
+        _vision_trt_hand_image)
+      kfcore_resolve_model_path(
+        "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_VISION_MODEL_TEST_FACE_IMAGE_RELATIVE}"
+        _vision_trt_face_image)
       find_path(KFCORE_VISION_TRT_STB_INCLUDE_DIR
         NAMES stb_image.h
         HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
@@ -233,13 +246,13 @@ if(BUILD_TESTS)
       target_include_directories(test_vision_models_tensorrt_integration PRIVATE
         ${KFCORE_VISION_TRT_STB_INCLUDE_DIR})
       target_compile_definitions(test_vision_models_tensorrt_integration PRIVATE
-        "KFCORE_VISION_TRT_TEST_PALM=\"${KFCORE_VISION_MODEL_TEST_ENGINE_PALM}\""
-        "KFCORE_VISION_TRT_TEST_HAND=\"${KFCORE_VISION_MODEL_TEST_ENGINE_HAND}\""
-        "KFCORE_VISION_TRT_TEST_CLASSIFIER=\"${KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}\""
-        "KFCORE_VISION_TRT_TEST_FACE=\"${KFCORE_VISION_MODEL_TEST_ENGINE_FACE}\""
-        "KFCORE_VISION_TRT_TEST_FACE_DETECTOR=\"${KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}\""
-        "KFCORE_VISION_TRT_TEST_HAND_IMAGE=\"${KFCORE_VISION_MODEL_TEST_HAND_IMAGE}\""
-        "KFCORE_VISION_TRT_TEST_FACE_IMAGE=\"${KFCORE_VISION_MODEL_TEST_FACE_IMAGE}\"")
+        "KFCORE_VISION_TRT_TEST_PALM=\"${_vision_trt_palm}\""
+        "KFCORE_VISION_TRT_TEST_HAND=\"${_vision_trt_hand}\""
+        "KFCORE_VISION_TRT_TEST_CLASSIFIER=\"${_vision_trt_classifier}\""
+        "KFCORE_VISION_TRT_TEST_FACE=\"${_vision_trt_face}\""
+        "KFCORE_VISION_TRT_TEST_FACE_DETECTOR=\"${_vision_trt_face_detector}\""
+        "KFCORE_VISION_TRT_TEST_HAND_IMAGE=\"${_vision_trt_hand_image}\""
+        "KFCORE_VISION_TRT_TEST_FACE_IMAGE=\"${_vision_trt_face_image}\"")
       target_link_libraries(test_vision_models_tensorrt_integration PRIVATE
         KFCore::vision_models_tensorrt
         CUDA::cudart
