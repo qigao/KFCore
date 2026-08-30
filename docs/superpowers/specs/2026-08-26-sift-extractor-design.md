@@ -84,5 +84,5 @@ fail fast。多个调用线程可并发提交，但单 device 的 CUDA 算法按
 - TinyTest：`SiftJob::getHost()` 和 `getDev()` 都能收到 worker exception。
 - CUDA 实测：真实 checkerboard 提取、多逻辑实例、并发提交、冲突配置拒绝及重复构造销毁。
 - CMake：清除 `POPSIFT_ROOT` 后 preset 配置、构建、安装和独立 consumer 运行。
-- 回归：SIFT 最小测试后运行完整 `ctest --preset win-sift-release-user`。
+- 回归：SIFT 最小测试后运行完整 `ctest --preset win-release-user`。
 - 性能：同一持久 extractor 上记录内部化前后多次提取耗时；若出现显著回退，先定位再优化。

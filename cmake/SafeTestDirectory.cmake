@@ -39,3 +39,20 @@ function(kfcore_reset_test_directory allowed_root target_directory)
   file(REMOVE_RECURSE "${_target_absolute}")
   file(MAKE_DIRECTORY "${_target_absolute}")
 endfunction()
+
+function(kfcore_get_parent_build_config binary_directory output_variable)
+  load_cache("${binary_directory}" READ_WITH_PREFIX _kfcore_parent_ CMAKE_BUILD_TYPE)
+  if(NOT DEFINED _kfcore_parent_CMAKE_BUILD_TYPE OR
+     NOT "${_kfcore_parent_CMAKE_BUILD_TYPE}" MATCHES "^[A-Za-z0-9_.+-]+$")
+    message(FATAL_ERROR
+      "Parent build tree must define a valid CMAKE_BUILD_TYPE: ${binary_directory}")
+  endif()
+  set(${output_variable} "${_kfcore_parent_CMAKE_BUILD_TYPE}" PARENT_SCOPE)
+endfunction()
+
+function(kfcore_require_environment_directory variable_name)
+  if(NOT DEFINED ENV{${variable_name}} OR
+     NOT IS_DIRECTORY "$ENV{${variable_name}}")
+    message(FATAL_ERROR "${variable_name} must name an existing directory")
+  endif()
+endfunction()

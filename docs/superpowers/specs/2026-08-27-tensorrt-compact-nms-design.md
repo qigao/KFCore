@@ -81,7 +81,7 @@ Compact NMS 输出约束：
 - TensorRT 11.2 + RTX 4060 使用本地 `yolov12n-face.engine` 完成真实图片序列执行。
 
 **事实（2026-08-27）**：契约 TinyTest 为 26/26、275 assertions，检测 helper TinyTest 为
-16/16、130 assertions，`win-yolo-release-user` CTest 为 19/19；本地 Compact NMS engine 对仓库
+16/16、130 assertions，`win-release-user` CTest 为 19/19；本地 Compact NMS engine 对仓库
 3 张输入图片写出 3/3 张结果。该本地 engine 的 batch 固定为 1，因此真实 TensorRT 执行只覆盖
 逐张 `detect()`；`B > 1` 的行偏移、独立 letterbox transform、padding 与结果顺序由双图片纯解码
 测试覆盖，不宣称真实动态 batch engine 已复验。

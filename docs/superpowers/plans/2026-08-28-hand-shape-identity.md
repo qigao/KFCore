@@ -73,8 +73,8 @@ weights do not overflow into order-dependent non-finite comparisons.
   Run:
 
   ```powershell
-  cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_hand_primitive_extractor
-  ctest --preset win-hand-interaction-demo-cpu-release-user -C Release -R test_hand_primitive_extractor --output-on-failure
+  cmake --build --preset win-release-user --target test_hand_primitive_extractor
+  ctest --preset win-release-user -C Release -R test_hand_primitive_extractor --output-on-failure
   ```
 
   Expected final behavior: the long-gap case receives a new ID; a separate

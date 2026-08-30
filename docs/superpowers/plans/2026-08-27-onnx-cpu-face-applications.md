@@ -98,7 +98,7 @@ InSwapper 矩阵语义；现有 TensorRT/OpenCV API 和默认构建行为保持�
 1. 新增 CPU 图像单元测试。
 2. CPU 人脸几何、预处理、合成与契约测试。
 3. 本地真实 ONNX 端到端测试与 benchmark。
-4. 现有 `win-face-applications-release-user` 回归。
+4. 现有 `win-release-user` 回归。
 5. CPU preset 的完整构建、CTest 与安装消费测试。
 
 **兼容性约束：**

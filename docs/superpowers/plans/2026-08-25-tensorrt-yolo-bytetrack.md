@@ -322,12 +322,12 @@ spec("YOLO ByteTrack session") {
 
 - [ ] **Step 2: Add tracking-only options and verify the test initially fails**
 
-Add `KFCORE_BUILD_YOLO_TRACKING` defaulting to `OFF`. Add public `win-yolo-tracking-dev-user` configure/build/test presets that inherit the matching `win-dev-user` entries and set only this option to `ON`; add `install-win-yolo-tracking-dev-user` targeting `install`.
+Add `KFCORE_BUILD_YOLO_TRACKING` defaulting to `OFF`. Add public `win-dev-user` configure/build/test presets that inherit the matching `win-dev-user` entries and set only this option to `ON`.
 
 ```powershell
 cmake --list-presets
-cmake --fresh --preset win-yolo-tracking-dev-user
-cmake --build --preset win-yolo-tracking-dev-user --target test_yolo_tracking
+cmake --fresh --preset win-dev-user
+cmake --build --preset win-dev-user --target test_yolo_tracking
 ```
 
 Expected: configure reaches the new module, then compilation fails because the public types/session are not implemented.
@@ -434,8 +434,8 @@ Pre-size `TrackFrame::detections` to the input count and fill by the `_ex` detec
 - [ ] **Step 5: Run focused no-GPU validation**
 
 ```powershell
-cmake --build --preset win-yolo-tracking-dev-user --target test_yolo_tracking
-ctest --preset win-yolo-tracking-dev-user -R test_yolo_tracking
+cmake --build --preset win-dev-user --target test_yolo_tracking
+ctest --preset win-dev-user -R test_yolo_tracking
 ```
 
 Expected: all session tests pass; no TensorRT, CUDA, or OpenCV package is searched.
@@ -491,7 +491,7 @@ spec("TensorRT YOLO engine contract") {
 - [ ] **Step 2: Build and verify undefined contract symbols fail**
 
 ```powershell
-cmake --build --preset win-yolo-tracking-dev-user --target test_tensorrt_contract
+cmake --build --preset win-dev-user --target test_tensorrt_contract
 ```
 
 Expected: compilation or linkage fails because the contract API is missing.
@@ -540,8 +540,8 @@ Require one rank-4 NCHW input with channel 3, INT32 `num_dets`/`labels`, same-ty
 - [ ] **Step 4: Run contract tests and tracking regression**
 
 ```powershell
-cmake --build --preset win-yolo-tracking-dev-user --target test_tensorrt_contract test_yolo_tracking
-ctest --preset win-yolo-tracking-dev-user -R "test_tensorrt_contract|test_yolo_tracking"
+cmake --build --preset win-dev-user --target test_tensorrt_contract test_yolo_tracking
+ctest --preset win-dev-user -R "test_tensorrt_contract|test_yolo_tracking"
 ```
 
 Expected: both targets pass without finding TensorRT.
@@ -584,7 +584,7 @@ if(KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_TRACKING)
 endif()
 ```
 
-Create `win-yolo-release-user` configure/build/test presets plus `install-win-yolo-release-user`. The configure preset defines:
+Create `win-release-user` configure/build/test presets. The configure preset defines:
 
 ```json
 "environment": {
@@ -598,7 +598,7 @@ Create `win-yolo-release-user` configure/build/test presets plus `install-win-yo
 }
 ```
 
-Run `cmake --fresh --preset win-yolo-release-user`. In the current machine state, expected result is a clear configure failure naming the missing `TENSORRT_ROOT` directory, not selection of a system SDK.
+Run `cmake --fresh --preset win-release-user`. In the current machine state, expected result is a clear configure failure naming the missing `TENSORRT_ROOT` directory, not selection of a system SDK.
 
 - [ ] **Step 2: Implement exact `FindTensorRT.cmake`**
 
@@ -680,8 +680,8 @@ Call `cudaSetDevice(options.device_id)` at detector-creation and inference bound
 If `$env:PKG_ROOT/tensorrt` exists:
 
 ```powershell
-cmake --fresh --preset win-yolo-release-user
-cmake --build --preset win-yolo-release-user --target tensorrt_yolo
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user --target tensorrt_yolo
 ```
 
 Expected: target compiles against TensorRT 10.x or 11.x. If the SDK remains absent, attach the configure error to the GitHub issue and do not mark the SDK compile acceptance criterion complete.
@@ -775,9 +775,9 @@ Set the version-matched trusted engine at the documented fixed test-data path:
 
 ```powershell
 $env:KFCORE_TENSORRT_TEST_ENGINE = "C:/projects/cpp/external/test-data/yolo11n-efficientnms.engine"
-cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
-cmake --build --preset win-yolo-release-user --target test_tensorrt_integration
-ctest --preset win-yolo-release-user -R test_tensorrt_integration
+cmake --fresh --preset win-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
+cmake --build --preset win-release-user --target test_tensorrt_integration
+ctest --preset win-release-user -R test_tensorrt_integration
 ```
 
 Expected: all GPU cases pass. If either SDK or engine is missing, the explicit configure failure remains an open GitHub blocker and no GPU success claim is made.
@@ -785,8 +785,8 @@ Expected: all GPU cases pass. If either SDK or engine is missing, the explicit c
 - [ ] **Step 5: Run no-GPU regression tests**
 
 ```powershell
-cmake --build --preset win-yolo-tracking-dev-user --target test_yolo_tracking test_tensorrt_contract
-ctest --preset win-yolo-tracking-dev-user -R "test_yolo_tracking|test_tensorrt_contract"
+cmake --build --preset win-dev-user --target test_yolo_tracking test_tensorrt_contract
+ctest --preset win-dev-user -R "test_yolo_tracking|test_tensorrt_contract"
 ```
 
 Expected: tracking and contract tests remain independent of CUDA/TensorRT.
@@ -881,9 +881,9 @@ It sorts supported image paths, creates one engine/detector/session, processes e
 - [ ] **Step 5: Build and run OpenCV tests**
 
 ```powershell
-cmake --fresh --preset win-yolo-release-user
-cmake --build --preset win-yolo-release-user --target test_yolo_opencv track_image_sequence
-ctest --preset win-yolo-release-user -R test_yolo_opencv
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user --target test_yolo_opencv track_image_sequence
+ctest --preset win-release-user -R test_yolo_opencv
 ```
 
 Expected: OpenCV tests pass using `C:/projects/cpp/external/pkgs/opencv-lite`; the targets do not link `opencv_dnn4130.lib`, `opencv_highgui4130.lib`, or ONNX Runtime.
@@ -961,28 +961,26 @@ ctest --preset win-dev-user
 
 Expected: the default C-only-compatible profile configures without TensorRT/OpenCV discovery and all existing tests pass.
 
-- [ ] **Step 5: Run tracking-only, install, and optional full checks**
+- [ ] **Step 5: Run tracking-only and optional full checks**
 
 ```powershell
-cmake --fresh --preset win-yolo-tracking-dev-user
-cmake --build --preset win-yolo-tracking-dev-user
-ctest --preset win-yolo-tracking-dev-user
-cmake --build --preset install-win-yolo-tracking-dev-user
+cmake --fresh --preset win-dev-user
+cmake --build --preset win-dev-user
+ctest --preset win-dev-user
 ```
 
-Expected: tracker/session/contract and installed-consumer tests pass without TensorRT.
+Expected: tracker/session/contract tests pass without TensorRT.
 
 When the external SDK and trusted engine exist:
 
 ```powershell
 $env:KFCORE_TENSORRT_TEST_ENGINE = "C:/projects/cpp/external/test-data/yolo11n-efficientnms.engine"
-cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
-cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user
-cmake --build --preset install-win-yolo-release-user
+cmake --fresh --preset win-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user
 ```
 
-Expected: full TensorRT/OpenCV/integration/install validation passes. If prerequisites are absent, record those exact unverified rows; do not close the integration issue.
+Expected: full TensorRT/OpenCV/integration validation passes. If prerequisites are absent, record those exact unverified rows; do not close the integration issue.
 
 - [ ] **Step 6: Inspect linkage and source provenance**
 
@@ -1007,7 +1005,7 @@ git commit -m "docs(yolo): export and verify TensorRT tracking module"
 
 Before claiming the feature complete:
 
-- Task 1-3 and tracking-only install verification must pass locally.
+- Task 1-3 and tracking-only verification must pass locally.
 - Default KFCore presets must remain green.
 - The two reference directories must remain absent from all build inputs.
 - GitHub child issues close only after their listed test commands pass.

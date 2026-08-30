@@ -26,8 +26,7 @@ cmake_config_target(kfcore_vision_model_core
   EXPORT_SET KFCoreTargets
   FOLDER "vision_models")
 
-if(KFCORE_BUILD_VISION_MODELS_CPU)
-  add_library(kfcore_vision_models_cpu SHARED
+add_library(kfcore_vision_models_cpu SHARED
     src/cpu.cpp
     src/onnx_session.cpp)
   target_include_directories(kfcore_vision_models_cpu
@@ -58,11 +57,9 @@ if(KFCORE_BUILD_VISION_MODELS_CPU)
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
               $<TARGET_FILE:ONNXRuntime::ONNXRuntime>
               $<TARGET_FILE_DIR:kfcore_vision_models_cpu>)
-  endif()
 endif()
 
-if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
-  add_library(kfcore_vision_models_tensorrt SHARED
+add_library(kfcore_vision_models_tensorrt SHARED
     src/tensorrt.cpp
     src/tensorrt_models.cpp)
   target_include_directories(kfcore_vision_models_tensorrt
@@ -87,9 +84,8 @@ if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
   cmake_config_target(kfcore_vision_models_tensorrt
     ALIAS KFCore::vision_models_tensorrt
     EXPORT_NAME vision_models_tensorrt
-    EXPORT_SET KFCoreTargets
-    FOLDER "vision_models")
-endif()
+  EXPORT_SET KFCoreTargets
+  FOLDER "vision_models")
 
 if(BUILD_TESTS)
   add_executable(test_vision_model_geometry tests/test_geometry.cpp)
@@ -121,8 +117,7 @@ if(BUILD_TESTS)
   target_compile_features(test_vision_model_hand_pipeline PRIVATE cxx_std_17)
   add_test(NAME test_vision_model_hand_pipeline COMMAND test_vision_model_hand_pipeline)
 
-  if(KFCORE_BUILD_VISION_MODELS_CPU)
-    add_executable(test_vision_models_cpu_validation
+  add_executable(test_vision_models_cpu_validation
       tests/test_cpu_backend_validation.cpp)
     target_link_libraries(test_vision_models_cpu_validation PRIVATE
       KFCore::vision_models_cpu
@@ -136,7 +131,7 @@ if(BUILD_TESTS)
           "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
     endif()
 
-    if(KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS)
+    if(KFCORE_ENABLE_VISION_MODELS_CPU_INTEGRATION_TESTS)
       set(_vision_cpu_palm
         "${KFCORE_VISION_MODEL_TEST_MODEL_DIR}/hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx")
       set(_vision_cpu_hand
@@ -193,10 +188,8 @@ if(BUILD_TESTS)
             "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
       endif()
     endif()
-  endif()
 
-  if(KFCORE_BUILD_VISION_MODELS_TENSORRT)
-    add_executable(test_vision_models_tensorrt_validation
+  add_executable(test_vision_models_tensorrt_validation
       tests/test_tensorrt_backend_validation.cpp)
     target_include_directories(test_vision_models_tensorrt_validation PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -212,7 +205,7 @@ if(BUILD_TESTS)
           "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
     endif()
 
-    if(KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS)
+    if(KFCORE_ENABLE_VISION_MODELS_TENSORRT_INTEGRATION_TESTS)
       foreach(_vision_trt_asset IN ITEMS
           "${KFCORE_VISION_MODEL_TEST_ENGINE_PALM}"
           "${KFCORE_VISION_MODEL_TEST_ENGINE_HAND}"
@@ -260,37 +253,18 @@ if(BUILD_TESTS)
             "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
       endif()
     endif()
-  endif()
 
-  if(KFCORE_INSTALL AND
-     (KFCORE_BUILD_VISION_MODELS_CPU OR KFCORE_BUILD_VISION_MODELS_TENSORRT))
-    include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
-    kfcore_require_ninja(_vision_models_consumer_ninja)
-    set(_vision_models_consumer_kind cpu)
-    if(KFCORE_BUILD_VISION_MODELS_CPU AND KFCORE_BUILD_VISION_MODELS_TENSORRT)
-      set(_vision_models_consumer_kind combined)
-    elseif(KFCORE_BUILD_VISION_MODELS_TENSORRT)
-      set(_vision_models_consumer_kind tensorrt)
-    endif()
-    set(_vision_models_consumer_root
-      "${CMAKE_BINARY_DIR}/tests/vision_models_${_vision_models_consumer_kind}_installed_consumer")
-    add_test(NAME test_vision_models_${_vision_models_consumer_kind}_installed_consumer
-      COMMAND "${CMAKE_COMMAND}"
-        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/VisionModelsInstalledConsumer"
-        "-DKFCORE_CONSUMER_BINARY_DIR=${_vision_models_consumer_root}/build"
-        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_vision_models_consumer_root}/install"
-        "-DKFCORE_CONSUMER_KFCORE_DIR=${_vision_models_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-        "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_vision_models_consumer_ninja}"
-        "-DKFCORE_CONSUMER_EXPECT_CPU=${KFCORE_BUILD_VISION_MODELS_CPU}"
-        "-DKFCORE_CONSUMER_EXPECT_TENSORRT=${KFCORE_BUILD_VISION_MODELS_TENSORRT}"
-        "-DKFCORE_CONSUMER_EXPECT_HAND_INTERACTION=${KFCORE_BUILD_HAND_INTERACTION}"
-        "-DKFCORE_CONSUMER_ONNXRUNTIME_ROOT=$ENV{ONNXRUNTIME_ROOT}"
-        "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
-        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_vision_models_installed_consumer.cmake")
-  endif()
+  set(_vision_models_consumer_kind combined)
+  set(_vision_models_consumer_root
+    "${CMAKE_BINARY_DIR}/tests/vision_models_${_vision_models_consumer_kind}_installed_consumer")
+  add_test(NAME test_vision_models_${_vision_models_consumer_kind}_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/VisionModelsInstalledConsumer"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${_vision_models_consumer_root}/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_vision_models_consumer_root}/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${_vision_models_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_vision_models_installed_consumer.cmake")
 endif()
 
 cmake_install_headers(

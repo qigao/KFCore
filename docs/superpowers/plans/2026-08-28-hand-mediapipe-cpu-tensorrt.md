@@ -52,7 +52,7 @@ check_error([&] { detail::validate_dynamic_output_requests(
 
 - [x] **Step 2: Configure/build the TensorRT runtime tests and verify RED because the new types/API do not exist.**
 
-Run: `cmake --fresh --preset win-tensorrt-models-release-user` then build `test_tensorrt_runtime_contract`.
+Run: `cmake --fresh --preset win-release-user` then build `test_tensorrt_runtime_contract`.
 Expected: compilation failure naming `DynamicOutputRequest` or `validate_dynamic_output_requests`.
 
 - [x] **Step 3: Implement validation and `run_dynamic()` with bounded executor-owned CUDA/pinned staging and owning host results.**
@@ -73,7 +73,7 @@ struct HostTensor {
 
 - [x] **Step 4: Run the unit test GREEN, then add and run a Palm-engine integration test that asserts `[N,8]`, `N <= 2016`, and finite FP32 values.**
 
-Run: `ctest --preset win-tensorrt-models-release-user -R "tensorrt_(tensor_validation|runtime_dynamic_output)"`.
+Run: `ctest --preset win-release-user -R "tensorrt_(tensor_validation|runtime_dynamic_output)"`.
 Expected: both tests pass when the Palm engine cache variable is supplied.
 
 - [x] **Step 5: Commit the runtime capability.**
@@ -167,7 +167,7 @@ Palm uses RGB unit-range letterbox; hand and face ROIs use RGB unit-range affine
 
 - [x] **Step 5: Add opt-in real-model integration tests for all four ONNX files; assert bounded counts, exact output sizes, finite results, and successful pipeline tracking.**
 
-Run: `ctest --preset win-vision-models-cpu-release-user -R vision_models_cpu`.
+Run: `ctest --preset win-release-user -R vision_models_cpu`.
 Expected: all CPU tests pass.
 
 - [x] **Step 6: Commit the CPU backend.**
@@ -208,7 +208,7 @@ Palm calls `run_dynamic()` with a checked cap of `max_palm_candidates * 8 * size
 
 - [x] **Step 5: Generate local TensorRT engines from the four trusted ONNX files and run CUDA integration tests.**
 
-Run: `ctest --preset win-vision-models-tensorrt-release-user -R vision_models_tensorrt`.
+Run: `ctest --preset win-release-user -R vision_models_tensorrt`.
 Expected: Palm dynamic output and the three fixed-output engines execute on device 0 with finite results.
 
 - [x] **Step 6: Commit the TensorRT backend.**
@@ -240,7 +240,7 @@ Run: `codegraph sync .` and `codegraph affected -p . <changed source files>`.
 
 - [x] **Step 4: Run focused CPU, TensorRT, image processor, trackers, and face-model tests, then full relevant preset suites.**
 
-Run: `ctest --preset win-vision-models-cpu-release-user`, `ctest --preset win-vision-models-tensorrt-release-user`, and the existing face/TensorRT preset tests.
+Run: `ctest --preset win-release-user`, `ctest --preset win-release-user`, and the existing face/TensorRT preset tests.
 
 - [x] **Step 5: Verify clean diff, scan for placeholder markers, and commit documentation/package integration.**
 

@@ -28,8 +28,8 @@
 **Step 2: 运行测试并确认 RED**
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_face_model_contracts
-ctest --preset win-yolo-release-user -R '^test_face_model_contracts$' --output-on-failure
+cmake --build --preset win-release-user --target test_face_model_contracts
+ctest --preset win-release-user -R '^test_face_model_contracts$' --output-on-failure
 ```
 
 预期：编译失败或新增测试失败，因为类型与 contract 尚不存在。
@@ -68,8 +68,8 @@ git commit -m "feat(face-models): add swap and enhancer contracts"
 **Step 2: 确认 RED**
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_face_swap_adapter_api
-ctest --preset win-yolo-release-user -R '^test_face_swap_adapter_api$' --output-on-failure
+cmake --build --preset win-release-user --target test_face_swap_adapter_api
+ctest --preset win-release-user -R '^test_face_swap_adapter_api$' --output-on-failure
 ```
 
 **Step 3: 最小实现**
@@ -113,8 +113,8 @@ git commit -m "feat(face-models): add TensorRT swap and enhancer adapters"
 **Step 2: 确认 RED**
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_inswapper_embedding
-ctest --preset win-yolo-release-user -R '^test_inswapper_embedding$' --output-on-failure
+cmake --build --preset win-release-user --target test_inswapper_embedding
+ctest --preset win-release-user -R '^test_inswapper_embedding$' --output-on-failure
 ```
 
 **Step 3: 最小实现**
@@ -124,7 +124,7 @@ ctest --preset win-yolo-release-user -R '^test_inswapper_embedding$' --output-on
 **Step 4: 确认 GREEN 并提交**
 
 ```powershell
-ctest --preset win-yolo-release-user -R '^test_inswapper_embedding$' --output-on-failure
+ctest --preset win-release-user -R '^test_inswapper_embedding$' --output-on-failure
 git add face_models
 git commit -m "feat(face-models): add InSwapper embedding projection"
 ```
@@ -169,7 +169,7 @@ git commit -m "feat(face-models): add InSwapper embedding projection"
 **Step 5: 确认 GREEN 并提交**
 
 ```powershell
-ctest --preset win-yolo-release-user -R '^test_face_(geometry|preprocess)$' --output-on-failure
+ctest --preset win-release-user -R '^test_face_(geometry|preprocess)$' --output-on-failure
 git add CMakeLists.txt CMakeOptions.cmake face_applications
 git commit -m "feat(face-applications): add face geometry and preprocessing"
 ```
@@ -189,8 +189,8 @@ git commit -m "feat(face-applications): add face geometry and preprocessing"
 **Step 2: 确认 RED**
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_face_composer
-ctest --preset win-yolo-release-user -R '^test_face_composer$' --output-on-failure
+cmake --build --preset win-release-user --target test_face_composer
+ctest --preset win-release-user -R '^test_face_composer$' --output-on-failure
 ```
 
 **Step 3: 最小实现**
@@ -200,7 +200,7 @@ ctest --preset win-yolo-release-user -R '^test_face_composer$' --output-on-failu
 **Step 4: GREEN、回归与提交**
 
 ```powershell
-ctest --preset win-yolo-release-user -R '^test_face_(geometry|preprocess|composer)$' --output-on-failure
+ctest --preset win-release-user -R '^test_face_(geometry|preprocess|composer)$' --output-on-failure
 git add face_applications
 git commit -m "feat(face-applications): add bounded face composition"
 ```
@@ -232,7 +232,7 @@ git commit -m "feat(face-applications): add bounded face composition"
 **Step 5: GREEN 与提交**
 
 ```powershell
-ctest --preset win-yolo-release-user -R '^test_face_application_' --output-on-failure
+ctest --preset win-release-user -R '^test_face_application_' --output-on-failure
 git add face_applications
 git commit -m "feat(face-applications): add YOLOv12 face swap facade"
 ```
@@ -294,8 +294,8 @@ git commit -m "feat(face-applications): add face swap image application"
 **Step 3: 最小测试、相邻回归、全量回归**
 
 ```powershell
-ctest --preset win-yolo-release-user -R 'face|tensorrt|opencv' --output-on-failure
-ctest --preset win-yolo-release-user --output-on-failure
+ctest --preset win-release-user -R 'face|tensorrt|opencv' --output-on-failure
+ctest --preset win-release-user --output-on-failure
 ```
 
 预期：新增测试与原有 27 项基线全部通过。记录实际测试数、耗时和任何 opt-in 未运行项的原因。

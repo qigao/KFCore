@@ -15,7 +15,7 @@
 - Preserve the model, tracker, canonical hand identity, and THIG ownership boundaries.
 - Use real `HandInteractionPipeline` frames for the Wave regression; do not mock primitive relations.
 - Keep all thresholds bounded and configurable through existing option structures or demo CLI.
-- Validate with `win-hand-interaction-demo-tensorrt-release-user` presets.
+- Validate with `win-release-user` presets.
 
 ---
 

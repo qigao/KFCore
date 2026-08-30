@@ -11,6 +11,9 @@
                 "PROJECT_ROOT": "C:/projects/cpp",
                 "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
                 "CUDA_TOOLKIT_ROOT": "$penv{CUDA_PATH_V12_8}",
+                "TENSORRT_ROOT": "C:/projects/TensorRT-11.2.1.2",
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
+                "OPENCV_LITE_ROOT": "$env{PKG_ROOT}/opencv-lite",
                 "VCPKG_ROOT": "C:/tools/vcpkg",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
             }
@@ -54,6 +57,7 @@
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
             "cacheVariables": {
+                "BUILD_TESTS": "ON",
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
@@ -62,7 +66,7 @@
                 "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
                 "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-dev-user",
@@ -73,6 +77,7 @@
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
             "cacheVariables": {
+                "BUILD_TESTS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
             },
@@ -80,7 +85,7 @@
                 "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
                 "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
                 "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
@@ -88,202 +93,10 @@
             ]
         },
         {
-            "name": "win-image-processor-release-user",
-            "displayName": "ImageProcessor CUDA Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "cacheVariables": {
-                "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
-                "KFCORE_BUILD_YOLO_TRACKING": "OFF",
-                "KFCORE_BUILD_TENSORRT_YOLO": "OFF",
-                "KFCORE_BUILD_YOLO_OPENCV": "OFF",
-                "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS": "OFF"
-            }
-        },
-        {
-            "name": "win-sift-release-user",
-            "displayName": "SIFT PopSift Release Build (Windows, User)",
-            "inherits": "win-image-processor-release-user",
-            "cacheVariables": {
-                "CMAKE_CUDA_ARCHITECTURES": "native",
-                "KFCORE_BUILD_SIFT": "ON",
-                "KFCORE_BUILD_SIFT_POPSIFT": "ON"
-            }
-        },
-        {
-            "name": "win-yolo-tracking-dev-user",
-            "displayName": "YOLO Tracking Developer Build (Windows, User)",
-            "inherits": "win-dev-user",
-            "cacheVariables": {
-                "KFCORE_BUILD_YOLO_TRACKING": "ON"
-            }
-        },
-        {
-            "name": "win-yolo-release-user",
-            "displayName": "YOLO TensorRT Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "environment": {
-                "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
-                "OPENCV_LITE_ROOT": "$env{PKG_ROOT}/opencv-lite",
-                "PATH": "$env{TENSORRT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_YOLO_TRACKING": "ON",
-                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
-                "KFCORE_BUILD_YOLO_OPENCV": "ON"
-            }
-        },
-        {
-            "name": "win-yolov8-applications-release-user",
-            "displayName": "YOLOv8 Domain Applications CPU/TensorRT Release Build (Windows, User)",
-            "inherits": "win-yolo-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-YOLOv8-Applications",
-            "environment": {
-                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
-                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-YOLOv8-Applications/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_YOLO_APPLICATIONS": "ON",
-                "KFCORE_BUILD_YOLO_APPLICATIONS_CPU": "ON",
-                "KFCORE_BUILD_YOLO_APPLICATION_INTEGRATION_TESTS": "ON",
-                "KFCORE_BUILD_YOLO_OPENCV": "OFF",
-                "KFCORE_YOLO_APPLICATION_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models"
-            }
-        },
-        {
-            "name": "win-tensorrt-models-release-user",
-            "displayName": "TensorRT Runtime and Face Models Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-TensorRT-Models-Release",
-            "environment": {
-                "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
-                "PATH": "$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-TensorRT-Models-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
-                "KFCORE_BUILD_FACE_MODELS": "ON",
-                "KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS": "ON",
-                "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE": "$penv{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}",
-                "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM": "$penv{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}",
-                "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER": "$penv{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER}",
-                "KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68": "$penv{KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68}"
-            }
-        },
-        {
-            "name": "win-face-applications-release-user",
-            "displayName": "TensorRT Face Applications Release Build (Windows, User)",
-            "inherits": "win-yolo-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Face",
-            "cacheVariables": {
-                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
-                "KFCORE_BUILD_FACE_MODELS": "ON",
-                "KFCORE_BUILD_YOLO_OPENCV": "OFF",
-                "KFCORE_BUILD_FACE_APPLICATIONS": "ON",
-                "KFCORE_BUILD_FACE_APPLICATION_EXAMPLES": "ON"
-            }
-        },
-        {
-            "name": "win-face-cpu-release-user",
-            "displayName": "ONNX Runtime CPU Face Applications Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Face-CPU",
-            "environment": {
-                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
-                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/Msvc-Face-CPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_FACE_APPLICATIONS_CPU": "ON",
-                "KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS": "ON",
-                "KFCORE_FACE_CPU_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
-                "KFCORE_FACE_CPU_TEST_MATRIX": "C:/projects/project-cpp-template/faceswap/src/model_matrix.bin",
-                "KFCORE_FACE_CPU_TEST_SOURCE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg",
-                "KFCORE_FACE_CPU_TEST_TARGET_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/target.jpg"
-            }
-        },
-        {
-            "name": "win-vision-models-cpu-release-user",
-            "displayName": "Vision Models ONNX Runtime CPU Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Vision-CPU",
-            "environment": {
-                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime",
-                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/Msvc-Vision-CPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_VISION_MODELS": "ON",
-                "KFCORE_BUILD_THIG": "ON",
-                "KFCORE_BUILD_HAND_INTERACTION": "ON",
-                "KFCORE_BUILD_VISION_MODELS_CPU": "ON",
-                "KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS": "ON",
-                "KFCORE_VISION_MODEL_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
-                "KFCORE_VISION_MODEL_TEST_HAND_IMAGE": "C:/projects/cpp/learnopencv/HandPose/hand.jpg",
-                "KFCORE_VISION_MODEL_TEST_FACE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg"
-            }
-        },
-        {
-            "name": "win-vision-models-tensorrt-release-user",
-            "displayName": "Vision Models CPU + TensorRT Release Build (Windows, User)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Vision-TensorRT",
-            "environment": {
-                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime-gpu",
-                "TENSORRT_ROOT": "$penv{TENSORRT_ROOT}",
-                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Vision-TensorRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_IMAGE_PROCESSOR": "ON",
-                "KFCORE_BUILD_TENSORRT_RUNTIME": "ON",
-                "KFCORE_BUILD_VISION_MODELS": "ON",
-                "KFCORE_BUILD_THIG": "ON",
-                "KFCORE_BUILD_HAND_INTERACTION": "ON",
-                "KFCORE_BUILD_YOLO_TRACKING": "ON",
-                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
-                "KFCORE_BUILD_VISION_MODELS_CPU": "ON",
-                "KFCORE_BUILD_VISION_MODELS_CPU_INTEGRATION_TESTS": "ON",
-                "KFCORE_BUILD_VISION_MODELS_TENSORRT": "ON",
-                "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "ON",
-                "KFCORE_VISION_MODEL_TEST_MODEL_DIR": "C:/projects/cpp/KFCore/yolo-models",
-                "KFCORE_VISION_MODEL_TEST_ENGINE_PALM": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_PALM}",
-                "KFCORE_VISION_MODEL_TEST_ENGINE_HAND": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_HAND}",
-                "KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_CLASSIFIER}",
-                "KFCORE_VISION_MODEL_TEST_ENGINE_FACE": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_FACE}",
-                "KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR": "$penv{KFCORE_VISION_MODEL_TEST_ENGINE_FACE_DETECTOR}",
-                "KFCORE_VISION_MODEL_TEST_HAND_IMAGE": "C:/projects/cpp/learnopencv/HandPose/hand.jpg",
-                "KFCORE_VISION_MODEL_TEST_FACE_IMAGE": "C:/projects/cpp/facefusion-onnxrun/cpp/images/source.jpg"
-            }
-        },
-        {
-            "name": "win-hand-interaction-demo-cpu-release-user",
-            "displayName": "THIG Hand Interaction Demo CPU Release Build (Windows, User)",
-            "inherits": "win-vision-models-cpu-release-user",
-            "binaryDir": "${sourceDir}/build/HandCPU",
-            "environment": {
-                "OPENCV_LITE_ROOT": "C:/projects/cpp/external/pkgs/opencv-lite",
-                "PATH": "$env{OPENCV_LITE_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}${sourceDir}/build/HandCPU/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES": "ON"
-            }
-        },
-        {
-            "name": "win-hand-interaction-demo-tensorrt-release-user",
-            "displayName": "THIG Hand Interaction Demo TensorRT Release Build (Windows, User)",
-            "inherits": "win-vision-models-tensorrt-release-user",
-            "binaryDir": "${sourceDir}/build/HandTRT",
-            "environment": {
-                "OPENCV_LITE_ROOT": "C:/projects/cpp/external/pkgs/opencv-lite",
-                "PATH": "$env{OPENCV_LITE_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}${sourceDir}/build/HandTRT/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
-            },
-            "cacheVariables": {
-                "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES": "ON",
-                "KFCORE_BUILD_YOLO_TRACKING": "ON",
-                "KFCORE_BUILD_TENSORRT_YOLO": "ON",
-                "KFCORE_BUILD_VISION_MODELS_TENSORRT_INTEGRATION_TESTS": "OFF"
-            }
-        },
-        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
+                "BUILD_TESTS": "ON",
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
@@ -304,6 +117,7 @@
             "name": "linux-release-user",
             "displayName": "Release Build (Linux, User)",
             "cacheVariables": {
+                "BUILD_TESTS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
             },
@@ -330,159 +144,12 @@
             "configurePreset": "win-release-user"
         },
         {
-            "name": "win-image-processor-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-image-processor-release-user"
-        },
-        {
-            "name": "win-sift-release-user",
-            "inherits": "win-image-processor-release-user",
-            "configurePreset": "win-sift-release-user"
-        },
-        {
-            "name": "win-yolo-tracking-dev-user",
-            "inherits": "win-dev-user",
-            "configurePreset": "win-yolo-tracking-dev-user"
-        },
-        {
-            "name": "win-yolo-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-yolo-release-user"
-        },
-        {
-            "name": "win-yolov8-applications-release-user",
-            "inherits": "win-yolo-release-user",
-            "configurePreset": "win-yolov8-applications-release-user"
-        },
-        {
-            "name": "win-tensorrt-models-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-tensorrt-models-release-user"
-        },
-        {
-            "name": "win-face-applications-release-user",
-            "inherits": "win-yolo-release-user",
-            "configurePreset": "win-face-applications-release-user"
-        },
-        {
-            "name": "win-face-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-face-cpu-release-user"
-        },
-        {
-            "name": "win-vision-models-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-vision-models-cpu-release-user"
-        },
-        {
-            "name": "win-vision-models-tensorrt-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-vision-models-tensorrt-release-user"
-        },
-        {
-            "name": "win-hand-interaction-demo-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-hand-interaction-demo-cpu-release-user"
-        },
-        {
-            "name": "win-hand-interaction-demo-tensorrt-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-hand-interaction-demo-tensorrt-release-user"
-        },
-        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
         {
             "name": "linux-release-user",
             "configurePreset": "linux-release-user"
-        },
-        {
-            "name": "install-win-dev-user",
-            "configurePreset": "win-dev-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-image-processor-release-user",
-            "configurePreset": "win-image-processor-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-sift-release-user",
-            "inherits": "install-win-image-processor-release-user",
-            "configurePreset": "win-sift-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-yolo-tracking-dev-user",
-            "inherits": "install-win-dev-user",
-            "configurePreset": "win-yolo-tracking-dev-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-yolo-release-user",
-            "configurePreset": "win-yolo-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-tensorrt-models-release-user",
-            "configurePreset": "win-tensorrt-models-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-face-applications-release-user",
-            "inherits": "install-win-yolo-release-user",
-            "configurePreset": "win-face-applications-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-face-cpu-release-user",
-            "configurePreset": "win-face-cpu-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-vision-models-cpu-release-user",
-            "configurePreset": "win-vision-models-cpu-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-vision-models-tensorrt-release-user",
-            "configurePreset": "win-vision-models-tensorrt-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-linux-dev-user",
-            "configurePreset": "linux-dev-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-linux-release-user",
-            "configurePreset": "linux-release-user",
-            "targets": [
-                "install"
-            ]
         }
     ],
     "testPresets": [
@@ -495,66 +162,6 @@
             "name": "win-release-user",
             "inherits": "base-test",
             "configurePreset": "win-release-user"
-        },
-        {
-            "name": "win-image-processor-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-image-processor-release-user"
-        },
-        {
-            "name": "win-sift-release-user",
-            "inherits": "win-image-processor-release-user",
-            "configurePreset": "win-sift-release-user"
-        },
-        {
-            "name": "win-yolo-tracking-dev-user",
-            "inherits": "win-dev-user",
-            "configurePreset": "win-yolo-tracking-dev-user"
-        },
-        {
-            "name": "win-yolo-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-yolo-release-user"
-        },
-        {
-            "name": "win-yolov8-applications-release-user",
-            "inherits": "win-yolo-release-user",
-            "configurePreset": "win-yolov8-applications-release-user"
-        },
-        {
-            "name": "win-tensorrt-models-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-tensorrt-models-release-user"
-        },
-        {
-            "name": "win-face-applications-release-user",
-            "inherits": "win-yolo-release-user",
-            "configurePreset": "win-face-applications-release-user"
-        },
-        {
-            "name": "win-face-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-face-cpu-release-user"
-        },
-        {
-            "name": "win-vision-models-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-vision-models-cpu-release-user"
-        },
-        {
-            "name": "win-vision-models-tensorrt-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-vision-models-tensorrt-release-user"
-        },
-        {
-            "name": "win-hand-interaction-demo-cpu-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-hand-interaction-demo-cpu-release-user"
-        },
-        {
-            "name": "win-hand-interaction-demo-tensorrt-release-user",
-            "inherits": "win-release-user",
-            "configurePreset": "win-hand-interaction-demo-tensorrt-release-user"
         },
         {
             "name": "linux-dev-user",

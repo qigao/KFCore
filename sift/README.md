@@ -28,23 +28,22 @@ kfcore::sift::FeatureSet extract(
 失败抛出 `SiftError`：`InvalidArgument` 表示输入契约错误，`ResourceLimitExceeded` 表示配置上限或
 字节计算溢出，`BackendFailure` 表示具体实现失败。
 
-构建公共契约时设置 `KFCORE_BUILD_SIFT=ON`，安装后链接 `KFCore::sift`。
+公共契约和 CUDA 后端会随 KFCore 一起构建；安装后分别链接 `KFCore::sift` 和
+`KFCore::sift_popsift`。
 
 ## CUDA SIFT 后端
 
 Windows 开发环境直接构建仓库内维护的 CUDA SIFT 源码：
 
 ```powershell
-cmake --fresh --preset win-sift-release-user
-cmake --build --preset win-sift-release-user
-ctest --preset win-sift-release-user -R '^test_(sift|popsift)' --output-on-failure
-cmake --build --preset win-sift-release-user --target benchmark_popsift
+cmake --fresh --preset win-release-user -DCMAKE_CUDA_ARCHITECTURES=native
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R '^test_(sift|popsift)' --output-on-failure
+cmake --build --preset win-release-user --target benchmark_popsift
 build/Msvc-Release/bin/benchmark_popsift.exe
-cmake --build --preset install-win-sift-release-user
 ```
 
-启用 `KFCORE_BUILD_SIFT=ON` 和 `KFCORE_BUILD_SIFT_POPSIFT=ON` 后，KFCore 从
-`sift/vendor/popsift` 构建私有静态 CUDA target；不读取 `POPSIFT_ROOT`，也不要求本机安装 PopSift。
+KFCore 从 `sift/vendor/popsift` 构建私有静态 CUDA target；不读取 `POPSIFT_ROOT`，也不要求本机安装 PopSift。
 安装后链接 `KFCore::sift_popsift`。内部头文件和独立 `popsift.dll` 不会安装；安装包附带
 `COPYING.md` 和 `UPSTREAM.md`，分别记录 MPL-2.0 许可证、上游 commit 和 KFCore 修改。
 

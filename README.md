@@ -634,16 +634,15 @@ target_link_libraries(my_app PRIVATE KFCore::trackers)
 ### 可选 TensorRT YOLO 跟踪
 
 `tensorrt_yolo/` 提供可安装的 `KFCore::yolo_tracking`、
-`KFCore::tensorrt_yolo` 和 `KFCore::yolo_opencv`。它们默认关闭；TensorRT
-profile 从继承环境的 `TENSORRT_ROOT` 查找 SDK，不会把开发机路径或运行时 DLL
+`KFCore::tensorrt_yolo` 和 `KFCore::yolo_opencv`。它们随 KFCore 构建；TensorRT
+从标准 user preset 的 `TENSORRT_ROOT` 查找 SDK，不会把开发机路径或运行时 DLL
 复制进工程。部署契约、容量限制、图片序列示例和 tracking-only/full/install 命令见
 [tensorrt_yolo/README.md](tensorrt_yolo/README.md)。
 
 ### TensorRT 模型能力矩阵
 
 `KFCore::tensorrt_runtime` 是模型无关的同步执行边界，`KFCore::face_models`
-在它之上提供严格的 Face68、ArcFace 与年龄/性别合约；两者默认关闭，分别由
-`KFCORE_BUILD_TENSORRT_RUNTIME` 和 `KFCORE_BUILD_FACE_MODELS` 启用。Face adapters
+在它之上提供严格的 Face68、ArcFace 与年龄/性别合约；两者均随 KFCore 构建。Face adapters
 只接收调用方已经准备好的 NCHW FP32 Tensor（host 或 CUDA device），不会接收原图，也不会
 隐式执行下表所列的对齐、裁剪、通道变换或归一化。
 
@@ -663,10 +662,8 @@ TensorRT/CUDA 绑定、执行、输出有限值与结果尺寸；raw outputs 也
 Windows 可从父环境提供 `TENSORRT_ROOT`，以及可选的同名
 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE`、
 `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER`、
-`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68`，然后使用
-`win-tensorrt-models-release-user` 的 configure/build/test 入口及
-`install-win-tensorrt-models-release-user` 安装入口。engine 变量为空时只报告对应真实 engine
-测试未注册；普通 preset 与普通安装路径仍保持 integration option 为 `OFF`。
+`KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68`，然后通过标准 `win-release-user` 配置、构建和测试。
+engine 变量为空时不注册对应真实 engine 测试。
 
 ### TensorRT 12face 换脸应用
 
@@ -686,20 +683,12 @@ Palm → 21 点 hand landmark → INT64 gesture classifier → KFCore ByteTrack/
 一次并复用同一份 CUDA image；它不会隐式降级到 CPU。目标、模型 I/O、engine 转换、容量、
 所有权和分阶段耗时契约见 [vision_models/README.md](vision_models/README.md)。
 
-When building from this repository, the important options are:
+When building from this repository, all production modules and install rules are enabled. The only project options are:
 
-- `KFCORE_BUILD_APRILTAG`: build the vendored AprilTag detector.
-- `KFCORE_BUILD_APRILTAG_TESTS`: build AprilTag tests.
-- `KFCORE_BUILD_APRILTAG_EXAMPLES`: build AprilTag examples.
-- `KFCORE_BUILD_NAVIGATION_TOOLS`: build frame transform and navigation fusion
-  helpers.
-- `KFCORE_BUILD_IMAGE_PROCESSOR`: build the reusable CUDA BGR/RGB image-to-tensor
-  processor without requiring TensorRT or OpenCV.
-- `KFCORE_BUILD_VISION_MODELS`: build shared hand/face landmark types, decoding,
-  geometry, and per-instance ByteTrack orchestration.
-- `KFCORE_BUILD_VISION_MODELS_CPU`: build the ONNX Runtime CPU backend.
-- `KFCORE_BUILD_VISION_MODELS_TENSORRT`: build the TensorRT CUDA backend.
-- `KFCORE_BUILD_TESTS`: build local tests.
+- `BUILD_TESTS`: build local tests and installed-package consumer checks.
+- `BUILD_EXAMPLES`: build demos and example programs.
+
+Machine-specific dependency and test-asset paths belong in `CMakeUserPresets.json`.
 
 The full repository depends on TurboNet and vcpkg packages such as SIMDe, STC,
 xxHash, stb, and libjpeg-turbo. For a small embedded integration, use only the

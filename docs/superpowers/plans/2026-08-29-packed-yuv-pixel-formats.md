@@ -87,5 +87,5 @@
 - Documents: decoded pixel formats only; codecs remain outside ImageProcessor
 
 - [x] Document layout, even-width constraints, Host/CUDA support, and the fixed BT.601 conversion.
-- [x] Run the CPU preset tests, then `win-face-applications-release-user` build and CTest suite.
+- [x] Run the CPU preset tests, then `win-release-user` build and CTest suite.
 - [x] Run `git diff --cached --check`, verify no unintended unstaged files, and stage only this task's files.

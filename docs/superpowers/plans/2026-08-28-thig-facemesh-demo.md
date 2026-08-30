@@ -49,7 +49,7 @@ check_equal(frame.landmarks->landmarks.size(), kFaceLandmarkCount);
 
 - [x] **Step 2: Build `test_vision_model_hand_pipeline` and verify RED because the FaceMesh interfaces do not exist.**
 
-Run: `cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_vision_model_hand_pipeline`.
+Run: `cmake --build --preset win-release-user --target test_vision_model_hand_pipeline`.
 Expected: compilation fails on `FaceMeshPipeline` or `FaceDetectorBackend`.
 
 - [x] **Step 3: Implement the minimal value types and synchronous composition pipeline with finite threshold validation and owned results.**
@@ -67,7 +67,7 @@ public:
 
 - [x] **Step 4: Rebuild and run `test_vision_model_hand_pipeline`; expect all FaceMesh and existing hand cases to pass.**
 
-Run: `ctest --preset win-hand-interaction-demo-cpu-release-user -R test_vision_model_hand_pipeline --output-on-failure`.
+Run: `ctest --preset win-release-user -R test_vision_model_hand_pipeline --output-on-failure`.
 
 ### Task 2: CPU YOLOv12-face detector adapter
 
@@ -98,7 +98,7 @@ check_close(face->confidence, 0.90F, 0.0001F);
 
 - [x] **Step 2: Build `test_vision_model_decode` and verify RED on the absent decoder.**
 
-Run: `cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_vision_model_decode`.
+Run: `cmake --build --preset win-release-user --target test_vision_model_decode`.
 
 - [x] **Step 3: Implement decoder and CPU adapter using RGB unit-range 640x640 letterbox with border 114, bounded tensor/model/output storage, and ordinary empty no-face results.**
 
@@ -114,7 +114,7 @@ public:
 
 - [x] **Step 4: Run decode, validation, and CPU integration tests with `yolov12n-face.onnx` plus `MediaPipeFaceLandmarkDetector.onnx`.**
 
-Run: `ctest --preset win-hand-interaction-demo-cpu-release-user -R "vision_model_(decode|cpu|hand_pipeline)" --output-on-failure`.
+Run: `ctest --preset win-release-user -R "vision_model_(decode|cpu|hand_pipeline)" --output-on-failure`.
 
 ### Task 3: Demo CLI, TensorRT adapter, and one-window overlay
 
@@ -151,7 +151,7 @@ check_equal(args.facemesh_score, 0.7F);
 
 - [x] **Step 2: Write a failing UI test that supplies a face box and literal landmarks, then asserts colored output pixels while the source pixels remain unchanged.**
 
-Run: `cmake --build --preset win-hand-interaction-demo-cpu-release-user --target test_hand_interaction_demo_cli test_hand_interaction_demo_ui`.
+Run: `cmake --build --preset win-release-user --target test_hand_interaction_demo_cli test_hand_interaction_demo_ui`.
 Expected: compilation fails on the new arguments and overlay parameter.
 
 - [x] **Step 3: Implement CLI validation, the CPU/TensorRT factory adapter, serial per-frame FaceMesh processing, one composed overlay, and face timing rows.**
@@ -169,7 +169,7 @@ cv::Mat compose_overlay(const cv::Mat& source,
 
 - [x] **Step 4: Enable TensorRT-YOLO only in the TensorRT demo preset, link the adapter there, and run CLI/UI plus adjacent hand tests under both CPU and TensorRT presets.**
 
-Run: `ctest --preset win-hand-interaction-demo-cpu-release-user -R "hand_interaction_demo|vision_model" --output-on-failure` and the matching TensorRT preset command.
+Run: `ctest --preset win-release-user -R "hand_interaction_demo|vision_model" --output-on-failure` and the matching TensorRT preset command.
 
 ### Task 4: Assets, camera verification, and documentation
 
@@ -194,4 +194,4 @@ hand_interaction_demo.exe --backend tensorrt --camera 0 --mode 385 --max-frames 
 
 - [x] **Step 3: Update README behavior, model requirements, metrics, GPU staging limitation, and exact invocations; run the full relevant CTest suites and verify a clean branch diff.**
 
-Run: `ctest --preset win-hand-interaction-demo-cpu-release-user --output-on-failure` and `ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure`.
+Run: `ctest --preset win-release-user --output-on-failure` and `ctest --preset win-release-user --output-on-failure`.

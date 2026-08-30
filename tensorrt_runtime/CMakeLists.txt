@@ -103,7 +103,7 @@ if(BUILD_TESTS)
     FOLDER "tensorrt_runtime/tests")
   add_test(NAME test_tensorrt_runtime_control COMMAND test_tensorrt_runtime_control)
 
-  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+  if(KFCORE_ENABLE_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "")
     add_executable(test_tensorrt_runtime_integration
       tests/test_tensorrt_runtime_integration.cpp)
@@ -128,7 +128,7 @@ if(BUILD_TESTS)
     endif()
   endif()
 
-  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+  if(KFCORE_ENABLE_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
      NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_PALM}" STREQUAL "")
     add_executable(test_tensorrt_runtime_dynamic_output_integration
       tests/test_tensorrt_runtime_dynamic_output_integration.cpp)

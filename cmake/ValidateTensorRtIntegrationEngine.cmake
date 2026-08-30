@@ -7,7 +7,7 @@ function(kfcore_validate_tensorrt_integration_engine configured_path output_vari
   if("${configured_path}" STREQUAL "")
     message(FATAL_ERROR
       "${_kfcore_engine_variable} must not be empty when "
-      "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON")
+      "KFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS=ON")
   endif()
 
   set(_kfcore_engine_candidate "${configured_path}")

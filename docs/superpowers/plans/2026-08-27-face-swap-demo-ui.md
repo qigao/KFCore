@@ -65,7 +65,7 @@ Test `Q/q/Escape`, `R/r`, `S/s`, unknown keys, pending-result composition, non-m
 
 - [x] **Step 2: Configure and build the test to verify it fails**
 
-Run: `cmake --build --preset win-face-applications-release-user --target test_face_swap_demo_ui`
+Run: `cmake --build --preset win-release-user --target test_face_swap_demo_ui`
 
 Expected: compile failure because `face_swap_demo_ui.hpp` does not exist.
 

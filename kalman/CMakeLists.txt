@@ -40,14 +40,13 @@ target_compile_features(kfcore PUBLIC c_std_11)
 # miniblas archive or target.
 target_link_libraries(kfcore PRIVATE miniblas)
 
-# Optional navigation helper functions.
-if(KFCORE_BUILD_NAVIGATION_TOOLS)
-    list(APPEND KFCORE_PUBLIC_HEADERS
+# Navigation helper functions are part of the standard KFCore package.
+list(APPEND KFCORE_PUBLIC_HEADERS
         navigation_tools/frame_transform.h
         navigation_tools/navtoolbox.h
         navigation_tools/nav_fusion2d.h
         navigation_tools/nav_fusion3d.h)
-    target_sources(kfcore
+target_sources(kfcore
         PRIVATE navigation_tools/frame_transform.c
                 navigation_tools/frame_transform.h
                 navigation_tools/navtoolbox.c
@@ -56,19 +55,15 @@ if(KFCORE_BUILD_NAVIGATION_TOOLS)
                 navigation_tools/nav_fusion2d.h
                 navigation_tools/nav_fusion3d.c
                 navigation_tools/nav_fusion3d.h)
-    target_include_directories(kfcore
+target_include_directories(kfcore
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/navigation_tools>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools>)
-endif()
 
-# Optional compiler warnings for the kfcore target.
-if(KFCORE_ENABLE_WARNINGS)
-    target_compile_options(kfcore
-        PRIVATE
-            $<$<C_COMPILER_ID:MSVC>:/W4>
-            $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wdouble-promotion>)
-endif()
+target_compile_options(kfcore
+    PRIVATE
+        $<$<C_COMPILER_ID:MSVC>:/W4>
+        $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wdouble-promotion>)
 
 # Link the math library on platforms that expose it as a separate library.
 if(NOT WIN32)

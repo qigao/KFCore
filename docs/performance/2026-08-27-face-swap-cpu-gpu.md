@@ -85,7 +85,7 @@ CUDA kernel 虽语义一致，但 OpenCV affine、planar conversion 与 CUDA fus
 build\Msvc-Face\bin\benchmark_face_swap_pipeline.exe
 ```
 
-目标仅在 `KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS=ON` 且真实模型路径有效时生成。
+目标仅在 `BUILD_TESTS=ON` 且全部真实模型与输入路径均已配置并有效时生成。
 每种配置先 warmup 5 次；兼容 `swap()` 路径测 50 次平均/min/max，随后
 `swap_profiled()` 再测 50 次 stage P50/P95。engine load 不进入计时。
 

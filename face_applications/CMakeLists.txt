@@ -25,7 +25,7 @@ cmake_config_target(kfcore_face_applications
   EXPORT_SET KFCoreTargets
   FOLDER "face_applications")
 
-if(KFCORE_BUILD_FACE_APPLICATION_EXAMPLES)
+if(BUILD_EXAMPLES)
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs highgui)
   add_executable(face_swap_image
     examples/face_swap_cli.cpp
@@ -114,23 +114,32 @@ if(BUILD_TESTS)
     FOLDER "face_applications/tests")
   add_test(NAME test_face_application_validation COMMAND test_face_application_validation)
 
-  if(KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS)
+  set(_kfcore_face_application_required_files
+    KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
+    KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER
+    KFCORE_FACE_APPLICATION_TEST_MATRIX
+    KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE
+    KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE)
+  set(_kfcore_face_application_has_assets OFF)
+  foreach(_kfcore_file_variable IN LISTS _kfcore_face_application_required_files)
+    if(DEFINED ${_kfcore_file_variable} AND
+       NOT "${${_kfcore_file_variable}}" STREQUAL "")
+      set(_kfcore_face_application_has_assets ON)
+      break()
+    endif()
+  endforeach()
+
+  if(_kfcore_face_application_has_assets)
     find_package(OpenCVLite REQUIRED COMPONENTS imgcodecs)
-    set(_kfcore_face_application_required_files
-      KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE
-      KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68
-      KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
-      KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_INSWAPPER
-      KFCORE_FACE_APPLICATION_TEST_MATRIX
-      KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE
-      KFCORE_FACE_APPLICATION_TEST_TARGET_IMAGE)
     foreach(_kfcore_file_variable IN LISTS _kfcore_face_application_required_files)
       if(NOT IS_ABSOLUTE "${${_kfcore_file_variable}}" OR
          NOT EXISTS "${${_kfcore_file_variable}}" OR
          IS_DIRECTORY "${${_kfcore_file_variable}}")
         message(FATAL_ERROR
           "${_kfcore_file_variable} must name an existing absolute file when "
-          "KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS=ON")
+          "face-application integration assets are configured")
       endif()
     endforeach()
 
@@ -188,25 +197,16 @@ if(BUILD_TESTS)
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR};PATH=path_list_prepend:$ENV{OPENCV_LITE_ROOT}/bin;PATH=path_list_prepend:$ENV{TURBOUTILS_ROOT}/bin")
   endif()
 
-  if(KFCORE_INSTALL)
-    include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
-    kfcore_require_ninja(_face_application_consumer_ninja)
-    set(_face_application_consumer_root
-      "${CMAKE_BINARY_DIR}/tests/face_application_installed_consumer")
-    add_test(NAME test_face_application_installed_consumer
-      COMMAND "${CMAKE_COMMAND}"
-        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/FaceApplicationInstalledConsumer"
-        "-DKFCORE_CONSUMER_BINARY_DIR=${_face_application_consumer_root}/build"
-        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_face_application_consumer_root}/install"
-        "-DKFCORE_CONSUMER_KFCORE_DIR=${_face_application_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-        "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_face_application_consumer_ninja}"
-        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
-        "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
-        "-DKFCORE_CONSUMER_TURBOUTILS_ROOT=$ENV{TURBOUTILS_ROOT}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_face_application_installed_consumer.cmake")
-  endif()
+  set(_face_application_consumer_root
+    "${CMAKE_BINARY_DIR}/tests/face_application_installed_consumer")
+  add_test(NAME test_face_application_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/FaceApplicationInstalledConsumer"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${_face_application_consumer_root}/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_face_application_consumer_root}/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${_face_application_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_face_application_installed_consumer.cmake")
 endif()
 
 cmake_install_headers(

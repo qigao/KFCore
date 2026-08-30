@@ -93,7 +93,7 @@ if(BUILD_TESTS)
     FOLDER "image_processor/benchmarks")
   endif()
 
-  if(KFCORE_INSTALL AND KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED)
+  if(KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED)
     set(_image_processor_consumer_root
       "${CMAKE_BINARY_DIR}/tests/image_processor_installed_consumer")
     add_test(NAME test_image_processor_installed_consumer
@@ -103,8 +103,6 @@ if(BUILD_TESTS)
         "-DKFCORE_CONSUMER_BINARY_DIR=${_image_processor_consumer_root}/build"
         "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_image_processor_consumer_root}/install"
         "-DKFCORE_CONSUMER_KFCORE_DIR=${_image_processor_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
         -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_image_processor_installed_consumer.cmake")
   endif()
 endif()

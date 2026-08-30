@@ -149,23 +149,15 @@ geometry histories。relation/window/action 容量拒绝不会消费 serial，�
 
 ## 构建和安装
 
-源码树构建需要同时启用：
-
-```cmake
--DKFCORE_BUILD_VISION_MODELS=ON
--DKFCORE_BUILD_THIG=ON
--DKFCORE_BUILD_HAND_INTERACTION=ON
-```
-
-Windows 用户 preset 已在 CPU/TensorRT vision profile 中启用这三个选项。安装后：
+vision models、THIG 和 hand interaction 均随 KFCore 构建。安装后：
 
 ```cmake
 find_package(KFCore CONFIG REQUIRED)
 target_link_libraries(app PRIVATE KFCore::hand_interaction)
 ```
 
-包配置提供 `KFCore_HAS_THIG` 和 `KFCore_HAS_HAND_INTERACTION`，便于可选功能在 configure 阶段
-fail fast。模型与 TensorRT engine 仍由对应 backend 管理，既不复制也不安装到本模块。
+调用方直接检查并链接实际导出的 target；缺失 target 时 CMake 在 configure 阶段 fail fast。
+模型与 TensorRT engine 仍由对应 backend 管理，既不复制也不安装到本模块。
 
 identity 与 primitive core 不依赖 OpenCV、CUDA、TensorRT 或 ONNX Runtime；CPU ONNX Runtime 和
 TensorRT CUDA backend 只提供同一种 `HandFrame`，因此使用同一套 canonical identity 行为。实时 demo
@@ -196,22 +188,26 @@ CUDA `compute` view，手部 appearance 直接从 host YUV 采样。CUDA view �
 CPU 路径：
 
 ```powershell
-cmake --preset win-hand-interaction-demo-cpu-release-user
-cmake --build --preset win-hand-interaction-demo-cpu-release-user
-ctest --preset win-hand-interaction-demo-cpu-release-user --output-on-failure
+$env:ONNXRUNTIME_ROOT = 'C:\projects\cpp\external\pkgs\onnxruntime'
+$env:OPENCV_LITE_ROOT = 'C:\projects\cpp\external\pkgs\opencv-lite'
+cmake --fresh --preset win-release-user -DBUILD_EXAMPLES=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 TensorRT 路径需要先指向本机 SDK；preset 只做编译验证，不要求集成测试 engine：
 
 ```powershell
 $env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
-cmake --preset win-hand-interaction-demo-tensorrt-release-user
-cmake --build --preset win-hand-interaction-demo-tensorrt-release-user
-ctest --preset win-hand-interaction-demo-tensorrt-release-user --output-on-failure
+$env:ONNXRUNTIME_ROOT = 'C:\projects\cpp\external\pkgs\onnxruntime-gpu'
+$env:OPENCV_LITE_ROOT = 'C:\projects\cpp\external\pkgs\opencv-lite'
+cmake --fresh --preset win-release-user -DBUILD_EXAMPLES=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 本机 TurboParser release package 若未导出 `TurboParser::Capture`，只能使用
-`-DKFCORE_BUILD_HAND_INTERACTION_EXAMPLES=OFF` 验证 core 和非 demo 测试；这不代表 identity core
+`-DBUILD_EXAMPLES=OFF` 验证 core 和非 demo 测试；这不代表 identity core
 测试失败。需要构建实时 demo 时，应安装包含 Capture component 的 TurboParser SDK，再使用上述
 preset 的默认 `ON` 配置重新 configure。
 

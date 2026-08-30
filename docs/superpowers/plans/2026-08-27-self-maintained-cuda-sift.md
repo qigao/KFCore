@@ -191,7 +191,7 @@ Run all `test_(sift|popsift)` tests and repeat `test_popsift_adapter` 20 times. 
 
 - [x] **Step 2: Run the full preset**
 
-Run `ctest --preset win-sift-release-user --output-on-failure`. Expected: all configured tests pass.
+Run `ctest --preset win-release-user --output-on-failure`. Expected: all configured tests pass.
 
 - [x] **Step 3: Inspect installed artifacts**
 

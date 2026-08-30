@@ -59,22 +59,23 @@ CPU：
 
 ```powershell
 $env:ONNXRUNTIME_ROOT = "C:\path\to\onnxruntime"
-cmake --preset win-vision-models-cpu-release-user
-cmake --build --preset win-vision-models-cpu-release-user
-ctest --preset win-vision-models-cpu-release-user --output-on-failure
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 CPU + GPU（同一安装包，可由应用运行时选择）：
 
 ```powershell
 $env:TENSORRT_ROOT = "C:\projects\TensorRT-11.2.1.2"
-cmake --preset win-vision-models-tensorrt-release-user
-cmake --build --preset win-vision-models-tensorrt-release-user
-ctest --preset win-vision-models-tensorrt-release-user --output-on-failure
+$env:ONNXRUNTIME_ROOT = "C:\projects\cpp\external\pkgs\onnxruntime-gpu"
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
-真实模型 integration tests 默认只在对应 preset 中启用，并要求 cache 中的 ONNX/engine/图片
-都是存在的绝对路径。模型和 engine 是部署资产，不会安装或提交到 KFCore。
+真实模型 integration tests 只在调用方显式启用对应选项时注册，并要求 cache 中的
+ONNX/engine/图片都是存在的绝对路径。模型和 engine 是部署资产，不会安装或提交到 KFCore。
 
 ## 从 ONNX 生成 TensorRT engine
 

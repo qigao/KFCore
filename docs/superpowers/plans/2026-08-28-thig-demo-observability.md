@@ -41,7 +41,7 @@ check_equal(text.derived, std::string("Derived:V | Motion:Stationary | Pose:OK")
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run the `test_hand_interaction_demo_ui` target and CTest filter with `win-hand-interaction-demo-cpu-release-user`; expect compilation to fail because `HandOverlayText` and `format_hand_overlay_text` do not exist.
+Run the `test_hand_interaction_demo_ui` target and CTest filter with `win-release-user`; expect compilation to fail because `HandOverlayText` and `format_hand_overlay_text` do not exist.
 
 - [x] **Step 3: Write minimal implementation**
 

@@ -23,40 +23,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "cmake")
+include(CTest)
 include(CMakeOptions.cmake)
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
 include(ValidateTensorRtIntegrationEngine)
 
-if(KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_TRACKING)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_TENSORRT_YOLO requires KFCORE_BUILD_YOLO_TRACKING=ON")
-endif()
-
-if((KFCORE_BUILD_YOLO_APPLICATIONS OR KFCORE_BUILD_YOLO_APPLICATIONS_CPU) AND
-   NOT KFCORE_BUILD_YOLO_TRACKING)
-  message(FATAL_ERROR
-    "YOLO applications and their CPU backend require KFCORE_BUILD_YOLO_TRACKING=ON")
-endif()
-
-if(KFCORE_BUILD_YOLO_APPLICATIONS AND
-   NOT KFCORE_BUILD_TENSORRT_YOLO AND NOT KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_YOLO_APPLICATIONS requires at least one CPU or TensorRT backend")
-endif()
-
-if(KFCORE_BUILD_YOLO_OPENCV AND NOT KFCORE_BUILD_YOLO_TRACKING)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_YOLO_OPENCV requires KFCORE_BUILD_YOLO_TRACKING=ON")
-endif()
-
-if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS AND NOT KFCORE_BUILD_TENSORRT_YOLO)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS requires KFCORE_BUILD_TENSORRT_YOLO=ON")
-endif()
-
-if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
+if(KFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS)
   kfcore_validate_tensorrt_integration_engine(
     "${KFCORE_TENSORRT_TEST_ENGINE}"
     KFCORE_TENSORRT_TEST_ENGINE_VALIDATED)
@@ -66,14 +40,7 @@ if(KFCORE_BUILD_TENSORRT_INTEGRATION_TESTS)
     KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE)
 endif()
 
-if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
-   NOT KFCORE_BUILD_TENSORRT_RUNTIME)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS requires "
-    "KFCORE_BUILD_TENSORRT_RUNTIME=ON")
-endif()
-
-if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS)
+if(KFCORE_ENABLE_TENSORRT_RUNTIME_INTEGRATION_TESTS)
   kfcore_validate_optional_tensorrt_runtime_engine(
     "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE}"
     KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE
@@ -101,18 +68,6 @@ if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS)
     KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_GFPGAN_VALIDATED)
 endif()
 
-if(KFCORE_BUILD_VISION_MODELS_CPU AND NOT KFCORE_BUILD_VISION_MODELS)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_VISION_MODELS_CPU requires KFCORE_BUILD_VISION_MODELS=ON")
-endif()
-if(KFCORE_BUILD_VISION_MODELS_TENSORRT AND
-   (NOT KFCORE_BUILD_VISION_MODELS OR NOT KFCORE_BUILD_TENSORRT_RUNTIME OR
-    NOT KFCORE_BUILD_TENSORRT_YOLO))
-  message(FATAL_ERROR
-    "KFCORE_BUILD_VISION_MODELS_TENSORRT requires KFCORE_BUILD_VISION_MODELS=ON "
-    "KFCORE_BUILD_TENSORRT_RUNTIME=ON, and KFCORE_BUILD_TENSORRT_YOLO=ON")
-endif()
-
 find_package(Threads REQUIRED)
 
 find_package(TurboUtils CONFIG REQUIRED
@@ -121,8 +76,6 @@ find_package(TurboParser CONFIG REQUIRED
              PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
 find_package(TurboNet CONFIG REQUIRED
              PATHS "$ENV{TURBONET_ROOT}" NO_DEFAULT_PATH)
-
-include(CTest)
 
 if(BUILD_TESTS)
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
@@ -156,130 +109,36 @@ endif()
 add_subdirectory(vendor)
 add_subdirectory(trackers)
 
-set(KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED OFF)
-if(KFCORE_BUILD_IMAGE_PROCESSOR OR KFCORE_BUILD_TENSORRT_YOLO OR KFCORE_BUILD_SIFT OR
-   KFCORE_BUILD_VISION_MODELS_TENSORRT)
-  set(KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED ON)
-endif()
+set(KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED ON)
+set(KFCORE_IMAGE_CORE_ENABLED ON)
+enable_language(CXX)
+enable_language(CUDA)
+find_package(CUDAToolkit REQUIRED)
+find_package(TensorRT REQUIRED MODULE)
+find_package(ONNXRuntime REQUIRED MODULE)
 
-set(KFCORE_IMAGE_CORE_ENABLED ${KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED})
-if(KFCORE_BUILD_FACE_APPLICATIONS_CPU OR KFCORE_BUILD_VISION_MODELS OR
-   KFCORE_BUILD_VISION_MODELS_CPU OR KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
-  set(KFCORE_IMAGE_CORE_ENABLED ON)
-endif()
-if(KFCORE_IMAGE_CORE_ENABLED)
-  enable_language(CXX)
-endif()
-if(KFCORE_IMAGE_PROCESSOR_CUDA_ENABLED)
-  enable_language(CUDA)
-  find_package(CUDAToolkit REQUIRED)
-endif()
-if(KFCORE_IMAGE_CORE_ENABLED)
-  add_subdirectory(image_processor)
-endif()
-if(KFCORE_BUILD_HAND_INTERACTION AND
-   (NOT KFCORE_BUILD_THIG OR NOT KFCORE_BUILD_VISION_MODELS))
-  message(FATAL_ERROR
-    "KFCORE_BUILD_HAND_INTERACTION requires KFCORE_BUILD_THIG=ON and "
-    "KFCORE_BUILD_VISION_MODELS=ON")
-endif()
-if(KFCORE_BUILD_HAND_INTERACTION_EXAMPLES AND
-   (NOT KFCORE_BUILD_HAND_INTERACTION OR
-    (NOT KFCORE_BUILD_VISION_MODELS_CPU AND
-     NOT KFCORE_BUILD_VISION_MODELS_TENSORRT)))
-  message(FATAL_ERROR
-    "KFCORE_BUILD_HAND_INTERACTION_EXAMPLES requires "
-    "KFCORE_BUILD_HAND_INTERACTION=ON and at least one vision-model backend")
-endif()
+add_subdirectory(image_processor)
+add_subdirectory(thig)
+add_subdirectory(sift)
+add_subdirectory(tensorrt_yolo)
+add_subdirectory(tensorrt_runtime)
+add_subdirectory(face_models)
+add_subdirectory(vision_models)
+add_subdirectory(hand_interaction)
+add_subdirectory(face_applications)
+add_subdirectory(face_applications_cpu)
 
-if(KFCORE_BUILD_THIG)
-  enable_language(CXX)
-  add_subdirectory(thig)
-endif()
-
-if(KFCORE_BUILD_SIFT_POPSIFT AND NOT KFCORE_BUILD_SIFT)
-  message(FATAL_ERROR "KFCORE_BUILD_SIFT_POPSIFT requires KFCORE_BUILD_SIFT=ON")
-endif()
-
-if(KFCORE_BUILD_SIFT)
-  add_subdirectory(sift)
-endif()
-
-if(KFCORE_BUILD_YOLO_APPLICATIONS_CPU)
-  find_package(ONNXRuntime REQUIRED MODULE)
-endif()
-
-if(KFCORE_BUILD_YOLO_TRACKING)
-  enable_language(CXX)
-  if(KFCORE_BUILD_TENSORRT_YOLO)
-    find_package(TensorRT REQUIRED)
-  endif()
-  add_subdirectory(tensorrt_yolo)
-endif()
-
-if(KFCORE_BUILD_TENSORRT_RUNTIME)
-  enable_language(CXX)
-  add_subdirectory(tensorrt_runtime)
-endif()
-
-if(KFCORE_BUILD_FACE_MODELS AND NOT KFCORE_BUILD_TENSORRT_RUNTIME)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_FACE_MODELS requires KFCORE_BUILD_TENSORRT_RUNTIME=ON")
-endif()
-
-if(KFCORE_BUILD_FACE_MODELS OR KFCORE_BUILD_FACE_APPLICATIONS_CPU)
-  add_subdirectory(face_models)
-endif()
-
-if(KFCORE_BUILD_FACE_APPLICATIONS_CPU OR KFCORE_BUILD_VISION_MODELS_CPU)
-  enable_language(CXX)
-  find_package(ONNXRuntime REQUIRED MODULE)
-endif()
-
-if(KFCORE_BUILD_VISION_MODELS)
-  add_subdirectory(vision_models)
-endif()
-
-if(KFCORE_BUILD_HAND_INTERACTION)
-  add_subdirectory(hand_interaction)
-endif()
-
-if(KFCORE_BUILD_FACE_APPLICATIONS AND
-   (NOT KFCORE_BUILD_FACE_MODELS OR NOT KFCORE_BUILD_TENSORRT_YOLO))
-  message(FATAL_ERROR
-    "KFCORE_BUILD_FACE_APPLICATIONS requires KFCORE_BUILD_FACE_MODELS, "
-    "and KFCORE_BUILD_TENSORRT_YOLO")
-endif()
-
-if(KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS AND
-   NOT KFCORE_BUILD_FACE_APPLICATIONS)
-  message(FATAL_ERROR
-    "KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS requires "
-    "KFCORE_BUILD_FACE_APPLICATIONS=ON")
-endif()
-
-if(KFCORE_BUILD_FACE_APPLICATIONS)
-  add_subdirectory(face_applications)
-endif()
-
-if(KFCORE_BUILD_FACE_APPLICATIONS_CPU)
-  add_subdirectory(face_applications_cpu)
-endif()
-
-if(KFCORE_BUILD_APRILTAG)
-  set(APRILTAG_BUILD_EXAMPLES "${KFCORE_BUILD_APRILTAG_EXAMPLES}" CACHE BOOL
-      "Build AprilTag example executables" FORCE)
-  set(APRILTAG_BUILD_PYTHON_WRAPPER "${KFCORE_BUILD_APRILTAG_PYTHON}" CACHE BOOL
-      "Build AprilTag Python wrapper" FORCE)
-  set(APRILTAG_BUILD_TESTS "${KFCORE_BUILD_APRILTAG_TESTS}" CACHE BOOL
-      "Build AprilTag upstream tests" FORCE)
-  set(APRILTAG_INSTALL OFF CACHE BOOL "Install AprilTag from the vendored subproject" FORCE)
-  add_subdirectory(apriltag)
-endif()
+set(APRILTAG_BUILD_EXAMPLES "${BUILD_EXAMPLES}" CACHE BOOL
+    "Build AprilTag example executables" FORCE)
+set(APRILTAG_BUILD_PYTHON_WRAPPER OFF CACHE BOOL
+    "Build AprilTag Python wrapper" FORCE)
+set(APRILTAG_BUILD_TESTS OFF CACHE BOOL
+    "Build AprilTag upstream tests" FORCE)
+set(APRILTAG_INSTALL OFF CACHE BOOL "Install AprilTag from the vendored subproject" FORCE)
+add_subdirectory(apriltag)
 add_subdirectory(kalman) 
 
-if(KFCORE_INSTALL)
-  include(CMakePackageConfigHelpers)
+include(CMakePackageConfigHelpers)
 
   install(
     TARGETS kfcore  
@@ -292,28 +151,16 @@ if(KFCORE_INSTALL)
                 kalman/kalman_ukf.h kalman/signal_filters.h
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
 
-  if(KFCORE_BUILD_NAVIGATION_TOOLS)
-    install(FILES kalman/navigation_tools/frame_transform.h
-                  kalman/navigation_tools/navtoolbox.h
-                  kalman/navigation_tools/nav_fusion2d.h
-                  kalman/navigation_tools/nav_fusion3d.h
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
-  endif()
+  install(FILES kalman/navigation_tools/frame_transform.h
+                kalman/navigation_tools/navtoolbox.h
+                kalman/navigation_tools/nav_fusion2d.h
+                kalman/navigation_tools/nav_fusion3d.h
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
 
-  if(KFCORE_BUILD_TENSORRT_RUNTIME OR KFCORE_BUILD_TENSORRT_YOLO)
-    install(FILES cmake/FindTensorRT.cmake
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-  endif()
-
-  if(KFCORE_BUILD_YOLO_OPENCV)
-    install(FILES cmake/FindOpenCVLite.cmake
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-  endif()
-
-  if(KFCORE_BUILD_FACE_APPLICATIONS_CPU OR KFCORE_BUILD_VISION_MODELS_CPU)
-    install(FILES cmake/FindONNXRuntime.cmake
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-  endif()
+  install(FILES cmake/FindTensorRT.cmake
+                cmake/FindOpenCVLite.cmake
+                cmake/FindONNXRuntime.cmake
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
 
   install(
     EXPORT KFCoreTargets
@@ -329,7 +176,6 @@ if(KFCORE_INSTALL)
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion)
 
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfig.cmake"
-                "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfigVersion.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-endif()
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")

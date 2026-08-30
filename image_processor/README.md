@@ -13,22 +13,18 @@ BGR。它适用于 TensorRT 或其他能读写 CUDA pointer 的后端，不依�
 
 ## 构建
 
-Windows 用户 preset 可直接启用模块而不查找 TensorRT：
+Windows 使用标准 Release preset；ImageProcessor 会随 KFCore 一起构建：
 
 ```powershell
-cmake --fresh --preset win-image-processor-release-user
-cmake --build --preset win-image-processor-release-user
-ctest --preset win-image-processor-release-user -R '^test_image_processor(_cuda)?$'
-cmake --build --preset install-win-image-processor-release-user
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R '^test_image_processor(_cuda)?$'
 ```
 
 本仓库的 `CMakeUserPresets.json` 从 Windows 安装器提供的 `CUDA_PATH_V12_8` 读取
 `CUDA_TOOLKIT_ROOT`，并同时设置 CUDA compiler、CUDAToolkit 查找根和运行时 `PATH`，避免机器上
 并存的更新 toolkit 被 CMake 静默选中。若本机使用其他已验证版本，应在用户 preset 中同步修改该
 环境来源；路径无效时 configure 必须失败。
-
-也可在其他 preset 上设置 `-DKFCORE_BUILD_IMAGE_PROCESSOR=ON`。启用
-`KFCORE_BUILD_TENSORRT_YOLO` 时会自动构建 ImageProcessor，不需重复设置该选项。
 
 安装后使用 `find_package(KFCore CONFIG REQUIRED)` 并链接 `KFCore::image_processor`。
 

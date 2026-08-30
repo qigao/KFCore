@@ -126,7 +126,7 @@ encoded bytes are not promised because the codec implementation changes.
   source.
 - Codec and overlay tests without OpenCV.
 - Capture mailbox contract tests for bounded copy, coalescing, close and rejected formats.
-- Focused builds/tests followed by the complete `win-yolov8-applications-release-user` preset.
+- Focused builds/tests followed by the complete `win-release-user` preset.
 - A benchmark at 640 x 480 comparing legacy full-frame conversion plus preprocessing with fused
   native preprocessing, separately reporting mailbox copy, CPU tensor preparation and CUDA tensor
   preparation.

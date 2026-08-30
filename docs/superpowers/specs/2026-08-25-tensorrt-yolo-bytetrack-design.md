@@ -436,10 +436,10 @@ $env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
 $env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
 $env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
 $env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
-cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
-cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
-ctest --preset win-yolo-tracking-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
+cmake --fresh --preset win-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
+ctest --preset win-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
 ```
 
 ### 10.4 YOLO11-face 来源与许可证边界

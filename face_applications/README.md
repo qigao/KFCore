@@ -98,28 +98,28 @@ Windows 核心库使用调用方提供的 TensorRT；构建图片 CLI/桌面 dem
 ```powershell
 $env:TENSORRT_ROOT = 'C:\projects\TensorRT-11.2.1.2'
 $env:OPENCV_LITE_ROOT = 'C:\projects\cpp\external\pkgs\opencv-lite'
-cmake --preset win-face-applications-release-user
-cmake --build --preset win-face-applications-release-user
-ctest --preset win-face-applications-release-user -R '^test_face_' --output-on-failure
+cmake --fresh --preset win-release-user -DBUILD_EXAMPLES=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R '^test_face_' --output-on-failure
 ```
 
-对应配置开启 `KFCORE_BUILD_TENSORRT_RUNTIME`、`KFCORE_BUILD_FACE_MODELS`、
-`KFCORE_BUILD_TENSORRT_YOLO`、`KFCORE_BUILD_FACE_APPLICATIONS` 和
-`KFCORE_BUILD_FACE_APPLICATION_EXAMPLES`。该 preset 显式关闭 `KFCORE_BUILD_YOLO_OPENCV`；
-OpenCV Lite 只链接到示例和相应测试目标，不会出现在 `KFCore::face_applications` 的公开依赖中。
+TensorRT runtime、face models、TensorRT YOLO 和 face applications 均随 KFCore 构建；
+`BUILD_EXAMPLES=ON` 只控制 CLI/demo。OpenCV Lite 只链接到示例和相应测试目标，
+不会出现在 `KFCore::face_applications` 的公开依赖中。
 
 无 GPU 的 CPU 路线使用独立 preset；`ONNXRUNTIME_ROOT` 必须包含匹配版本的 `include/`、
 import library 和 runtime DLL：
 
 ```powershell
-cmake --preset win-face-cpu-release-user
-cmake --build --preset win-face-cpu-release-user
-ctest --preset win-face-cpu-release-user --output-on-failure
+$env:ONNXRUNTIME_ROOT = 'C:\projects\cpp\external\pkgs\onnxruntime'
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 Windows 部署时应把 finder 选中的 `onnxruntime.dll` 放在最终可执行文件目录。仅修改 `PATH`
 不足以覆盖 System32 中可能存在的同名旧版本 DLL；真实模型集成测试会为其测试目标做 app-local
-staging。CPU preset 显式要求六个 ONNX、矩阵和两张测试图存在，配置错误会立即失败。
+staging。真实模型集成测试还需显式启用对应选项，并提供六个 ONNX、矩阵和两张测试图；配置错误会立即失败。
 
 ## 命令行应用
 
@@ -159,7 +159,7 @@ face_swap_demo.exe `
 
 ## 真实模型 opt-in 测试
 
-`KFCORE_BUILD_FACE_APPLICATION_INTEGRATION_TESTS=ON` 时，必须同时提供下列绝对路径：
+配置下列任一路径时，必须同时提供全部必需绝对路径；路径完整后集成测试自动注册：
 
 - `KFCORE_FACE_APPLICATION_TEST_ENGINE_12FACE`
 - `KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68`

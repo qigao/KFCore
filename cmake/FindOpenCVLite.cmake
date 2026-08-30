@@ -46,7 +46,7 @@ if(NOT TARGET OpenCVLite::core AND NOT TARGET OpenCVLite::imgproc AND
 endif()
 
 if(NOT DEFINED ENV{OPENCV_LITE_ROOT} OR "$ENV{OPENCV_LITE_ROOT}" STREQUAL "")
-  message(FATAL_ERROR "OPENCV_LITE_ROOT is required when KFCORE_BUILD_YOLO_OPENCV=ON")
+  message(FATAL_ERROR "OPENCV_LITE_ROOT is required by KFCore OpenCV Lite support")
 endif()
 if(NOT IS_DIRECTORY "$ENV{OPENCV_LITE_ROOT}")
   message(FATAL_ERROR "OPENCV_LITE_ROOT is not a directory: $ENV{OPENCV_LITE_ROOT}")

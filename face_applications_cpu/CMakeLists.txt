@@ -62,7 +62,7 @@ if(BUILD_TESTS)
         "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
   endif()
 
-  if(KFCORE_BUILD_FACE_APPLICATION_CPU_INTEGRATION_TESTS)
+  if(KFCORE_ENABLE_FACE_APPLICATION_CPU_INTEGRATION_TESTS)
     set(_cpu_face_assets
       "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/yolov12n-face.onnx"
       "${KFCORE_FACE_CPU_TEST_MODEL_DIR}/2dfan4.onnx"

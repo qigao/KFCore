@@ -45,10 +45,9 @@ worker 共享，但每个 worker 必须拥有自己的 `TensorRtDetector`；同�
 
 ## 构建和部署
 
-在 x64 VS 2022 Developer Command Prompt 中执行。预设本身不记录 TensorRT SDK 的本机路径；
-full profile 从继承环境读取 `TENSORRT_ROOT`。opencv-lite 使用 `$env{PKG_ROOT}/opencv-lite`，
-full profile 的运行时 `PATH` 已加入其 `bin`，不会复制 DLL。
-缺少 `TENSORRT_ROOT`、目录不存在，或缺少所需 TensorRT headers/libraries 时，full configure
+在 x64 VS 2022 Developer Command Prompt 中执行。标准 preset 不记录 TensorRT SDK 的本机路径；
+调用方通过环境提供 `TENSORRT_ROOT` 和 `OPENCV_LITE_ROOT`。
+缺少 `TENSORRT_ROOT`、目录不存在，或缺少所需 TensorRT headers/libraries 时，configure
 会立即失败，绝不改用系统 SDK 或其他推理后端。
 
 ```powershell
@@ -56,20 +55,15 @@ cmake --fresh --preset win-dev-user
 cmake --build --preset win-dev-user
 ctest --preset win-dev-user
 
-cmake --fresh --preset win-yolo-tracking-dev-user
-cmake --build --preset win-yolo-tracking-dev-user
-ctest --preset win-yolo-tracking-dev-user
-cmake --build --preset install-win-yolo-tracking-dev-user
-
 $env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
-cmake --fresh --preset win-yolo-tracking-dev-user -DKFCORE_BUILD_YOLO_OPENCV=ON
-cmake --build --preset win-yolo-tracking-dev-user --target test_yolo_opencv
+cmake --fresh --preset win-dev-user
+cmake --build --preset win-dev-user --target test_yolo_opencv
 
 $env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
-cmake --fresh --preset win-yolo-release-user
-cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user
-cmake --build --preset install-win-yolo-release-user
+$env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user
 ```
 
 GPU 集成测试还必须显式启用并提供可信 engine：
@@ -79,9 +73,10 @@ $env:TENSORRT_ROOT = 'C:/path/to/TensorRT'
 $env:OPENCV_LITE_ROOT = 'C:/path/to/opencv-lite'
 $env:KFCORE_TENSORRT_TEST_ENGINE = 'C:/path/to/yolo11n-efficientnms.engine'
 $env:KFCORE_TENSORRT_TEST_ENGINE_YOLO11_FACE = 'C:/path/to/yolov11n-face-efficientnms.engine'
-cmake --fresh --preset win-yolo-release-user -DKFCORE_BUILD_TENSORRT_INTEGRATION_TESTS=ON
-cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
+cmake --fresh --preset win-release-user `
+  -DKFCORE_ENABLE_TENSORRT_INTEGRATION_TESTS=ON
+cmake --build --preset win-release-user
+ctest --preset win-release-user -R '^test_tensorrt_integration(_yolo11_face)?$'
 ```
 
 `KFCORE_TENSORRT_TEST_ENGINE` 是 configure-time `FILEPATH` cache 变量（同名环境变量仅用于初始化
@@ -98,7 +93,7 @@ CTest 名称使用相同测试逻辑，但分别加载各自已验证的 engine�
 只验证缓存注册和环境注入时，可复现地运行：
 
 ```powershell
-ctest --preset win-yolo-tracking-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
+ctest --preset win-dev-user -R '^test_tensorrt_integration_engine_config$' --output-on-failure
 ```
 
 TensorRT/CUDA DLL 由部署环境提供；安装包不复制它们。若没有与目标 GPU/TensorRT 版本匹配的
@@ -121,33 +116,34 @@ ImageProcessor。两条路线产生同一个 `DetectionFrame`，之后共用 KFC
 
 ```powershell
 $env:TENSORRT_ROOT = 'C:/projects/TensorRT-11.2.1.2'
-cmake --fresh --preset win-yolov8-applications-release-user
-cmake --build --preset win-yolov8-applications-release-user --target yolov8_domain_demo
-ctest --preset win-yolov8-applications-release-user -R '^test_yolo_domain_' --output-on-failure
+$env:ONNXRUNTIME_ROOT = 'C:/projects/cpp/external/pkgs/onnxruntime'
+cmake --fresh --preset win-release-user -DBUILD_EXAMPLES=ON
+cmake --build --preset win-release-user --target yolov8_domain_demo
+ctest --preset win-release-user -R '^test_yolo_domain_' --output-on-failure
 
 # preset 的环境只作用于 CMake/CTest 子进程；直接启动 exe 前显式设置 DLL 搜索路径
 $pkgRoot = 'C:/projects/cpp/external/pkgs'
-$appBin = "$PWD/build/Msvc-YOLOv8-Applications/bin"
+$appBin = "$PWD/build/Msvc-Release/bin"
 $env:PATH = "$pkgRoot/onnxruntime/lib;$env:TENSORRT_ROOT/bin;$env:CUDA_PATH_V12_8/bin;" +
             "$appBin;$pkgRoot/turboparser/release/bin;" +
             "$pkgRoot/turboutils/release/bin;$pkgRoot/turbonet/release/bin;$env:PATH"
 
 # CPU：有界图片目录处理
-build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application football --backend cpu `
   --model C:/projects/cpp/KFCore/yolo-models/yolov8n-football.onnx `
   --images C:/absolute/input --output C:/absolute/output --max-frames 100
 
 # 查询摄像头及 mode id；此命令不加载模型
-build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe --list-cameras
+build/Msvc-Release/bin/yolov8_domain_demo.exe --list-cameras
 
 # GPU：默认严格选择 640x480@30 NV12；Q/Esc 退出，R 清空跟踪状态
-build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application parking --backend tensorrt `
   --model C:/absolute/yolov8n-parking.engine --camera 0 --mirror
 
 # 无窗口采样必须给定边界
-build/Msvc-YOLOv8-Applications/bin/yolov8_domain_demo.exe `
+build/Msvc-Release/bin/yolov8_domain_demo.exe `
   --application drone --backend cpu `
   --model C:/projects/cpp/KFCore/yolo-models/yolov8n-drone.onnx `
   --camera 0 --headless --max-frames 300

@@ -18,7 +18,6 @@ cmake_config_target(kfcore_face_model_core
   EXPORT_SET KFCoreTargets
   FOLDER "face_models")
 
-if(KFCORE_BUILD_FACE_MODELS)
 add_library(kfcore_face_models SHARED
   src/age_gender.cpp
   src/arcface.cpp
@@ -104,32 +103,22 @@ if(BUILD_TESTS)
         "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin")
   endif()
 
-  if(KFCORE_INSTALL)
-    include("${CMAKE_SOURCE_DIR}/cmake/RequireNinja.cmake")
-    kfcore_require_ninja(_tensorrt_runtime_consumer_ninja)
+  add_test(NAME test_tensorrt_runtime_installed_consumer_missing_ninja
+    COMMAND "${CMAKE_COMMAND}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer_missing_ninja.cmake")
 
-    add_test(NAME test_tensorrt_runtime_installed_consumer_missing_ninja
-      COMMAND "${CMAKE_COMMAND}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer_missing_ninja.cmake")
+  set(_tensorrt_runtime_consumer_root
+    "${CMAKE_BINARY_DIR}/tests/tensorrt_runtime_installed_consumer")
+  add_test(NAME test_tensorrt_runtime_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/TensorRtRuntimeInstalledConsumer"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${_tensorrt_runtime_consumer_root}/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_tensorrt_runtime_consumer_root}/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${_tensorrt_runtime_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer.cmake")
 
-    set(_tensorrt_runtime_consumer_root
-      "${CMAKE_BINARY_DIR}/tests/tensorrt_runtime_installed_consumer")
-    add_test(NAME test_tensorrt_runtime_installed_consumer
-      COMMAND "${CMAKE_COMMAND}"
-        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/TensorRtRuntimeInstalledConsumer"
-        "-DKFCORE_CONSUMER_BINARY_DIR=${_tensorrt_runtime_consumer_root}/build"
-        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_tensorrt_runtime_consumer_root}/install"
-        "-DKFCORE_CONSUMER_KFCORE_DIR=${_tensorrt_runtime_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-        "-DKFCORE_CONSUMER_NINJA_EXECUTABLE=${_tensorrt_runtime_consumer_ninja}"
-        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
-        "-DKFCORE_CONSUMER_TENSORRT_ROOT=$ENV{TENSORRT_ROOT}"
-        "-DKFCORE_CONSUMER_TURBOUTILS_ROOT=$ENV{TURBOUTILS_ROOT}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_tensorrt_runtime_installed_consumer.cmake")
-  endif()
-
-  if(KFCORE_BUILD_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
+  if(KFCORE_ENABLE_TENSORRT_RUNTIME_INTEGRATION_TESTS AND
      (NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_ARCFACE_VALIDATED}" STREQUAL "" OR
       NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_AGE_GENDER_VALIDATED}" STREQUAL "" OR
       NOT "${KFCORE_TENSORRT_RUNTIME_TEST_ENGINE_FACE68_VALIDATED}" STREQUAL "" OR
@@ -194,7 +183,6 @@ if(BUILD_TESTS)
           "PATH=path_list_prepend:$ENV{TENSORRT_ROOT}/bin;PATH=path_list_prepend:${CUDAToolkit_BIN_DIR}")
     endif()
   endif()
-endif()
 endif()
 
 cmake_install_headers(

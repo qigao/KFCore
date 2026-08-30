@@ -2,36 +2,20 @@ if(NOT DEFINED KFCORE_BINARY_DIR OR NOT DEFINED KFCORE_CONSUMER_SOURCE_DIR OR
    NOT DEFINED KFCORE_CONSUMER_BINARY_DIR OR NOT DEFINED KFCORE_CONSUMER_INSTALL_PREFIX OR
    NOT DEFINED KFCORE_CONSUMER_KFCORE_DIR OR NOT DEFINED KFCORE_CONSUMER_TRACKERS_DIR OR
    NOT DEFINED KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS OR
-   NOT DEFINED KFCORE_CONSUMER_BUILD_CONFIG OR
-   NOT DEFINED KFCORE_CONSUMER_MODE OR
-   NOT DEFINED KFCORE_CONSUMER_HAS_TENSORRT_YOLO OR
-   NOT DEFINED KFCORE_CONSUMER_HAS_YOLO_OPENCV)
+   NOT DEFINED KFCORE_CONSUMER_MODE)
   message(FATAL_ERROR "Installed-consumer test paths are required")
 endif()
 if(NOT KFCORE_CONSUMER_MODE MATCHES
    "^(kfcore_first|trackers_first|dependency_first|repeated_kfcore)$")
   message(FATAL_ERROR "Unknown installed-consumer mode: ${KFCORE_CONSUMER_MODE}")
 endif()
-foreach(_feature IN ITEMS
-    KFCORE_CONSUMER_HAS_TENSORRT_YOLO
-    KFCORE_CONSUMER_HAS_YOLO_OPENCV)
-  if(NOT "${${_feature}}" STREQUAL "ON" AND
-     NOT "${${_feature}}" STREQUAL "OFF")
-    message(FATAL_ERROR "${_feature} must be an explicit ON or OFF value")
-  endif()
-endforeach()
 if(NOT "${KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS}" STREQUAL "ON" AND
    NOT "${KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS}" STREQUAL "OFF")
   message(FATAL_ERROR
     "KFCORE_CONSUMER_ENABLE_SANITIZER_ADDRESS must be an explicit ON or OFF value")
 endif()
-if("${KFCORE_CONSUMER_BUILD_CONFIG}" STREQUAL "" OR
-   NOT "${KFCORE_CONSUMER_BUILD_CONFIG}" MATCHES "^[A-Za-z0-9_.+-]+$")
-  message(FATAL_ERROR
-    "KFCORE_CONSUMER_BUILD_CONFIG must name a non-empty CMake configuration")
-endif()
-
 include("${CMAKE_CURRENT_LIST_DIR}/../SafeTestDirectory.cmake")
+kfcore_get_parent_build_config("${KFCORE_BINARY_DIR}" _consumer_build_config)
 set(_consumer_test_root "${KFCORE_BINARY_DIR}/tests")
 kfcore_reset_test_directory(
   "${_consumer_test_root}" "${KFCORE_CONSUMER_BINARY_DIR}")
@@ -40,7 +24,7 @@ kfcore_reset_test_directory(
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --install "${KFCORE_BINARY_DIR}"
-    --config "${KFCORE_CONSUMER_BUILD_CONFIG}"
+    --config "${_consumer_build_config}"
     --prefix "${KFCORE_CONSUMER_INSTALL_PREFIX}"
   RESULT_VARIABLE _install_result
   OUTPUT_VARIABLE _install_output
@@ -57,9 +41,7 @@ execute_process(
     "-DKFCORE_EXPECTED_KFCORE_DIR=${KFCORE_CONSUMER_KFCORE_DIR}"
     "-DKFCORE_EXPECTED_TRACKERS_DIR=${KFCORE_CONSUMER_TRACKERS_DIR}"
     "-DKFCORE_CONSUMER_MODE=${KFCORE_CONSUMER_MODE}"
-    "-DKFCORE_CONSUMER_HAS_TENSORRT_YOLO=${KFCORE_CONSUMER_HAS_TENSORRT_YOLO}"
-    "-DKFCORE_CONSUMER_HAS_YOLO_OPENCV=${KFCORE_CONSUMER_HAS_YOLO_OPENCV}"
-    "-DCMAKE_BUILD_TYPE=${KFCORE_CONSUMER_BUILD_CONFIG}"
+    "-DCMAKE_BUILD_TYPE=${_consumer_build_config}"
     -DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=TRUE
@@ -72,7 +54,7 @@ endif()
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${KFCORE_CONSUMER_BINARY_DIR}"
-    --config "${KFCORE_CONSUMER_BUILD_CONFIG}"
+    --config "${_consumer_build_config}"
   RESULT_VARIABLE _build_result
   OUTPUT_VARIABLE _build_output
   ERROR_VARIABLE _build_error)
@@ -81,7 +63,7 @@ if(NOT _build_result EQUAL 0)
 endif()
 
 set(_consumer_target_file
-  "${KFCORE_CONSUMER_BINARY_DIR}/consumer-target-file-${KFCORE_CONSUMER_BUILD_CONFIG}.txt")
+  "${KFCORE_CONSUMER_BINARY_DIR}/consumer-target-file-${_consumer_build_config}.txt")
 if(NOT EXISTS "${_consumer_target_file}")
   message(FATAL_ERROR "Consumer did not generate its target file path")
 endif()

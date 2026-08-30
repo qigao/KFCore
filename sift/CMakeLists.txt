@@ -16,8 +16,7 @@ cmake_config_target(kfcore_sift
   EXPORT_SET KFCoreTargets
   FOLDER "sift")
 
-if(KFCORE_BUILD_SIFT_POPSIFT)
-  add_subdirectory(vendor/popsift)
+add_subdirectory(vendor/popsift)
 
   add_library(kfcore_sift_popsift SHARED src/popsift_extractor.cpp)
   target_include_directories(kfcore_sift_popsift PUBLIC
@@ -42,9 +41,8 @@ if(KFCORE_BUILD_SIFT_POPSIFT)
     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/COPYING.md"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
   install(SCRIPT "${KFCORE_POPSIFT_REVISION_VERIFY_SCRIPT}")
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor/popsift/generated/UPSTREAM.md"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
-endif()
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor/popsift/generated/UPSTREAM.md"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
 
 if(BUILD_TESTS)
   add_executable(test_sift tests/test_sift.cpp)
@@ -65,8 +63,7 @@ if(BUILD_TESTS)
     FOLDER "sift/tests")
   add_test(NAME test_popsift_options COMMAND test_popsift_options)
 
-  if(KFCORE_BUILD_SIFT_POPSIFT)
-    add_executable(test_popsift_internal tests/test_popsift_internal.cpp)
+  add_executable(test_popsift_internal tests/test_popsift_internal.cpp)
     target_include_directories(test_popsift_internal PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popsift/src")
     target_link_libraries(test_popsift_internal PRIVATE
@@ -110,28 +107,23 @@ if(BUILD_TESTS)
     target_link_libraries(benchmark_popsift PRIVATE
       KFCore::sift_popsift
       TurboUtils::TinyTest)
-    set_target_properties(benchmark_popsift PROPERTIES
+  set_target_properties(benchmark_popsift PROPERTIES
       CXX_STANDARD 17
       CXX_STANDARD_REQUIRED ON
       CXX_EXTENSIONS OFF
-      FOLDER "sift/benchmarks")
-  endif()
+    FOLDER "sift/benchmarks")
 
-  if(KFCORE_INSTALL)
-    set(_sift_consumer_root "${CMAKE_BINARY_DIR}/tests/sift_installed_consumer")
-    add_test(NAME test_sift_installed_consumer
-      COMMAND "${CMAKE_COMMAND}"
-        "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
-        "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/SiftInstalledConsumer"
-        "-DKFCORE_CONSUMER_BINARY_DIR=${_sift_consumer_root}/build"
-        "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_sift_consumer_root}/install"
-        "-DKFCORE_CONSUMER_KFCORE_DIR=${_sift_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
-        "-DKFCORE_CONSUMER_BUILD_CONFIG=$<CONFIG>"
-        "-DKFCORE_CONSUMER_CUDATOOLKIT_ROOT=${CUDAToolkit_ROOT}"
-        "-DKFCORE_EXPECT_SIFT_POPSIFT=${KFCORE_BUILD_SIFT_POPSIFT}"
-        "-DKFCORE_EXPECTED_SOURCE_REVISION=${KFCORE_POPSIFT_SOURCE_REVISION}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_sift_installed_consumer.cmake")
-  endif()
+  set(_sift_consumer_root "${CMAKE_BINARY_DIR}/tests/sift_installed_consumer")
+  add_test(NAME test_sift_installed_consumer
+    COMMAND "${CMAKE_COMMAND}"
+      "-DKFCORE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DKFCORE_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/cmake/tests/SiftInstalledConsumer"
+      "-DKFCORE_CONSUMER_BINARY_DIR=${_sift_consumer_root}/build"
+      "-DKFCORE_CONSUMER_INSTALL_PREFIX=${_sift_consumer_root}/install"
+      "-DKFCORE_CONSUMER_KFCORE_DIR=${_sift_consumer_root}/install/${CMAKE_INSTALL_LIBDIR}/cmake/KFCore"
+      "-DKFCORE_EXPECT_SIFT_POPSIFT=ON"
+      "-DKFCORE_EXPECTED_SOURCE_REVISION=${KFCORE_POPSIFT_SOURCE_REVISION}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/test_sift_installed_consumer.cmake")
 endif()
 
 cmake_install_headers(

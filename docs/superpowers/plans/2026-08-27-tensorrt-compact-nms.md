@@ -42,7 +42,7 @@ Add a literal `images + output0` fixture with output shapes `{1,300,6}`, `{2,300
 Run:
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_tensorrt_contract
+cmake --build --preset win-release-user --target test_tensorrt_contract
 build/Msvc-Release/bin/test_tensorrt_contract.exe --filter "Compact NMS"
 ```
 
@@ -76,7 +76,7 @@ Use hand-derived rows such as `{0, 160, 640, 480, 0.75, 3}` plus a zero padding 
 Run:
 
 ```powershell
-cmake --build --preset win-yolo-release-user --target test_tensorrt_detection_helpers
+cmake --build --preset win-release-user --target test_tensorrt_detection_helpers
 build/Msvc-Release/bin/test_tensorrt_detection_helpers.exe --filter "compact NMS"
 ```
 
@@ -124,8 +124,8 @@ Document both accepted output forms, tensor names, padding semantics, non-goals,
 Run:
 
 ```powershell
-cmake --build --preset win-yolo-release-user
-ctest --preset win-yolo-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user
 ```
 
 Then rerun the real Compact NMS image sequence and inspect `git diff --check` plus `git status --short`.

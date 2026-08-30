@@ -36,7 +36,7 @@
 - Consumes: explicit backend availability, camera index, mode id or exact width/height/fps, and CPU/TensorRT model paths.
 
 - [x] **Step 1: Write failing TinyTest cases.** Cover list-only operation without models, missing/duplicate/unknown options, numeric range errors, unavailable backend rejection, readable model validation, exact mode-id matching, exact geometry/fps matching, format preference, and MJPEG-only rejection.
-- [x] **Step 2: Build `test_hand_interaction_demo_cli` and verify RED.** Run `cmake --build --preset win-vision-models-cpu-release-user --target test_hand_interaction_demo_cli`; expect missing source/header failure.
+- [x] **Step 2: Build `test_hand_interaction_demo_cli` and verify RED.** Run `cmake --build --preset win-release-user --target test_hand_interaction_demo_cli`; expect missing source/header failure.
 - [x] **Step 3: Implement the minimal parser and selector.** Use named defaults (`1280x720@30`, camera 0, 64 MiB), `std::from_chars`, TurboUtils filesystem validation, and error messages prefixed with `hand_interaction_demo arguments:`.
 - [x] **Step 4: Run focused tests GREEN.** Run `ctest --test-dir build/Msvc-Vision-CPU -C Release -R '^test_hand_interaction_demo_cli$' --output-on-failure`.
 - [x] **Step 5: Commit.** Commit parser, selector, test, and CMake test target as one independently reviewable unit.
@@ -107,7 +107,7 @@
 - Modify: `docs/superpowers/plans/2026-08-28-thig-hand-interaction-demo.md`
 
 **Interfaces:**
-- Produces: `win-hand-interaction-demo-cpu-release-user` and `win-hand-interaction-demo-tensorrt-release-user` configure/build/test presets with OpenCV Lite and runtime DLL paths.
+- Produces: `win-release-user` and `win-release-user` configure/build/test presets with OpenCV Lite and runtime DLL paths.
 - Documents: complete list, CPU launch, TensorRT launch, controls, ownership, supported formats, and troubleshooting commands.
 
 - [x] **Step 1: Repair the installed TurboParser capture export.** In the TurboParser `refactor/capture-serial-to-parser` worktree, run `cmake --preset win-capture-release-user`, build/test, then `cmake --build --preset install-win-capture-release-user`; verify a clean consumer sees `TARGET TurboParser::Capture`.

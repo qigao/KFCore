@@ -132,9 +132,9 @@ Commands (from the worktree in a Visual Studio developer environment with
 `TENSORRT_ROOT=C:\projects\TensorRT-11.2.1.2`):
 
 ```powershell
-cmake --fresh --preset win-yolov8-applications-release-user
-cmake --build --preset win-yolov8-applications-release-user
-ctest --preset win-yolov8-applications-release-user --output-on-failure
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 ```
 
 Then run the focused 640 x 480 NV12 benchmark and one CPU ONNX plus one TensorRT engine smoke test.
