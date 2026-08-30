@@ -61,8 +61,8 @@
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
             "cacheVariables": {
+                "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
-                "ENABLE_SANITIZER_ADDRESS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
             },
@@ -81,6 +81,7 @@
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
             "cacheVariables": {
+                "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
@@ -101,7 +102,6 @@
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
                 "BUILD_TESTS": "ON",
-                "ENABLE_SANITIZER_ADDRESS": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
             },

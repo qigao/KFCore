@@ -90,7 +90,7 @@
 
 **Interfaces:**
 - Produces: executable `hand_interaction_demo` when `KFCORE_BUILD_HAND_INTERACTION_EXAMPLES=ON`.
-- Consumes: Tasks 1-3, `KFCore::vision_models_cpu` and/or `KFCore::vision_models_tensorrt`, `KFCore::hand_interaction`, `TurboParser::Capture`, and `OpenCVLite::highgui`.
+- Consumes: Tasks 1-3, `KFCore::hand_models_cpu` and/or `KFCore::vision_models_tensorrt`, `KFCore::hand_interaction`, `TurboParser::Capture`, and `OpenCVLite::highgui`.
 
 - [x] **Step 1: Add option dependency checks and executable target.** Require the official `TurboParser::Capture` imported target and fail configuration if the SDK was installed without capture exports.
 - [x] **Step 2: Build and verify the executable initially fails.** Expect missing `main` orchestration until the next step.

@@ -1,9 +1,6 @@
 include(CMakePackageConfigHelpers)
 
 add_library(trackers SHARED src/tracker.c)
-add_library(KFCore::trackers ALIAS trackers)
-set_target_properties(trackers PROPERTIES
-    FOLDER "trackers" )
 target_include_directories(
   trackers PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                   $<INSTALL_INTERFACE:include>)
@@ -18,63 +15,26 @@ set_target_properties(
              C_EXTENSIONS OFF
              EXPORT_NAME trackers
              WINDOWS_EXPORT_ALL_SYMBOLS ON)
+cmake_config_target(trackers
+  ALIAS KFCore::trackers
+  EXPORT_NAME trackers
+  EXPORT_SET trackersTargets
+  FOLDER "trackers")
 
 if(BUILD_EXAMPLES)
   add_executable(example examples/basic_tracking.c)
   target_link_libraries(example PRIVATE trackers)
-  if(WIN32)
-    add_custom_command(
-      TARGET example
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:example>)
-  endif()
+  cmake_config_target(example NO_INSTALL FOLDER "trackers/examples")
 endif()
 
 if(BUILD_TESTS)
-
-  add_executable(test_tracker tests/test_trackers.c)
-  target_link_libraries(test_tracker PRIVATE trackers TurboUtils::TinyTest)
-  if(WIN32)
-    add_custom_command(
-      TARGET test_tracker
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:test_tracker>)
-  endif()
-  add_test(NAME test_tracker COMMAND test_tracker)
-  set_target_properties(test_tracker PROPERTIES
-    FOLDER "trackers" )
-
-  add_executable(test_bytetrack_status
-    tests/test_bytetrack_status.c
-    tests/tracker_test_alloc.c
-    src/tracker.c)
-  target_compile_definitions(test_bytetrack_status PRIVATE KFCORE_TRACKERS_TEST_ALLOCATOR)
-  target_include_directories(test_bytetrack_status PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-  target_link_libraries(test_bytetrack_status PRIVATE KFCore::kfcore miniblas TurboUtils::TinyTest)
-  if(WIN32)
-    add_custom_command(
-      TARGET test_bytetrack_status
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:KFCore::kfcore> $<TARGET_FILE_DIR:test_bytetrack_status>)
-  endif()
-  add_test(NAME test_bytetrack_status COMMAND test_bytetrack_status)
-  set_target_properties(test_bytetrack_status PROPERTIES
-    FOLDER "trackers" )
+  add_subdirectory(tests)
 endif()
 
-install(
-  TARGETS trackers
-  EXPORT trackersTargets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+cmake_install_headers(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  PATTERNS "*.h")
 
 set(trackers_config_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/trackers")
 set(trackers_config "${CMAKE_CURRENT_BINARY_DIR}/trackersConfig.cmake")

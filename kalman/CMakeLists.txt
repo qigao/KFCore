@@ -21,7 +21,6 @@ set(KFCORE_PUBLIC_HEADERS
     signal_filters.h)
 
 add_library(kfcore SHARED)
-add_library(KFCore::kfcore ALIAS kfcore)
 
 target_sources(kfcore
     PRIVATE ${KFCORE_SOURCES}
@@ -71,10 +70,16 @@ if(NOT WIN32)
 endif()
 
 set_target_properties(kfcore PROPERTIES
-    FOLDER "kalman"
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
+cmake_config_target(kfcore
+    ALIAS KFCore::kfcore
+    EXPORT_NAME kfcore
+    EXPORT_SET KFCoreTargets
+    FOLDER "kalman")
 
 # Expose the list of public headers to the parent scope so the top-level
 # project can reuse them for install rules and package config generation.
 set(KFCORE_PUBLIC_HEADERS ${KFCORE_PUBLIC_HEADERS} PARENT_SCOPE)
-add_subdirectory(tests)
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

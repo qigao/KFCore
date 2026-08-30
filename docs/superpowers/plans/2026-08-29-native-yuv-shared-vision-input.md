@@ -4,7 +4,7 @@
 
 **Goal:** Preserve captured NV12/I420 through shared CPU/TensorRT vision inference and materialize BGR only for display.
 
-**Architecture:** `CapturedFrame` remains the sole host owner. A borrowed `ImageView` feeds CPU directly or is packed/uploaded once by `TensorRtVisionInput`; all same-frame TensorRT stages borrow that CUDA view. Hand appearance samples host YUV directly, while the demo performs an explicit post-inference BGR conversion for UI only.
+**Architecture:** `CapturedFrame` remains the sole host owner. A borrowed `ImageView` feeds CPU directly or is packed/uploaded once by `TensorRtHandInput`; all same-frame TensorRT stages borrow that CUDA view. Hand appearance samples host YUV directly, while the demo performs an explicit post-inference BGR conversion for UI only.
 
 **Tech Stack:** C++17, CUDA, TensorRT, Turbo Capture, KFCore ImageProcessor, TinyTest, CMake Presets.
 

@@ -22,7 +22,7 @@ the detector/landmarker interfaces, and the stateless composition pipeline.
 The CPU adapter owns its ONNX Runtime detector session. Existing CPU and
 TensorRT face landmark adapters implement the common landmark interface.
 
-The TensorRT demo owns a thin adapter from `KFCore::tensorrt_yolo` detections to
+The TensorRT demo owns a thin adapter from `KFCore::yolo_tensorrt` detections to
 the backend-neutral face contract. This keeps TensorRT-YOLO types out of the
 vision-model core and avoids making every TensorRT vision-model consumer depend
 on the YOLO runtime.

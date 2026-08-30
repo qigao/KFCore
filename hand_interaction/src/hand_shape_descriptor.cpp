@@ -14,7 +14,7 @@ constexpr std::array<std::array<std::size_t, 5U>, 5U> kFingerChains = {{
     {{0U, 17U, 18U, 19U, 20U}},
 }};
 
-bool IsFinite(const vision_models::HandLandmark& landmark) {
+bool IsFinite(const hand_models::HandLandmark& landmark) {
   return std::isfinite(landmark.x) && std::isfinite(landmark.y) &&
          std::isfinite(landmark.z);
 }
@@ -22,8 +22,8 @@ bool IsFinite(const vision_models::HandLandmark& landmark) {
 }  // namespace
 
 std::optional<HandShapeDescriptor> MakeHandShapeDescriptor(
-    const std::array<vision_models::HandLandmark,
-                     vision_models::kHandLandmarkCount>& landmarks) {
+    const std::array<hand_models::HandLandmark,
+                     hand_models::kHandLandmarkCount>& landmarks) {
   for (const auto& landmark : landmarks) {
     if (!IsFinite(landmark)) {
       return std::nullopt;

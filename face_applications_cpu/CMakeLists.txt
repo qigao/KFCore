@@ -1,20 +1,18 @@
 add_library(kfcore_face_applications_cpu SHARED
   src/composer.cpp
   src/cpu.cpp
-  src/geometry.cpp
-  src/onnx_session.cpp)
+  src/geometry.cpp)
 target_sources(kfcore_face_applications_cpu PRIVATE src/preprocess.cpp)
 target_include_directories(kfcore_face_applications_cpu
   PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/face_models/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(kfcore_face_applications_cpu PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_applications_cpu PUBLIC
-  KFCore::image_core
+  KFCore::image_processor_cpu
   KFCore::face_model_core
-  ONNXRuntime::ONNXRuntime)
+  KFCore::face_models_cpu)
 set_target_properties(kfcore_face_applications_cpu PROPERTIES
   CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
   FOLDER "face_applications_cpu"
@@ -26,116 +24,7 @@ cmake_config_target(kfcore_face_applications_cpu
   FOLDER "face_applications_cpu")
 
 if(BUILD_TESTS)
-  foreach(_cpu_face_test IN ITEMS geometry preprocess composer)
-    add_executable(test_cpu_face_${_cpu_face_test}
-      tests/test_cpu_face_${_cpu_face_test}.cpp)
-    target_include_directories(test_cpu_face_${_cpu_face_test} PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(test_cpu_face_${_cpu_face_test} PRIVATE
-      KFCore::face_applications_cpu
-      TurboUtils::TinyTest)
-    set_target_properties(test_cpu_face_${_cpu_face_test} PROPERTIES
-      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-      FOLDER "face_applications_cpu/tests")
-    add_test(NAME test_cpu_face_${_cpu_face_test}
-      COMMAND test_cpu_face_${_cpu_face_test})
-  endforeach()
-
-  add_executable(test_cpu_face_application_validation
-    tests/test_cpu_face_application_validation.cpp)
-  target_link_libraries(test_cpu_face_application_validation PRIVATE
-    KFCore::face_applications_cpu
-    TurboUtils::TinyTest)
-  set_target_properties(test_cpu_face_application_validation PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-    FOLDER "face_applications_cpu/tests")
-  add_test(NAME test_cpu_face_application_validation
-    COMMAND test_cpu_face_application_validation)
-
-  if(WIN32)
-    set_tests_properties(
-      test_cpu_face_geometry
-      test_cpu_face_preprocess
-      test_cpu_face_composer
-      test_cpu_face_application_validation
-      PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
-  endif()
-
-  if(KFCORE_ENABLE_FACE_APPLICATION_CPU_INTEGRATION_TESTS)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "yolov12n-face.onnx" _cpu_face_detector)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "2dfan4.onnx" _cpu_face_face68)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "arcface_w600k_r50.onnx" _cpu_face_arcface)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "inswapper_128.onnx" _cpu_face_inswapper)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "gfpgan_1.4.onnx" _cpu_face_gfpgan)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "age-gender.onnx" _cpu_face_age_gender)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_MATRIX_RELATIVE}"
-      _cpu_face_matrix)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_SOURCE_IMAGE_RELATIVE}"
-      _cpu_face_source_image)
-    kfcore_resolve_model_path(
-      "$ENV{KFCORE_MODEL_ROOT}" "${KFCORE_FACE_CPU_TEST_TARGET_IMAGE_RELATIVE}"
-      _cpu_face_target_image)
-    find_path(KFCORE_CPU_FACE_STB_INCLUDE_DIR
-      NAMES stb_image.h
-      HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
-    if(NOT KFCORE_CPU_FACE_STB_INCLUDE_DIR)
-      message(FATAL_ERROR
-        "CPU face integration tests require the stb_image.h test dependency")
-    endif()
-
-    function(kfcore_configure_cpu_face_asset_target target_name)
-      target_include_directories(${target_name} PRIVATE
-        ${KFCORE_CPU_FACE_STB_INCLUDE_DIR})
-      target_link_libraries(${target_name} PRIVATE
-        KFCore::face_applications_cpu
-        TurboUtils::TinyTest)
-      target_compile_definitions(${target_name} PRIVATE
-        "KFCORE_FACE_CPU_TEST_DETECTOR=\"${_cpu_face_detector}\""
-        "KFCORE_FACE_CPU_TEST_FACE68=\"${_cpu_face_face68}\""
-        "KFCORE_FACE_CPU_TEST_ARCFACE=\"${_cpu_face_arcface}\""
-        "KFCORE_FACE_CPU_TEST_INSWAPPER=\"${_cpu_face_inswapper}\""
-        "KFCORE_FACE_CPU_TEST_GFPGAN=\"${_cpu_face_gfpgan}\""
-        "KFCORE_FACE_CPU_TEST_AGE_GENDER=\"${_cpu_face_age_gender}\""
-        "KFCORE_FACE_CPU_TEST_MATRIX=\"${_cpu_face_matrix}\""
-        "KFCORE_FACE_CPU_TEST_SOURCE_IMAGE=\"${_cpu_face_source_image}\""
-        "KFCORE_FACE_CPU_TEST_TARGET_IMAGE=\"${_cpu_face_target_image}\"")
-      set_target_properties(${target_name} PROPERTIES
-        CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-        FOLDER "face_applications_cpu/tests")
-      if(WIN32)
-        add_custom_command(
-          TARGET ${target_name}
-          POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                  $<TARGET_FILE:ONNXRuntime::ONNXRuntime>
-                  $<TARGET_FILE_DIR:${target_name}>)
-      endif()
-    endfunction()
-
-    add_executable(test_cpu_face_pipeline_integration
-      tests/test_cpu_face_pipeline_integration.cpp)
-    kfcore_configure_cpu_face_asset_target(test_cpu_face_pipeline_integration)
-    add_test(NAME test_cpu_face_pipeline_integration
-      COMMAND test_cpu_face_pipeline_integration)
-    if(WIN32)
-      set_tests_properties(test_cpu_face_pipeline_integration PROPERTIES
-        ENVIRONMENT_MODIFICATION
-          "PATH=path_list_prepend:$ENV{ONNXRUNTIME_ROOT}/lib")
-    endif()
-
-    add_executable(benchmark_cpu_face_pipeline
-      tests/benchmark_cpu_pipeline.cpp)
-    kfcore_configure_cpu_face_asset_target(benchmark_cpu_face_pipeline)
-  endif()
+  add_subdirectory(tests)
 endif()
 
 cmake_install_headers(

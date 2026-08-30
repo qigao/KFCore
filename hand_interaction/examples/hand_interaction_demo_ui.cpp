@@ -45,15 +45,15 @@ int mirror_coordinate(float value, int extent)
     return extent - 1 - clamp_coordinate(value, extent);
 }
 
-std::string gesture_name(vision_models::Gesture gesture)
+std::string gesture_name(hand_models::Gesture gesture)
 {
     switch (gesture)
     {
-    case vision_models::Gesture::Open:
+    case hand_models::Gesture::Open:
         return "Open";
-    case vision_models::Gesture::Closed:
+    case hand_models::Gesture::Closed:
         return "Closed";
-    case vision_models::Gesture::Pointer:
+    case hand_models::Gesture::Pointer:
         return "Pointer";
     default:
         return "Unknown";
@@ -93,15 +93,15 @@ const char* association_name(HandIdentityAssociation association) noexcept
     }
 }
 
-const char* handedness_name(vision_models::Handedness handedness) noexcept
+const char* handedness_name(hand_models::Handedness handedness) noexcept
 {
     switch (handedness)
     {
-    case vision_models::Handedness::Left:
+    case hand_models::Handedness::Left:
         return "Left";
-    case vision_models::Handedness::Right:
+    case hand_models::Handedness::Right:
         return "Right";
-    case vision_models::Handedness::Unknown:
+    case hand_models::Handedness::Unknown:
     default:
         return "Unknown";
     }
@@ -235,7 +235,7 @@ std::array<std::string, 3> format_timing_lines(const DemoMetrics& metrics)
 }
 
 HandOverlayText format_hand_overlay_text(const CanonicalHand& identity_result,
-                                         const vision_models::HandResult& hand,
+                                         const hand_models::HandResult& hand,
                                          const PrimitiveFrame& primitives)
 {
     const int canonical_id = identity_result.canonical_id;
@@ -301,14 +301,14 @@ HandOverlayText format_hand_overlay_text(const CanonicalHand& identity_result,
 }
 
 std::vector<HandIdentityDiagnostic> make_identity_diagnostics(
-    const vision_models::HandFrame& hands,
+    const hand_models::HandFrame& hands,
     const HandInteractionFrame& interaction)
 {
     std::vector<HandIdentityDiagnostic> result;
     result.reserve(hands.hands.size());
     for (std::size_t index = 0U; index < hands.hands.size(); ++index)
     {
-        const vision_models::HandResult& hand = hands.hands[index];
+        const hand_models::HandResult& hand = hands.hands[index];
         const CanonicalHand* identity = canonical_hand_for(interaction, index);
         result.push_back(
             { index,
@@ -326,7 +326,7 @@ std::vector<HandIdentityDiagnostic> make_identity_diagnostics(
 }
 
 std::string format_identity_diagnostic_line(
-    std::uint64_t frame_serial, const vision_models::HandFrame& hands,
+    std::uint64_t frame_serial, const hand_models::HandFrame& hands,
     const HandInteractionFrame& interaction)
 {
     const std::vector<HandIdentityDiagnostic> diagnostics =
@@ -335,9 +335,9 @@ std::string format_identity_diagnostic_line(
     line << "[ID] frame=" << frame_serial << " hands=" << diagnostics.size();
     for (const HandIdentityDiagnostic& diagnostic : diagnostics)
     {
-        const vision_models::HandResult& hand =
+        const hand_models::HandResult& hand =
             hands.hands[diagnostic.input_index];
-        const vision_models::RectF& box = hand.palm.box;
+        const hand_models::RectF& box = hand.palm.box;
         line << " | input=" << diagnostic.input_index
              << " raw=" << diagnostic.raw_track_id
              << " hand=" << diagnostic.canonical_id
@@ -386,10 +386,10 @@ std::string format_action_line(const thig::ActionEvent& action)
     return line.str();
 }
 
-cv::Mat compose_overlay(const cv::Mat& source, const vision_models::HandFrame& hands,
+cv::Mat compose_overlay(const cv::Mat& source, const hand_models::HandFrame& hands,
                         const HandInteractionFrame& interaction,
                         const DemoThigStatus& status,
-                        const vision_models::FaceMeshFrame* face,
+                        const face_models::FaceMeshFrame* face,
                         const DemoMetrics& metrics)
 {
     if (source.empty() || source.type() != CV_8UC3)

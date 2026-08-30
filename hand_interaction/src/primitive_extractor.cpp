@@ -18,9 +18,9 @@ namespace kfcore::hand_interaction
 namespace
 {
 
-using vision_models::Gesture;
-using vision_models::HandLandmark;
-using vision_models::HandResult;
+using hand_models::Gesture;
+using hand_models::HandLandmark;
+using hand_models::HandResult;
 
 constexpr std::array<std::size_t, 5> kPalmLandmarkIndices = { 0, 5, 9, 13, 17 };
 constexpr float kMinimumPalmSpanPixels = 8.0F;
@@ -373,7 +373,7 @@ void validate_options(const HandPrimitiveOptions& options)
         options.identity.appearance_update_weight > 1.0F ||
         options.identity.minimum_comparable_appearance_parts == 0U ||
         options.identity.minimum_comparable_appearance_parts >
-            vision_models::kHandAppearancePartCount)
+            hand_models::kHandAppearancePartCount)
     {
         throw std::invalid_argument("invalid canonical hand identity configuration");
     }
@@ -868,7 +868,7 @@ HandPrimitiveExtractor::HandPrimitiveExtractor(HandPrimitiveExtractor&&) noexcep
 HandPrimitiveExtractor& HandPrimitiveExtractor::operator=(HandPrimitiveExtractor&&) noexcept = default;
 
 PrimitiveFrame HandPrimitiveExtractor::process(
-    const vision_models::HandFrame& frame,
+    const hand_models::HandFrame& frame,
     const GestureFrameContext& context)
 {
     if (context.image_width <= 0 || context.image_height <= 0)

@@ -1,12 +1,12 @@
 #include "kfcore/face_applications/cpu.hpp"
 
+#include "kfcore/face_models/cpu.hpp"
 #include "kfcore/face_models/error.hpp"
 #include "kfcore/face_models/inswapper_embedding.hpp"
 #include "kfcore/image_processor/cpu.hpp"
 
 #include "composer.hpp"
 #include "geometry.hpp"
-#include "onnx_session.hpp"
 #include "preprocess.hpp"
 
 #include <algorithm>
@@ -25,11 +25,6 @@ namespace kfcore::face_applications
 {
 namespace
 {
-
-using detail::ModelContract;
-using detail::TensorContract;
-
-constexpr std::int64_t kDetectorExtent = 640;
 
 class StageTimer final
 {
@@ -131,43 +126,28 @@ void validate_options(const CpuFaceSwapOptions& options)
     }
 }
 
-ModelContract detector_contract()
+kfcore::face_models::CpuFaceModelOptions
+face_model_options(const CpuFaceSwapOptions& options)
 {
-    return { "YOLOv12Face", { TensorContract { "images", { 1, 3, 640, 640 } } },
-             { TensorContract { "output0", { 1, 300, 6 } } } };
+    kfcore::face_models::CpuFaceModelOptions result;
+    result.intra_op_threads = options.intra_op_threads;
+    result.inter_op_threads = options.inter_op_threads;
+    result.max_model_bytes  = options.max_model_bytes;
+    return result;
 }
 
-ModelContract face68_contract()
+kfcore::face_models::CpuFaceMeshOptions
+detector_options(const CpuFaceSwapOptions& options)
 {
-    return { "Face68", { TensorContract { "input", { 1, 3, 256, 256 } } },
-             { TensorContract { "landmarks_xyscore", { 1, 68, 3 } },
-               TensorContract { "heatmaps", { 1, 68, 64, 64 } } } };
-}
-
-ModelContract arcface_contract()
-{
-    return { "ArcFace", { TensorContract { "input.1", { -1, 3, 112, 112 } } },
-             { TensorContract { "683", { 1, 512 } } } };
-}
-
-ModelContract inswapper_contract()
-{
-    return { "InSwapper",
-             { TensorContract { "target", { 1, 3, 128, 128 } },
-               TensorContract { "source", { 1, 512 } } },
-             { TensorContract { "output", { 1, 3, 128, 128 } } } };
-}
-
-ModelContract gfpgan_contract()
-{
-    return { "GFPGAN", { TensorContract { "input", { 1, 3, 512, 512 } } },
-             { TensorContract { "output", { 1, 3, 512, 512 } } } };
-}
-
-ModelContract age_gender_contract()
-{
-    return { "AgeGender", { TensorContract { "pixel_values", { -1, 3, 224, 224 } } },
-             { TensorContract { "logits", { -1, 2 } } } };
+    kfcore::face_models::CpuFaceMeshOptions result;
+    result.intra_op_threads = options.intra_op_threads;
+    result.inter_op_threads = options.inter_op_threads;
+    result.max_model_bytes  = options.max_model_bytes;
+    result.max_source_bytes = options.max_image_bytes;
+    result.max_tensor_bytes = options.max_tensor_bytes;
+    result.face_detection_score_threshold = options.detector_score_threshold;
+    result.face_class_id = options.face_class_id;
+    return result;
 }
 
 void validate_image(const kfcore::image::BgrImage& image, std::size_t max_image_bytes)
@@ -184,125 +164,6 @@ void validate_image(const kfcore::image::BgrImage& image, std::size_t max_image_
     {
         throw_invalid("BGR image storage is malformed or exceeds max_image_bytes");
     }
-}
-
-CpuFaceDetection decode_detection(const std::vector<float>& values,
-                                  const kfcore::image::LetterboxTransform& transform,
-                                  const kfcore::image::BgrImage& image,
-                                  const CpuFaceSwapOptions& options)
-{
-    constexpr std::size_t kValuesPerDetection = 6U;
-    constexpr std::size_t kDetectionCount = 300U;
-    if (values.size() != kDetectionCount * kValuesPerDetection)
-    {
-        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ModelContractMismatch,
-                                      "YOLOv12Face output element count is unexpected");
-    }
-    std::optional<CpuFaceDetection> best;
-    for (std::size_t index = 0; index < kDetectionCount; ++index)
-    {
-        const float* row = values.data() + index * kValuesPerDetection;
-        for (std::size_t value = 0; value < kValuesPerDetection; ++value)
-        {
-            if (!std::isfinite(row[value]))
-            {
-                throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                              "YOLOv12Face output values must be finite");
-            }
-        }
-        const float score = row[4];
-        if (score < 0.0F || score > 1.0F)
-        {
-            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                          "YOLOv12Face score must be within [0,1]");
-        }
-        if (score == 0.0F)
-        {
-            continue;
-        }
-        if (row[5] < 0.0F || row[5] > static_cast<float>((std::numeric_limits<int>::max)()) ||
-            std::trunc(row[5]) != row[5] || row[0] > row[2] || row[1] > row[3])
-        {
-            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                          "YOLOv12Face detection row is invalid");
-        }
-        const int class_id = static_cast<int>(row[5]);
-        if (class_id != options.face_class_id || score < options.detector_score_threshold)
-        {
-            continue;
-        }
-        const float inverse_scale = 1.0F / transform.scale;
-        CpuFaceDetection detection;
-        detection.box.left = (std::clamp)((row[0] - transform.pad_x) * inverse_scale,
-                                          0.0F, static_cast<float>(image.width));
-        detection.box.top = (std::clamp)((row[1] - transform.pad_y) * inverse_scale,
-                                         0.0F, static_cast<float>(image.height));
-        detection.box.right = (std::clamp)((row[2] - transform.pad_x) * inverse_scale,
-                                           0.0F, static_cast<float>(image.width));
-        detection.box.bottom = (std::clamp)((row[3] - transform.pad_y) * inverse_scale,
-                                            0.0F, static_cast<float>(image.height));
-        detection.score = score;
-        detection.class_id = class_id;
-        if (detection.box.left >= detection.box.right ||
-            detection.box.top >= detection.box.bottom)
-        {
-            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                          "YOLOv12Face restored box has no positive area");
-        }
-        if (!best || detection.score > best->score)
-        {
-            best = detection;
-        }
-    }
-    if (!best)
-    {
-        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::NoFaceDetected,
-                                      "YOLOv12Face found no matching face");
-    }
-    return *best;
-}
-
-kfcore::face_models::Face68Result decode_face68(const std::vector<float>& values)
-{
-    if (values.size() != kfcore::face_models::kFace68LandmarkCount * 3U)
-    {
-        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ModelContractMismatch,
-                                      "Face68 output element count is unexpected");
-    }
-    kfcore::face_models::Face68Result result {};
-    for (std::size_t point = 0; point < result.size(); ++point)
-    {
-        const float x = values[point * 3U];
-        const float y = values[point * 3U + 1U];
-        const float score = values[point * 3U + 2U];
-        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(score))
-        {
-            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                          "Face68 output values must be finite");
-        }
-        result[point] = { x * 4.0F, y * 4.0F, score };
-    }
-    return result;
-}
-
-kfcore::face_models::ArcFaceResult decode_embedding(const std::vector<float>& values)
-{
-    if (values.size() != kfcore::face_models::kArcFaceEmbeddingLength)
-    {
-        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ModelContractMismatch,
-                                      "ArcFace output element count is unexpected");
-    }
-    kfcore::face_models::ArcFaceResult result {};
-    for (std::size_t index = 0; index < result.size(); ++index)
-    {
-        if (!std::isfinite(values[index]))
-        {
-            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::RuntimeFailure,
-                                          "ArcFace output values must be finite");
-        }
-        result[index] = values[index];
-    }
-    return result;
 }
 
 kfcore::image::BgrImage crop_detection(const kfcore::image::BgrImage& image,
@@ -361,6 +222,9 @@ kfcore::image::BgrImage crop_detection(const kfcore::image::BgrImage& image,
     case kfcore::face_models::FaceModelErrorCode::InvalidModelAsset:
         code = CpuFaceApplicationErrorCode::InvalidModelAsset;
         break;
+    case kfcore::face_models::FaceModelErrorCode::ConcurrentExecution:
+        code = CpuFaceApplicationErrorCode::ConcurrentExecution;
+        break;
     case kfcore::face_models::FaceModelErrorCode::RuntimeFailure:
         break;
     }
@@ -385,21 +249,24 @@ struct OnnxFaceSwapApplication::Impl final
 {
     Impl(const CpuFaceApplicationModelPaths& paths, const CpuFaceSwapOptions& options_in)
         : options(options_in)
-        , environment(ORT_LOGGING_LEVEL_ERROR, "KFCoreFaceCPU")
-        , detector(environment, paths.detector_model, detector_contract(), options)
-        , face68(environment, paths.face68_model, face68_contract(), options)
-        , arcface(environment, paths.arcface_model, arcface_contract(), options)
-        , inswapper(environment, paths.inswapper_model, inswapper_contract(), options)
+        , detector(kfcore::face_models::CpuFaceDetector::load(
+              paths.detector_model, detector_options(options)))
+        , face68(kfcore::face_models::CpuFace68::load(
+              paths.face68_model, face_model_options(options)))
+        , arcface(kfcore::face_models::CpuArcFace::load(
+              paths.arcface_model, face_model_options(options)))
+        , inswapper(kfcore::face_models::CpuInSwapper::load(
+              paths.inswapper_model, face_model_options(options)))
     {
         if (paths.gfpgan_model)
         {
-            gfpgan = std::make_unique<detail::OnnxSession>(
-                environment, *paths.gfpgan_model, gfpgan_contract(), options);
+            gfpgan = kfcore::face_models::CpuGfpGan::load(
+                *paths.gfpgan_model, face_model_options(options));
         }
         if (paths.age_gender_model)
         {
-            age_gender = std::make_unique<detail::OnnxSession>(
-                environment, *paths.age_gender_model, age_gender_contract(), options);
+            age_gender = kfcore::face_models::CpuAgeGender::load(
+                *paths.age_gender_model, face_model_options(options));
         }
         projector = std::make_unique<kfcore::face_models::InSwapperEmbeddingProjector>(
             kfcore::face_models::InSwapperEmbeddingProjector::load(paths.inswapper_matrix));
@@ -421,20 +288,21 @@ struct OnnxFaceSwapApplication::Impl final
         CpuFaceAnalysis analysis;
         {
             StageTimer timer(timings != nullptr ? &timings->detection : nullptr);
-            kfcore::image::LetterboxTransform transform;
-            kfcore::image::PreprocessOptions preprocess_options;
-            preprocess_options.output_format = kfcore::image::PixelFormat::Rgb8;
-            preprocess_options.border_value = 114.0F;
-            const std::vector<float> tensor =
-                kfcore::image::CpuImageProcessor::letterbox_nchw(
-                    image.view(), static_cast<int>(kDetectorExtent),
-                    static_cast<int>(kDetectorExtent), preprocess_options,
-                    options.max_image_bytes, options.max_tensor_bytes, &transform);
-            const std::vector<detail::HostTensor> output = detector.run(
-                { detail::HostTensorView { tensor.data(), tensor.size(),
-                                           { 1, 3, kDetectorExtent, kDetectorExtent } } });
-            analysis.detection = decode_detection(output.at(0).values, transform, image,
-                                                  options);
+            const kfcore::face_models::FaceDetectionResult detection =
+                detector->infer(image.view());
+            if (!detection.face)
+            {
+                throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::NoFaceDetected,
+                                              "YOLOv12Face found no matching face");
+            }
+            analysis.detection.box = {
+                detection.face->box.x,
+                detection.face->box.y,
+                detection.face->box.x + detection.face->box.width,
+                detection.face->box.y + detection.face->box.height,
+            };
+            analysis.detection.score = detection.face->confidence;
+            analysis.detection.class_id = options.face_class_id;
         }
 
         detail::AlignedFace face68_crop;
@@ -449,13 +317,9 @@ struct OnnxFaceSwapApplication::Impl final
                                  : nullptr);
             const std::vector<float> tensor =
                 detail::preprocess_face68(face68_crop.image, options.max_tensor_bytes);
-            const std::vector<detail::HostTensor> output = face68.run(
-                { detail::HostTensorView { tensor.data(), tensor.size(),
-                                           { 1, 3,
-                                             kfcore::face_models::kFace68InputExtent,
-                                             kfcore::face_models::kFace68InputExtent } } });
             analysis.landmarks68 = detail::map_face68_to_source(
-                decode_face68(output.at(0).values), face68_crop.aligned_to_source);
+                face68->infer({ tensor.data(), tensor.size() }),
+                face68_crop.aligned_to_source);
             analysis.landmarks = detail::extract_five_landmarks(analysis.landmarks68);
         }
 
@@ -472,12 +336,8 @@ struct OnnxFaceSwapApplication::Impl final
         }
         {
             StageTimer timer(timings != nullptr ? &timings->arcface_inference : nullptr);
-            const std::vector<detail::HostTensor> output = arcface.run(
-                { detail::HostTensorView { arcface_tensor.data(), arcface_tensor.size(),
-                                           { 1, 3,
-                                             kfcore::face_models::kArcFaceInputExtent,
-                                             kfcore::face_models::kArcFaceInputExtent } } });
-            analysis.embedding = decode_embedding(output.at(0).values);
+            analysis.embedding = arcface->infer(
+                { arcface_tensor.data(), arcface_tensor.size() });
         }
 
         if (age_gender != nullptr)
@@ -491,33 +351,19 @@ struct OnnxFaceSwapApplication::Impl final
                 image, analysis.detection.box, options.max_image_bytes);
             const std::vector<float> tensor = detail::preprocess_age_gender(
                 crop, options.max_image_bytes, options.max_tensor_bytes);
-            const std::vector<detail::HostTensor> output = age_gender->run(
-                { detail::HostTensorView { tensor.data(), tensor.size(),
-                                           { 1, 3,
-                                             kfcore::face_models::kAgeGenderInputExtent,
-                                             kfcore::face_models::kAgeGenderInputExtent } } });
-            const std::vector<float>& values = output.at(0).values;
-            if (values.size() != kfcore::face_models::kAgeGenderLogitCount ||
-                !std::isfinite(values[0]) || !std::isfinite(values[1]))
-            {
-                throw CpuFaceApplicationError(
-                    CpuFaceApplicationErrorCode::RuntimeFailure,
-                    "AgeGender output must contain two finite logits");
-            }
-            analysis.age_gender_logits =
-                kfcore::face_models::AgeGenderResult { values[0], values[1] };
+            analysis.age_gender_logits = age_gender->infer(
+                { tensor.data(), tensor.size() });
         }
         return analysis;
     }
 
     CpuFaceSwapOptions options;
-    Ort::Env environment;
-    detail::OnnxSession detector;
-    detail::OnnxSession face68;
-    detail::OnnxSession arcface;
-    detail::OnnxSession inswapper;
-    std::unique_ptr<detail::OnnxSession> gfpgan;
-    std::unique_ptr<detail::OnnxSession> age_gender;
+    std::unique_ptr<kfcore::face_models::CpuFaceDetector> detector;
+    std::unique_ptr<kfcore::face_models::CpuFace68>         face68;
+    std::unique_ptr<kfcore::face_models::CpuArcFace>        arcface;
+    std::unique_ptr<kfcore::face_models::CpuInSwapper>      inswapper;
+    std::unique_ptr<kfcore::face_models::CpuGfpGan>         gfpgan;
+    std::unique_ptr<kfcore::face_models::CpuAgeGender>      age_gender;
     std::unique_ptr<kfcore::face_models::InSwapperEmbeddingProjector> projector;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
@@ -546,9 +392,9 @@ OnnxFaceSwapApplication::load(const CpuFaceApplicationModelPaths& paths,
     }
     catch (const kfcore::face_models::FaceModelError& error)
     {
-        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::InvalidModelAsset,
-                                      error.what());
+        translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -575,6 +421,7 @@ CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::BgrImage& 
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -603,6 +450,7 @@ CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::ImageView&
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -631,6 +479,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap(
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -665,6 +514,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap(
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -695,6 +545,7 @@ ProfiledCpuFaceSwapResult OnnxFaceSwapApplication::swap_profiled(
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -746,6 +597,7 @@ ProfiledCpuFaceSwapResult OnnxFaceSwapApplication::swap_profiled(
     {
         translate_face_model_error(error);
     }
+
     catch (const std::bad_alloc&)
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
@@ -791,15 +643,11 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
         StageTimer timer(timings != nullptr
                              ? &timings->inswapper_inference_and_decode
                              : nullptr);
-        const std::vector<detail::HostTensor> output = impl_->inswapper.run(
-            { detail::HostTensorView {
-                  inswapper_tensor.data(), inswapper_tensor.size(),
-                  { 1, 3, kfcore::face_models::kInSwapperInputExtent,
-                    kfcore::face_models::kInSwapperInputExtent } },
-              detail::HostTensorView {
-                  projected_embedding.data(), projected_embedding.size(), { 1, 512 } } });
+        const kfcore::face_models::InSwapperResult output = impl_->inswapper->infer(
+            { inswapper_tensor.data(), inswapper_tensor.size() },
+            { projected_embedding.data(), projected_embedding.size() });
         swapped_face = detail::decode_rgb_chw(
-            output.at(0).values,
+            output.values,
             static_cast<int>(kfcore::face_models::kInSwapperInputExtent), false);
     }
 
@@ -837,13 +685,10 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
             StageTimer timer(timings != nullptr
                                  ? &*timings->gfpgan_inference_and_decode
                                  : nullptr);
-            const std::vector<detail::HostTensor> output = impl_->gfpgan->run(
-                { detail::HostTensorView {
-                    gfpgan_tensor.data(), gfpgan_tensor.size(),
-                    { 1, 3, kfcore::face_models::kGfpGanInputExtent,
-                      kfcore::face_models::kGfpGanInputExtent } } });
+            const kfcore::face_models::GfpGanResult output = impl_->gfpgan->infer(
+                { gfpgan_tensor.data(), gfpgan_tensor.size() });
             enhanced_face = detail::decode_rgb_chw(
-                output.at(0).values,
+                output.values,
                 static_cast<int>(kfcore::face_models::kGfpGanInputExtent), true);
         }
         {

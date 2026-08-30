@@ -5,13 +5,10 @@
 #include "hand_interaction_demo_ui.hpp"
 
 #include "kfcore/hand_interaction/hand_interaction.hpp"
-#include "kfcore/vision_models/core.hpp"
-#if defined(KFCORE_HAND_DEMO_HAS_CPU)
-#include "kfcore/vision_models/cpu.hpp"
-#endif
-#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
-#include "kfcore/vision_models/tensorrt.hpp"
-#endif
+#include "kfcore/face_models/core.hpp"
+#include "kfcore/hand_models/core.hpp"
+#include "kfcore/hand_models/cpu.hpp"
+#include "kfcore/hand_models/tensorrt.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -35,11 +32,11 @@ using kfcore::hand_interaction::GestureFrameContext;
 using kfcore::hand_interaction::HandInteractionFrame;
 using kfcore::hand_interaction::HandInteractionOptions;
 using kfcore::hand_interaction::HandInteractionPipeline;
-using kfcore::vision_models::HandFrame;
-using kfcore::vision_models::HandInferenceBackend;
-using kfcore::vision_models::HandPipeline;
-using kfcore::vision_models::HandPipelineOptions;
-using kfcore::vision_models::FaceMeshFrame;
+using kfcore::hand_models::HandFrame;
+using kfcore::hand_models::HandInferenceBackend;
+using kfcore::hand_models::HandPipeline;
+using kfcore::hand_models::HandPipelineOptions;
+using kfcore::face_models::FaceMeshFrame;
 
 constexpr char kWindowTitle[] = "KFCore THIG Hand Interaction + FaceMesh";
 constexpr char kHandInteractionGraph[] = "hand_interaction_cycle";
@@ -50,14 +47,7 @@ constexpr double kFpsSmoothingAlpha = 0.15;
 
 demo::BackendAvailability backend_availability()
 {
-    demo::BackendAvailability result;
-#if defined(KFCORE_HAND_DEMO_HAS_CPU)
-    result.cpu = true;
-#endif
-#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
-    result.tensorrt = true;
-#endif
-    return result;
+    return { true, true };
 }
 
 const char* format_name(int format)
@@ -107,20 +97,12 @@ std::unique_ptr<HandInferenceBackend> make_backend(const demo::Arguments& argume
 {
     if (arguments.backend == demo::Backend::Cpu)
     {
-#if defined(KFCORE_HAND_DEMO_HAS_CPU)
-        return kfcore::vision_models::CpuHandBackend::load(
+        return kfcore::hand_models::CpuHandBackend::load(
             { arguments.palm_model, arguments.hand_model, arguments.classifier_model });
-#else
-        throw std::logic_error("CPU backend was not compiled into this demo");
-#endif
     }
 
-#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
-    return kfcore::vision_models::TensorRtHandBackend::load(
+    return kfcore::hand_models::TensorRtHandBackend::load(
         { arguments.palm_model, arguments.hand_model, arguments.classifier_model });
-#else
-    throw std::logic_error("TensorRT backend was not compiled into this demo");
-#endif
 }
 
 kfcore::image::ImageView image_view(const cv::Mat& image)
@@ -194,14 +176,12 @@ int run(const demo::Arguments& arguments)
     auto       model_pipeline = HandPipeline::create(
         make_backend(arguments), hand_pipeline_options);
     auto       face_pipeline = demo::make_face_pipeline(arguments);
-#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
-    std::unique_ptr<kfcore::vision_models::TensorRtVisionInput> tensor_rt_input;
+    std::unique_ptr<kfcore::hand_models::TensorRtHandInput> tensor_rt_input;
     if (arguments.backend == demo::Backend::TensorRt)
     {
         tensor_rt_input =
-            kfcore::vision_models::TensorRtVisionInput::create();
+            kfcore::hand_models::TensorRtHandInput::create();
     }
-#endif
     const auto model_load_finished = std::chrono::steady_clock::now();
     const auto model_load_ms = std::chrono::duration<double, std::milli>(
                                    model_load_finished - model_load_started)
@@ -268,13 +248,11 @@ int run(const demo::Arguments& arguments)
             source_view = image_view(inference_bgr);
         }
         auto frame_view =
-            kfcore::vision_models::VisionFrameView::borrow(source_view);
-#if defined(KFCORE_HAND_DEMO_HAS_TENSORRT)
+            kfcore::image::FrameView::borrow(source_view);
         if (tensor_rt_input)
         {
             frame_view = tensor_rt_input->prepare(source_view);
         }
-#endif
         HandFrame hands = model_pipeline->process(frame_view);
         FaceMeshFrame face;
         if (face_pipeline)

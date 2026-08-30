@@ -244,15 +244,14 @@ spec("hand interaction demo CLI")
         check_equal(demo::select_mode(modes, request), (std::size_t)1U);
     }
 
-    it("defaults to 640x480 and prefers NV12 then I420")
+    it("keeps the camera mode order instead of forcing a pixel format")
     {
         const std::vector<turbo_video_native_mode_t> modes {
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_RGB24, 1U),
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 2U),
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 3U),
+            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 1U),
+            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 2U),
         };
         demo::CaptureRequest request;
-        check_equal(demo::select_mode(modes, request), (std::size_t)2U);
+        check_equal(demo::select_mode(modes, request), (std::size_t)0U);
     }
 
     it("rejects missing exact modes and MJPEG-only matches")

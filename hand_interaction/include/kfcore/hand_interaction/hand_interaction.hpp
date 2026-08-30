@@ -80,7 +80,7 @@ public:
     HandInteractionPipeline& operator=(HandInteractionPipeline&&) noexcept;
 
     [[nodiscard]] HandInteractionFrame
-         process(const vision_models::HandFrame& frame, const GestureFrameContext& context,
+         process(const hand_models::HandFrame& frame, const GestureFrameContext& context,
                  // External layout classification is intentionally limited to one
                  // Region relation per canonical hand and frame.
                  const std::vector<thig::Observation>& external_observations = {});

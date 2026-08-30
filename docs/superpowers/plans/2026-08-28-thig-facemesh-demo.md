@@ -25,8 +25,8 @@
 ### Task 1: Backend-neutral FaceMesh pipeline
 
 **Files:**
-- Modify: `vision_models/include/kfcore/vision_models/types.hpp`
-- Modify: `vision_models/include/kfcore/vision_models/core.hpp`
+- Modify: `vision_models/include/kfcore/hand_models/types.hpp`
+- Modify: `vision_models/include/kfcore/hand_models/core.hpp`
 - Modify: `vision_models/src/pipeline.cpp`
 - Modify: `vision_models/tests/test_hand_pipeline.cpp`
 
@@ -72,7 +72,7 @@ Run: `ctest --preset win-release-user -R test_vision_model_hand_pipeline --outpu
 ### Task 2: CPU YOLOv12-face detector adapter
 
 **Files:**
-- Modify: `vision_models/include/kfcore/vision_models/cpu.hpp`
+- Modify: `vision_models/include/kfcore/hand_models/cpu.hpp`
 - Modify: `vision_models/src/cpu.cpp`
 - Modify: `vision_models/src/decode.hpp`
 - Modify: `vision_models/src/decode.cpp`
@@ -82,7 +82,7 @@ Run: `ctest --preset win-release-user -R test_vision_model_hand_pipeline --outpu
 
 **Interfaces:**
 - Consumes: `FaceDetectorBackend` and `FaceDetectionResult` from Task 1.
-- Produces: `CpuFaceDetector::load(path, CpuVisionOptions)` and `infer(ImageView)` with YOLOv12-face `images -> output0 [1,300,6]` validation.
+- Produces: `CpuFaceDetector::load(path, CpuHandOptions)` and `infer(ImageView)` with YOLOv12-face `images -> output0 [1,300,6]` validation.
 - Changes: `CpuFaceLandmarker` implements `FaceLandmarkBackend`.
 
 - [x] **Step 1: Write failing literal decode tests for highest-score class 0 selection, letterbox restoration, empty detections, non-finite values, and invalid boxes.**
@@ -107,7 +107,7 @@ class CpuFaceDetector final : public FaceDetectorBackend {
 public:
     static std::unique_ptr<CpuFaceDetector> load(
         const std::filesystem::path& model_path,
-        const CpuVisionOptions& options = {});
+        const CpuHandOptions& options = {});
     FaceDetectionResult infer(const image::ImageView& image) override;
 };
 ```

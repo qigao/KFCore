@@ -96,7 +96,7 @@ HandInteractionPipeline&
 HandInteractionPipeline::operator=(HandInteractionPipeline&&) noexcept = default;
 
 HandInteractionFrame
-HandInteractionPipeline::process(const vision_models::HandFrame&       frame,
+HandInteractionPipeline::process(const hand_models::HandFrame&       frame,
                                  const GestureFrameContext&            context,
                                  const std::vector<thig::Observation>& external_observations)
 {

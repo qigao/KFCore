@@ -44,7 +44,7 @@ shape, motion, and tracker evidence. THIG consumes confirmed canonical IDs only.
 **Files:**
 - Create: `vision_models/src/hand_appearance.hpp`
 - Create: `vision_models/src/hand_appearance.cpp`
-- Modify: `vision_models/include/kfcore/vision_models/types.hpp`
+- Modify: `vision_models/include/kfcore/hand_models/types.hpp`
 - Modify: `vision_models/src/pipeline.cpp`
 - Modify: `vision_models/CMakeLists.txt`
 

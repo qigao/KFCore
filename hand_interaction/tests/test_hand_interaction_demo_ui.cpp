@@ -120,9 +120,9 @@ spec("hand interaction demo frame and UI")
 
     it("distinguishes raw model gesture from derived hand primitives")
     {
-        kfcore::vision_models::HandResult hand;
+        kfcore::hand_models::HandResult hand;
         hand.track_id = 3;
-        hand.gesture  = kfcore::vision_models::Gesture::Open;
+        hand.gesture  = kfcore::hand_models::Gesture::Open;
 
         kfcore::hand_interaction::PrimitiveFrame primitives;
         for (const std::string& relation : { "Shape V", "Motion Stationary",
@@ -151,19 +151,19 @@ spec("hand interaction demo frame and UI")
 
     it("formats one bounded diagnostic snapshot for identity transitions")
     {
-        kfcore::vision_models::HandFrame hands;
-        kfcore::vision_models::HandResult hand;
+        kfcore::hand_models::HandFrame hands;
+        kfcore::hand_models::HandResult hand;
         hand.track_id = 7;
-        hand.handedness = kfcore::vision_models::Handedness::Left;
+        hand.handedness = kfcore::hand_models::Handedness::Left;
         hand.palm.box = { 10.0F, 20.0F, 40.0F, 60.0F };
         hand.palm.confidence = 0.90F;
         hand.landmark_confidence = 0.80F;
-        kfcore::vision_models::HandAppearanceDescriptor appearance;
+        kfcore::hand_models::HandAppearanceDescriptor appearance;
         appearance.valid_parts =
-            kfcore::vision_models::hand_appearance_part_bit(
-                kfcore::vision_models::HandAppearancePart::Palm) |
-            kfcore::vision_models::hand_appearance_part_bit(
-                kfcore::vision_models::HandAppearancePart::Pinky);
+            kfcore::hand_models::hand_appearance_part_bit(
+                kfcore::hand_models::HandAppearancePart::Palm) |
+            kfcore::hand_models::hand_appearance_part_bit(
+                kfcore::hand_models::HandAppearancePart::Pinky);
         hand.appearance = appearance;
         hands.hands.push_back(hand);
 
@@ -270,8 +270,8 @@ spec("hand interaction demo frame and UI")
     it("draws tracked hands actions and metrics without changing the input")
     {
         cv::Mat source(240, 320, CV_8UC3, cv::Scalar(0, 0, 0));
-        kfcore::vision_models::HandFrame hands;
-        kfcore::vision_models::HandResult hand;
+        kfcore::hand_models::HandFrame hands;
+        kfcore::hand_models::HandResult hand;
         hand.palm.box            = { 40.0F, 50.0F, 100.0F, 120.0F };
         hand.palm.confidence     = 0.95F;
         hand.landmark_confidence = 0.96F;
@@ -298,11 +298,11 @@ spec("hand interaction demo frame and UI")
         metrics.thig_ms                   = 0.4;
         metrics.frame_ms                  = 10.2;
 
-        kfcore::vision_models::FaceMeshFrame face;
-        face.detection = kfcore::vision_models::FaceDetection {
+        kfcore::face_models::FaceMeshFrame face;
+        face.detection = kfcore::face_models::FaceDetection {
             { 160.0F, 40.0F, 100.0F, 120.0F }, 0.9F
         };
-        kfcore::vision_models::FaceLandmarkResult landmarks;
+        kfcore::face_models::FaceLandmarkResult landmarks;
         landmarks.confidence = 0.95F;
         for (std::size_t index = 0U; index < landmarks.landmarks.size(); ++index)
         {
@@ -330,7 +330,7 @@ spec("hand interaction demo frame and UI")
 
     it("labels appearance-based identity reacquisition")
     {
-        kfcore::vision_models::HandResult hand;
+        kfcore::hand_models::HandResult hand;
         hand.track_id = 8;
         const kfcore::hand_interaction::PrimitiveFrame primitives;
 
@@ -346,8 +346,8 @@ spec("hand interaction demo frame and UI")
 
     it("keeps hand labels readable on both bright and dark camera frames")
     {
-        kfcore::vision_models::HandFrame hands;
-        kfcore::vision_models::HandResult hand;
+        kfcore::hand_models::HandFrame hands;
+        kfcore::hand_models::HandResult hand;
         hand.palm.box            = { 40.0F, 180.0F, 160.0F, 120.0F };
         hand.palm.confidence     = 0.98F;
         hand.landmark_confidence = 0.98F;

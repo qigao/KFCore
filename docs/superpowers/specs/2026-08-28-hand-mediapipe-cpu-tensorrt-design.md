@@ -30,9 +30,9 @@ landmarker consumes a caller-provided face box. Existing face-swap APIs and mode
 
 The subsystem uses a bridge between model-independent orchestration and backend implementations:
 
-- `KFCore::vision_model_core` owns public value types, geometry, classification decoding, and one
+- `KFCore::hand_model_core` owns public value types, geometry, classification decoding, and one
   `HandPipeline` instance's ByteTrack state.
-- `KFCore::vision_models_cpu` owns ONNX Runtime sessions and CPU preprocessing.
+- `KFCore::hand_models_cpu` owns ONNX Runtime sessions and CPU preprocessing.
 - `KFCore::vision_models_tensorrt` owns TensorRT adapters and one CUDA ImageProcessor per backend instance.
 
 `HandInferenceBackend` is constructor-injected into `HandPipeline`. This keeps tracking independent of

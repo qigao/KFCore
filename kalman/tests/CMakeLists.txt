@@ -4,24 +4,12 @@
 # alias) and the TurboUtils::TinyTest framework that provides the tinytest.h
 # header and test runner.
 
-if(BUILD_TESTING)
-    add_executable(kfcore_kalman_tests test.c)
-
-    target_link_libraries(kfcore_kalman_tests
-        PRIVATE
-            KFCore::kfcore
-            TurboUtils::TinyTest)
-
-    # The test source includes linalg.h / navtoolbox.h directly, so make the
-    # vendored miniblas headers reachable as well.
-    target_link_libraries(kfcore_kalman_tests PRIVATE miniblas)
-
-    if(TARGET apriltag)
-        target_link_libraries(kfcore_kalman_tests PRIVATE apriltag)
-    endif()
-
-    add_test(NAME kfcore_kalman_tests COMMAND kfcore_kalman_tests)
-
-    set_target_properties(kfcore_kalman_tests PROPERTIES
-        FOLDER "kalman/tests")
-endif()
+cmake_add_test(
+    NAME kfcore_kalman_tests
+    SOURCES test.c
+    LIBS KFCore::kfcore TurboUtils::TinyTest miniblas apriltag
+    FOLDER "kalman/tests"
+    TARGET_PROPERTIES
+      C_STANDARD 11
+      C_STANDARD_REQUIRED ON
+      C_EXTENSIONS OFF)

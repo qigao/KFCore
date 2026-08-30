@@ -1,5 +1,8 @@
 #include "hand_interaction_demo_cli.hpp"
 
+#include "kfcore/hand_models/cpu_model_names.hpp"
+#include "kfcore/hand_models/cuda_model_names.hpp"
+
 #include <turbo_fs.h>
 
 #include <array>
@@ -16,13 +19,8 @@ namespace kfcore::hand_interaction::demo
 namespace
 {
 
-constexpr std::string_view kPalmRelative =
-    "hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx";
-constexpr std::string_view kHandRelative =
-    "hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx";
-constexpr std::string_view kClassifierRelative =
-    "hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx";
-constexpr std::string_view kTensorRtRelative = "hand_gesture_model/tensorrt";
+namespace cpu_model_names  = kfcore::hand_models::cpu_model_names;
+namespace cuda_model_names = kfcore::hand_models::cuda_model_names;
 
 [[noreturn]] void fail(const std::string& message)
 {
@@ -64,20 +62,17 @@ void require_readable_file(const std::filesystem::path& path, const char* role)
     }
 }
 
-int format_rank(int format)
+bool supported_capture_format(int format) noexcept
 {
     switch (format)
     {
     case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
-        return 0;
     case TURBO_VIDEO_CAPTURE_FORMAT_I420:
-        return 1;
     case TURBO_VIDEO_CAPTURE_FORMAT_BGRA:
-        return 2;
     case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
-        return 3;
+        return true;
     default:
-        return -1;
+        return false;
     }
 }
 
@@ -297,9 +292,9 @@ Arguments parse_arguments(const std::vector<std::string>& values,
             fail("--palm, --hand, and --classifier are TensorRT-only options");
         }
         const std::filesystem::path root(*model_dir);
-        result.palm_model       = root / kPalmRelative;
-        result.hand_model       = root / kHandRelative;
-        result.classifier_model = root / kClassifierRelative;
+        result.palm_model       = root / cpu_model_names::palm_detector;
+        result.hand_model       = root / cpu_model_names::hand_landmarker;
+        result.classifier_model = root / cpu_model_names::gesture_classifier;
     }
     else
     {
@@ -315,11 +310,14 @@ Arguments parse_arguments(const std::vector<std::string>& values,
                      "TensorRT model root/profile are not set");
             }
             const std::filesystem::path root =
-                model_root / kTensorRtRelative / tensorrt_profile;
-            if (!palm.has_value()) palm = (root / "palm_detection.engine").string();
-            if (!hand.has_value()) hand = (root / "hand_landmark.engine").string();
+                model_root / cuda_model_names::engine_profile_directory /
+                tensorrt_profile;
+            if (!palm.has_value())
+                palm = (root / cuda_model_names::palm_detector).string();
+            if (!hand.has_value())
+                hand = (root / cuda_model_names::hand_landmarker).string();
             if (!classifier.has_value())
-                classifier = (root / "keypoint_classifier.engine").string();
+                classifier = (root / cuda_model_names::gesture_classifier).string();
         }
         result.palm_model       = *palm;
         result.hand_model       = *hand;
@@ -348,30 +346,23 @@ Arguments parse_arguments_from_environment(const std::vector<std::string>& value
 std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
                         const CaptureRequest& request)
 {
-    std::optional<std::size_t> selected;
-    int                        selected_rank = (std::numeric_limits<int>::max)();
     for (std::size_t index = 0U; index < modes.size(); ++index)
     {
         const auto& current = modes[index];
-        const int   rank    = format_rank(current.format);
         const bool  identity_matches =
             request.mode_id.has_value() && current.mode_id == *request.mode_id;
         const bool geometry_matches =
             !request.mode_id.has_value() && current.width == request.width &&
             current.height == request.height && rounded_fps(current) == request.fps;
-        if ((identity_matches || geometry_matches) && rank >= 0 && rank < selected_rank)
+        if ((identity_matches || geometry_matches) &&
+            supported_capture_format(current.format))
         {
-            selected      = index;
-            selected_rank = rank;
+            return index;
         }
     }
-    if (!selected.has_value())
-    {
-        fail(request.mode_id.has_value()
-                 ? "requested mode id is absent or uses an unsupported format"
-                 : "no exact uncompressed camera mode matches width, height, and fps");
-    }
-    return *selected;
+    fail(request.mode_id.has_value()
+             ? "requested mode id is absent or uses an unsupported format"
+             : "no exact supported camera mode matches width, height, and fps");
 }
 
 } // namespace kfcore::hand_interaction::demo

@@ -631,13 +631,12 @@ find_package(trackers CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE KFCore::trackers)
 ```
 
-### 可选 TensorRT YOLO 跟踪
+### YOLO CPU/CUDA 跟踪
 
-`tensorrt_yolo/` 提供可安装的 `KFCore::yolo_tracking`、
-`KFCore::tensorrt_yolo` 和 `KFCore::yolo_opencv`。它们随 KFCore 构建；TensorRT
-从标准 user preset 的 `TENSORRT_ROOT` 查找 SDK，不会把开发机路径或运行时 DLL
-复制进工程。部署契约、容量限制、图片序列示例和 tracking-only/full/install 命令见
-[tensorrt_yolo/README.md](tensorrt_yolo/README.md)。
+`yolo_core/`、`yolo_onnx/` 与 `yolo_tensorrt/` 分别导出
+`KFCore::yolo_core`、`KFCore::yolo_onnx` 和 `KFCore::yolo_tensorrt`。生产 target
+不依赖 OpenCV；ONNX 路线通过 `runtime_onnx` 在 CPU 执行，TensorRT 路线使用 CUDA。
+部署契约、容量限制与示例见 [yolo_core/README.md](yolo_core/README.md)。
 
 ### TensorRT 模型能力矩阵
 
@@ -655,14 +654,15 @@ FaceMesh 等可选阶段仍须显式启用。
 CMake 的 PowerShell。直接运行 `.exe` 时，应在该终端设置同名环境变量，或继续使用显式 CLI
 路径；CLI 始终优先。
 
-`KFCore::tensorrt_runtime` 是模型无关的同步执行边界，`KFCore::face_models`
-在它之上提供严格的 Face68、ArcFace 与年龄/性别合约；两者均随 KFCore 构建。Face adapters
-只接收调用方已经准备好的 NCHW FP32 Tensor（host 或 CUDA device），不会接收原图，也不会
-隐式执行下表所列的对齐、裁剪、通道变换或归一化。
+`KFCore::face_model_core` 提供后端无关的结果、解码、错误和 InSwapper 矩阵投影。
+`KFCore::face_models_cpu` 使用 ONNX Runtime 执行 host FP32 tensor；
+`KFCore::face_models_cuda` 在模型无关的 `KFCore::runtime_tensorrt` 之上执行 host 或 CUDA
+device tensor。消费方必须在链接时明确选择后端，不存在运行时自动 fallback。Face adapters
+不会接收原图，也不会隐式执行下表所列的对齐、裁剪、通道变换或归一化。
 
 | 模型/adapter | 输入边界 | engine 输出契约 | adapter 返回值 | adapter 外仍需完成的预处理 |
 |---|---|---|---|---|
-| YOLO Compact NMS / EfficientNMS (`KFCore::tensorrt_yolo`) | `ImageView`；内部使用 `KFCore::image_processor` letterbox | Compact `[N,max_detections,6]`，或 EfficientNMS 的 `num_dets/boxes/scores/labels` | 已校验的 detection frame | 调用方提供正确像素格式；YOLO adapter 已执行其声明的 letterbox/通道及数值变换 |
+| YOLO Compact NMS / EfficientNMS (`KFCore::yolo_tensorrt`) | `ImageView`；内部使用 `KFCore::image_processor_cuda` letterbox | Compact `[N,max_detections,6]`，或 EfficientNMS 的 `num_dets/boxes/scores/labels` | 已校验的 detection frame | 调用方提供正确像素格式；YOLO adapter 已执行其声明的 letterbox/通道及数值变换 |
 | Face68 (`TensorRtFace68`) | 已准备的 FP32 `[N,3,256,256]` | FP32 `[N,68,3]`，以及 engine 中存在时仍须绑定的 heatmap | 68 个 raw `(x,y,score)`；`x/y` 位于模型 256 像素坐标系 | 基于 bbox 的 affine crop 到 256×256、BGR、除以 255；调用方还需把输出坐标映射回原图 |
 | ArcFace (`TensorRtArcFace`) | 已准备的 FP32 `[N,3,112,112]` | FP32 `[N,512]` | 512 个 raw embedding 值，不隐式 L2 normalize | 基于 5 点人脸关键点的 similarity align 到 112×112、RGB、`value / 127.5 - 1` |
 | Age/Gender (`TensorRtAgeGender`) | 已准备的 FP32 `[N,3,224,224]` | FP32 `[N,2]` | 两个 raw logits；语义顺序不命名 | face ROI resize 到 224×224、RGB、ImageNet mean `[0.485,0.456,0.406]` / std `[0.229,0.224,0.225]` normalize |
@@ -680,21 +680,24 @@ ArcFace、Age/Gender、InSwapper 与 GFPGAN engine 都按上述 profile 目录�
 
 ### TensorRT 12face 换脸应用
 
-`KFCore::face_applications` 把上述 prepared-tensor adapters 组成同步单脸应用：
+`KFCore::face_applications_cuda` 把 CUDA prepared-tensor adapters 组成同步单脸应用：
 YOLOv12-face（唯一检测入口）→ Face68 → ArcFace → InSwapper，并可显式启用
 GFPGAN 与 Age/Gender。它依赖 OpenCV Lite 的 `core/imgproc`，命令行示例另外依赖
 `imgcodecs`。每帧由 ImageProcessor 上传一次后供检测与 Face68/ArcFace/InSwapper/GFPGAN
 CUDA 预处理复用，随后以 device tensor 直接进入 TensorRT；Age/Gender 保留 CPU ROI resize。
+`KFCore::face_applications_cpu` 使用 `KFCore::face_models_cpu` 的检测、Face68、ArcFace、
+InSwapper、GFPGAN 与 Age/Gender ONNX adapter；应用层不再直接创建 ONNX session。
 模型 I/O、matrix sidecar、所有权、非重入约束、构建和真实模型验证命令见
-[face_applications/README.md](face_applications/README.md)。
+[face_applications_cuda/README.md](face_applications_cuda/README.md)。
 
-### Hand 与 MediaPipe Landmark CPU/GPU
+### Hand Landmark CPU/CUDA
 
-`vision_models/` 提供 OpenCV-free 的 ONNX Runtime CPU 与 TensorRT CUDA 两条线路：
-Palm → 21 点 hand landmark → INT64 gesture classifier → KFCore ByteTrack/Kalman，以及消费
-调用方人脸框的 MediaPipe 468 点 landmarker。GPU 路径接受 Host/CUDA 图片，每帧只 stage
-一次并复用同一份 CUDA image；它不会隐式降级到 CPU。目标、模型 I/O、engine 转换、容量、
-所有权和分阶段耗时契约见 [vision_models/README.md](vision_models/README.md)。
+`hand_models_cpu/` 与 `hand_models_cuda/` 提供 OpenCV-free 的 ONNX Runtime CPU 与 TensorRT
+CUDA 两条对等线路：Palm → 21 点 hand landmark → INT64 gesture classifier → KFCore
+ByteTrack/Kalman。CUDA 路径接受 Host/CUDA 图片，每帧只 stage 一次并复用同一份 CUDA
+image；它不会隐式降级到 CPU。FaceMesh 独立属于 `face_model_core/`、`face_models_cpu/` 与
+`face_models_cuda/`。Hand 的模型 I/O、容量、所有权和分阶段耗时契约见
+[hand_model_core/README.md](hand_model_core/README.md)。
 
 When building from this repository, all production modules and install rules are enabled. The only project options are:
 

@@ -17,8 +17,8 @@ struct HandIdentityObservation {
   double scale = 0.0;
   float confidence = 0.0f;
   std::optional<HandShapeDescriptor> shape;
-  std::optional<vision_models::HandAppearanceDescriptor> appearance;
-  vision_models::Handedness handedness = vision_models::Handedness::Unknown;
+  std::optional<hand_models::HandAppearanceDescriptor> appearance;
+  hand_models::Handedness handedness = hand_models::Handedness::Unknown;
 };
 
 struct HandIdentityConfig {

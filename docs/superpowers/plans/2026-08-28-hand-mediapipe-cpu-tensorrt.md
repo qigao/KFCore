@@ -87,9 +87,9 @@ git commit -m "feat(tensorrt): support bounded data-dependent outputs"
 
 **Files:**
 - Create: `vision_models/CMakeLists.txt`
-- Create: `vision_models/include/kfcore/vision_models/error.hpp`
-- Create: `vision_models/include/kfcore/vision_models/types.hpp`
-- Create: `vision_models/include/kfcore/vision_models/core.hpp`
+- Create: `vision_models/include/kfcore/hand_models/error.hpp`
+- Create: `vision_models/include/kfcore/hand_models/types.hpp`
+- Create: `vision_models/include/kfcore/hand_models/core.hpp`
 - Create: `vision_models/src/error.cpp`
 - Create: `vision_models/src/geometry.hpp`
 - Create: `vision_models/src/geometry.cpp`
@@ -139,7 +139,7 @@ git commit -m "feat(vision): add hand geometry and tracking core"
 ### Task 3: OpenCV-free ONNX Runtime CPU backend
 
 **Files:**
-- Create: `vision_models/include/kfcore/vision_models/cpu.hpp`
+- Create: `vision_models/include/kfcore/hand_models/cpu.hpp`
 - Create: `vision_models/src/onnx_session.hpp`
 - Create: `vision_models/src/onnx_session.cpp`
 - Create: `vision_models/src/cpu.cpp`
@@ -149,8 +149,8 @@ git commit -m "feat(vision): add hand geometry and tracking core"
 - Modify: `CMakeUserPresets.json`
 
 **Interfaces:**
-- Produces: `CpuHandBackend::load(HandOnnxModelPaths, CpuVisionOptions)`.
-- Produces: `CpuFaceLandmarker::load(path, CpuVisionOptions)` and `infer(ImageView, FaceBox)`.
+- Produces: `CpuHandBackend::load(HandOnnxModelPaths, CpuHandOptions)`.
+- Produces: `CpuFaceLandmarker::load(path, CpuHandOptions)` and `infer(ImageView, FaceBox)`.
 
 - [x] **Step 1: Write failing public-validation tests for empty paths, host-only input, invalid boxes, zero limits, and non-copyable instance ownership.**
 
@@ -180,7 +180,7 @@ git commit -m "feat(vision): add ONNX Runtime CPU hand and face landmarks"
 ### Task 4: TensorRT CUDA backend sharing one staged image
 
 **Files:**
-- Create: `vision_models/include/kfcore/vision_models/tensorrt.hpp`
+- Create: `vision_models/include/kfcore/hand_models/tensorrt.hpp`
 - Create: `vision_models/src/tensorrt_models.hpp`
 - Create: `vision_models/src/tensorrt_models.cpp`
 - Create: `vision_models/src/tensorrt.cpp`
@@ -190,8 +190,8 @@ git commit -m "feat(vision): add ONNX Runtime CPU hand and face landmarks"
 - Modify: `CMakeUserPresets.json`
 
 **Interfaces:**
-- Produces: `TensorRtHandBackend::load(HandTensorRtEnginePaths, TensorRtVisionOptions)`.
-- Produces: `TensorRtFaceLandmarker::load(path, TensorRtVisionOptions)` and `infer(ImageView, FaceBox)`.
+- Produces: `TensorRtHandBackend::load(HandTensorRtEnginePaths, TensorRtHandOptions)`.
+- Produces: `TensorRtFaceLandmarker::load(path, TensorRtHandOptions)` and `infer(ImageView, FaceBox)`.
 
 - [x] **Step 1: Write failing validation tests for engine paths, device/limits, strict tensor contracts, and non-copyable ownership.**
 
@@ -228,7 +228,7 @@ git commit -m "feat(vision): add TensorRT hand and MediaPipe landmarks"
 - Modify: `README.md`
 
 **Interfaces:**
-- Produces exported targets `KFCore::vision_model_core`, `KFCore::vision_models_cpu`, and `KFCore::vision_models_tensorrt` when enabled.
+- Produces exported targets `KFCore::hand_model_core`, `KFCore::hand_models_cpu`, and `KFCore::vision_models_tensorrt` when enabled.
 
 - [x] **Step 1: Add installation/export dependency tests that fail before package metadata is updated.**
 

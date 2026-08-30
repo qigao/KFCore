@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kfcore/vision_models/types.hpp"
+#include "kfcore/hand_models/types.hpp"
 
 #include <array>
 #include <cstddef>
@@ -15,8 +15,8 @@ struct HandShapeDescriptor {
 };
 
 [[nodiscard]] std::optional<HandShapeDescriptor> MakeHandShapeDescriptor(
-    const std::array<vision_models::HandLandmark,
-                     vision_models::kHandLandmarkCount>& landmarks);
+    const std::array<hand_models::HandLandmark,
+                     hand_models::kHandLandmarkCount>& landmarks);
 [[nodiscard]] float HandShapeDistance(const HandShapeDescriptor& lhs,
                                       const HandShapeDescriptor& rhs);
 [[nodiscard]] bool NormalizeHandShapeDescriptor(HandShapeDescriptor& descriptor);

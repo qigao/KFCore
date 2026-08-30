@@ -62,8 +62,8 @@ struct Arguments
 [[nodiscard]] Arguments parse_arguments_from_environment(
     const std::vector<std::string>& values, BackendAvailability availability);
 
-// Returns the index into modes. Selection is exact; it never changes geometry,
-// frame rate, or compressed/uncompressed semantics behind the caller's back.
+// Returns the first processable camera-provided mode matching the exact mode id
+// or geometry and frame rate. The device enumeration owns pixel-format order.
 [[nodiscard]] std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
                                       const CaptureRequest& request);
 

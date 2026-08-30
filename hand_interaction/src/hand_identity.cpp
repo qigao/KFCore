@@ -17,8 +17,8 @@ struct IdentityState {
   int canonical_id = 0;
   int raw_track_id = -1;
   HandShapeDescriptor shape;
-  std::optional<vision_models::HandAppearanceDescriptor> appearance;
-  vision_models::Handedness handedness = vision_models::Handedness::Unknown;
+  std::optional<hand_models::HandAppearanceDescriptor> appearance;
+  hand_models::Handedness handedness = hand_models::Handedness::Unknown;
   double center_x = 0.0;
   double center_y = 0.0;
   double scale = 0.0;
@@ -40,23 +40,23 @@ struct Candidate {
 };
 
 bool IsValidAppearance(
-    const vision_models::HandAppearanceDescriptor& descriptor) {
+    const hand_models::HandAppearanceDescriptor& descriptor) {
   if (descriptor.valid_parts == 0U ||
-      (descriptor.valid_parts & ~vision_models::kAllHandAppearanceParts) != 0U) {
+      (descriptor.valid_parts & ~hand_models::kAllHandAppearanceParts) != 0U) {
     return false;
   }
   for (std::size_t part_index = 0U;
-       part_index < vision_models::kHandAppearancePartCount; ++part_index) {
-    const auto part = static_cast<vision_models::HandAppearancePart>(part_index);
+       part_index < hand_models::kHandAppearancePartCount; ++part_index) {
+    const auto part = static_cast<hand_models::HandAppearancePart>(part_index);
     const bool valid =
-        (descriptor.valid_parts & vision_models::hand_appearance_part_bit(part)) != 0U;
+        (descriptor.valid_parts & hand_models::hand_appearance_part_bit(part)) != 0U;
     const float quality = descriptor.quality[part_index];
     if (!std::isfinite(quality) ||
         (valid ? quality <= 0.0F || quality > 1.0F : quality != 0.0F)) {
       return false;
     }
-    const std::size_t offset = vision_models::hand_appearance_feature_offset(part);
-    const std::size_t count = vision_models::hand_appearance_feature_count(part);
+    const std::size_t offset = hand_models::hand_appearance_feature_offset(part);
+    const std::size_t count = hand_models::hand_appearance_feature_count(part);
     const std::size_t texture_count = count / 2U;
     for (std::size_t local = 0U; local < count; ++local) {
       const float value = descriptor.values[offset + local];
@@ -78,8 +78,8 @@ struct AppearanceComparison {
 };
 
 std::optional<AppearanceComparison> CompareAppearance(
-    const std::optional<vision_models::HandAppearanceDescriptor>& first,
-    const std::optional<vision_models::HandAppearanceDescriptor>& second,
+    const std::optional<hand_models::HandAppearanceDescriptor>& first,
+    const std::optional<hand_models::HandAppearanceDescriptor>& second,
     std::size_t minimum_comparable_parts) {
   if (!first || !second) {
     return std::nullopt;
@@ -88,14 +88,14 @@ std::optional<AppearanceComparison> CompareAppearance(
   double weighted_distance = 0.0;
   double total_weight = 0.0;
   for (std::size_t part_index = 0U;
-       part_index < vision_models::kHandAppearancePartCount; ++part_index) {
-    const auto part = static_cast<vision_models::HandAppearancePart>(part_index);
-    const std::uint8_t bit = vision_models::hand_appearance_part_bit(part);
+       part_index < hand_models::kHandAppearancePartCount; ++part_index) {
+    const auto part = static_cast<hand_models::HandAppearancePart>(part_index);
+    const std::uint8_t bit = hand_models::hand_appearance_part_bit(part);
     if ((first->valid_parts & bit) == 0U || (second->valid_parts & bit) == 0U) {
       continue;
     }
-    const std::size_t offset = vision_models::hand_appearance_feature_offset(part);
-    const std::size_t count = vision_models::hand_appearance_feature_count(part);
+    const std::size_t offset = hand_models::hand_appearance_feature_offset(part);
+    const std::size_t count = hand_models::hand_appearance_feature_count(part);
     double part_distance = 0.0;
     for (std::size_t local = 0U; local < count; ++local) {
       part_distance += std::abs(
@@ -193,7 +193,7 @@ public:
         std::clamp(config_.appearance_update_weight, 0.0001f, 1.0f);
     config_.minimum_comparable_appearance_parts =
         std::clamp<std::size_t>(config_.minimum_comparable_appearance_parts, 1U,
-                                vision_models::kHandAppearancePartCount);
+                                hand_models::kHandAppearancePartCount);
   }
 
   std::vector<HandIdentityResolution> Resolve(
@@ -244,8 +244,8 @@ public:
       // retention-limited prototype.
       for (const auto& [canonical_id, state] : identities_) {
         const bool handedness_conflict =
-            state.handedness != vision_models::Handedness::Unknown &&
-            observation.handedness != vision_models::Handedness::Unknown &&
+            state.handedness != hand_models::Handedness::Unknown &&
+            observation.handedness != hand_models::Handedness::Unknown &&
             state.handedness != observation.handedness;
         const double shape_distance =
             HandShapeDistance(*observation.shape, state.shape);
@@ -556,17 +556,17 @@ private:
         state.appearance.emplace();
       }
       for (std::size_t part_index = 0U;
-           part_index < vision_models::kHandAppearancePartCount; ++part_index) {
+           part_index < hand_models::kHandAppearancePartCount; ++part_index) {
         const auto part =
-            static_cast<vision_models::HandAppearancePart>(part_index);
-        const std::uint8_t bit = vision_models::hand_appearance_part_bit(part);
+            static_cast<hand_models::HandAppearancePart>(part_index);
+        const std::uint8_t bit = hand_models::hand_appearance_part_bit(part);
         if ((observation.appearance->valid_parts & bit) == 0U) {
           continue;
         }
         const std::size_t offset =
-            vision_models::hand_appearance_feature_offset(part);
+            hand_models::hand_appearance_feature_offset(part);
         const std::size_t count =
-            vision_models::hand_appearance_feature_count(part);
+            hand_models::hand_appearance_feature_count(part);
         if ((state.appearance->valid_parts & bit) == 0U) {
           std::copy_n(observation.appearance->values.begin() + offset, count,
                       state.appearance->values.begin() + offset);
@@ -588,8 +588,8 @@ private:
       }
     }
     if (trusted_geometry &&
-        state.handedness == vision_models::Handedness::Unknown &&
-        observation.handedness != vision_models::Handedness::Unknown) {
+        state.handedness == hand_models::Handedness::Unknown &&
+        observation.handedness != hand_models::Handedness::Unknown) {
       state.handedness = observation.handedness;
     }
     if (trusted_geometry) {

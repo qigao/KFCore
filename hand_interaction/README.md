@@ -1,6 +1,6 @@
 # Hand Interaction 与 THIG
 
-`KFCore::hand_interaction` 把 `vision_models::HandFrame` 中的 Palm box、21 点、模型手势和
+`KFCore::hand_interaction` 把 `hand_models::HandFrame` 中的 Palm box、21 点、模型手势和
 ByteTrack ID 转成有界的 primitive observations，再交给 `KFCore::thig` 解释时序动作。
 它不执行模型推理，因此 ONNX Runtime CPU 与 TensorRT CUDA 共用完全相同的身份、几何和
 手势图实现。
@@ -176,8 +176,8 @@ USB camera -> Turbo Capture -> bounded latest-frame mailbox -> owning native fra
 Capture 回调中的像素指针只在回调期间有效，因此示例在回调返回前复制一次。邮箱固定保留两个
 受 `--max-frame-bytes` 限制的 vector；推理落后时以最新帧替换未消费帧并增加 `coalesced`，不会
 让采集线程等待。mailbox 中的 RGB24/NV12/I420 原生存储是唯一 host 事实源。CPU 模式的
-`VisionFrameView::{source,compute}` 都指向这一份只读 host 帧；TensorRT 模式每帧只由
-`TensorRtVisionInput::prepare()` 上传一次，手部、face detector 与 face landmarker 共享返回的
+`image::FrameView::{source,compute}` 都指向这一份只读 host 帧；TensorRT 模式每帧只由
+`TensorRtHandInput::prepare()` 上传一次，手部、face detector 与 face landmarker 共享返回的
 CUDA `compute` view，手部 appearance 直接从 host YUV 采样。CUDA view 在下一次 `prepare()`
 时失效，所有 pipeline 均在此前同步完成。OpenCV Lite 与 Turbo Capture 只链接到示例，不成为
 `KFCore::hand_interaction` 的传递依赖。完成手部、FaceMesh 和 THIG 后才为 overlay/HighGUI
@@ -269,8 +269,8 @@ build\HandTRT\bin\hand_interaction_demo.exe `
 CPU 路径会分别报告两项。
 
 `--mode` 与 `--width/--height/--fps` 二选一，且只接受精确匹配。省略时请求
-640x480@30；同一规格按 NV12、I420、BGRA、RGB24 的顺序选择。MJPEG 会被明确拒绝，因为
-示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
+640x480@30；同一规格保留摄像头枚举返回的首个可处理模式，不强制改选某种像素格式。
+MJPEG 会被明确拒绝，因为示例没有隐式 JPEG 解码路径。`--max-frames N` 可用于可重复的有界 smoke test，默认持续运行；
 `R` 同时重置 tracker 与 THIG 状态，`Q`、Escape 或关闭窗口正常退出。
 
 启动时输出全部已启用模型的总加载耗时；窗口逐帧显示推理后的 Display-to-BGR 转换、preprocess、Palm、landmark、

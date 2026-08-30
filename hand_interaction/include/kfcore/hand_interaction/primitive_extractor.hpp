@@ -1,7 +1,7 @@
 #pragma once
 
 #include "kfcore/hand_interaction/types.hpp"
-#include "kfcore/vision_models/types.hpp"
+#include "kfcore/hand_models/types.hpp"
 
 #include <memory>
 
@@ -22,7 +22,7 @@ public:
     HandPrimitiveExtractor& operator=(HandPrimitiveExtractor&&) noexcept;
 
     [[nodiscard]] PrimitiveFrame process(
-        const vision_models::HandFrame& frame,
+        const hand_models::HandFrame& frame,
         const GestureFrameContext& context);
     void reset();
 

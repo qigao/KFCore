@@ -17,15 +17,7 @@ cmake_config_target(kfcore_thig
   FOLDER "thig")
 
 if(BUILD_TESTS)
-  add_executable(test_thig_temporal_graph
-    tests/test_temporal_graph.cpp)
-  target_include_directories(test_thig_temporal_graph PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(test_thig_temporal_graph PRIVATE
-    KFCore::thig
-    TurboUtils::TinyTest)
-  target_compile_features(test_thig_temporal_graph PRIVATE cxx_std_17)
-  add_test(NAME test_thig_temporal_graph COMMAND test_thig_temporal_graph)
+  add_subdirectory(tests)
 endif()
 
 cmake_install_headers(

@@ -2,6 +2,7 @@
 
 #include "hand_interaction_demo_capture.hpp"
 
+#include "kfcore/face_models/core.hpp"
 #include "kfcore/hand_interaction/hand_interaction.hpp"
 
 #include <opencv2/core.hpp>
@@ -26,8 +27,8 @@ enum class DemoAction
 struct DemoMetrics
 {
     CaptureCounters                    capture;
-    vision_models::StageTimings        model;
-    vision_models::FaceMeshTimings     face;
+    hand_models::StageTimings model;
+    face_models::FaceMeshTimings face;
     double                             fps        = 0.0;
     double                             convert_ms = 0.0;
     double                             thig_ms  = 0.0;
@@ -56,7 +57,7 @@ struct HandIdentityDiagnostic
     int                     canonical_id = 0;
     HandIdentityAssociation association =
         HandIdentityAssociation::UnreliableObservation;
-    vision_models::Handedness handedness = vision_models::Handedness::Unknown;
+    hand_models::Handedness handedness = hand_models::Handedness::Unknown;
     std::uint8_t appearance_parts = 0U;
 
     [[nodiscard]] bool operator==(const HandIdentityDiagnostic& other) const noexcept;
@@ -95,26 +96,26 @@ private:
     const DemoMetrics& metrics);
 
 [[nodiscard]] HandOverlayText format_hand_overlay_text(
-    const CanonicalHand& identity, const vision_models::HandResult& hand,
+    const CanonicalHand& identity, const hand_models::HandResult& hand,
     const PrimitiveFrame& primitives);
 
 [[nodiscard]] std::string format_thig_state_line(const DemoThigStatus& status);
 [[nodiscard]] std::string format_action_line(const thig::ActionEvent& action);
 
 [[nodiscard]] std::vector<HandIdentityDiagnostic> make_identity_diagnostics(
-    const vision_models::HandFrame& hands,
+    const hand_models::HandFrame& hands,
     const HandInteractionFrame& interaction);
 
 [[nodiscard]] std::string format_identity_diagnostic_line(
-    std::uint64_t frame_serial, const vision_models::HandFrame& hands,
+    std::uint64_t frame_serial, const hand_models::HandFrame& hands,
     const HandInteractionFrame& interaction);
 
 // Source must be a non-empty CV_8UC3 image. The returned overlay is mirrored,
 // owns its pixels, and source is never modified.
 [[nodiscard]] cv::Mat compose_overlay(
-    const cv::Mat& source, const vision_models::HandFrame& hands,
+    const cv::Mat& source, const hand_models::HandFrame& hands,
     const HandInteractionFrame& interaction,
     const DemoThigStatus& status,
-    const vision_models::FaceMeshFrame* face, const DemoMetrics& metrics);
+    const face_models::FaceMeshFrame* face, const DemoMetrics& metrics);
 
 } // namespace kfcore::hand_interaction::demo

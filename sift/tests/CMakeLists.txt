@@ -1,0 +1,44 @@
+cmake_add_test(
+  NAME test_sift
+  SOURCES test_sift.cpp
+  LIBS KFCore::sift TurboUtils::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/tests")
+
+cmake_add_test(
+  NAME test_popsift_options
+  SOURCES test_popsift_options.cpp
+  LIBS KFCore::sift TurboUtils::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/tests")
+
+cmake_add_test(
+  NAME test_popsift_internal
+  SOURCES test_popsift_internal.cpp
+  LIBS kfcore_popsift_internal Threads::Threads TurboUtils::TinyTest
+  INCLUDES ../vendor/popsift/src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/tests"
+  TEST_PROPERTIES TIMEOUT 30)
+
+cmake_add_test(
+  NAME test_popsift_result_validation
+  SOURCES test_popsift_result_validation.cpp
+  LIBS KFCore::sift TurboUtils::TinyTest
+  INCLUDES ../src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/tests")
+
+cmake_add_test(
+  NAME test_popsift_adapter
+  SOURCES test_popsift_adapter.cpp
+  LIBS KFCore::sift_popsift CUDA::cudart TurboUtils::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/tests")
+
+cmake_add_benchmark(
+  NAME benchmark_popsift
+  SOURCES benchmark_popsift.cpp
+  LIBS KFCore::sift_popsift TurboUtils::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "sift/benchmarks")

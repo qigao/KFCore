@@ -18,9 +18,9 @@ using kfcore::hand_interaction::HandInteractionSettings;
 using kfcore::thig::ActionEvent;
 using kfcore::thig::Observation;
 using kfcore::thig::TemporalGraphEngine;
-using kfcore::vision_models::Gesture;
-using kfcore::vision_models::HandFrame;
-using kfcore::vision_models::HandResult;
+using kfcore::hand_models::Gesture;
+using kfcore::hand_models::HandFrame;
+using kfcore::hand_models::HandResult;
 
 Observation relation(std::string name, int source_id, std::uint64_t serial, int target_id = 0)
 {

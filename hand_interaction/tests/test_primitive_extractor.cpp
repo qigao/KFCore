@@ -18,11 +18,11 @@ using kfcore::hand_interaction::HandIdentityAssociation;
 using kfcore::hand_interaction::HandPrimitiveExtractor;
 using kfcore::hand_interaction::HandPrimitiveOptions;
 using kfcore::thig::Observation;
-using kfcore::vision_models::Gesture;
-using kfcore::vision_models::HandFrame;
-using kfcore::vision_models::HandResult;
-using kfcore::vision_models::HandAppearanceDescriptor;
-using kfcore::vision_models::HandAppearancePart;
+using kfcore::hand_models::Gesture;
+using kfcore::hand_models::HandFrame;
+using kfcore::hand_models::HandResult;
+using kfcore::hand_models::HandAppearanceDescriptor;
+using kfcore::hand_models::HandAppearancePart;
 
 constexpr int kImageWidth  = 640;
 constexpr int kImageHeight = 480;
@@ -66,9 +66,9 @@ HandResult identity_hand(int track_id = 0)
     hand.palm.confidence = 0.98F;
     hand.landmark_confidence = 0.98F;
     hand.palm.box = { 40.0F, 40.0F, 160.0F, 160.0F };
-    hand.handedness = kfcore::vision_models::Handedness::Left;
+    hand.handedness = kfcore::hand_models::Handedness::Left;
 
-    constexpr std::array<kfcore::vision_models::HandLandmark, 21>
+    constexpr std::array<kfcore::hand_models::HandLandmark, 21>
         kLandmarks = {{
             { 100.0F, 220.0F, 0.0F }, { 72.0F, 210.0F, 0.0F },
             { 55.0F, 188.0F, 0.0F },  { 42.0F, 166.0F, 0.0F },
@@ -90,17 +90,17 @@ void set_appearance(HandResult& hand, float luminance, float red_chroma,
                     float green_chroma)
 {
     HandAppearanceDescriptor descriptor;
-    descriptor.valid_parts = kfcore::vision_models::kAllHandAppearanceParts;
+    descriptor.valid_parts = kfcore::hand_models::kAllHandAppearanceParts;
     descriptor.quality.fill(1.0F);
     for (std::size_t part_index = 0U;
-         part_index < kfcore::vision_models::kHandAppearancePartCount;
+         part_index < kfcore::hand_models::kHandAppearancePartCount;
          ++part_index)
     {
         const auto part = static_cast<HandAppearancePart>(part_index);
         const std::size_t offset =
-            kfcore::vision_models::hand_appearance_feature_offset(part);
+            kfcore::hand_models::hand_appearance_feature_offset(part);
         const std::size_t count =
-            kfcore::vision_models::hand_appearance_feature_count(part);
+            kfcore::hand_models::hand_appearance_feature_count(part);
         const std::size_t texture_count = count / 2U;
         const std::size_t chroma_count = count / 4U;
         std::fill_n(descriptor.values.begin() + offset, texture_count, luminance);
@@ -116,9 +116,9 @@ void set_appearance_part(HandResult& hand, HandAppearancePart part,
                          float luminance, float red_chroma, float green_chroma)
 {
     const std::size_t offset =
-        kfcore::vision_models::hand_appearance_feature_offset(part);
+        kfcore::hand_models::hand_appearance_feature_offset(part);
     const std::size_t count =
-        kfcore::vision_models::hand_appearance_feature_count(part);
+        kfcore::hand_models::hand_appearance_feature_count(part);
     const std::size_t texture_count = count / 2U;
     const std::size_t chroma_count = count / 4U;
     std::fill_n(hand.appearance->values.begin() + offset, texture_count, luminance);
@@ -132,12 +132,12 @@ void keep_appearance_parts(HandResult& hand, std::uint8_t valid_parts)
 {
     hand.appearance->valid_parts = valid_parts;
     for (std::size_t part_index = 0U;
-         part_index < kfcore::vision_models::kHandAppearancePartCount;
+         part_index < kfcore::hand_models::kHandAppearancePartCount;
          ++part_index)
     {
         const auto part = static_cast<HandAppearancePart>(part_index);
         if ((valid_parts &
-             kfcore::vision_models::hand_appearance_part_bit(part)) == 0U)
+             kfcore::hand_models::hand_appearance_part_bit(part)) == 0U)
         {
             hand.appearance->quality[part_index] = 0.0F;
         }
@@ -706,7 +706,7 @@ spec("hand primitive extractor")
         HandFrame right_frame;
         right_frame.hands.push_back(identity_hand(19));
         right_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         const auto right = extractor.process(right_frame, frame_context(2));
 
         check(right.hands[0].canonical_id > 0);
@@ -723,7 +723,7 @@ spec("hand primitive extractor")
         HandFrame flipped_frame;
         flipped_frame.hands.push_back(identity_hand(4));
         flipped_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         const auto flipped = extractor.process(flipped_frame, frame_context(2));
 
         check(flipped.hands[0].canonical_id == left.hands[0].canonical_id);
@@ -738,13 +738,13 @@ spec("hand primitive extractor")
         initial_frame.hands.push_back(identity_hand(8));
         initial_frame.hands.push_back(identity_hand(2));
         initial_frame.hands[1].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         translate_hand(initial_frame.hands[1], 400.0F, 0.0F);
         const auto initial = extractor.process(initial_frame, frame_context(1));
 
         HandFrame noisy_frame = initial_frame;
         noisy_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         const auto noisy = extractor.process(noisy_frame, frame_context(2, 33));
 
         check(noisy.hands[0].canonical_id == initial.hands[0].canonical_id);
@@ -759,7 +759,7 @@ spec("hand primitive extractor")
         HandFrame initial_frame;
         initial_frame.hands.push_back(identity_hand(10));
         initial_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         initial_frame.hands.push_back(identity_hand(20));
         set_appearance(initial_frame.hands[0], 0.1F, 0.35F, 0.35F);
         set_appearance(initial_frame.hands[1], 0.1F, 0.35F, 0.35F);
@@ -786,15 +786,15 @@ spec("hand primitive extractor")
         initial_frame.hands.push_back(identity_hand(4));
         initial_frame.hands.push_back(identity_hand(9));
         initial_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Unknown;
+            kfcore::hand_models::Handedness::Unknown;
         initial_frame.hands[1].handedness =
-            kfcore::vision_models::Handedness::Unknown;
+            kfcore::hand_models::Handedness::Unknown;
         (void)extractor.process(initial_frame, frame_context(1));
 
         HandFrame ambiguous_frame;
         ambiguous_frame.hands.push_back(identity_hand(-1));
         ambiguous_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Unknown;
+            kfcore::hand_models::Handedness::Unknown;
         const auto ambiguous =
             extractor.process(ambiguous_frame, frame_context(2));
 
@@ -1219,7 +1219,7 @@ spec("hand primitive extractor")
         HandFrame initial_frame;
         initial_frame.hands.push_back(identity_hand(0));
         initial_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         set_appearance(initial_frame.hands[0], -0.8F, 0.10F, 0.80F);
         initial_frame.hands.push_back(identity_hand(1));
         set_appearance(initial_frame.hands[1], 0.8F, 0.80F, 0.10F);
@@ -1240,7 +1240,7 @@ spec("hand primitive extractor")
             HandFrame unreliable_frame;
             unreliable_frame.hands.push_back(identity_hand(2));
             unreliable_frame.hands[0].handedness =
-                kfcore::vision_models::Handedness::Right;
+                kfcore::hand_models::Handedness::Right;
             unreliable_frame.hands[0].palm.confidence = 0.80F;
             set_appearance(unreliable_frame.hands[0], -0.8F, 0.10F, 0.80F);
             const auto unreliable = extractor.process(
@@ -1252,7 +1252,7 @@ spec("hand primitive extractor")
         HandFrame recovered_frame;
         recovered_frame.hands.push_back(identity_hand(2));
         recovered_frame.hands[0].handedness =
-            kfcore::vision_models::Handedness::Right;
+            kfcore::hand_models::Handedness::Right;
         set_appearance(recovered_frame.hands[0], -0.8F, 0.10F, 0.80F);
         const auto recovered = extractor.process(
             recovered_frame, frame_context(102, 3333));
@@ -1319,9 +1319,9 @@ spec("hand primitive extractor")
         const auto first = extractor.process(first_frame, frame_context(1));
 
         constexpr std::uint8_t kVisibleParts =
-            kfcore::vision_models::hand_appearance_part_bit(
+            kfcore::hand_models::hand_appearance_part_bit(
                 HandAppearancePart::Palm) |
-            kfcore::vision_models::hand_appearance_part_bit(
+            kfcore::hand_models::hand_appearance_part_bit(
                 HandAppearancePart::Index);
         HandFrame occluded_frame;
         occluded_frame.hands.push_back(identity_hand(10));
@@ -1411,16 +1411,16 @@ spec("hand primitive extractor")
         set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
         invalid_frame.hands[0].appearance->valid_parts &=
             static_cast<std::uint8_t>(
-                ~kfcore::vision_models::hand_appearance_part_bit(
+                ~kfcore::hand_models::hand_appearance_part_bit(
                     HandAppearancePart::Pinky));
         check_throws_as(extractor.process(invalid_frame, frame_context(1)),
                         std::invalid_argument);
 
         set_appearance(invalid_frame.hands[0], 0.0F, 0.20F, 0.20F);
         const std::size_t palm_chroma_offset =
-            kfcore::vision_models::hand_appearance_feature_offset(
+            kfcore::hand_models::hand_appearance_feature_offset(
                 HandAppearancePart::Palm) +
-            kfcore::vision_models::hand_appearance_feature_count(
+            kfcore::hand_models::hand_appearance_feature_count(
                 HandAppearancePart::Palm) /
                 2U;
         invalid_frame.hands[0].appearance->values[palm_chroma_offset] = 1.1F;
@@ -1738,7 +1738,7 @@ spec("hand primitive extractor")
 
         options = {};
         options.identity.minimum_comparable_appearance_parts =
-            kfcore::vision_models::kHandAppearancePartCount + 1U;
+            kfcore::hand_models::kHandAppearancePartCount + 1U;
         check_throws_as(HandPrimitiveExtractor { options }, std::invalid_argument);
     }
 
