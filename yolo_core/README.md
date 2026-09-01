@@ -64,7 +64,8 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user -R "test_yolo_" --output-on-failure
 ```
 
-模型路径通过 `KFCORE_MODEL_ROOT` 设置；TensorRT engine 使用
-`tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`。ONNX detector 通过
+模型根固定为进程启动工作目录下的 `./yolo-models`；TensorRT engine 使用
+`tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`，profile 只在 CMake 配置阶段
+设置并编译进库。ONNX detector 通过
 `KFCore::runtime_onnx` 执行，TensorRT detector 使用 CUDA 图像处理与 TensorRT SDK；两条路线
-没有自动 fallback。
+没有自动 fallback，模型根不接受 CMake、Preset JSON、环境变量或 API 配置。

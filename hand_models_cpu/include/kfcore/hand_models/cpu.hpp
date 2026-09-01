@@ -41,6 +41,8 @@ public:
 
     [[nodiscard]] static std::unique_ptr<CpuHandBackend>
     load(const HandOnnxModelPaths& paths, const CpuHandOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<CpuHandBackend>
+    load(const CpuHandOptions& options);
 
     HandFrame infer(const image::ImageView& image) override;
 

@@ -63,6 +63,8 @@ public:
     [[nodiscard]] static std::unique_ptr<TensorRtHandBackend>
     load(const HandTensorRtEnginePaths& paths,
          const TensorRtHandOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<TensorRtHandBackend>
+    load(const TensorRtHandOptions& options);
 
     HandFrame infer(const image::ImageView& image) override;
 

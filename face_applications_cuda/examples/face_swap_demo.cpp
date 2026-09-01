@@ -102,7 +102,7 @@ int main(int argc, char** argv)
             values.emplace_back(argv[index]);
         }
         const auto arguments =
-            kfcore::face_applications::cli::parse_arguments_from_environment(values);
+            kfcore::face_applications::cli::parse_arguments(values);
         const cv::Mat source = read_bgr(arguments.source, "--source");
         const cv::Mat target = read_bgr(arguments.target, "--target");
 
@@ -111,11 +111,9 @@ int main(int argc, char** argv)
                          kfcore::face_applications::demo::kCanvasHeight);
         show(source, target, {}, "Loading TensorRT engines...");
 
-        kfcore::face_applications::FaceApplicationModelPaths paths {
-            arguments.detector, arguments.face68, arguments.arcface, arguments.inswapper,
-            arguments.matrix, arguments.gfpgan, arguments.age_gender
-        };
-        auto application = kfcore::face_applications::TensorRtFaceSwapApplication::load(paths);
+        auto application =
+            kfcore::face_applications::TensorRtFaceSwapApplication::load(
+                kfcore::face_applications::FaceSwapOptions {});
         cv::Mat result;
         std::string status;
         kfcore::face_applications::demo::TimingHistory timing_history;

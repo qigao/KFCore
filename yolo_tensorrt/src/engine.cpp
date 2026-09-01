@@ -1,4 +1,5 @@
 #include "kfcore/yolo/tensorrt.hpp"
+#include "kfcore/yolo/tensorrt_model_names.hpp"
 
 #include "engine_file.hpp"
 #include "tensorrt_raii.hpp"
@@ -130,6 +131,14 @@ namespace
             options.border_value > kMaximumBorderValue)
         {
             throw_invalid("detector options stage: border_value must be within [0, 255]");
+        }
+        if (!std::isfinite(options.score_threshold) ||
+            options.score_threshold < 0.0F || options.score_threshold > 1.0F ||
+            !std::isfinite(options.iou_threshold) ||
+            options.iou_threshold < 0.0F || options.iou_threshold > 1.0F)
+        {
+            throw_invalid(
+                "detector options stage: score and IoU thresholds must be within [0, 1]");
         }
         return input_size;
     }
@@ -374,6 +383,16 @@ Engine::Engine(std::shared_ptr<const State> state)
 {
 }
 
+std::shared_ptr<const Engine> Engine::load_person_detector(
+    const EngineOptions& options)
+{
+    namespace names = kfcore::yolo::tensorrt_model_names;
+    const std::filesystem::path engine_root =
+        std::filesystem::path(names::default_model_root) /
+        names::engine_profile_directory / names::default_engine_profile;
+    return load(engine_root / names::person_detector, options);
+}
+
 std::shared_ptr<const Engine> Engine::load(const std::filesystem::path& engine_path,
                                            const EngineOptions&         options)
 {
@@ -462,13 +481,22 @@ std::unique_ptr<TensorRtDetector> Engine::create_detector(const DetectorOptions&
             impl->labels_host.reserve(outputs.labels.max_bytes,
                                       state_->options.max_output_bytes);
         }
-        else
+        else if (contract.output_layout == DetectionOutputLayout::CompactNms)
         {
             const CompactNmsContract& outputs =
                 std::get<CompactNmsContract>(contract.outputs);
             impl->detections_device.reserve(outputs.detections.max_bytes,
                                             state_->options.max_output_bytes);
             impl->detections_host.reserve(outputs.detections.max_bytes,
+                                          state_->options.max_output_bytes);
+        }
+        else
+        {
+            const RawYoloContract& outputs =
+                std::get<RawYoloContract>(contract.outputs);
+            impl->detections_device.reserve(outputs.predictions.max_bytes,
+                                            state_->options.max_output_bytes);
+            impl->detections_host.reserve(outputs.predictions.max_bytes,
                                           state_->options.max_output_bytes);
         }
         return std::unique_ptr<TensorRtDetector>(new TensorRtDetector(std::move(impl)));

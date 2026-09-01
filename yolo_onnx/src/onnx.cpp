@@ -1,6 +1,8 @@
 #include "kfcore/yolo/onnx.hpp"
+#include "kfcore/yolo/onnx_model_names.hpp"
 
 #include "compact_nms.hpp"
+#include "raw_yolo.hpp"
 #include "kfcore/image_processor/cpu.hpp"
 #include "kfcore/runtime_onnx/runtime.hpp"
 #include "kfcore/yolo/error.hpp"
@@ -23,6 +25,7 @@ namespace
 
 constexpr std::size_t kChannels = 3U;
 constexpr std::size_t kDetectionValues = 6U;
+constexpr std::size_t kRawBoxValues = 4U;
 
 namespace onnx_runtime = kfcore::runtime_onnx;
 
@@ -70,6 +73,11 @@ std::size_t checked_add(std::size_t left, std::size_t right,
 
 void validate_options(const OnnxDetectorOptions& options)
 {
+    if (options.input_name.empty() || options.output_name.empty() ||
+        options.input_name == options.output_name)
+    {
+        throw_invalid("input and output tensor names must be non-empty and distinct");
+    }
     if (options.intra_op_threads < 0 || options.inter_op_threads < 0)
     {
         throw_invalid("thread counts must not be negative");
@@ -87,6 +95,13 @@ void validate_options(const OnnxDetectorOptions& options)
         options.border_value > 255.0F)
     {
         throw_invalid("border value must be finite within [0,255]");
+    }
+    if (!std::isfinite(options.score_threshold) ||
+        options.score_threshold < 0.0F || options.score_threshold > 1.0F ||
+        !std::isfinite(options.iou_threshold) ||
+        options.iou_threshold < 0.0F || options.iou_threshold > 1.0F)
+    {
+        throw_invalid("score and IoU thresholds must be finite within [0,1]");
     }
 }
 
@@ -122,11 +137,13 @@ onnx_runtime::SessionOptions runtime_options(const OnnxDetectorOptions& options)
     return result;
 }
 
-onnx_runtime::ModelContract model_contract()
+onnx_runtime::ModelContract model_contract(const OnnxDetectorOptions& options)
 {
     return { "YOLO ONNX detector",
-             { { "images", onnx_runtime::ElementType::Float32, { 1, 3, -1, -1 } } },
-             { { "output0", onnx_runtime::ElementType::Float32, { 1, -1, 6 } } } };
+             { { options.input_name, onnx_runtime::ElementType::Float32,
+                 { 1, 3, -1, -1 } } },
+             { { options.output_name, onnx_runtime::ElementType::Float32,
+                 { 1, -1, -1 } } } };
 }
 
 [[noreturn]] void rethrow_runtime(const onnx_runtime::Error& error)
@@ -290,10 +307,12 @@ private:
 
 struct OnnxDetector::Impl final
 {
+    enum class OutputLayout { CompactNms, RawYolo };
+
     Impl(const std::filesystem::path& path, const OnnxDetectorOptions& options_value)
         : options(options_value)
         , environment("KFCoreYoloOnnx")
-        , session(environment, path, model_contract(), runtime_options(options))
+        , session(environment, path, model_contract(options), runtime_options(options))
     {
         validate_contract();
     }
@@ -312,20 +331,38 @@ struct OnnxDetector::Impl final
             throw_contract("images shape must be static [1,3,H,W]");
         }
         if (output_shape.size() != 3U || output_shape[0] != 1 ||
-            output_shape[1] <= 0 || output_shape[2] != 6)
+            output_shape[1] <= 0 || output_shape[2] <= 0)
         {
-            throw_contract("output0 shape must be static [1,N,6]");
+            throw_contract("output shape must be static [1,N,6] or [1,4+C,A]");
         }
-        if (static_cast<std::uintmax_t>(output_shape[1]) >
-            static_cast<std::uintmax_t>(options.max_detections))
+        if (output_shape[2] == static_cast<std::int64_t>(kDetectionValues))
         {
-            throw_resource("model detections exceed the configured maximum detections");
+            output_layout = OutputLayout::CompactNms;
+            if (static_cast<std::uintmax_t>(output_shape[1]) >
+                static_cast<std::uintmax_t>(options.max_detections))
+            {
+                throw_resource(
+                    "model detections exceed the configured maximum detections");
+            }
+            detection_count = static_cast<std::size_t>(output_shape[1]);
+            output_elements = checked_multiply(
+                detection_count, kDetectionValues, "output tensor");
+        }
+        else
+        {
+            if (output_shape[1] <= static_cast<std::int64_t>(kRawBoxValues))
+            {
+                throw_contract("raw YOLO output must contain at least one class");
+            }
+            output_layout = OutputLayout::RawYolo;
+            class_count = static_cast<std::size_t>(output_shape[1]) - kRawBoxValues;
+            candidate_count = static_cast<std::size_t>(output_shape[2]);
+            output_elements = checked_multiply(
+                static_cast<std::size_t>(output_shape[1]), candidate_count,
+                "raw output tensor");
         }
         input_height_value = static_cast<std::int32_t>(input_shape[2]);
         input_width_value = static_cast<std::int32_t>(input_shape[3]);
-        detection_count = static_cast<std::size_t>(output_shape[1]);
-        const std::size_t output_elements = checked_multiply(
-            detection_count, kDetectionValues, "output tensor");
         const std::size_t output_bytes = checked_multiply(
             output_elements, sizeof(float), "output tensor");
         if (output_bytes > options.max_output_bytes)
@@ -339,7 +376,11 @@ struct OnnxDetector::Impl final
     onnx_runtime::Session         session;
     std::int32_t                  input_width_value = 0;
     std::int32_t                  input_height_value = 0;
+    OutputLayout                  output_layout = OutputLayout::CompactNms;
     std::size_t                   detection_count = 0U;
+    std::size_t                   class_count = 0U;
+    std::size_t                   candidate_count = 0U;
+    std::size_t                   output_elements = 0U;
     std::atomic_flag              in_use = ATOMIC_FLAG_INIT;
 };
 
@@ -351,6 +392,15 @@ OnnxDetector::OnnxDetector(std::unique_ptr<Impl> impl)
 OnnxDetector::~OnnxDetector() = default;
 OnnxDetector::OnnxDetector(OnnxDetector&&) noexcept = default;
 OnnxDetector& OnnxDetector::operator=(OnnxDetector&&) noexcept = default;
+
+std::unique_ptr<OnnxDetector> OnnxDetector::load_person_detector(
+    const OnnxDetectorOptions& options)
+{
+    namespace names = kfcore::yolo::onnx_model_names;
+    return load(std::filesystem::path(names::default_model_root) /
+                    names::person_detector,
+                options);
+}
 
 std::unique_ptr<OnnxDetector> OnnxDetector::load(
     const std::filesystem::path& model_path, const OnnxDetectorOptions& options)
@@ -405,19 +455,30 @@ DetectionFrame OnnxDetector::detect(const ImageView& image)
         {
             throw_contract("runtime output set is invalid");
         }
-        const std::vector<std::int64_t> expected_output_shape {
-            1, static_cast<std::int64_t>(impl_->detection_count), 6
-        };
+        const std::vector<std::int64_t>& expected_output_shape =
+            impl_->session.declared_output_dimensions(0U);
         if (outputs[0].dimensions != expected_output_shape)
         {
-            throw_contract("runtime output shape does not match [1,N,6]");
+            throw_contract("runtime output shape changed after model validation");
         }
-        const std::size_t output_elements = checked_multiply(
-            impl_->detection_count, kDetectionValues, "runtime output tensor");
+        if (outputs[0].float_values.size() != impl_->output_elements)
+        {
+            throw_contract("runtime output element count is inconsistent");
+        }
         const std::vector<ImageView> images { image };
         const std::vector<detail::LetterboxTransform> transforms { transform };
+        if (impl_->output_layout == Impl::OutputLayout::RawYolo)
+        {
+            const detail::RawYoloOutputView raw {
+                outputs[0].float_values.data(), impl_->output_elements,
+                impl_->class_count, impl_->candidate_count,
+                TensorDataType::Float32, impl_->options.score_threshold,
+                impl_->options.iou_threshold, impl_->options.max_detections
+            };
+            return detail::decode_raw_yolo(images, transforms, raw).front();
+        }
         const detail::CompactNmsOutputView compact {
-            outputs[0].float_values.data(), output_elements,
+            outputs[0].float_values.data(), impl_->output_elements,
             impl_->detection_count, TensorDataType::Float32
         };
         return detail::decode_compact_nms(images, transforms, compact).front();
@@ -456,7 +517,13 @@ std::int32_t OnnxDetector::input_height() const noexcept
 
 std::size_t OnnxDetector::max_detections() const noexcept
 {
-    return impl_ ? impl_->detection_count : 0U;
+    if (!impl_)
+    {
+        return 0U;
+    }
+    return impl_->output_layout == Impl::OutputLayout::RawYolo
+               ? impl_->options.max_detections
+               : impl_->detection_count;
 }
 
 } // namespace kfcore::yolo

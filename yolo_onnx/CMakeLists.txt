@@ -2,6 +2,7 @@ add_library(kfcore_yolo_onnx SHARED src/onnx.cpp)
 target_include_directories(kfcore_yolo_onnx
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${KFCORE_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
     ${CMAKE_SOURCE_DIR}/yolo_core/src)

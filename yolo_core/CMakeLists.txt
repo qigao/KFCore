@@ -1,9 +1,11 @@
 add_library(kfcore_yolo_core SHARED
   src/compact_nms.cpp
+  src/raw_yolo.cpp
   src/tracking.cpp)
 target_include_directories(kfcore_yolo_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${KFCORE_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)

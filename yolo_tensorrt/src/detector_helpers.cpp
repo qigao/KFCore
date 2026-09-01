@@ -415,6 +415,33 @@ CompactNmsBufferLayout compute_compact_nms_buffer_layout(std::size_t batch,
     return { detections_bytes };
 }
 
+RawYoloBufferLayout compute_raw_yolo_buffer_layout(
+    std::size_t batch, std::size_t class_count, std::size_t candidate_count,
+    TensorDataType output_type, std::size_t max_output_bytes)
+{
+    if (batch == 0U || class_count == 0U || candidate_count == 0U)
+    {
+        throw_invalid(
+            "raw output layout stage: batch, classes, and candidates must be positive");
+    }
+    const std::size_t floating_bytes =
+        floating_element_size(output_type, "raw output layout");
+    const std::size_t channel_count =
+        checked_add(class_count, kBoxCoordinates, "raw output layout");
+    std::size_t predictions_bytes =
+        checked_multiply(batch, channel_count, "raw output layout");
+    predictions_bytes = checked_multiply(
+        predictions_bytes, candidate_count, "raw output layout");
+    predictions_bytes = checked_multiply(
+        predictions_bytes, floating_bytes, "raw output layout");
+    if (predictions_bytes > max_output_bytes)
+    {
+        throw_resource(
+            "raw output layout stage: output exceeds configured byte limit");
+    }
+    return {predictions_bytes};
+}
+
 std::vector<DetectionFrame> decode_efficient_nms(const std::vector<ImageView>&          images,
                                                  const std::vector<LetterboxTransform>& transforms,
                                                  const EfficientNmsOutputView&          outputs)

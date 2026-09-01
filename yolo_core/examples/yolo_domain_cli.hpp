@@ -54,11 +54,7 @@ struct Arguments
     int                          inter_op_threads = 0;
 };
 
-[[nodiscard]] Arguments parse_arguments(const std::vector<std::string>& values,
-                                        BackendAvailability availability,
-                                        const std::filesystem::path& model_root = {},
-                                        const std::string& tensorrt_profile = {});
-[[nodiscard]] Arguments parse_arguments_from_environment(
+[[nodiscard]] Arguments parse_arguments(
     const std::vector<std::string>& values, BackendAvailability availability);
 [[nodiscard]] std::size_t select_mode(
     const std::vector<turbo_video_native_mode_t>& modes,

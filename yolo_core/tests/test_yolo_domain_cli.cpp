@@ -32,8 +32,8 @@ spec("YOLOv8 domain application CLI")
     it("selects the only compiled backend and defaults to 640x480 NV12 request")
     {
         const Arguments arguments = parse_arguments(
-            { "yolov8_domain_demo", "--application", "parking", "--model",
-              "parking.onnx", "--max-frames", "10", "--headless" },
+            { "yolov8_domain_demo", "--application", "parking", "--max-frames",
+              "10", "--headless" },
             { true, false });
         check(arguments.backend == Backend::Cpu);
         check(arguments.application == DomainKind::Parking);
@@ -43,73 +43,51 @@ spec("YOLOv8 domain application CLI")
         check(arguments.max_frames == 10U);
     }
 
-    it("derives application model paths from the configured model root")
-    {
-        const std::filesystem::path root("C:/kfcore-models");
-        const Arguments cpu = parse_arguments(
-            { "demo", "--application", "parking" }, { true, false }, root,
-            "rtx4060-sm89-trt11.2.1-default");
-        check(cpu.model == root / "yolov8n-parking.onnx");
-
-        const Arguments gpu = parse_arguments(
-            { "demo", "--application", "football", "--backend", "tensorrt" },
-            { true, true }, root, "rtx4060-sm89-trt11.2.1-default");
-        check(gpu.model == root / "tensorrt" /
-                               "rtx4060-sm89-trt11.2.1-default" /
-                               "yolov8n-football.engine");
-
-        const Arguments explicit_model = parse_arguments(
-            { "demo", "--application", "drone", "--model", "custom.onnx" },
-            { true, false }, root, "rtx4060-sm89-trt11.2.1-default");
-        check(explicit_model.model == "custom.onnx");
-    }
-
     it("requires an explicit backend when both are compiled")
     {
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--model", "m.onnx" },
-                            { true, true }),
+                            { "demo", "--application", "drone" }, { true, true }),
                         std::invalid_argument);
         const Arguments arguments = parse_arguments(
-            { "demo", "--application", "football", "--backend", "tensorrt",
-              "--model", "football.engine" }, { true, true });
+            { "demo", "--application", "football", "--backend", "tensorrt" },
+            { true, true });
         check(arguments.backend == Backend::TensorRt);
     }
 
     it("accepts a bounded image-directory source and rejects source conflicts")
     {
         const Arguments arguments = parse_arguments(
-            { "demo", "--application", "drone", "--model", "drone.onnx",
-              "--images", "input", "--output", "output", "--max-frames", "25" },
+            { "demo", "--application", "drone", "--images", "input", "--output",
+              "output", "--max-frames", "25" },
             { true, false });
         check(arguments.images.has_value());
         check(arguments.output.has_value());
         check(arguments.max_frames == 25U);
 
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--model", "m.onnx",
-                              "--images", "in", "--output", "out", "--camera", "1" },
+                            { "demo", "--application", "drone", "--images", "in",
+                              "--output", "out", "--camera", "1" },
                             { true, false }),
                         std::invalid_argument);
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--model", "m.onnx",
-                              "--images", "in" }, { true, false }),
+                            { "demo", "--application", "drone", "--images", "in" },
+                            { true, false }),
                         std::invalid_argument);
     }
 
     it("rejects unbounded headless capture invalid scores and unavailable backends")
     {
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--model", "m.onnx",
-                              "--headless" }, { true, false }),
+                            { "demo", "--application", "drone", "--headless" },
+                            { true, false }),
                         std::invalid_argument);
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--model", "m.onnx",
-                              "--score-threshold", "1.1" }, { true, false }),
+                            { "demo", "--application", "drone", "--score-threshold",
+                              "1.1" }, { true, false }),
                         std::invalid_argument);
         check_throws_as(parse_arguments(
-                            { "demo", "--application", "drone", "--backend", "tensorrt",
-                              "--model", "m.engine" }, { true, false }),
+                            { "demo", "--application", "drone", "--backend",
+                              "tensorrt" }, { true, false }),
                         std::invalid_argument);
     }
 

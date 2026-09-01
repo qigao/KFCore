@@ -20,6 +20,7 @@ constexpr std::size_t kCompactDetectionsRank = 3;
 constexpr std::int64_t kImageChannels = 3;
 constexpr std::int64_t kBoxCoordinates = 4;
 constexpr std::int64_t kCompactDetectionValues = 6;
+constexpr std::int64_t kRawBoxValues = 4;
 
 [[noreturn]] void contract_error(const std::string& stage, const std::string& detail) {
     throw YoloError(YoloErrorCode::EngineContractMismatch, stage + " stage: " + detail);
@@ -301,26 +302,40 @@ ValidatedContract validate_engine_contract(
                 contract_error(detections.name, "output data type must be Float16 or Float32");
             }
             validate_physical_layout(detections);
-            if (detections.min_shape[2] != kCompactDetectionValues) {
-                contract_error(detections.name, "each Compact NMS row must contain six values");
-            }
             require_same_profile_dimension(images, detections, 0);
 
-            const std::size_t max_detections =
-                checked_dimension(detections.max_shape[1], detections.name);
-            if (max_detections > limits.max_detections) {
-                resource_error(detections.name,
-                               "maximum detections exceeds configured detection limit");
-            }
             ValidatedTensor validated_detections = validate_capacity(detections);
             if (validated_detections.max_bytes > limits.max_output_bytes) {
                 resource_error("outputs", "maximum output buffers exceed configured byte limit");
             }
             const std::size_t output_bytes = validated_detections.max_bytes;
+            if (detections.min_shape[2] == kCompactDetectionValues) {
+                const std::size_t max_detections =
+                    checked_dimension(detections.max_shape[1], detections.name);
+                if (max_detections > limits.max_detections) {
+                    resource_error(detections.name,
+                                   "maximum detections exceeds configured detection limit");
+                }
+                return make_contract(
+                    images, DetectionOutputLayout::CompactNms, detections.data_type,
+                    detections.max_shape[1], output_bytes, std::move(validated_images),
+                    CompactNmsContract {std::move(validated_detections)});
+            }
+            if (detections.min_shape[1] <= kRawBoxValues) {
+                contract_error(
+                    detections.name,
+                    "output must be Compact NMS [B,N,6] or raw YOLO [B,4+C,A]");
+            }
+            const std::size_t class_count = checked_dimension(
+                detections.max_shape[1] - kRawBoxValues, detections.name);
+            const std::size_t candidate_count =
+                checked_dimension(detections.max_shape[2], detections.name);
             return make_contract(
-                images, DetectionOutputLayout::CompactNms, detections.data_type,
-                detections.max_shape[1], output_bytes, std::move(validated_images),
-                CompactNmsContract {std::move(validated_detections)});
+                images, DetectionOutputLayout::RawYolo, detections.data_type,
+                static_cast<std::int64_t>(limits.max_detections), output_bytes,
+                std::move(validated_images),
+                RawYoloContract {std::move(validated_detections), class_count,
+                                 candidate_count});
         }
 
         std::array<RequiredTensor, 5> required = {{

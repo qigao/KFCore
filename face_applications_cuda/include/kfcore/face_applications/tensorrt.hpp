@@ -102,16 +102,29 @@ public:
 
     [[nodiscard]] static std::unique_ptr<TensorRtFaceSwapApplication>
     load(const FaceApplicationModelPaths& paths, const FaceSwapOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<TensorRtFaceSwapApplication>
+    load(const FaceSwapOptions& options);
 
     // Calls are synchronous and non-reentrant. BGR8, RGB8, NV12, I420, NV21, YUY2 and UYVY inputs
     // are borrowed and never mutated. Host and same-device CUDA inputs are supported.
     [[nodiscard]] FaceAnalysis analyze(const kfcore::image::ImageView& image);
+    [[nodiscard]] std::vector<FaceAnalysis> analyze_all(
+        const kfcore::image::ImageView& image);
     [[nodiscard]] kfcore::image::BgrImage swap(
         const kfcore::image::ImageView& source,
         const kfcore::image::ImageView& target);
     [[nodiscard]] ProfiledFaceSwapResult swap_profiled(
         const kfcore::image::ImageView& source,
         const kfcore::image::ImageView& target);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::ImageView& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const FiveLandmarks& target_landmarks, bool enhance);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::ImageView& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const FiveLandmarks& target_landmarks, bool enhance,
+        float enhancer_blend);
 
 private:
     struct Impl;
@@ -119,6 +132,11 @@ private:
     [[nodiscard]] kfcore::image::BgrImage swap_internal(
         const kfcore::image::ImageView& source,
         const kfcore::image::ImageView& target,
+        FaceSwapTimingReport* timings);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared_internal(
+        const kfcore::image::ImageView& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const FiveLandmarks& target_landmarks, bool enhance, float enhancer_blend,
         FaceSwapTimingReport* timings);
     std::unique_ptr<Impl> impl_;
 };

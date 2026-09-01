@@ -132,7 +132,8 @@ void require_regular_model(const fs::path& path)
     std::error_code error;
     if (!path.is_absolute() || !fs::is_regular_file(path, error) || error)
     {
-        fail("--model must be an existing absolute regular file: " + path.string());
+        fail("configured model must be an existing absolute regular file: " +
+             path.string());
     }
 }
 
@@ -503,8 +504,8 @@ int main(int argc, char** argv)
 {
     try
     {
-        const Arguments arguments = parse_arguments_from_environment(
-            argument_values(argc, argv), compiled_backends());
+        const Arguments arguments =
+            parse_arguments(argument_values(argc, argv), compiled_backends());
         if (arguments.help)
         {
             std::cout << usage_text() << '\n';

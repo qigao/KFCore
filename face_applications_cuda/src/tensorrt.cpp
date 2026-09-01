@@ -2,6 +2,7 @@
 
 #include "kfcore/face_applications/composer.hpp"
 #include "kfcore/face_applications/error.hpp"
+#include "kfcore/face_models/cuda_model_names.hpp"
 #include "kfcore/image_processor/image_processor.hpp"
 #include "kfcore/yolo/error.hpp"
 
@@ -112,6 +113,41 @@ void validate_final_pipeline_device(const FaceApplicationModelPaths& paths,
         options.inswapper.engine.device_id != options.gfpgan.engine.device_id)
     {
         throw_invalid("InSwapper and GFPGAN must use the same CUDA device");
+    }
+}
+
+FaceApplicationModelPaths default_model_paths()
+{
+    namespace names = kfcore::face_models::cuda_model_names;
+    const std::filesystem::path root(names::default_model_root);
+    const std::filesystem::path engines =
+        root / names::engine_profile_directory / names::default_engine_profile;
+    return {
+        engines / names::face_detector,
+        engines / names::face_68_landmarker,
+        engines / names::face_embedding,
+        engines / names::face_swapper,
+        root / names::face_swap_projection,
+        engines / names::face_restorer,
+        engines / names::age_gender_estimator,
+    };
+}
+
+void validate_prepared_inputs(
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const FiveLandmarks& target_landmarks)
+{
+    if (!std::all_of(source_embedding.begin(), source_embedding.end(),
+                     [](float value) { return std::isfinite(value); }))
+    {
+        throw_invalid("source embedding must contain only finite values");
+    }
+    for (const Point2f& point : target_landmarks)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y))
+        {
+            throw_invalid("target landmarks must contain only finite coordinates");
+        }
     }
 }
 
@@ -387,7 +423,7 @@ struct TensorRtFaceSwapApplication::Impl final
          std::unique_ptr<kfcore::face_models::TensorRtFace68> face68_in,
          std::unique_ptr<kfcore::face_models::TensorRtArcFace> arcface_in,
          std::unique_ptr<kfcore::face_models::TensorRtInSwapper> inswapper_in,
-         kfcore::face_models::InSwapperEmbeddingProjector projector_in,
+         std::unique_ptr<kfcore::face_models::InSwapperEmbeddingProjector> projector_in,
          std::unique_ptr<kfcore::face_models::TensorRtGfpGan> gfpgan_in,
          std::unique_ptr<kfcore::face_models::TensorRtAgeGender> age_gender_in)
         : options(std::move(options_in))
@@ -502,35 +538,45 @@ struct TensorRtFaceSwapApplication::Impl final
             kfcore::image::TensorElementType::Float32);
     }
 
-    FaceAnalysis analyze_internal(const kfcore::image::ImageView& image,
-                                  FaceAnalysisTimingReport* timings = nullptr)
+    std::vector<kfcore::yolo::Detection> detect_all_internal(
+        const kfcore::image::ImageView& image,
+        FaceAnalysisTimingReport* timings = nullptr)
     {
-        StageTimer total_timer(timings != nullptr ? &timings->total : nullptr);
         const kfcore::image::ImageView* detector_image = nullptr;
         {
             StageTimer timer(timings != nullptr ? &timings->initial_staging : nullptr);
             begin_frame();
             detector_image = &stage_for(image, options.detector_engine.device_id);
         }
-        std::optional<kfcore::yolo::Detection> detection;
+        kfcore::yolo::DetectionFrame frame;
         {
             StageTimer timer(timings != nullptr ? &timings->detection : nullptr);
-            const kfcore::yolo::DetectionFrame frame =
-                detector->detect(yolo_image_view(*detector_image));
-            detection = select_highest_score_face(frame.detections, options.face_class_id,
-                                                  options.detector_score_threshold);
+            frame = detector->detect(yolo_image_view(*detector_image));
         }
-        if (!detection)
+        std::vector<kfcore::yolo::Detection> result;
+        result.reserve(frame.detections.size());
+        for (const kfcore::yolo::Detection& detection : frame.detections)
         {
-            throw FaceApplicationError(FaceApplicationErrorCode::NoFaceDetected,
-                                       "face application detect stage: 12face found no qualifying face");
+            if (detection.class_id == options.face_class_id &&
+                std::isfinite(detection.score) &&
+                detection.score >= options.detector_score_threshold)
+            {
+                result.push_back(detection);
+            }
         }
+        return result;
+    }
 
+    FaceAnalysis analyze_detection_internal(
+        const kfcore::image::ImageView& image,
+        const kfcore::yolo::Detection& detection,
+        FaceAnalysisTimingReport* timings = nullptr)
+    {
         FaceTransform face68_aligned;
         kfcore::image::TensorView face68_values;
         {
             StageTimer timer(timings != nullptr ? &timings->face68_preprocess : nullptr);
-            face68_aligned = face68_transform(face_box(*detection));
+            face68_aligned = face68_transform(face_box(detection));
             const kfcore::image::ImageView& face68_image =
                 stage_for(image, options.face68.engine.device_id);
             face68_values = preprocess(
@@ -588,7 +634,7 @@ struct TensorRtFaceSwapApplication::Impl final
             embedding = embeddings.front();
         }
 
-        FaceAnalysis result { *detection, landmarks68, landmarks, embedding, std::nullopt };
+        FaceAnalysis result { detection, landmarks68, landmarks, embedding, std::nullopt };
         if (age_gender)
         {
             if (timings != nullptr)
@@ -601,7 +647,7 @@ struct TensorRtFaceSwapApplication::Impl final
             const kfcore::image::TensorView age_values = preprocess(
                 age_image,
                 static_cast<std::int32_t>(kfcore::face_models::kAgeGenderInputExtent),
-                age_gender_transform(image, *detection), age_gender_options(),
+                age_gender_transform(image, detection), age_gender_options(),
                 options.age_gender.engine.device_id);
             const auto logits = age_gender->infer(
                 device_image_tensor(options.age_gender.input_name,
@@ -618,13 +664,49 @@ struct TensorRtFaceSwapApplication::Impl final
         return result;
     }
 
+    FaceAnalysis analyze_internal(const kfcore::image::ImageView& image,
+                                  FaceAnalysisTimingReport* timings = nullptr)
+    {
+        StageTimer total_timer(timings != nullptr ? &timings->total : nullptr);
+        const std::vector<kfcore::yolo::Detection> detections =
+            detect_all_internal(image, timings);
+        const auto best = std::max_element(
+            detections.begin(), detections.end(),
+            [](const kfcore::yolo::Detection& left,
+               const kfcore::yolo::Detection& right)
+            {
+                return left.score < right.score;
+            });
+        if (best == detections.end())
+        {
+            throw FaceApplicationError(
+                FaceApplicationErrorCode::NoFaceDetected,
+                "face application detect stage: 12face found no qualifying face");
+        }
+        return analyze_detection_internal(image, *best, timings);
+    }
+
+    std::vector<FaceAnalysis> analyze_all_internal(
+        const kfcore::image::ImageView& image)
+    {
+        const std::vector<kfcore::yolo::Detection> detections =
+            detect_all_internal(image);
+        std::vector<FaceAnalysis> result;
+        result.reserve(detections.size());
+        for (const kfcore::yolo::Detection& detection : detections)
+        {
+            result.push_back(analyze_detection_internal(image, detection));
+        }
+        return result;
+    }
+
     FaceSwapOptions options;
     std::shared_ptr<const kfcore::yolo::Engine> detector_engine;
     std::unique_ptr<kfcore::yolo::TensorRtDetector> detector;
     std::unique_ptr<kfcore::face_models::TensorRtFace68> face68;
     std::unique_ptr<kfcore::face_models::TensorRtArcFace> arcface;
     std::unique_ptr<kfcore::face_models::TensorRtInSwapper> inswapper;
-    kfcore::face_models::InSwapperEmbeddingProjector projector;
+    std::unique_ptr<kfcore::face_models::InSwapperEmbeddingProjector> projector;
     std::unique_ptr<kfcore::face_models::TensorRtGfpGan> gfpgan;
     std::unique_ptr<kfcore::face_models::TensorRtAgeGender> age_gender;
     FloatMask inswapper_mask;
@@ -657,10 +739,11 @@ TensorRtFaceSwapApplication::load(const FaceApplicationModelPaths& paths,
                                                                 options.face68);
         auto arcface = kfcore::face_models::TensorRtArcFace::load(paths.arcface_engine,
                                                                   options.arcface);
-        auto inswapper = kfcore::face_models::TensorRtInSwapper::load(paths.inswapper_engine,
-                                                                      options.inswapper);
-        auto projector = kfcore::face_models::InSwapperEmbeddingProjector::load(
-            paths.inswapper_matrix);
+        auto inswapper = kfcore::face_models::TensorRtInSwapper::load(
+            paths.inswapper_engine, options.inswapper);
+        auto projector = std::make_unique<kfcore::face_models::InSwapperEmbeddingProjector>(
+            kfcore::face_models::InSwapperEmbeddingProjector::load(
+                paths.inswapper_matrix));
         std::unique_ptr<kfcore::face_models::TensorRtGfpGan> gfpgan;
         if (paths.gfpgan_engine)
         {
@@ -734,6 +817,43 @@ FaceAnalysis TensorRtFaceSwapApplication::analyze(const kfcore::image::ImageView
     }
 }
 
+std::unique_ptr<TensorRtFaceSwapApplication>
+TensorRtFaceSwapApplication::load(const FaceSwapOptions& options)
+{
+    return load(default_model_paths(), options);
+}
+
+std::vector<FaceAnalysis> TensorRtFaceSwapApplication::analyze_all(
+    const kfcore::image::ImageView& image)
+{
+    try
+    {
+        ApplicationCallGuard guard(impl_->in_use);
+        return impl_->analyze_all_internal(image);
+    }
+    catch (const FaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        rethrow_model(error, "all-face analysis");
+    }
+    catch (const kfcore::yolo::YoloError& error)
+    {
+        rethrow_yolo(error, "all-face analysis");
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        rethrow_image(error, "all-face analysis");
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw FaceApplicationError(FaceApplicationErrorCode::ResourceLimitExceeded,
+                                   "face application all-face analysis stage: allocation failed");
+    }
+}
+
 kfcore::image::BgrImage TensorRtFaceSwapApplication::swap(
     const kfcore::image::ImageView& source,
     const kfcore::image::ImageView& target)
@@ -750,6 +870,50 @@ ProfiledFaceSwapResult TensorRtFaceSwapApplication::swap_profiled(
     return { std::move(image), std::move(timings) };
 }
 
+kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_prepared(
+    const kfcore::image::ImageView& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const FiveLandmarks& target_landmarks, bool enhance)
+{
+    return swap_prepared(target, source_embedding, target_landmarks, enhance,
+                         impl_->options.enhancer_blend);
+}
+
+kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_prepared(
+    const kfcore::image::ImageView& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const FiveLandmarks& target_landmarks, bool enhance, float enhancer_blend)
+{
+    try
+    {
+        ApplicationCallGuard guard(impl_->in_use);
+        impl_->begin_frame();
+        return swap_prepared_internal(target, source_embedding, target_landmarks,
+                                      enhance, enhancer_blend, nullptr);
+    }
+    catch (const FaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        rethrow_model(error, "prepared swap");
+    }
+    catch (const kfcore::yolo::YoloError& error)
+    {
+        rethrow_yolo(error, "prepared swap");
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        rethrow_image(error, "prepared swap");
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw FaceApplicationError(FaceApplicationErrorCode::ResourceLimitExceeded,
+                                   "face application prepared swap stage: allocation failed");
+    }
+}
+
 kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_internal(
     const kfcore::image::ImageView& source_image,
     const kfcore::image::ImageView& target_image,
@@ -763,112 +927,10 @@ kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_internal(
             source_image, timings != nullptr ? &timings->source_analysis : nullptr);
         const FaceAnalysis target = impl_->analyze_internal(
             target_image, timings != nullptr ? &timings->target_analysis : nullptr);
-        kfcore::face_models::ArcFaceResult projected;
-        {
-            StageTimer timer(timings != nullptr ? &timings->embedding_projection : nullptr);
-            projected = impl_->projector.project(source.embedding);
-        }
-
-        FaceTransform swap_aligned;
-        kfcore::image::TensorView swap_values;
-        const kfcore::image::ImageView* target_device_image = nullptr;
-        kfcore::image::CudaImageProcessor& final_processor =
-            impl_->processor_for(impl_->options.inswapper.engine.device_id);
-        {
-            StageTimer timer(timings != nullptr ? &timings->inswapper_preprocess : nullptr);
-            swap_aligned = alignment_transform(target.landmarks, inswapper_template());
-            target_device_image = &impl_->stage_for(
-                target_image, impl_->options.inswapper.engine.device_id);
-            swap_values = impl_->preprocess(
-                *target_device_image,
-                static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent),
-                affine_transform(swap_aligned.aligned_to_source), rgb_unit_options(),
-                impl_->options.inswapper.engine.device_id);
-        }
-        kfcore::image::TensorView swap_output;
-        {
-            StageTimer timer(
-                timings != nullptr ? &timings->inswapper_inference_and_decode : nullptr);
-            swap_output = final_processor.acquire_tensor(
-                1, kfcore::face_models::kFaceModelInputChannels,
-                static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent),
-                static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent));
-            impl_->inswapper->infer_into(
-                device_image_tensor(impl_->options.inswapper.target_input_name,
-                                    kfcore::face_models::kInSwapperInputExtent, swap_values),
-                embedding_tensor(impl_->options.inswapper.source_input_name, projected),
-                mutable_device_image_tensor(impl_->options.inswapper.output_name,
-                                            kfcore::face_models::kInSwapperInputExtent,
-                                            swap_output));
-        }
-        kfcore::image::BgrImage result;
-        kfcore::image::ImageView final_device_image;
-        {
-            StageTimer timer(timings != nullptr ? &timings->inswapper_composition : nullptr);
-            final_device_image = final_processor.composite_affine(
-                *target_device_image, swap_output, host_alpha_tensor(impl_->inswapper_mask),
-                affine_transform(swap_aligned.source_to_aligned));
-            if (!impl_->gfpgan)
-            {
-                result.width = target_image.width;
-                result.height = target_image.height;
-                result.pixels.resize(final_device_image.byte_size);
-                final_processor.download_bgr(
-                    final_device_image, { result.pixels.data(), result.pixels.size() });
-            }
-        }
-
-        if (impl_->gfpgan)
-        {
-            if (timings != nullptr)
-            {
-                timings->gfpgan_preprocess.emplace();
-                timings->gfpgan_inference_and_decode.emplace();
-                timings->gfpgan_composition.emplace();
-            }
-            FaceTransform enhance_aligned;
-            kfcore::image::TensorView enhance_values;
-            {
-                StageTimer timer(timings != nullptr ? &*timings->gfpgan_preprocess : nullptr);
-                enhance_aligned = alignment_transform(target.landmarks, gfpgan_template());
-                enhance_values = impl_->preprocess(
-                    final_device_image,
-                    static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent),
-                    affine_transform(enhance_aligned.aligned_to_source), rgb_signed_options(),
-                    impl_->options.gfpgan.engine.device_id);
-            }
-            kfcore::image::TensorView enhance_output;
-            {
-                StageTimer timer(
-                    timings != nullptr ? &*timings->gfpgan_inference_and_decode : nullptr);
-                enhance_output = final_processor.acquire_tensor(
-                    1, kfcore::face_models::kFaceModelInputChannels,
-                    static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent),
-                    static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent));
-                impl_->gfpgan->infer_into(
-                    device_image_tensor(impl_->options.gfpgan.input_name,
-                                        kfcore::face_models::kGfpGanInputExtent,
-                                        enhance_values),
-                    mutable_device_image_tensor(impl_->options.gfpgan.output_name,
-                                                kfcore::face_models::kGfpGanInputExtent,
-                                                enhance_output));
-            }
-            {
-                StageTimer timer(timings != nullptr ? &*timings->gfpgan_composition : nullptr);
-                kfcore::image::TensorCompositeOptions composite_options;
-                composite_options.input_range = kfcore::image::TensorValueRange::SignedUnit;
-                composite_options.strength = impl_->options.enhancer_blend;
-                final_device_image = final_processor.composite_affine(
-                    final_device_image, enhance_output, host_alpha_tensor(impl_->gfpgan_mask),
-                    affine_transform(enhance_aligned.source_to_aligned), composite_options);
-                result.width = target_image.width;
-                result.height = target_image.height;
-                result.pixels.resize(final_device_image.byte_size);
-                final_processor.download_bgr(
-                    final_device_image, { result.pixels.data(), result.pixels.size() });
-            }
-        }
-        return result;
+        return swap_prepared_internal(target_image, source.embedding,
+                                      target.landmarks,
+                                      impl_->gfpgan != nullptr,
+                                      impl_->options.enhancer_blend, timings);
     }
     catch (const FaceApplicationError&)
     {
@@ -891,6 +953,135 @@ kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_internal(
         throw FaceApplicationError(FaceApplicationErrorCode::ResourceLimitExceeded,
                                    "face application swap stage: allocation failed");
     }
+}
+
+kfcore::image::BgrImage TensorRtFaceSwapApplication::swap_prepared_internal(
+    const kfcore::image::ImageView& target_image,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const FiveLandmarks& target_landmarks, bool enhance, float enhancer_blend,
+    FaceSwapTimingReport* timings)
+{
+    validate_prepared_inputs(source_embedding, target_landmarks);
+    if (!std::isfinite(enhancer_blend) || enhancer_blend < 0.0F ||
+        enhancer_blend > 1.0F)
+    {
+        throw_invalid("enhancer blend must be in [0,1]");
+    }
+    if (!impl_->inswapper || !impl_->projector)
+    {
+        throw_invalid("face swap was requested without InSwapper assets");
+    }
+    if (enhance && !impl_->gfpgan)
+    {
+        throw_invalid("face enhancement was requested without a GFPGAN engine");
+    }
+
+    kfcore::face_models::ArcFaceResult projected;
+    {
+        StageTimer timer(timings != nullptr ? &timings->embedding_projection : nullptr);
+        projected = impl_->projector->project(source_embedding);
+    }
+
+    FaceTransform swap_aligned;
+    kfcore::image::TensorView swap_values;
+    const kfcore::image::ImageView* target_device_image = nullptr;
+    kfcore::image::CudaImageProcessor& final_processor =
+        impl_->processor_for(impl_->options.inswapper.engine.device_id);
+    {
+        StageTimer timer(timings != nullptr ? &timings->inswapper_preprocess : nullptr);
+        swap_aligned = alignment_transform(target_landmarks, inswapper_template());
+        target_device_image = &impl_->stage_for(
+            target_image, impl_->options.inswapper.engine.device_id);
+        swap_values = impl_->preprocess(
+            *target_device_image,
+            static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent),
+            affine_transform(swap_aligned.aligned_to_source), rgb_unit_options(),
+            impl_->options.inswapper.engine.device_id);
+    }
+    kfcore::image::TensorView swap_output;
+    {
+        StageTimer timer(
+            timings != nullptr ? &timings->inswapper_inference_and_decode : nullptr);
+        swap_output = final_processor.acquire_tensor(
+            1, kfcore::face_models::kFaceModelInputChannels,
+            static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent),
+            static_cast<std::int32_t>(kfcore::face_models::kInSwapperInputExtent));
+        impl_->inswapper->infer_into(
+            device_image_tensor(impl_->options.inswapper.target_input_name,
+                                kfcore::face_models::kInSwapperInputExtent, swap_values),
+            embedding_tensor(impl_->options.inswapper.source_input_name, projected),
+            mutable_device_image_tensor(impl_->options.inswapper.output_name,
+                                        kfcore::face_models::kInSwapperInputExtent,
+                                        swap_output));
+    }
+    kfcore::image::BgrImage result;
+    kfcore::image::ImageView final_device_image;
+    {
+        StageTimer timer(timings != nullptr ? &timings->inswapper_composition : nullptr);
+        final_device_image = final_processor.composite_affine(
+            *target_device_image, swap_output, host_alpha_tensor(impl_->inswapper_mask),
+            affine_transform(swap_aligned.source_to_aligned));
+        if (!enhance)
+        {
+            result.width = target_image.width;
+            result.height = target_image.height;
+            result.pixels.resize(final_device_image.byte_size);
+            final_processor.download_bgr(
+                final_device_image, { result.pixels.data(), result.pixels.size() });
+        }
+    }
+
+    if (enhance)
+    {
+        if (timings != nullptr)
+        {
+            timings->gfpgan_preprocess.emplace();
+            timings->gfpgan_inference_and_decode.emplace();
+            timings->gfpgan_composition.emplace();
+        }
+        FaceTransform enhance_aligned;
+        kfcore::image::TensorView enhance_values;
+        {
+            StageTimer timer(timings != nullptr ? &*timings->gfpgan_preprocess : nullptr);
+            enhance_aligned = alignment_transform(target_landmarks, gfpgan_template());
+            enhance_values = impl_->preprocess(
+                final_device_image,
+                static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent),
+                affine_transform(enhance_aligned.aligned_to_source), rgb_signed_options(),
+                impl_->options.gfpgan.engine.device_id);
+        }
+        kfcore::image::TensorView enhance_output;
+        {
+            StageTimer timer(
+                timings != nullptr ? &*timings->gfpgan_inference_and_decode : nullptr);
+            enhance_output = final_processor.acquire_tensor(
+                1, kfcore::face_models::kFaceModelInputChannels,
+                static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent),
+                static_cast<std::int32_t>(kfcore::face_models::kGfpGanInputExtent));
+            impl_->gfpgan->infer_into(
+                device_image_tensor(impl_->options.gfpgan.input_name,
+                                    kfcore::face_models::kGfpGanInputExtent,
+                                    enhance_values),
+                mutable_device_image_tensor(impl_->options.gfpgan.output_name,
+                                            kfcore::face_models::kGfpGanInputExtent,
+                                            enhance_output));
+        }
+        {
+            StageTimer timer(timings != nullptr ? &*timings->gfpgan_composition : nullptr);
+            kfcore::image::TensorCompositeOptions composite_options;
+            composite_options.input_range = kfcore::image::TensorValueRange::SignedUnit;
+            composite_options.strength = enhancer_blend;
+            final_device_image = final_processor.composite_affine(
+                final_device_image, enhance_output, host_alpha_tensor(impl_->gfpgan_mask),
+                affine_transform(enhance_aligned.source_to_aligned), composite_options);
+            result.width = target_image.width;
+            result.height = target_image.height;
+            result.pixels.resize(final_device_image.byte_size);
+            final_processor.download_bgr(
+                final_device_image, { result.pixels.data(), result.pixels.size() });
+        }
+    }
+    return result;
 }
 
 } // namespace kfcore::face_applications

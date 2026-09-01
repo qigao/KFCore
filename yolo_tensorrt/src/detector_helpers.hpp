@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compact_nms.hpp"
+#include "raw_yolo.hpp"
 #include "engine_contract.hpp"
 #include "kfcore/image_processor/types.hpp"
 #include "kfcore/yolo/types.hpp"
@@ -32,6 +33,11 @@ struct DetectionBufferLayout
 struct CompactNmsBufferLayout
 {
     std::size_t detections_bytes;
+};
+
+struct RawYoloBufferLayout
+{
+    std::size_t predictions_bytes;
 };
 
 struct EfficientNmsOutputView
@@ -66,6 +72,10 @@ CompactNmsBufferLayout compute_compact_nms_buffer_layout(std::size_t batch,
                                                          std::size_t max_detections,
                                                          TensorDataType output_type,
                                                          std::size_t max_output_bytes);
+
+RawYoloBufferLayout compute_raw_yolo_buffer_layout(
+    std::size_t batch, std::size_t class_count, std::size_t candidate_count,
+    TensorDataType output_type, std::size_t max_output_bytes);
 
 std::vector<DetectionFrame> decode_efficient_nms(const std::vector<ImageView>&          images,
                                                  const std::vector<LetterboxTransform>& transforms,

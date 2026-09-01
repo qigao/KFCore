@@ -1,6 +1,7 @@
 #include "kfcore/face_applications/cpu.hpp"
 
 #include "kfcore/face_models/cpu.hpp"
+#include "kfcore/face_models/cpu_model_names.hpp"
 #include "kfcore/face_models/error.hpp"
 #include "kfcore/face_models/inswapper_embedding.hpp"
 #include "kfcore/image_processor/cpu.hpp"
@@ -96,6 +97,21 @@ void validate_paths(const CpuFaceApplicationModelPaths& paths)
     {
         throw_invalid("optional model paths must not be empty when configured");
     }
+}
+
+CpuFaceApplicationModelPaths default_model_paths()
+{
+    namespace names = kfcore::face_models::cpu_model_names;
+    const std::filesystem::path root(names::default_model_root);
+    return {
+        root / names::face_detector,
+        root / names::face_68_landmarker,
+        root / names::face_embedding,
+        root / names::face_swapper,
+        root / names::face_swap_projection,
+        root / names::face_restorer,
+        root / names::age_gender_estimator,
+    };
 }
 
 void validate_options(const CpuFaceSwapOptions& options)
@@ -255,9 +271,12 @@ struct OnnxFaceSwapApplication::Impl final
               paths.face68_model, face_model_options(options)))
         , arcface(kfcore::face_models::CpuArcFace::load(
               paths.arcface_model, face_model_options(options)))
-        , inswapper(kfcore::face_models::CpuInSwapper::load(
-              paths.inswapper_model, face_model_options(options)))
     {
+        inswapper = kfcore::face_models::CpuInSwapper::load(
+            paths.inswapper_model, face_model_options(options));
+        projector = std::make_unique<kfcore::face_models::InSwapperEmbeddingProjector>(
+            kfcore::face_models::InSwapperEmbeddingProjector::load(
+                paths.inswapper_matrix));
         if (paths.gfpgan_model)
         {
             gfpgan = kfcore::face_models::CpuGfpGan::load(
@@ -268,42 +287,14 @@ struct OnnxFaceSwapApplication::Impl final
             age_gender = kfcore::face_models::CpuAgeGender::load(
                 *paths.age_gender_model, face_model_options(options));
         }
-        projector = std::make_unique<kfcore::face_models::InSwapperEmbeddingProjector>(
-            kfcore::face_models::InSwapperEmbeddingProjector::load(paths.inswapper_matrix));
     }
 
-    [[nodiscard]] CpuFaceAnalysis analyze_internal(
-        const kfcore::image::BgrImage& image, CpuFaceAnalysisTimingReport* timings)
+    [[nodiscard]] CpuFaceAnalysis analyze_detection(
+        const kfcore::image::BgrImage& image, const CpuFaceDetection& detection,
+        CpuFaceAnalysisTimingReport* timings)
     {
-        if (timings != nullptr)
-        {
-            *timings = {};
-        }
-        StageTimer total(timings != nullptr ? &timings->total : nullptr);
-        {
-            StageTimer timer(timings != nullptr ? &timings->initial_staging : nullptr);
-            validate_image(image, options.max_image_bytes);
-        }
-
         CpuFaceAnalysis analysis;
-        {
-            StageTimer timer(timings != nullptr ? &timings->detection : nullptr);
-            const kfcore::face_models::FaceDetectionResult detection =
-                detector->infer(image.view());
-            if (!detection.face)
-            {
-                throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::NoFaceDetected,
-                                              "YOLOv12Face found no matching face");
-            }
-            analysis.detection.box = {
-                detection.face->box.x,
-                detection.face->box.y,
-                detection.face->box.x + detection.face->box.width,
-                detection.face->box.y + detection.face->box.height,
-            };
-            analysis.detection.score = detection.face->confidence;
-            analysis.detection.class_id = options.face_class_id;
-        }
+        analysis.detection = detection;
 
         detail::AlignedFace face68_crop;
         {
@@ -355,6 +346,71 @@ struct OnnxFaceSwapApplication::Impl final
                 { tensor.data(), tensor.size() });
         }
         return analysis;
+    }
+
+    [[nodiscard]] std::vector<CpuFaceDetection> detect_all(
+        const kfcore::image::BgrImage& image)
+    {
+        validate_image(image, options.max_image_bytes);
+        const kfcore::face_models::FaceDetectionsResult detections =
+            detector->infer_all(image.view());
+        std::vector<CpuFaceDetection> result;
+        result.reserve(detections.faces.size());
+        for (const kfcore::face_models::FaceDetection& detection : detections.faces)
+        {
+            result.push_back({
+                { detection.box.x, detection.box.y,
+                  detection.box.x + detection.box.width,
+                  detection.box.y + detection.box.height },
+                detection.confidence,
+                options.face_class_id,
+            });
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::vector<CpuFaceAnalysis> analyze_all_internal(
+        const kfcore::image::BgrImage& image)
+    {
+        const std::vector<CpuFaceDetection> detections = detect_all(image);
+        std::vector<CpuFaceAnalysis> result;
+        result.reserve(detections.size());
+        for (const CpuFaceDetection& detection : detections)
+        {
+            result.push_back(analyze_detection(image, detection, nullptr));
+        }
+        return result;
+    }
+
+    [[nodiscard]] CpuFaceAnalysis analyze_internal(
+        const kfcore::image::BgrImage& image, CpuFaceAnalysisTimingReport* timings)
+    {
+        if (timings != nullptr)
+        {
+            *timings = {};
+        }
+        StageTimer total(timings != nullptr ? &timings->total : nullptr);
+        {
+            StageTimer timer(timings != nullptr ? &timings->initial_staging : nullptr);
+            validate_image(image, options.max_image_bytes);
+        }
+        std::vector<CpuFaceDetection> detections;
+        {
+            StageTimer timer(timings != nullptr ? &timings->detection : nullptr);
+            detections = detect_all(image);
+        }
+        const auto best = std::max_element(
+            detections.begin(), detections.end(),
+            [](const CpuFaceDetection& left, const CpuFaceDetection& right)
+            {
+                return left.score < right.score;
+            });
+        if (best == detections.end())
+        {
+            throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::NoFaceDetected,
+                                          "YOLOv12Face found no matching face");
+        }
+        return analyze_detection(image, *best, timings);
     }
 
     CpuFaceSwapOptions options;
@@ -429,6 +485,12 @@ CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::BgrImage& 
     }
 }
 
+std::unique_ptr<OnnxFaceSwapApplication>
+OnnxFaceSwapApplication::load(const CpuFaceSwapOptions& options)
+{
+    return load(default_model_paths(), options);
+}
+
 CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::ImageView& image)
 {
     CallGuard guard(impl_->in_use);
@@ -455,6 +517,80 @@ CpuFaceAnalysis OnnxFaceSwapApplication::analyze(const kfcore::image::ImageView&
     {
         throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
                                       "CPU face analysis allocation failed");
+    }
+}
+
+void validate_prepared_inputs(
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks)
+{
+    if (!std::all_of(source_embedding.begin(), source_embedding.end(),
+                     [](float value) { return std::isfinite(value); }))
+    {
+        throw_invalid("source embedding must contain only finite values");
+    }
+    for (const CpuPoint2f& point : target_landmarks)
+    {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y))
+        {
+            throw_invalid("target landmarks must contain only finite coordinates");
+        }
+    }
+}
+
+std::vector<CpuFaceAnalysis> OnnxFaceSwapApplication::analyze_all(
+    const kfcore::image::BgrImage& image)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        return impl_->analyze_all_internal(image);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "CPU all-face analysis allocation failed");
+    }
+}
+
+std::vector<CpuFaceAnalysis> OnnxFaceSwapApplication::analyze_all(
+    const kfcore::image::ImageView& image)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        const kfcore::image::BgrImage owned = kfcore::image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_image_bytes);
+        return impl_->analyze_all_internal(owned);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "CPU all-face analysis allocation failed");
     }
 }
 
@@ -605,6 +741,86 @@ ProfiledCpuFaceSwapResult OnnxFaceSwapApplication::swap_profiled(
     }
 }
 
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap_prepared(
+    const kfcore::image::BgrImage& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks, bool enhance)
+{
+    return swap_prepared(target, source_embedding, target_landmarks, enhance,
+                         impl_->options.enhancer_blend);
+}
+
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap_prepared(
+    const kfcore::image::BgrImage& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks, bool enhance, float enhancer_blend)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        return swap_prepared_internal(target, source_embedding, target_landmarks,
+                                      enhance, enhancer_blend, nullptr);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "prepared CPU face swap allocation failed");
+    }
+}
+
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap_prepared(
+    const kfcore::image::ImageView& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks, bool enhance)
+{
+    return swap_prepared(target, source_embedding, target_landmarks, enhance,
+                         impl_->options.enhancer_blend);
+}
+
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap_prepared(
+    const kfcore::image::ImageView& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks, bool enhance, float enhancer_blend)
+{
+    CallGuard guard(impl_->in_use);
+    try
+    {
+        const kfcore::image::BgrImage owned = kfcore::image::CpuImageProcessor::copy_bgr(
+            target, impl_->options.max_image_bytes);
+        return swap_prepared_internal(owned, source_embedding, target_landmarks,
+                                      enhance, enhancer_blend, nullptr);
+    }
+    catch (const CpuFaceApplicationError&)
+    {
+        throw;
+    }
+    catch (const kfcore::image::ImageProcessorError& error)
+    {
+        translate_image_error(error);
+    }
+    catch (const kfcore::face_models::FaceModelError& error)
+    {
+        translate_face_model_error(error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw CpuFaceApplicationError(CpuFaceApplicationErrorCode::ResourceLimitExceeded,
+                                      "prepared CPU face swap allocation failed");
+    }
+}
+
 kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
     const kfcore::image::BgrImage& source,
     const kfcore::image::BgrImage& target,
@@ -619,11 +835,38 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
         source, timings != nullptr ? &timings->source_analysis : nullptr);
     const CpuFaceAnalysis target_analysis = impl_->analyze_internal(
         target, timings != nullptr ? &timings->target_analysis : nullptr);
+    return swap_prepared_internal(target, source_analysis.embedding,
+                                  target_analysis.landmarks,
+                                  impl_->gfpgan != nullptr,
+                                  impl_->options.enhancer_blend, timings);
+}
+
+kfcore::image::BgrImage OnnxFaceSwapApplication::swap_prepared_internal(
+    const kfcore::image::BgrImage& target,
+    const kfcore::face_models::ArcFaceResult& source_embedding,
+    const CpuFiveLandmarks& target_landmarks, bool enhance, float enhancer_blend,
+    CpuFaceSwapTimingReport* timings)
+{
+    validate_image(target, impl_->options.max_image_bytes);
+    validate_prepared_inputs(source_embedding, target_landmarks);
+    if (!std::isfinite(enhancer_blend) || enhancer_blend < 0.0F ||
+        enhancer_blend > 1.0F)
+    {
+        throw_invalid("enhancer_blend must be finite within [0,1]");
+    }
+    if (enhance && impl_->gfpgan == nullptr)
+    {
+        throw_invalid("face enhancement was requested without a GFPGAN model");
+    }
+    if (impl_->inswapper == nullptr || impl_->projector == nullptr)
+    {
+        throw_invalid("face swap was requested without InSwapper assets");
+    }
 
     kfcore::face_models::ArcFaceResult projected_embedding;
     {
         StageTimer timer(timings != nullptr ? &timings->embedding_projection : nullptr);
-        projected_embedding = impl_->projector->project(source_analysis.embedding);
+        projected_embedding = impl_->projector->project(source_embedding);
     }
 
     detail::AlignedFace inswapper_crop;
@@ -631,7 +874,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
     {
         StageTimer timer(timings != nullptr ? &timings->inswapper_preprocess : nullptr);
         inswapper_crop = detail::align_face(
-            target, target_analysis.landmarks, detail::inswapper_template(),
+            target, target_landmarks, detail::inswapper_template(),
             static_cast<int>(kfcore::face_models::kInSwapperInputExtent),
             impl_->options.max_image_bytes);
         inswapper_tensor = detail::preprocess_inswapper(
@@ -661,7 +904,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
                                     impl_->options.max_image_bytes);
     }
 
-    if (impl_->gfpgan != nullptr)
+    if (enhance)
     {
         if (timings != nullptr)
         {
@@ -674,7 +917,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
         {
             StageTimer timer(timings != nullptr ? &*timings->gfpgan_preprocess : nullptr);
             gfpgan_crop = detail::align_face(
-                result, target_analysis.landmarks, detail::gfpgan_template(),
+                result, target_landmarks, detail::gfpgan_template(),
                 static_cast<int>(kfcore::face_models::kGfpGanInputExtent),
                 impl_->options.max_image_bytes);
             gfpgan_tensor = detail::preprocess_gfpgan(
@@ -702,7 +945,7 @@ kfcore::image::BgrImage OnnxFaceSwapApplication::swap_internal(
                 result, enhanced_face, mask, gfpgan_crop.aligned_to_source,
                 impl_->options.max_image_bytes);
             result = detail::blend_images(result, enhanced,
-                                          impl_->options.enhancer_blend,
+                                          enhancer_blend,
                                           impl_->options.max_image_bytes);
         }
     }

@@ -87,6 +87,8 @@ public:
     [[nodiscard]] static std::unique_ptr<TensorRtFaceDetector>
     load(const std::filesystem::path& engine_path,
          const TensorRtFaceMeshOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<TensorRtFaceDetector>
+    load(const TensorRtFaceMeshOptions& options);
     FaceDetectionResult infer(const image::ImageView& image) override;
 
 private:
@@ -105,6 +107,8 @@ public:
     [[nodiscard]] static std::unique_ptr<TensorRtFaceLandmarker>
     load(const std::filesystem::path& engine_path,
          const TensorRtFaceMeshOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<TensorRtFaceLandmarker>
+    load(const TensorRtFaceMeshOptions& options);
     FaceLandmarkResult infer(const image::ImageView& image,
                              const RectF& face_box) override;
 

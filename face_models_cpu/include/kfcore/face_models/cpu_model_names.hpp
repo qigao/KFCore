@@ -1,9 +1,13 @@
 #pragma once
 
+#include "kfcore/model_configuration.hpp"
+
 namespace kfcore::face_models::cpu_model_names
 {
 
-inline constexpr char face_detector[] = "yolov12n-face.onnx";
+inline constexpr const char* default_model_root =
+    kfcore::model_configuration::model_root;
+inline constexpr char face_detector[] = "yolov11n-face.onnx";
 inline constexpr char face_mesh_landmarker[] =
     "MediaPipeFaceLandmarkDetector.onnx";
 inline constexpr char face_68_landmarker[]   = "2dfan4.onnx";

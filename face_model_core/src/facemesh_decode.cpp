@@ -33,6 +33,24 @@ std::optional<FaceDetection> decode_yolo12_face(
     float confidence_threshold, const image::LetterboxTransform& letterbox,
     std::int32_t image_width, std::int32_t image_height)
 {
+    const std::vector<FaceDetection> faces = decode_yolo12_faces(
+        values, value_count, face_class_id, confidence_threshold, letterbox,
+        image_width, image_height);
+    const auto best = std::max_element(
+        faces.begin(), faces.end(),
+        [](const FaceDetection& left, const FaceDetection& right)
+        {
+            return left.confidence < right.confidence;
+        });
+    return best == faces.end() ? std::nullopt
+                               : std::optional<FaceDetection>(*best);
+}
+
+std::vector<FaceDetection> decode_yolo12_faces(
+    const float* values, std::size_t value_count, std::int32_t face_class_id,
+    float confidence_threshold, const image::LetterboxTransform& letterbox,
+    std::int32_t image_width, std::int32_t image_height)
+{
     constexpr std::size_t kValuesPerDetection = 6U;
     if ((values == nullptr && value_count != 0U) ||
         value_count % kValuesPerDetection != 0U)
@@ -55,7 +73,7 @@ std::optional<FaceDetection> decode_yolo12_face(
         throw_contract("YOLOv12 face decode configuration is invalid");
     }
 
-    std::optional<FaceDetection> best;
+    std::vector<FaceDetection> faces;
     const std::size_t row_count = value_count / kValuesPerDetection;
     for (std::size_t index = 0; index < row_count; ++index)
     {
@@ -93,15 +111,11 @@ std::optional<FaceDetection> decode_yolo12_face(
         {
             throw_contract("YOLOv12 face restored box has no positive area");
         }
-        const FaceDetection candidate {
+        faces.push_back(FaceDetection {
             { left, top, right - left, bottom - top }, score
-        };
-        if (!best || candidate.confidence > best->confidence)
-        {
-            best = candidate;
-        }
+        });
     }
-    return best;
+    return faces;
 }
 
 std::array<Point3f, kFaceMeshLandmarkCount> decode_face_landmarks(

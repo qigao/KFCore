@@ -64,13 +64,13 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user --output-on-failure
 ```
 
-ONNX 与 engine 由 `KFCORE_MODEL_ROOT` 加模块固定相对路径解析；路径由外部
-`CMakeUserPresets.json` 的环境变量提供。模型和 engine 是部署资产，不随 KFCore 安装。
+ONNX 与 engine 从进程启动工作目录下唯一的 `./yolo-models` 加模块相对路径解析。
+模型和 engine 是应用部署资产，不随 KFCore 安装。
 CPU ONNX 与 CUDA engine 的固定名称分别公开在
 `kfcore/hand_models/cpu_model_names.hpp` 和 `kfcore/hand_models/cuda_model_names.hpp`。其中 CPU
-常量是相对 `KFCORE_MODEL_ROOT` 的完整路径；CUDA 先拼接 `engine_profile_directory`、
-`KFCORE_TENSORRT_ENGINE_PROFILE`，再拼接对应 engine 名。加载接口仍接收显式完整路径，不会在
-模型库内部读取环境变量或自动切换后端。
+默认加载接口使用固定相对模型根；CUDA 再拼接 `engine_profile_directory`、CMake cache variable
+`KFCORE_TENSORRT_ENGINE_PROFILE` 和对应 engine 名。底层显式路径 overload 保留给测试
+与库内验证；应用运行时不读取模型环境变量，也不自动切换后端。
 
 ## 从 ONNX 生成 TensorRT engine
 
@@ -78,8 +78,9 @@ CPU ONNX 与 CUDA engine 的固定名称分别公开在
 参数相关；必须在部署环境重新生成并保留 ONNX 来源、hash 和转换命令。
 
 ```powershell
-$models = $env:KFCORE_MODEL_ROOT
-$handEngines = Join-Path $models "hand_gesture_model/tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
+$models = (Resolve-Path "$PWD/yolo-models").Path
+$profile = 'rtx4060-sm89-trt11.2.1-default'
+$handEngines = Join-Path $models "hand_gesture_model/tensorrt/$profile"
 $trtexec = Join-Path $env:TENSORRT_ROOT "bin\trtexec.exe"
 
 & $trtexec --onnx="$models\hand_gesture_model\palm_detection\palm_detection_full_inf_post_192x192.onnx" `

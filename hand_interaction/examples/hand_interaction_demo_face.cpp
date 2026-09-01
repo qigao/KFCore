@@ -11,16 +11,6 @@ namespace kfcore::hand_interaction::demo
 std::unique_ptr<face_models::FaceMeshPipeline> make_face_pipeline(
     const Arguments& arguments)
 {
-    if (arguments.face_detector_model.has_value() !=
-        arguments.face_landmark_model.has_value())
-    {
-        throw std::invalid_argument(
-            "FaceMesh demo requires detector and landmark models together");
-    }
-    if (!arguments.face_detector_model.has_value())
-    {
-        return nullptr;
-    }
     if (!std::isfinite(arguments.face_detection_score_threshold) ||
         arguments.face_detection_score_threshold < 0.0F ||
         arguments.face_detection_score_threshold > 1.0F ||
@@ -40,20 +30,16 @@ std::unique_ptr<face_models::FaceMeshPipeline> make_face_pipeline(
         options.face_detection_score_threshold =
             arguments.face_detection_score_threshold;
         return face_models::FaceMeshPipeline::create(
-            face_models::CpuFaceDetector::load(
-                *arguments.face_detector_model, options),
-            face_models::CpuFaceLandmarker::load(
-                *arguments.face_landmark_model, options),
+            face_models::CpuFaceDetector::load(options),
+            face_models::CpuFaceLandmarker::load(options),
             pipeline_options);
     }
     face_models::TensorRtFaceMeshOptions options;
     options.face_detection_score_threshold =
         arguments.face_detection_score_threshold;
     return face_models::FaceMeshPipeline::create(
-        face_models::TensorRtFaceDetector::load(
-            *arguments.face_detector_model, options),
-        face_models::TensorRtFaceLandmarker::load(
-            *arguments.face_landmark_model, options),
+        face_models::TensorRtFaceDetector::load(options),
+        face_models::TensorRtFaceLandmarker::load(options),
         pipeline_options);
 }
 

@@ -49,6 +49,9 @@ public:
     [[nodiscard]] static std::unique_ptr<CpuFaceDetector>
     load(const std::filesystem::path& model_path,
          const CpuFaceMeshOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<CpuFaceDetector>
+    load(const CpuFaceMeshOptions& options);
+    [[nodiscard]] FaceDetectionsResult infer_all(const image::ImageView& image);
     FaceDetectionResult infer(const image::ImageView& image) override;
 
 private:
@@ -67,6 +70,8 @@ public:
     [[nodiscard]] static std::unique_ptr<CpuFaceLandmarker>
     load(const std::filesystem::path& model_path,
          const CpuFaceMeshOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<CpuFaceLandmarker>
+    load(const CpuFaceMeshOptions& options);
     FaceLandmarkResult infer(const image::ImageView& image,
                              const RectF& face_box) override;
 

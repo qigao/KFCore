@@ -11,6 +11,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace kfcore::face_applications
 {
@@ -137,10 +138,16 @@ public:
     [[nodiscard]] static std::unique_ptr<OnnxFaceSwapApplication>
     load(const CpuFaceApplicationModelPaths& paths,
          const CpuFaceSwapOptions& options = {});
+    [[nodiscard]] static std::unique_ptr<OnnxFaceSwapApplication>
+    load(const CpuFaceSwapOptions& options);
 
     // Calls are synchronous and non-reentrant. Inputs are borrowed and never mutated.
     [[nodiscard]] CpuFaceAnalysis analyze(const kfcore::image::BgrImage& image);
     [[nodiscard]] CpuFaceAnalysis analyze(const kfcore::image::ImageView& image);
+    [[nodiscard]] std::vector<CpuFaceAnalysis> analyze_all(
+        const kfcore::image::BgrImage& image);
+    [[nodiscard]] std::vector<CpuFaceAnalysis> analyze_all(
+        const kfcore::image::ImageView& image);
     [[nodiscard]] kfcore::image::BgrImage swap(
         const kfcore::image::BgrImage& source,
         const kfcore::image::BgrImage& target);
@@ -153,6 +160,24 @@ public:
     [[nodiscard]] ProfiledCpuFaceSwapResult swap_profiled(
         const kfcore::image::ImageView& source,
         const kfcore::image::ImageView& target);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::BgrImage& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const CpuFiveLandmarks& target_landmarks, bool enhance);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::BgrImage& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const CpuFiveLandmarks& target_landmarks, bool enhance,
+        float enhancer_blend);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::ImageView& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const CpuFiveLandmarks& target_landmarks, bool enhance);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared(
+        const kfcore::image::ImageView& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const CpuFiveLandmarks& target_landmarks, bool enhance,
+        float enhancer_blend);
 
 private:
     struct Impl;
@@ -160,6 +185,11 @@ private:
     [[nodiscard]] kfcore::image::BgrImage swap_internal(
         const kfcore::image::BgrImage& source,
         const kfcore::image::BgrImage& target,
+        CpuFaceSwapTimingReport* timings);
+    [[nodiscard]] kfcore::image::BgrImage swap_prepared_internal(
+        const kfcore::image::BgrImage& target,
+        const kfcore::face_models::ArcFaceResult& source_embedding,
+        const CpuFiveLandmarks& target_landmarks, bool enhance, float enhancer_blend,
         CpuFaceSwapTimingReport* timings);
     std::unique_ptr<Impl> impl_;
 };

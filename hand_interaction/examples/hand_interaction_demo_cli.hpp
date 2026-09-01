@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,20 +45,11 @@ struct Arguments
     std::optional<Backend>       backend;
     std::optional<std::uint64_t> max_frames;
     CaptureRequest               capture;
-    std::filesystem::path        palm_model;
-    std::filesystem::path        hand_model;
-    std::filesystem::path        classifier_model;
-    std::optional<std::filesystem::path> face_detector_model;
-    std::optional<std::filesystem::path> face_landmark_model;
-    float                                face_detection_score_threshold = 0.50F;
-    float                                face_landmark_score_threshold = 0.50F;
+    float                        face_detection_score_threshold = 0.50F;
+    float                        face_landmark_score_threshold = 0.50F;
 };
 
-[[nodiscard]] Arguments parse_arguments(const std::vector<std::string>& values,
-                                        BackendAvailability availability,
-                                        const std::filesystem::path& model_root = {},
-                                        const std::string& tensorrt_profile = {});
-[[nodiscard]] Arguments parse_arguments_from_environment(
+[[nodiscard]] Arguments parse_arguments(
     const std::vector<std::string>& values, BackendAvailability availability);
 
 // Returns the first processable camera-provided mode matching the exact mode id

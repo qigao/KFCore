@@ -1,4 +1,5 @@
 #include "kfcore/hand_models/cpu.hpp"
+#include "kfcore/hand_models/cpu_model_names.hpp"
 
 #include "decode.hpp"
 #include "geometry.hpp"
@@ -200,6 +201,17 @@ CpuHandBackend::CpuHandBackend(std::unique_ptr<Impl> impl)
 }
 
 CpuHandBackend::~CpuHandBackend() = default;
+
+std::unique_ptr<CpuHandBackend> CpuHandBackend::load(
+    const CpuHandOptions& options)
+{
+    namespace names = kfcore::hand_models::cpu_model_names;
+    const std::filesystem::path root(names::default_model_root);
+    return load({ root / names::palm_detector,
+                  root / names::hand_landmarker,
+                  root / names::gesture_classifier },
+                options);
+}
 
 std::unique_ptr<CpuHandBackend> CpuHandBackend::load(
     const HandOnnxModelPaths& paths, const CpuHandOptions& options)

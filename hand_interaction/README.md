@@ -223,43 +223,34 @@ PowerShell 启动 exe 时，父 shell 仍需把这些目录加入 `PATH`。
 build\HandCPU\bin\hand_interaction_demo.exe --list-cameras
 ```
 
-直接启动应用前设置与 `CMakeUserPresets.json` 相同的运行时环境。CPU 使用仓库已有的三份
-ONNX hand 模型；省略 `--model-dir` 时从 `KFCORE_MODEL_ROOT` 推导：
+CPU 使用进程启动工作目录下 `./yolo-models` 中固定名称的三份 ONNX hand 模型；运行时不接收模型目录或模型
+文件参数：
 
 ```powershell
-$env:KFCORE_MODEL_ROOT = (Resolve-Path "$PWD/yolo-models").Path
-$env:KFCORE_TENSORRT_ENGINE_PROFILE = 'rtx4060-sm89-trt11.2.1-default'
-$modelRoot = $env:KFCORE_MODEL_ROOT
 build\HandCPU\bin\hand_interaction_demo.exe `
   --backend cpu --camera 0 --width 640 --height 480 --fps 30
 ```
 
-在同一窗口启用 FaceMesh 时，额外显式提供 YOLOv12-face detector 与 MediaPipe 468 点模型；
-两项必须同时出现，省略两项仍保持原有 hand-only 行为：
+FaceMesh 使用同一模型根中的固定 detector 与 468 点模型并始终启用：
 
 ```powershell
 build\HandCPU\bin\hand_interaction_demo.exe `
-  --backend cpu --camera 1 --mode 0 --max-frames 100 `
-  --face-detector (Join-Path $modelRoot 'yolov12n-face.onnx') `
-  --facemesh (Join-Path $modelRoot 'MediaPipeFaceLandmarkDetector.onnx')
+  --backend cpu --camera 1 --mode 0 --max-frames 100
 ```
 
-TensorRT 从固定 profile 目录解析三份可信 engine，不会自动生成 engine 或回退到 CPU；显式
-`--palm`、`--hand`、`--classifier` 仍可逐项覆盖：
+TensorRT 从 CMake 配置的固定 profile 目录解析三份可信 engine，不会自动生成 engine、接受
+运行时覆盖或回退到 CPU：
 
 ```powershell
 build\HandTRT\bin\hand_interaction_demo.exe `
   --backend tensorrt --camera 0 --mode 385
 ```
 
-TensorRT FaceMesh 使用同模型生成的 strongly typed engine：
+TensorRT FaceMesh 自动使用同 profile 下的 strongly typed engine：
 
 ```powershell
-$faceEngineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 build\HandTRT\bin\hand_interaction_demo.exe `
-  --backend tensorrt --camera 1 --mode 0 --max-frames 100 `
-  --face-detector (Join-Path $faceEngineRoot 'yolov12n-face.engine') `
-  --facemesh (Join-Path $faceEngineRoot 'face_landmark.engine')
+  --backend tensorrt --camera 1 --mode 0 --max-frames 100
 ```
 
 `--face-score` 和 `--facemesh-score` 分别设置 detector 与 landmarks 的 `[0,1]` 置信度阈值，

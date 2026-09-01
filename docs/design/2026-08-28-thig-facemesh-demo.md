@@ -34,15 +34,14 @@ resource-limit violations, and runtime failures remain exceptions.
 
 ## Configuration and compatibility
 
-FaceMesh remains disabled unless both `--face-detector` and `--facemesh` are
-provided. Supplying only one path is rejected. `--face-score` controls the
-YOLOv12-face threshold and `--facemesh-score` controls landmark visibility;
-both accept finite values in `[0,1]`.
+FaceMesh uses KFCore's fixed `./yolo-models` root and is always enabled;
+the demo does not accept detector or landmark model paths. `--face-score`
+controls the face detector threshold and `--facemesh-score` controls landmark
+visibility; both accept finite values in `[0,1]`.
 
-CPU paths name ONNX files. TensorRT paths name engines built for the active
-TensorRT/GPU environment. Existing hand-only invocations and public THIG
-behavior remain unchanged. Reset still resets hand tracking and THIG state;
-the FaceMesh path is stateless.
+The CPU backend loads fixed ONNX names. The TensorRT backend loads engines from
+the CMake-configured profile. Public THIG behavior remains unchanged. Reset
+still resets hand tracking and THIG state; the FaceMesh path is stateless.
 
 ## Rendering and performance
 

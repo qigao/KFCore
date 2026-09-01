@@ -1,7 +1,8 @@
 #include "yolo_domain_cli.hpp"
 
+#include "kfcore/model_configuration.hpp"
+
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -117,38 +118,24 @@ int rounded_fps(const turbo_video_native_mode_t& mode)
         static_cast<double>(mode.framerate_denominator)));
 }
 
-std::filesystem::path configured_model_path(
-    DomainKind application, Backend backend, const std::filesystem::path& model_root,
-    const std::string& tensorrt_profile)
+std::filesystem::path configured_model_path(DomainKind application, Backend backend)
 {
-    if (model_root.empty())
-    {
-        fail("--model is required when KFCORE_MODEL_ROOT is not set");
-    }
+    const std::filesystem::path model_root(
+        kfcore::model_configuration::model_root);
     const std::string basename = "yolov8n-" + domain_profile(application).name;
     if (backend == Backend::Cpu)
     {
         return model_root / (basename + ".onnx");
     }
-    if (tensorrt_profile.empty())
-    {
-        fail("--model is required when KFCORE_TENSORRT_ENGINE_PROFILE is not set");
-    }
-    return model_root / "tensorrt" / tensorrt_profile / (basename + ".engine");
-}
-
-std::string environment_value(const char* name)
-{
-    const char* value = std::getenv(name);
-    return value != nullptr ? value : "";
+    return model_root / "tensorrt" /
+           kfcore::model_configuration::tensorrt_engine_profile /
+           (basename + ".engine");
 }
 
 } // namespace
 
 Arguments parse_arguments(const std::vector<std::string>& values,
-                          BackendAvailability availability,
-                          const std::filesystem::path& model_root,
-                          const std::string& tensorrt_profile)
+                          BackendAvailability availability)
 {
     if (values.empty())
     {
@@ -191,8 +178,6 @@ Arguments parse_arguments(const std::vector<std::string>& values,
             result.application = parse_domain_kind(value);
         else if (option == "--backend")
             result.backend = parse_backend(value);
-        else if (option == "--model")
-            result.model = value;
         else if (option == "--images")
             result.images = std::filesystem::path(value);
         else if (option == "--output")
@@ -264,11 +249,7 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         fail(std::string(backend_name(*result.backend)) +
              " backend was not compiled into the application");
     }
-    if (result.model.empty())
-    {
-        result.model = configured_model_path(*result.application, *result.backend,
-                                             model_root, tensorrt_profile);
-    }
+    result.model = configured_model_path(*result.application, *result.backend);
     if (result.images.has_value())
     {
         if (!result.output.has_value())
@@ -289,14 +270,6 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         fail("headless camera capture requires --max-frames");
     }
     return result;
-}
-
-Arguments parse_arguments_from_environment(const std::vector<std::string>& values,
-                                           BackendAvailability availability)
-{
-    return parse_arguments(values, availability,
-                           environment_value("KFCORE_MODEL_ROOT"),
-                           environment_value("KFCORE_TENSORRT_ENGINE_PROFILE"));
 }
 
 std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
@@ -333,13 +306,12 @@ std::string usage_text()
 {
     return
         "usage: yolov8_domain_demo --application <drone|football|parking> "
-        "--backend <cpu|tensorrt> [--model <onnx|engine>] "
+        "--backend <cpu|tensorrt> "
         "[--camera <index> [--mode <id> | --width 640 --height 480 --fps 30] | "
         "--images <dir> --output <dir>] [--score-threshold <0..1>] "
         "[--max-frames <count>] [--mirror] [--headless]\n"
         "       yolov8_domain_demo --list-cameras\n"
-        "When --model is omitted, KFCORE_MODEL_ROOT and (for TensorRT) "
-        "KFCORE_TENSORRT_ENGINE_PROFILE select the model.";
+        "Models are selected under ./yolo-models.";
 }
 
 } // namespace kfcore::yolo::demo

@@ -1,4 +1,5 @@
 #include "kfcore/face_models/tensorrt.hpp"
+#include "kfcore/face_models/cuda_model_names.hpp"
 
 #include "facemesh_decode.hpp"
 #include "facemesh_geometry.hpp"
@@ -327,6 +328,16 @@ TensorRtFaceDetector::TensorRtFaceDetector(std::unique_ptr<Impl> impl)
 TensorRtFaceDetector::~TensorRtFaceDetector() = default;
 
 std::unique_ptr<TensorRtFaceDetector> TensorRtFaceDetector::load(
+    const TensorRtFaceMeshOptions& options)
+{
+    namespace names = kfcore::face_models::cuda_model_names;
+    const std::filesystem::path engine_root =
+        std::filesystem::path(names::default_model_root) /
+        names::engine_profile_directory / names::default_engine_profile;
+    return load(engine_root / names::face_detector, options);
+}
+
+std::unique_ptr<TensorRtFaceDetector> TensorRtFaceDetector::load(
     const std::filesystem::path& engine_path, const TensorRtFaceMeshOptions& options)
 {
     validate_options(options);
@@ -431,6 +442,16 @@ TensorRtFaceLandmarker::TensorRtFaceLandmarker(std::unique_ptr<Impl> impl)
 }
 
 TensorRtFaceLandmarker::~TensorRtFaceLandmarker() = default;
+
+std::unique_ptr<TensorRtFaceLandmarker> TensorRtFaceLandmarker::load(
+    const TensorRtFaceMeshOptions& options)
+{
+    namespace names = kfcore::face_models::cuda_model_names;
+    const std::filesystem::path engine_root =
+        std::filesystem::path(names::default_model_root) /
+        names::engine_profile_directory / names::default_engine_profile;
+    return load(engine_root / names::face_mesh_landmarker, options);
+}
 
 std::unique_ptr<TensorRtFaceLandmarker> TensorRtFaceLandmarker::load(
     const std::filesystem::path& engine_path, const TensorRtFaceMeshOptions& options)

@@ -41,16 +41,13 @@ int main(int argc, char** argv)
             values.emplace_back(argv[index]);
         }
         const auto arguments =
-            kfcore::face_applications::cli::parse_arguments_from_environment(values);
+            kfcore::face_applications::cli::parse_arguments(values);
 
         const cv::Mat source = read_bgr(arguments.source, "--source");
         const cv::Mat target = read_bgr(arguments.target, "--target");
-        kfcore::face_applications::FaceApplicationModelPaths paths {
-            arguments.detector, arguments.face68, arguments.arcface, arguments.inswapper,
-            arguments.matrix, arguments.gfpgan, arguments.age_gender
-        };
         auto application =
-            kfcore::face_applications::TensorRtFaceSwapApplication::load(paths);
+            kfcore::face_applications::TensorRtFaceSwapApplication::load(
+                kfcore::face_applications::FaceSwapOptions {});
         kfcore::image::BgrImage output = application->swap(
             kfcore::face_applications::demo::borrowed_bgr(source, "source"),
             kfcore::face_applications::demo::borrowed_bgr(target, "target"));

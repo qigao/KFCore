@@ -1,12 +1,9 @@
 #include "face_swap_cli.hpp"
 
-#include "kfcore/face_models/cuda_model_names.hpp"
-
 #include "turbo_fs.h"
 
 #include <array>
 #include <cstddef>
-#include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -18,27 +15,17 @@ namespace kfcore::face_applications::cli
 namespace
 {
 
-namespace model_names = kfcore::face_models::cuda_model_names;
-
 struct OptionBinding
 {
     const char* name;
-    std::string Arguments::*required_member;
-    std::optional<std::string> Arguments::*optional_member;
+    std::string Arguments::*member;
     bool input_file;
 };
 
-constexpr std::array<OptionBinding, 10> kBindings = {
-    OptionBinding { "--source", &Arguments::source, nullptr, true },
-    OptionBinding { "--target", &Arguments::target, nullptr, true },
-    OptionBinding { "--output", &Arguments::output, nullptr, false },
-    OptionBinding { "--detector", &Arguments::detector, nullptr, true },
-    OptionBinding { "--face68", &Arguments::face68, nullptr, true },
-    OptionBinding { "--arcface", &Arguments::arcface, nullptr, true },
-    OptionBinding { "--inswapper", &Arguments::inswapper, nullptr, true },
-    OptionBinding { "--matrix", &Arguments::matrix, nullptr, true },
-    OptionBinding { "--gfpgan", nullptr, &Arguments::gfpgan, true },
-    OptionBinding { "--age-gender", nullptr, &Arguments::age_gender, true },
+constexpr std::array<OptionBinding, 3> kBindings = {
+    OptionBinding { "--source", &Arguments::source, true },
+    OptionBinding { "--target", &Arguments::target, true },
+    OptionBinding { "--output", &Arguments::output, false },
 };
 
 [[noreturn]] void fail(const std::string& message)
@@ -60,11 +47,7 @@ const OptionBinding& find_binding(const std::string& option)
 
 bool is_set(const Arguments& arguments, const OptionBinding& binding)
 {
-    if (binding.required_member != nullptr)
-    {
-        return !(arguments.*binding.required_member).empty();
-    }
-    return (arguments.*binding.optional_member).has_value();
+    return !(arguments.*binding.member).empty();
 }
 
 void assign(Arguments& arguments, const OptionBinding& binding, std::string value)
@@ -73,23 +56,12 @@ void assign(Arguments& arguments, const OptionBinding& binding, std::string valu
     {
         fail(std::string("duplicate option: ") + binding.name);
     }
-    if (binding.required_member != nullptr)
-    {
-        arguments.*binding.required_member = std::move(value);
-    }
-    else
-    {
-        arguments.*binding.optional_member = std::move(value);
-    }
+    arguments.*binding.member = std::move(value);
 }
 
 const std::string& value_of(const Arguments& arguments, const OptionBinding& binding)
 {
-    if (binding.required_member != nullptr)
-    {
-        return arguments.*binding.required_member;
-    }
-    return *(arguments.*binding.optional_member);
+    return arguments.*binding.member;
 }
 
 void require_readable_file(const std::string& path, const char* option)
@@ -124,45 +96,9 @@ bool resolves_to_same_file(const std::string& left, const std::string& right)
     return normalized_left == normalized_right;
 }
 
-void derive_required_model_paths(Arguments& arguments,
-                                 const std::filesystem::path& model_root,
-                                 const std::string& tensorrt_profile)
-{
-    if (model_root.empty())
-    {
-        return;
-    }
-    if (arguments.matrix.empty())
-    {
-        arguments.matrix = (model_root / model_names::face_swap_projection).string();
-    }
-    if (tensorrt_profile.empty())
-    {
-        return;
-    }
-    const std::filesystem::path root =
-        model_root / model_names::engine_profile_directory / tensorrt_profile;
-    if (arguments.detector.empty())
-        arguments.detector = (root / model_names::face_detector).string();
-    if (arguments.face68.empty())
-        arguments.face68 = (root / model_names::face_68_landmarker).string();
-    if (arguments.arcface.empty())
-        arguments.arcface = (root / model_names::face_embedding).string();
-    if (arguments.inswapper.empty())
-        arguments.inswapper = (root / model_names::face_swapper).string();
-}
-
-std::string environment_value(const char* name)
-{
-    const char* value = std::getenv(name);
-    return value != nullptr ? value : "";
-}
-
 } // namespace
 
-Arguments parse_arguments(const std::vector<std::string>& values,
-                          const std::filesystem::path& model_root,
-                          const std::string& tensorrt_profile)
+Arguments parse_arguments(const std::vector<std::string>& values)
 {
     if (values.empty())
     {
@@ -182,11 +118,9 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         assign(arguments, binding, values[index + 1U]);
     }
 
-    derive_required_model_paths(arguments, model_root, tensorrt_profile);
-
     for (const OptionBinding& binding : kBindings)
     {
-        if (binding.optional_member == nullptr && !is_set(arguments, binding))
+        if (!is_set(arguments, binding))
         {
             fail(std::string("missing required option: ") + binding.name);
         }
@@ -201,12 +135,6 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         fail("--output must differ from --source and --target");
     }
     return arguments;
-}
-
-Arguments parse_arguments_from_environment(const std::vector<std::string>& values)
-{
-    return parse_arguments(values, environment_value("KFCORE_MODEL_ROOT"),
-                           environment_value("KFCORE_TENSORRT_ENGINE_PROFILE"));
 }
 
 } // namespace kfcore::face_applications::cli

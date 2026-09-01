@@ -98,11 +98,11 @@ std::unique_ptr<HandInferenceBackend> make_backend(const demo::Arguments& argume
     if (arguments.backend == demo::Backend::Cpu)
     {
         return kfcore::hand_models::CpuHandBackend::load(
-            { arguments.palm_model, arguments.hand_model, arguments.classifier_model });
+            kfcore::hand_models::CpuHandOptions {});
     }
 
     return kfcore::hand_models::TensorRtHandBackend::load(
-        { arguments.palm_model, arguments.hand_model, arguments.classifier_model });
+        kfcore::hand_models::TensorRtHandOptions {});
 }
 
 kfcore::image::ImageView image_view(const cv::Mat& image)
@@ -342,8 +342,7 @@ int main(int argc, char** argv)
         {
             values.emplace_back(argv[index] != nullptr ? argv[index] : "");
         }
-        return run(demo::parse_arguments_from_environment(values,
-                                                          backend_availability()));
+        return run(demo::parse_arguments(values, backend_availability()));
     }
     catch (const std::exception& error)
     {

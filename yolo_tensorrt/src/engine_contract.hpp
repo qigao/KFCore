@@ -60,7 +60,7 @@ struct ValidatedTensor {
     std::size_t max_bytes;
 };
 
-enum class DetectionOutputLayout { EfficientNms, CompactNms };
+enum class DetectionOutputLayout { EfficientNms, CompactNms, RawYolo };
 
 struct EfficientNmsContract {
     ValidatedTensor num_dets;
@@ -73,7 +73,14 @@ struct CompactNmsContract {
     ValidatedTensor detections;
 };
 
-using DetectionOutputContract = std::variant<EfficientNmsContract, CompactNmsContract>;
+struct RawYoloContract {
+    ValidatedTensor predictions;
+    std::size_t class_count;
+    std::size_t candidate_count;
+};
+
+using DetectionOutputContract =
+    std::variant<EfficientNmsContract, CompactNmsContract, RawYoloContract>;
 
 struct ValidatedContract {
     std::int64_t min_batch;

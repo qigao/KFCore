@@ -64,6 +64,14 @@ struct FaceDetectionResult
     double                       total_ms      = 0.0;
 };
 
+struct FaceDetectionsResult
+{
+    std::vector<FaceDetection> faces;
+    double                     preprocess_ms = 0.0;
+    double                     inference_ms  = 0.0;
+    double                     total_ms      = 0.0;
+};
+
 struct FaceLandmarkResult
 {
     std::array<Point3f, kFaceMeshLandmarkCount> landmarks {};

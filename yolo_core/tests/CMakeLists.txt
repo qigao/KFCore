@@ -1,6 +1,14 @@
 set(_yolo_core_test_folder "yolo_core/tests")
 
 cmake_add_test(
+  NAME test_raw_yolo
+  SOURCES test_raw_yolo.cpp
+  LIBS KFCore::yolo_core TurboUtils::TinyTest
+  INCLUDES ../src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_yolo_core_test_folder}")
+
+cmake_add_test(
   NAME test_yolo_domain_profile
   SOURCES test_yolo_domain_profile.cpp ../examples/yolo_domain_profile.cpp
   LIBS KFCore::yolo_core TurboUtils::TinyTest

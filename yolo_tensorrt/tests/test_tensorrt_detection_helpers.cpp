@@ -231,6 +231,34 @@ spec("TensorRT YOLO detection helpers")
             YoloErrorCode::ResourceLimitExceeded, "outputs");
     }
 
+    it("computes bounded raw YOLO tensor byte sizes")
+    {
+        const RawYoloBufferLayout fp32 = compute_raw_yolo_buffer_layout(
+            1, 80, 8400, TensorDataType::Float32, 2'822'400);
+        check(fp32.predictions_bytes == std::size_t { 2'822'400 });
+
+        const RawYoloBufferLayout fp16 = compute_raw_yolo_buffer_layout(
+            1, 80, 8400, TensorDataType::Float16, 1'411'200);
+        check(fp16.predictions_bytes == std::size_t { 1'411'200 });
+
+        expect_yolo_error(
+            [&]
+            {
+                (void)compute_raw_yolo_buffer_layout(
+                    1, 80, 8400, TensorDataType::Float32, 2'822'399);
+            },
+            YoloErrorCode::ResourceLimitExceeded, "raw output layout");
+        expect_yolo_error(
+            [&]
+            {
+                (void)compute_raw_yolo_buffer_layout(
+                    1, (std::numeric_limits<std::size_t>::max)(), 1,
+                    TensorDataType::Float32,
+                    (std::numeric_limits<std::size_t>::max)());
+            },
+            YoloErrorCode::ResourceLimitExceeded, "raw output layout");
+    }
+
     it("decodes Compact NMS rows and removes zero-score padding")
     {
         std::uint8_t pixels[3] {};

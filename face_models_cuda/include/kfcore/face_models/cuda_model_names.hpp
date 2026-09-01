@@ -1,10 +1,16 @@
 #pragma once
 
+#include "kfcore/model_configuration.hpp"
+
 namespace kfcore::face_models::cuda_model_names
 {
 
+inline constexpr const char* default_model_root =
+    kfcore::model_configuration::model_root;
 inline constexpr char engine_profile_directory[] = "tensorrt";
-inline constexpr char face_detector[]             = "yolov12n-face.engine";
+inline constexpr const char* default_engine_profile =
+    kfcore::model_configuration::tensorrt_engine_profile;
+inline constexpr char face_detector[]             = "yolov11n-face.engine";
 inline constexpr char face_mesh_landmarker[]      = "face_landmark.engine";
 inline constexpr char face_68_landmarker[]        = "2dfan4.engine";
 inline constexpr char face_embedding[]            = "arcface_w600k_r50.engine";

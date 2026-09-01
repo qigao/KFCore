@@ -80,8 +80,9 @@ GPU 完成的时间，也包含 adapter 校验；为兼容已有 API，`*_infere
 
 应用使用语义名称而不是上游文件名识别模型角色。CPU ONNX 与 CUDA engine 的固定物理名称分别
 定义在 `kfcore/face_models/cpu_model_names.hpp` 和
-`kfcore/face_models/cuda_model_names.hpp`；调用方仍负责传入 `KFCORE_MODEL_ROOT`，CUDA 路径还需
-插入 `KFCORE_TENSORRT_ENGINE_PROFILE`。例如 `face_mesh_landmarker` 在 CPU 映射到
+`kfcore/face_models/cuda_model_names.hpp`；模型根固定为进程启动工作目录下的
+`./yolo-models`，CUDA 路径插入 CMake cache variable
+`KFCORE_TENSORRT_ENGINE_PROFILE`。例如 `face_mesh_landmarker` 在 CPU 映射到
 `MediaPipeFaceLandmarkDetector.onnx`，在 CUDA 映射到 `face_landmark.engine`，因此不能仅替换扩展名。
 
 | 模型 | 默认 binding | 固定 shape / 结果 |
@@ -100,13 +101,14 @@ projector 不可变拥有。模型实际 binding 与上表不一致时应通过 
 
 ## 从 ONNX 生成当前 GPU profile
 
-标准 user preset 定义 `KFCORE_MODEL_ROOT` 与 `KFCORE_TENSORRT_ENGINE_PROFILE`。TensorRT 11.2
-默认使用 strongly typed network；以下命令保持 adapter 要求的 FP32 I/O，并允许默认 TF32
+模型根固定为仓库的 `yolo-models`；`KFCORE_TENSORRT_ENGINE_PROFILE` 在 CMake 配置阶段定义。
+TensorRT 11.2 默认使用 strongly typed network；以下命令保持 adapter 要求的 FP32 I/O，并允许默认 TF32
 tactics。ArcFace 与 Age/Gender 的 ONNX batch 维为动态，但应用合约固定为 batch 1：
 
 ```powershell
-$models = $env:KFCORE_MODEL_ROOT
-$engines = Join-Path $models "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
+$models = (Resolve-Path "$PWD/yolo-models").Path
+$profile = 'rtx4060-sm89-trt11.2.1-default'
+$engines = Join-Path $models "tensorrt/$profile"
 $trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
 
 & $trtexec --onnx="$models/2dfan4.onnx" `
@@ -171,18 +173,12 @@ staging。真实模型集成测试还需显式启用对应选项，并提供六�
 
 ## 命令行应用
 
-直接启动应用前设置与 `CMakeUserPresets.json` 相同的运行时环境。必需的 detector、Face68、
-ArcFace、InSwapper 与 matrix 会从模型根/profile 的固定相对路径解析；显式路径优先。GFPGAN 和
-Age/Gender 仍仅在给出路径时加载：
+detector、Face68、ArcFace、InSwapper、matrix、GFPGAN 和 Age/Gender 都从固定模型根/profile
+的固定相对路径解析；命令行只接收输入与输出图片：
 
 ```powershell
-$env:KFCORE_MODEL_ROOT = (Resolve-Path "$PWD/yolo-models").Path
-$env:KFCORE_TENSORRT_ENGINE_PROFILE = 'rtx4060-sm89-trt11.2.1-default'
-$modelRoot = $env:KFCORE_MODEL_ROOT
-$engineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 face_swap_image.exe `
-  --source source.jpg --target target.jpg --output swapped.png `
-  --gfpgan (Join-Path $engineRoot 'gfpgan_1.4.engine')
+  --source source.jpg --target target.jpg --output swapped.png
 ```
 
 缺少参数、重复参数、未知参数和不可读输入/模型文件会在加载 engine 前失败。应用只在完整换脸
@@ -194,10 +190,8 @@ face_swap_image.exe `
 输出三联视图：
 
 ```powershell
-$engineRoot = Join-Path $modelRoot "tensorrt/$env:KFCORE_TENSORRT_ENGINE_PROFILE"
 face_swap_demo.exe `
-  --source source.jpg --target target.jpg --output swapped.png `
-  --gfpgan (Join-Path $engineRoot 'gfpgan_1.4.engine')
+  --source source.jpg --target target.jpg --output swapped.png
 ```
 
 - `R`：使用已加载的 engine 重新运行
@@ -206,12 +200,12 @@ face_swap_demo.exe `
 
 窗口会在 engine 加载前显示状态；推理保持同步。每次首次运行或按 `R` 重跑后，底部显示各
 阶段的本次耗时以及最近 120 次样本的 nearest-rank P50/P95；未启用的可选阶段显示 `--`。
-只有显式提供 `--gfpgan` 时才运行增强，不会自动搜索模型、转换 ONNX 或降级到 CPU。
+应用使用固定 GFPGAN engine，不会自动搜索模型、转换 ONNX 或降级到 CPU。
 
 ## 真实模型 opt-in 测试
 
 配置下列任一相对路径时，必须同时提供全部必需项；所有值都从
-`KFCORE_MODEL_ROOT` 解析，路径完整后集成测试自动注册：
+固定模型根解析，路径完整后集成测试自动注册：
 
 - `KFCORE_FACE_APPLICATION_TEST_MATRIX_RELATIVE`
 - `KFCORE_FACE_APPLICATION_TEST_SOURCE_IMAGE_RELATIVE`

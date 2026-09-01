@@ -1,4 +1,5 @@
 #include "kfcore/face_models/cpu.hpp"
+#include "kfcore/face_models/cpu_model_names.hpp"
 
 #include "facemesh_decode.hpp"
 #include "facemesh_geometry.hpp"
@@ -6,6 +7,7 @@
 
 #include "kfcore/image_processor/cpu.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -125,6 +127,15 @@ CpuFaceDetector::CpuFaceDetector(std::unique_ptr<Impl> impl)
 CpuFaceDetector::~CpuFaceDetector() = default;
 
 std::unique_ptr<CpuFaceDetector> CpuFaceDetector::load(
+    const CpuFaceMeshOptions& options)
+{
+    namespace names = kfcore::face_models::cpu_model_names;
+    return load(std::filesystem::path(names::default_model_root) /
+                    names::face_detector,
+                options);
+}
+
+std::unique_ptr<CpuFaceDetector> CpuFaceDetector::load(
     const std::filesystem::path& model_path, const CpuFaceMeshOptions& options)
 {
     validate_options(options);
@@ -145,10 +156,30 @@ std::unique_ptr<CpuFaceDetector> CpuFaceDetector::load(
 
 FaceDetectionResult CpuFaceDetector::infer(const image::ImageView& source)
 {
+    FaceDetectionsResult all = infer_all(source);
+    FaceDetectionResult result;
+    result.preprocess_ms = all.preprocess_ms;
+    result.inference_ms  = all.inference_ms;
+    result.total_ms      = all.total_ms;
+    const auto best = std::max_element(
+        all.faces.begin(), all.faces.end(),
+        [](const FaceDetection& left, const FaceDetection& right)
+        {
+            return left.confidence < right.confidence;
+        });
+    if (best != all.faces.end())
+    {
+        result.face = *best;
+    }
+    return result;
+}
+
+FaceDetectionsResult CpuFaceDetector::infer_all(const image::ImageView& source)
+{
     detail::CpuCallGuard guard(impl_->in_use, "face detector");
     validate_host_image(source);
     const Clock::time_point total_started = Clock::now();
-    FaceDetectionResult result;
+    FaceDetectionsResult result;
     image::LetterboxTransform letterbox;
     const Clock::time_point preprocess_started = Clock::now();
     std::vector<float> input = image::CpuImageProcessor::letterbox_nchw(
@@ -166,7 +197,7 @@ FaceDetectionResult CpuFaceDetector::infer(const image::ImageView& source)
     {
         throw_contract("YOLOv12 face detector output set is invalid");
     }
-    result.face = detail::decode_yolo12_face(
+    result.faces = detail::decode_yolo12_faces(
         outputs[0].float_values.data(), outputs[0].float_values.size(),
         impl_->options.face_class_id,
         impl_->options.face_detection_score_threshold, letterbox,
@@ -195,6 +226,15 @@ CpuFaceLandmarker::CpuFaceLandmarker(std::unique_ptr<Impl> impl)
 }
 
 CpuFaceLandmarker::~CpuFaceLandmarker() = default;
+
+std::unique_ptr<CpuFaceLandmarker> CpuFaceLandmarker::load(
+    const CpuFaceMeshOptions& options)
+{
+    namespace names = kfcore::face_models::cpu_model_names;
+    return load(std::filesystem::path(names::default_model_root) /
+                    names::face_mesh_landmarker,
+                options);
+}
 
 std::unique_ptr<CpuFaceLandmarker> CpuFaceLandmarker::load(
     const std::filesystem::path& model_path, const CpuFaceMeshOptions& options)

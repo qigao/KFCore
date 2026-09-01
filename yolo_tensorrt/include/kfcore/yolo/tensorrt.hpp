@@ -42,6 +42,8 @@ struct DetectorOptions
     std::array<float, 3>                       mean { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>                       stddev { 1.0f, 1.0f, 1.0f };
     float                                      border_value = 114.0f;
+    float                                      score_threshold = 0.25f;
+    float                                      iou_threshold = 0.45f;
     bool                                       mirror_horizontal = false;
 };
 
@@ -55,6 +57,8 @@ public:
     // cannot detect every same-size in-place rewrite or a mutation after its EOF check.
     static std::shared_ptr<const Engine> load(const std::filesystem::path& engine_path,
                                               const EngineOptions&         options = {});
+    static std::shared_ptr<const Engine>
+    load_person_detector(const EngineOptions& options = {});
 
     std::unique_ptr<TensorRtDetector> create_detector(const DetectorOptions& options = {}) const;
 

@@ -640,19 +640,14 @@ target_link_libraries(my_app PRIVATE KFCore::trackers)
 
 ### TensorRT 模型能力矩阵
 
-模型资产统一从 `KFCORE_MODEL_ROOT` 解析；仓库的标准 user preset 默认把它设为
-`${sourceDir}/yolo-models`。ONNX、测试图片和 sidecar matrix 在模块中使用相对此根的路径，
-TensorRT engine 使用
+模型根目录固定为进程启动工作目录下的 `./yolo-models`，不由 CMake、Preset JSON 或环境变量
+配置。ONNX、测试图片和 sidecar matrix 在模块中使用相对此根的路径，TensorRT engine 使用
 `tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`；手部 engine 使用
 `hand_gesture_model/tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/<model>.engine`。
-应用模型路径的解析顺序为：显式命令行路径、进程环境中的
-`KFCORE_MODEL_ROOT`/`KFCORE_TENSORRT_ENGINE_PROFILE`、明确报错。CPU ONNX 与
-TensorRT engine 都使用固定相对文件名，因此不会扫描目录或猜测模型。GFPGAN、Age/Gender 和
-FaceMesh 等可选阶段仍须显式启用。
-
-`CMakeUserPresets.json` 的 `environment` 只传给 CMake、build 和 CTest 子进程，不会修改启动
-CMake 的 PowerShell。直接运行 `.exe` 时，应在该终端设置同名环境变量，或继续使用显式 CLI
-路径；CLI 始终优先。
+profile 是 CMake cache variable，默认值为 `rtx4060-sm89-trt11.2.1-default`，可在
+`CMakeUserPresets.json` 的 `cacheVariables` 中覆盖。两项均编译进公开配置头；应用运行时不读取
+模型环境变量，也不接受模型路径/profile 命令行参数。CPU ONNX 与 TensorRT engine 都使用固定
+模型名，不扫描目录、不猜测模型，也不自动切换后端。
 
 `KFCore::face_model_core` 提供后端无关的结果、解码、错误和 InSwapper 矩阵投影。
 `KFCore::face_models_cpu` 使用 ONNX Runtime 执行 host FP32 tensor；
@@ -673,10 +668,10 @@ device tensor。消费方必须在链接时明确选择后端，不存在运行�
 TensorRT/CUDA 绑定、执行、输出有限值与结果尺寸；raw outputs 也只保留模型输出语义。两者都不是
 模型 accuracy、标签顺序或业务阈值的验证，部署前仍需使用有 provenance 的 golden samples。
 
-Windows 的标准 `win-release-user` 从 `CMakeUserPresets.json` 提供 `TENSORRT_ROOT`、
-`KFCORE_MODEL_ROOT` 与 `KFCORE_TENSORRT_ENGINE_PROFILE`。启用真实模型测试后，Face68、
+Windows 的标准 `win-release-user` 从 `CMakeUserPresets.json` 提供 `TENSORRT_ROOT`；engine
+profile 使用上述 CMake cache variable。启用真实模型测试后，Face68、
 ArcFace、Age/Gender、InSwapper 与 GFPGAN engine 都按上述 profile 目录和固定模型文件名解析；
-缺少或越出模型根目录时在 configure 阶段失败。
+模型缺失时由对应集成测试明确失败。
 
 ### TensorRT 12face 换脸应用
 

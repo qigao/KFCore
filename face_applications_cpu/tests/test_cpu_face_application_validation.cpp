@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <limits>
 #include <type_traits>
+#include <vector>
 
 using namespace kfcore::face_applications;
 
@@ -26,10 +27,26 @@ CpuFaceApplicationModelPaths valid_paths()
 
 spec("ONNX CPU face application validation")
 {
+    it("offers KFCore-owned default model discovery")
+    {
+        using DefaultLoadSignature = std::unique_ptr<OnnxFaceSwapApplication> (*)(
+            const CpuFaceSwapOptions&);
+        check_true((std::is_same_v<decltype(static_cast<DefaultLoadSignature>(
+                                      &OnnxFaceSwapApplication::load)),
+                                   DefaultLoadSignature>));
+    }
+
     it("rejects empty required model paths before opening assets")
     {
         CpuFaceApplicationModelPaths paths = valid_paths();
         paths.arcface_model.clear();
+        check_throws_as(OnnxFaceSwapApplication::load(paths), CpuFaceApplicationError);
+    }
+
+    it("requires the InSwapper model and matrix assets")
+    {
+        CpuFaceApplicationModelPaths paths = valid_paths();
+        paths.inswapper_model.clear();
         check_throws_as(OnnxFaceSwapApplication::load(paths), CpuFaceApplicationError);
     }
 
@@ -63,5 +80,44 @@ spec("ONNX CPU face application validation")
                                       &OnnxFaceSwapApplication::analyze)), AnalyzeView>));
         check_true((std::is_same_v<decltype(static_cast<SwapView>(
                                       &OnnxFaceSwapApplication::swap)), SwapView>));
+    }
+
+    it("exposes all-face analysis and prepared swap entry points")
+    {
+        using AnalyzeAllOwned = std::vector<CpuFaceAnalysis> (
+            OnnxFaceSwapApplication::*)(const kfcore::image::BgrImage&);
+        using AnalyzeAllView = std::vector<CpuFaceAnalysis> (
+            OnnxFaceSwapApplication::*)(const kfcore::image::ImageView&);
+        using PreparedOwned = kfcore::image::BgrImage (
+            OnnxFaceSwapApplication::*)(
+                const kfcore::image::BgrImage&,
+                const kfcore::face_models::ArcFaceResult&,
+                const CpuFiveLandmarks&, bool);
+        using PreparedView = kfcore::image::BgrImage (
+            OnnxFaceSwapApplication::*)(
+                const kfcore::image::ImageView&,
+                const kfcore::face_models::ArcFaceResult&,
+                const CpuFiveLandmarks&, bool);
+        using PreparedBlendView = kfcore::image::BgrImage (
+            OnnxFaceSwapApplication::*)(
+                const kfcore::image::ImageView&,
+                const kfcore::face_models::ArcFaceResult&,
+                const CpuFiveLandmarks&, bool, float);
+
+        check_true((std::is_same_v<decltype(static_cast<AnalyzeAllOwned>(
+                                      &OnnxFaceSwapApplication::analyze_all)),
+                                   AnalyzeAllOwned>));
+        check_true((std::is_same_v<decltype(static_cast<AnalyzeAllView>(
+                                      &OnnxFaceSwapApplication::analyze_all)),
+                                   AnalyzeAllView>));
+        check_true((std::is_same_v<decltype(static_cast<PreparedOwned>(
+                                      &OnnxFaceSwapApplication::swap_prepared)),
+                                   PreparedOwned>));
+        check_true((std::is_same_v<decltype(static_cast<PreparedView>(
+                                      &OnnxFaceSwapApplication::swap_prepared)),
+                                   PreparedView>));
+        check_true((std::is_same_v<decltype(static_cast<PreparedBlendView>(
+                                      &OnnxFaceSwapApplication::swap_prepared)),
+                                   PreparedBlendView>));
     }
 }

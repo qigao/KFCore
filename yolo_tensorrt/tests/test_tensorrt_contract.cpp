@@ -55,6 +55,15 @@ EngineMetadata valid_compact_nms_metadata() {
     }};
 }
 
+EngineMetadata valid_raw_yolo_metadata() {
+    return {{
+        tensor("images", TensorIoMode::Input, TensorDataType::Float32,
+               {1, 3, 640, 640}, {1, 3, 640, 640}, {1, 3, 640, 640}),
+        tensor("predictions", TensorIoMode::Output, TensorDataType::Float32,
+               {1, 84, 8400}, {1, 84, 8400}, {1, 84, 8400}),
+    }};
+}
+
 ContractLimits limits() {
     return {};
 }
@@ -150,6 +159,48 @@ spec("TensorRT YOLO engine contract") {
         check(contract.output_bytes == std::size_t{14'400});
     }
 
+    it("accepts a raw YOLO detection head with a bounded post-NMS limit") {
+        ContractNames names;
+        names.detections = "predictions";
+        const ValidatedContract contract =
+            validate_engine_contract(valid_raw_yolo_metadata(), names, limits());
+
+        check(contract.output_layout == DetectionOutputLayout::RawYolo);
+        check(contract.max_detections == INT64_C(1000));
+        const RawYoloContract& raw = std::get<RawYoloContract>(contract.outputs);
+        check(raw.class_count == std::size_t{80});
+        check(raw.candidate_count == std::size_t{8400});
+        check(raw.predictions.max_elements == std::size_t{705600});
+    }
+
+    it("rejects raw YOLO class and candidate dimensions that vary by profile") {
+        ContractNames names;
+        names.detections = "predictions";
+        EngineMetadata dynamic_classes = valid_raw_yolo_metadata();
+        dynamic_classes.tensors[1].min_shape[1] = 83;
+        bool threw = false;
+        try {
+            (void)validate_engine_contract(dynamic_classes, names, limits());
+        } catch (const YoloError& error) {
+            threw = true;
+            check(error.code() == YoloErrorCode::EngineContractMismatch);
+            check(std::string(error.what()).find("only batch") != std::string::npos);
+        }
+        check(threw);
+
+        EngineMetadata dynamic_candidates = valid_raw_yolo_metadata();
+        dynamic_candidates.tensors[1].min_shape[2] = 2100;
+        threw = false;
+        try {
+            (void)validate_engine_contract(dynamic_candidates, names, limits());
+        } catch (const YoloError& error) {
+            threw = true;
+            check(error.code() == YoloErrorCode::EngineContractMismatch);
+            check(std::string(error.what()).find("only batch") != std::string::npos);
+        }
+        check(threw);
+    }
+
     it("allows output names to overlap across mutually exclusive contracts") {
         EngineMetadata metadata = valid_fp32_metadata();
         metadata.tensors[4].name = "output0";
@@ -174,10 +225,13 @@ spec("TensorRT YOLO engine contract") {
         check_error(wrong_rank, "rank");
 
         EngineMetadata wrong_width = valid_compact_nms_metadata();
+        wrong_width.tensors[1].min_shape[1] = 4;
+        wrong_width.tensors[1].opt_shape[1] = 4;
+        wrong_width.tensors[1].max_shape[1] = 4;
         wrong_width.tensors[1].min_shape[2] = 7;
         wrong_width.tensors[1].opt_shape[2] = 7;
         wrong_width.tensors[1].max_shape[2] = 7;
-        check_error(wrong_width, "six values");
+        check_error(wrong_width, "Compact NMS");
 
         EngineMetadata wrong_batch = valid_compact_nms_metadata();
         wrong_batch.tensors[1].max_shape[0] = 3;

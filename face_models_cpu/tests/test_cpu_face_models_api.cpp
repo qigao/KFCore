@@ -67,6 +67,18 @@ spec("CPU face model adapter API")
         check_false(std::is_copy_assignable_v<CpuFaceLandmarker>);
     }
 
+    it("exposes all-face detector inference without changing the legacy result")
+    {
+        using InferAllSignature = FaceDetectionsResult (CpuFaceDetector::*)(
+            const kfcore::image::ImageView&);
+        using InferSignature = FaceDetectionResult (CpuFaceDetector::*)(
+            const kfcore::image::ImageView&);
+        check_true((std::is_same_v<decltype(&CpuFaceDetector::infer_all),
+                                   InferAllSignature>));
+        check_true((std::is_same_v<decltype(&CpuFaceDetector::infer),
+                                   InferSignature>));
+    }
+
     it("rejects empty model assets before creating ONNX Runtime sessions")
     {
         const std::filesystem::path empty;

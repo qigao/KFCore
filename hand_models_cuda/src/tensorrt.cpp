@@ -1,4 +1,5 @@
 #include "kfcore/hand_models/tensorrt.hpp"
+#include "kfcore/hand_models/cuda_model_names.hpp"
 
 #include "decode.hpp"
 #include "geometry.hpp"
@@ -320,6 +321,19 @@ TensorRtHandBackend::TensorRtHandBackend(std::unique_ptr<Impl> impl)
 }
 
 TensorRtHandBackend::~TensorRtHandBackend() = default;
+
+std::unique_ptr<TensorRtHandBackend> TensorRtHandBackend::load(
+    const TensorRtHandOptions& options)
+{
+    namespace names = kfcore::hand_models::cuda_model_names;
+    const std::filesystem::path root =
+        std::filesystem::path(names::default_model_root) /
+        names::engine_profile_directory / names::default_engine_profile;
+    return load({ root / names::palm_detector,
+                  root / names::hand_landmarker,
+                  root / names::gesture_classifier },
+                options);
+}
 
 std::unique_ptr<TensorRtHandBackend> TensorRtHandBackend::load(
     const HandTensorRtEnginePaths& paths, const TensorRtHandOptions& options)

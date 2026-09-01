@@ -26,7 +26,21 @@ set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "cmake")
 include(CMakeOptions.cmake)
 include(GNUInstallDirs)
 include(CmakeUtils)
-include(ModelPaths)
+
+set(KFCORE_TENSORRT_ENGINE_PROFILE
+    "rtx4060-sm89-trt11.2.1-default"
+    CACHE STRING "TensorRT engine profile directory under yolo-models/tensorrt")
+if(NOT KFCORE_TENSORRT_ENGINE_PROFILE MATCHES "^[A-Za-z0-9._-]+$")
+  message(FATAL_ERROR
+    "KFCORE_TENSORRT_ENGINE_PROFILE must be one path segment")
+endif()
+
+set(KFCORE_GENERATED_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
+configure_file(
+  cmake/model_configuration.hpp.in
+  "${KFCORE_GENERATED_INCLUDE_DIR}/kfcore/model_configuration.hpp"
+  @ONLY)
 
 if(BUILD_TESTS)
   enable_testing()
@@ -107,3 +121,7 @@ include(CMakePackageConfigHelpers)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+
+install(FILES
+        "${KFCORE_GENERATED_INCLUDE_DIR}/kfcore/model_configuration.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")

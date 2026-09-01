@@ -39,15 +39,11 @@ cmake_add_test(
   FOLDER "${_runtime_tensorrt_test_folder}")
 
 set(_runtime_tensorrt_engine_root
-  "tensorrt/$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}")
-kfcore_resolve_model_path(
-  "$ENV{KFCORE_MODEL_ROOT}"
-  "${_runtime_tensorrt_engine_root}/arcface_w600k_r50.engine"
-  _runtime_tensorrt_arcface_engine)
-kfcore_resolve_model_path(
-  "$ENV{KFCORE_MODEL_ROOT}"
-  "hand_gesture_model/tensorrt/$ENV{KFCORE_TENSORRT_ENGINE_PROFILE}/palm_detection.engine"
-  _runtime_tensorrt_palm_engine)
+  "tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}")
+set(_runtime_tensorrt_arcface_engine
+  "./yolo-models/${_runtime_tensorrt_engine_root}/arcface_w600k_r50.engine")
+set(_runtime_tensorrt_palm_engine
+  "./yolo-models/hand_gesture_model/tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}/palm_detection.engine")
 
 cmake_add_test(
   NAME test_runtime_tensorrt_integration
@@ -58,7 +54,8 @@ cmake_add_test(
   FOLDER "${_runtime_tensorrt_test_folder}"
   TEST_PROPERTIES
     ENVIRONMENT
-      "KFCORE_RUNTIME_TENSORRT_TEST_ENGINE_ARCFACE=${_runtime_tensorrt_arcface_engine}")
+      "KFCORE_RUNTIME_TENSORRT_TEST_ENGINE_ARCFACE=${_runtime_tensorrt_arcface_engine}"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
 cmake_add_test(
   NAME test_runtime_tensorrt_dynamic_output_integration
@@ -69,7 +66,8 @@ cmake_add_test(
   FOLDER "${_runtime_tensorrt_test_folder}"
   TEST_PROPERTIES
     ENVIRONMENT
-      "KFCORE_RUNTIME_TENSORRT_TEST_ENGINE_PALM=${_runtime_tensorrt_palm_engine}")
+      "KFCORE_RUNTIME_TENSORRT_TEST_ENGINE_PALM=${_runtime_tensorrt_palm_engine}"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
 if(WIN32)
   set_tests_properties(

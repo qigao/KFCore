@@ -219,6 +219,8 @@ spec("THIG temporal graph") {
 
     check_size(actions, 1);
     check_size(actions[0].evidence, 2);
+    check(actions[0].evidence[0].startMs < actions[0].startMs);
+    check(actions[0].startMs == actions[0].evidence[1].startMs);
   }
 
   it("requires configured overlap instead of boundary contact for Both") {
@@ -525,6 +527,7 @@ spec("THIG temporal graph") {
     check_size(actions, 1);
     check_size(actions[0].evidence, 2);
     check(static_cast<int>(actions[0].endMs - actions[0].startMs) == 0);
+    check(actions[0].evidence[1].startMs < actions[0].startMs);
   }
 
   it("keeps forbidden evidence inside a During action interval") {

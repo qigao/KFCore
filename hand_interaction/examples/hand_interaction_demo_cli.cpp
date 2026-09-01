@@ -1,14 +1,7 @@
 #include "hand_interaction_demo_cli.hpp"
 
-#include "kfcore/hand_models/cpu_model_names.hpp"
-#include "kfcore/hand_models/cuda_model_names.hpp"
-
-#include <turbo_fs.h>
-
-#include <array>
 #include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -18,9 +11,6 @@ namespace kfcore::hand_interaction::demo
 {
 namespace
 {
-
-namespace cpu_model_names  = kfcore::hand_models::cpu_model_names;
-namespace cuda_model_names = kfcore::hand_models::cuda_model_names;
 
 [[noreturn]] void fail(const std::string& message)
 {
@@ -49,17 +39,6 @@ float parse_score(const std::string& text, const std::string& option)
         fail(option + " must be a finite value within [0,1]: " + text);
     }
     return value;
-}
-
-void require_readable_file(const std::filesystem::path& path, const char* role)
-{
-    const std::string native = path.string();
-    turbo_fs_stat_t   status {};
-    if (turbo_fs_stat(native.c_str(), &status) != 0 || !status.is_file ||
-        turbo_fs_access(native.c_str(), TURBO_FS_ACCESS_READ) != 0)
-    {
-        fail(std::string(role) + " is not a readable file: " + native);
-    }
 }
 
 bool supported_capture_format(int format) noexcept
@@ -104,18 +83,10 @@ Backend parse_backend(const std::string& text)
     fail("--backend must be cpu or tensorrt");
 }
 
-std::string environment_value(const char* name)
-{
-    const char* value = std::getenv(name);
-    return value != nullptr ? value : "";
-}
-
 } // namespace
 
 Arguments parse_arguments(const std::vector<std::string>& values,
-                          BackendAvailability availability,
-                          const std::filesystem::path& model_root,
-                          const std::string& tensorrt_profile)
+                          BackendAvailability availability)
 {
     if (values.empty())
     {
@@ -125,14 +96,6 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     Arguments                      result;
     std::unordered_set<std::string> seen;
     std::optional<std::string>      backend_value;
-    std::optional<std::string>      model_dir;
-    std::optional<std::string>      palm;
-    std::optional<std::string>      hand;
-    std::optional<std::string>      classifier;
-    std::optional<std::string>      face_detector;
-    std::optional<std::string>      face_landmark;
-    bool                            face_score_set = false;
-    bool                            face_landmark_score_set = false;
     bool                            geometry_set = false;
 
     for (std::size_t index = 1U; index < values.size(); ++index)
@@ -162,39 +125,13 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         {
             backend_value = value;
         }
-        else if (option == "--model-dir")
-        {
-            model_dir = value;
-        }
-        else if (option == "--palm")
-        {
-            palm = value;
-        }
-        else if (option == "--hand")
-        {
-            hand = value;
-        }
-        else if (option == "--classifier")
-        {
-            classifier = value;
-        }
-        else if (option == "--face-detector")
-        {
-            face_detector = value;
-        }
-        else if (option == "--facemesh")
-        {
-            face_landmark = value;
-        }
         else if (option == "--face-score")
         {
             result.face_detection_score_threshold = parse_score(value, option);
-            face_score_set = true;
         }
         else if (option == "--facemesh-score")
         {
             result.face_landmark_score_threshold = parse_score(value, option);
-            face_landmark_score_set = true;
         }
         else if (option == "--camera")
         {
@@ -263,84 +200,7 @@ Arguments parse_arguments(const std::vector<std::string>& values,
         fail("requested backend is not available in this build");
     }
 
-    if (face_detector.has_value() != face_landmark.has_value())
-    {
-        fail("--face-detector and --facemesh must be supplied together");
-    }
-    if ((face_score_set || face_landmark_score_set) && !face_detector.has_value())
-    {
-        fail("face score options require --face-detector and --facemesh");
-    }
-    if (face_detector.has_value())
-    {
-        result.face_detector_model = std::filesystem::path(*face_detector);
-        result.face_landmark_model = std::filesystem::path(*face_landmark);
-    }
-
-    if (*result.backend == Backend::Cpu)
-    {
-        if (!model_dir.has_value())
-        {
-            if (model_root.empty())
-            {
-                fail("--model-dir is required when KFCORE_MODEL_ROOT is not set");
-            }
-            model_dir = model_root.string();
-        }
-        if (palm.has_value() || hand.has_value() || classifier.has_value())
-        {
-            fail("--palm, --hand, and --classifier are TensorRT-only options");
-        }
-        const std::filesystem::path root(*model_dir);
-        result.palm_model       = root / cpu_model_names::palm_detector;
-        result.hand_model       = root / cpu_model_names::hand_landmarker;
-        result.classifier_model = root / cpu_model_names::gesture_classifier;
-    }
-    else
-    {
-        if (model_dir.has_value())
-        {
-            fail("--model-dir is a cpu-only option");
-        }
-        if (!palm.has_value() || !hand.has_value() || !classifier.has_value())
-        {
-            if (model_root.empty() || tensorrt_profile.empty())
-            {
-                fail("--palm, --hand, and --classifier are required when the "
-                     "TensorRT model root/profile are not set");
-            }
-            const std::filesystem::path root =
-                model_root / cuda_model_names::engine_profile_directory /
-                tensorrt_profile;
-            if (!palm.has_value())
-                palm = (root / cuda_model_names::palm_detector).string();
-            if (!hand.has_value())
-                hand = (root / cuda_model_names::hand_landmarker).string();
-            if (!classifier.has_value())
-                classifier = (root / cuda_model_names::gesture_classifier).string();
-        }
-        result.palm_model       = *palm;
-        result.hand_model       = *hand;
-        result.classifier_model = *classifier;
-    }
-
-    require_readable_file(result.palm_model, "palm model");
-    require_readable_file(result.hand_model, "hand landmark model");
-    require_readable_file(result.classifier_model, "classifier model");
-    if (result.face_detector_model.has_value())
-    {
-        require_readable_file(*result.face_detector_model, "face detector model");
-        require_readable_file(*result.face_landmark_model, "face landmark model");
-    }
     return result;
-}
-
-Arguments parse_arguments_from_environment(const std::vector<std::string>& values,
-                                           BackendAvailability availability)
-{
-    return parse_arguments(values, availability,
-                           environment_value("KFCORE_MODEL_ROOT"),
-                           environment_value("KFCORE_TENSORRT_ENGINE_PROFILE"));
 }
 
 std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,

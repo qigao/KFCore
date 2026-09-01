@@ -170,6 +170,7 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
                                   contract.input_type, engine_options.max_input_bytes);
         detail::DetectionBufferLayout efficient_layout {};
         detail::CompactNmsBufferLayout compact_layout {};
+        detail::RawYoloBufferLayout raw_layout {};
         if (contract.output_layout == DetectionOutputLayout::EfficientNms)
         {
             efficient_layout = detail::compute_detection_buffer_layout(
@@ -185,7 +186,7 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
                     "detection setup stage: dynamic tensor bytes exceed the validated contract");
             }
         }
-        else
+        else if (contract.output_layout == DetectionOutputLayout::CompactNms)
         {
             compact_layout = detail::compute_compact_nms_buffer_layout(
                 images.size(), max_detections, contract.output_type,
@@ -195,6 +196,18 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
             {
                 throw_tensorrt(
                     "detection setup stage: dynamic tensor bytes exceed the validated contract");
+            }
+        }
+        else
+        {
+            const auto& outputs = std::get<RawYoloContract>(contract.outputs);
+            raw_layout = detail::compute_raw_yolo_buffer_layout(
+                images.size(), outputs.class_count, outputs.candidate_count,
+                contract.output_type, engine_options.max_output_bytes);
+            if (raw_layout.predictions_bytes > outputs.predictions.max_bytes)
+            {
+                throw_tensorrt(
+                    "detection setup stage: raw tensor bytes exceed the validated contract");
             }
         }
         if (input_plan.input_bytes > contract.images.max_bytes)
@@ -229,11 +242,18 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
             impl_->labels_host.reserve(efficient_layout.labels_bytes,
                                        engine_options.max_output_bytes);
         }
-        else
+        else if (contract.output_layout == DetectionOutputLayout::CompactNms)
         {
             impl_->detections_device.reserve(compact_layout.detections_bytes,
                                              engine_options.max_output_bytes);
             impl_->detections_host.reserve(compact_layout.detections_bytes,
+                                           engine_options.max_output_bytes);
+        }
+        else
+        {
+            impl_->detections_device.reserve(raw_layout.predictions_bytes,
+                                             engine_options.max_output_bytes);
+            impl_->detections_host.reserve(raw_layout.predictions_bytes,
                                            engine_options.max_output_bytes);
         }
 
@@ -335,13 +355,22 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
                                     efficient_layout.labels_bytes, cudaMemcpyDeviceToHost, stream),
                     "cudaMemcpyAsync", "labels output download");
             }
-            else
+            else if (contract.output_layout == DetectionOutputLayout::CompactNms)
             {
                 detail::check_cuda(
                     cudaMemcpyAsync(impl_->detections_host.data(),
                                     impl_->detections_device.data(),
                                     compact_layout.detections_bytes, cudaMemcpyDeviceToHost, stream),
                     "cudaMemcpyAsync", "detections output download");
+            }
+            else
+            {
+                detail::check_cuda(
+                    cudaMemcpyAsync(impl_->detections_host.data(),
+                                    impl_->detections_device.data(),
+                                    raw_layout.predictions_bytes,
+                                    cudaMemcpyDeviceToHost, stream),
+                    "cudaMemcpyAsync", "raw predictions output download");
             }
             detail::check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
                                "detection completion");
@@ -371,13 +400,28 @@ std::vector<DetectionFrame> TensorRtDetector::detect_batch(const std::vector<Ima
                 return detail::decode_efficient_nms(images, transforms, output_view);
             }
 
-            const detail::CompactNmsOutputView output_view {
+            if (contract.output_layout == DetectionOutputLayout::CompactNms)
+            {
+                const detail::CompactNmsOutputView output_view {
+                    impl_->detections_host.data(),
+                    compact_layout.detections_bytes / float_bytes,
+                    max_detections,
+                    contract.output_type,
+                };
+                return detail::decode_compact_nms(images, transforms, output_view);
+            }
+            const auto& raw_contract = std::get<RawYoloContract>(contract.outputs);
+            const detail::RawYoloOutputView output_view {
                 impl_->detections_host.data(),
-                compact_layout.detections_bytes / float_bytes,
-                max_detections,
+                raw_layout.predictions_bytes / float_bytes,
+                raw_contract.class_count,
+                raw_contract.candidate_count,
                 contract.output_type,
+                impl_->options.score_threshold,
+                impl_->options.iou_threshold,
+                max_detections,
             };
-            return detail::decode_compact_nms(images, transforms, output_view);
+            return detail::decode_raw_yolo(images, transforms, output_view);
         }
         catch (...)
         {

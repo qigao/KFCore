@@ -46,6 +46,15 @@ FaceApplicationModelPaths complete_dummy_paths()
 
 spec("TensorRT face application validation")
 {
+    it("offers KFCore-owned default engine discovery")
+    {
+        using DefaultLoadSignature = std::unique_ptr<TensorRtFaceSwapApplication> (*)(
+            const FaceSwapOptions&);
+        check_true((std::is_same_v<decltype(static_cast<DefaultLoadSignature>(
+                                      &TensorRtFaceSwapApplication::load)),
+                                   DefaultLoadSignature>));
+    }
+
     it("selects only the highest-score configured 12face class with stable ties")
     {
         const std::vector<kfcore::yolo::Detection> detections = {
@@ -98,6 +107,15 @@ spec("TensorRT face application validation")
             "detector");
     }
 
+    it("requires the InSwapper engine and matrix assets")
+    {
+        FaceApplicationModelPaths paths = complete_dummy_paths();
+        paths.inswapper_engine.clear();
+        expect_invalid(
+            [&] { (void)TensorRtFaceSwapApplication::load(paths, FaceSwapOptions {}); },
+            "InSwapper engine");
+    }
+
     it("requires the final TensorRT chain to share one CUDA device")
     {
         FaceSwapOptions options;
@@ -123,5 +141,31 @@ spec("TensorRT face application validation")
                                    AnalyzeSignature>));
         check_true((std::is_same_v<decltype(&TensorRtFaceSwapApplication::swap),
                                    SwapSignature>));
+    }
+
+    it("exposes all-face analysis and prepared swap entry points")
+    {
+        using AnalyzeAllSignature = std::vector<FaceAnalysis> (
+            TensorRtFaceSwapApplication::*)(const kfcore::image::ImageView&);
+        using PreparedSignature = kfcore::image::BgrImage (
+            TensorRtFaceSwapApplication::*)(
+                const kfcore::image::ImageView&,
+                const kfcore::face_models::ArcFaceResult&,
+                const FiveLandmarks&, bool);
+        using PreparedBlendSignature = kfcore::image::BgrImage (
+            TensorRtFaceSwapApplication::*)(
+                const kfcore::image::ImageView&,
+                const kfcore::face_models::ArcFaceResult&,
+                const FiveLandmarks&, bool, float);
+
+        check_true((std::is_same_v<decltype(
+                                      &TensorRtFaceSwapApplication::analyze_all),
+                                   AnalyzeAllSignature>));
+        check_true((std::is_same_v<decltype(static_cast<PreparedSignature>(
+                                      &TensorRtFaceSwapApplication::swap_prepared)),
+                                   PreparedSignature>));
+        check_true((std::is_same_v<decltype(static_cast<PreparedBlendSignature>(
+                                      &TensorRtFaceSwapApplication::swap_prepared)),
+                                   PreparedBlendSignature>));
     }
 }
