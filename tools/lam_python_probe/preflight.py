@@ -13,6 +13,18 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 COMMAND_TIMEOUT_SECONDS = 10
+LAM_REQUIRED_FILES = (
+    Path("app_lam.py"),
+    Path("configs/inference/lam-20k-8gpu.yaml"),
+)
+LAM_CHECKPOINT = Path(
+    "model_zoo/lam_models/releases/lam/lam-20k/step_045500/model.safetensors"
+)
+A2E_REQUIRED_FILES = (
+    Path("inference.py"),
+    Path("configs/lam_audio2exp_config_streaming.py"),
+)
+A2E_CHECKPOINT = Path("pretrained_models/lam_audio2exp_streaming.tar")
 
 
 def _command(command: list[str]) -> dict[str, Any]:
@@ -45,6 +57,35 @@ def _upstream(root: Path) -> dict[str, Any]:
         result["revision"] = revision["stdout"]
     else:
         result["revision_error"] = revision.get("error") or revision.get("stderr")
+    return result
+
+
+def _validated_upstream(
+    name: str,
+    root: Path,
+    required_files: tuple[Path, ...],
+    checkpoint_relative: Path,
+) -> dict[str, Any]:
+    for relative_path in required_files:
+        required_path = root / relative_path
+        if not required_path.is_file():
+            raise ValueError(f"{name} required file is missing: {required_path}")
+
+    checkpoint = root / checkpoint_relative
+    if not checkpoint.is_file():
+        raise ValueError(f"{name} checkpoint is missing: {checkpoint}")
+    checkpoint_size = checkpoint.stat().st_size
+    if checkpoint_size <= 0:
+        raise ValueError(f"{name} checkpoint is empty: {checkpoint}")
+
+    result = _upstream(root)
+    result["checkpoint"] = {
+        "path": str(checkpoint.resolve()),
+        "size_bytes": checkpoint_size,
+    }
+    result["required_files"] = [
+        str((root / relative_path).resolve()) for relative_path in required_files
+    ]
     return result
 
 
@@ -93,8 +134,15 @@ def collect_preflight(lam_root: Path, a2e_root: Path) -> dict[str, Any]:
             "machine": platform.machine(),
         },
         "upstreams": {
-            "lam": _upstream(lam_root),
-            "a2e": _upstream(a2e_root),
+            "lam": _validated_upstream(
+                "LAM", lam_root, LAM_REQUIRED_FILES, LAM_CHECKPOINT
+            ),
+            "a2e": _validated_upstream(
+                "LAM_Audio2Expression",
+                a2e_root,
+                A2E_REQUIRED_FILES,
+                A2E_CHECKPOINT,
+            ),
         },
         "torch": _torch_runtime(),
         "nvidia_smi": _command(

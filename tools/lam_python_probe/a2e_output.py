@@ -12,6 +12,69 @@ from typing import Any
 
 EXPRESSION_COUNT = 52
 DEFAULT_FPS = 30.0
+ARKIT_BLENDSHAPE_NAMES = (
+    "browDownLeft",
+    "browDownRight",
+    "browInnerUp",
+    "browOuterUpLeft",
+    "browOuterUpRight",
+    "cheekPuff",
+    "cheekSquintLeft",
+    "cheekSquintRight",
+    "eyeBlinkLeft",
+    "eyeBlinkRight",
+    "eyeLookDownLeft",
+    "eyeLookDownRight",
+    "eyeLookInLeft",
+    "eyeLookInRight",
+    "eyeLookOutLeft",
+    "eyeLookOutRight",
+    "eyeLookUpLeft",
+    "eyeLookUpRight",
+    "eyeSquintLeft",
+    "eyeSquintRight",
+    "eyeWideLeft",
+    "eyeWideRight",
+    "jawForward",
+    "jawLeft",
+    "jawOpen",
+    "jawRight",
+    "mouthClose",
+    "mouthDimpleLeft",
+    "mouthDimpleRight",
+    "mouthFrownLeft",
+    "mouthFrownRight",
+    "mouthFunnel",
+    "mouthLeft",
+    "mouthLowerDownLeft",
+    "mouthLowerDownRight",
+    "mouthPressLeft",
+    "mouthPressRight",
+    "mouthPucker",
+    "mouthRight",
+    "mouthRollLower",
+    "mouthRollUpper",
+    "mouthShrugLower",
+    "mouthShrugUpper",
+    "mouthSmileLeft",
+    "mouthSmileRight",
+    "mouthStretchLeft",
+    "mouthStretchRight",
+    "mouthUpperUpLeft",
+    "mouthUpperUpRight",
+    "noseSneerLeft",
+    "noseSneerRight",
+    "tongueOut",
+)
+
+
+def _finite_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(f"{label} must be numeric")
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"{label} must be finite")
+    return numeric_value
 
 
 def _audio_duration_seconds(audio_path: Path) -> float:
@@ -43,30 +106,52 @@ def validate_a2e_output(
     if not isinstance(document, dict):
         raise ValueError("expression output root must be an object")
     names = document.get("names")
-    if not isinstance(names, list) or len(names) != EXPRESSION_COUNT:
-        raise ValueError(f"expression output must define {EXPRESSION_COUNT} names")
+    if names != list(ARKIT_BLENDSHAPE_NAMES):
+        raise ValueError("expression names must match the official ARKit52 order")
     frames = document.get("frames")
     if not isinstance(frames, list) or not frames:
         raise ValueError("expression output must contain at least one frame")
+    metadata = document.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("expression metadata must be an object")
+    metadata_fps = _finite_number(metadata.get("fps"), "metadata fps")
+    if not math.isclose(metadata_fps, fps, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(f"metadata fps does not match expected fps: {metadata_fps}")
+    metadata_frame_count = metadata.get("frame_count")
+    if (
+        isinstance(metadata_frame_count, bool)
+        or not isinstance(metadata_frame_count, int)
+        or metadata_frame_count != len(frames)
+    ):
+        raise ValueError("metadata frame_count does not match frames")
+    if metadata.get("blendshape_names") != names:
+        raise ValueError("metadata blendshape_names do not match names")
 
     minimum_weight = math.inf
     maximum_weight = -math.inf
     for frame_index, frame in enumerate(frames):
         if not isinstance(frame, dict):
             raise ValueError(f"frame {frame_index} must be an object")
+        frame_time = _finite_number(frame.get("time"), f"frame {frame_index} time")
+        expected_time = frame_index / fps
+        if not math.isclose(frame_time, expected_time, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError(
+                f"frame {frame_index} time does not match {expected_time}"
+            )
+        rotation = frame.get("rotation")
+        if not isinstance(rotation, list) or len(rotation) not in (0, 3):
+            raise ValueError(
+                f"frame {frame_index} rotation must be empty or contain 3 values"
+            )
+        for rotation_index, value in enumerate(rotation):
+            _finite_number(value, f"frame {frame_index} rotation {rotation_index}")
         weights = frame.get("weights")
         if not isinstance(weights, list) or len(weights) != EXPRESSION_COUNT:
             raise ValueError(f"frame {frame_index} must contain {EXPRESSION_COUNT} weights")
         for weight_index, weight in enumerate(weights):
-            if isinstance(weight, bool) or not isinstance(weight, Real):
-                raise ValueError(
-                    f"frame {frame_index} weight {weight_index} must be numeric"
-                )
-            numeric_weight = float(weight)
-            if not math.isfinite(numeric_weight):
-                raise ValueError(
-                    f"frame {frame_index} weight {weight_index} must be finite"
-                )
+            numeric_weight = _finite_number(
+                weight, f"frame {frame_index} weight {weight_index}"
+            )
             if not 0.0 <= numeric_weight <= 1.0:
                 raise ValueError(
                     f"frame {frame_index} weight {weight_index} is outside [0, 1]"

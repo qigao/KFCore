@@ -44,6 +44,11 @@ Each runnable stage records:
 - total GPU memory before and after the process;
 - output paths and failure stage.
 
+The machine-readable snapshot for this run is
+[`lam-python-prototype-results.json`](lam-python-prototype-results.json). It
+records command templates, versions, archive/output hashes, timings, memory,
+and explicit limitations; generated media and model files remain ignored.
+
 ## Failure Semantics
 
 The repository-owned probes terminate with a non-zero exit code for missing
@@ -148,7 +153,8 @@ The run used the bundled `assets/sample_input/status.png`, the bundled
 `Look_In_My_Eyes` motion, the official 512x512 FP32 path, and no training. A
 small compatibility patch fixed Windows path handling and streamed only the
 requested render tensors to CPU. It also converted the completed RGB tensor to
-`uint8` in place before MoviePy encoding.
+`uint8` after in-place clamp/scale, avoiding NumPy's full-size float
+intermediates before MoviePy encoding.
 
 - **Fact:** The 519-frame LAM render interval took 17.556 seconds. The measured
   application interval, including model loading, tracking, preprocessing,
@@ -180,6 +186,8 @@ copies exhausted host memory. The repository patch
 `tools/lam_python_probe/patches/lam-one-click-windows.patch` addresses both
 bounded-memory failures and the Windows path separator bugs without changing
 the default behavior of `ModelLAM.infer_single_view` for existing callers.
+The measured path used `save_ply=False`; the `save_ply=True` path retains
+per-frame non-tensor Gaussian objects and is not claimed to be bounded-memory.
 
 **HIGH:** The upstream UI catches broad exceptions and returned exit code zero
 for both the CUDA extension failure and the GPU/CPU out-of-memory failures.

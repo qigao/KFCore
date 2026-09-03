@@ -196,4 +196,3 @@ Expected: tests pass; only the probe and design/plan documentation are tracked.
 git add docs/design/lam-python-prototype.md docs/superpowers/plans/2026-09-03-lam-python-prototype.md
 git commit -m "docs: conclude LAM Python prototype"
 ```
-

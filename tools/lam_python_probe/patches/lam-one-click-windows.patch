@@ -1,36 +1,69 @@
 diff --git a/app_lam.py b/app_lam.py
 --- a/app_lam.py
 +++ b/app_lam.py
-@@ -97 +97 @@ def save_images2video(img_lst, v_pth, fps):
+@@ -94,7 +94,7 @@ def doRender():
+ def save_images2video(img_lst, v_pth, fps):
+     from moviepy.editor import ImageSequenceClip
+     # Ensure all images are in uint8 format
 -    images = [image.astype(np.uint8) for image in img_lst]
 +    images = [image.astype(np.uint8, copy=False) for image in img_lst]
-@@ -274,2 +274,2 @@ def demo_lam(flametracking, lam, cfg):
+     
+     # Create an ImageSequenceClip from the list of images
+     clip = ImageSequenceClip(images, fps=fps)
+@@ -271,8 +271,8 @@ def demo_lam(flametracking, lam, cfg):
+         Image.fromarray(vis_ref_img).save(save_ref_img_path)
+ 
+         # prepare motion seq
 -        src = image_path.split('/')[-3]
 -        driven = motion_seqs_dir.split('/')[-2]
 +        src = os.path.basename(os.path.dirname(os.path.dirname(os.path.normpath(image_path))))
 +        driven = os.path.basename(os.path.normpath(motion_seqs_dir))
-@@ -293 +293,3 @@ def demo_lam(flametracking, lam, cfg):
+         src_driven = [src, driven]
+         motion_seq = prepare_motion_seqs(motion_seqs_dir, None, save_root=dump_tmp_dir, fps=render_fps,
+                                             bg_color=1., aspect_standard=aspect_standard, enlarge_ratio=[1.0, 1,0],
+@@ -290,7 +290,9 @@ def demo_lam(flametracking, lam, cfg):
+                                         render_c2ws=motion_seq["render_c2ws"].to(device),
+                                         render_intrs=motion_seq["render_intrs"].to(device),
+                                         render_bg_colors=motion_seq["render_bg_colors"].to(device),
 -                                        flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()})
 +                                        flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()},
 +                                        render_output_keys=("comp_rgb", "comp_mask"),
 +                                        render_output_device="cpu")
+         
+         # save h5 rendering info
+         if h5_rendering:
 diff --git a/lam/models/modeling_lam.py b/lam/models/modeling_lam.py
 --- a/lam/models/modeling_lam.py
 +++ b/lam/models/modeling_lam.py
-@@ -284 +284,2 @@ class ModelLAM(nn.Module):
+@@ -281,7 +281,8 @@ class ModelLAM(nn.Module):
+         
+     @torch.no_grad()
+     def infer_single_view(self, image, source_c2ws, source_intrs, render_c2ws, 
 -                          render_intrs, render_bg_colors, flame_params):
 +                          render_intrs, render_bg_colors, flame_params,
 +                          render_output_keys=None, render_output_device=None):
-@@ -312,0 +314,6 @@ class ModelLAM(nn.Module):
+         # image: [B, N_ref, C_img, H_img, W_img]
+         # source_c2ws: [B, N_ref, 4, 4]
+         # source_intrs: [B, N_ref, 4, 4]
+@@ -310,7 +311,14 @@ class ModelLAM(nn.Module):
+                                                 flame_data=flame_params,
+                                                 additional_features={"image_feats": image_feats, "image": image[:, 0], "image_feats_bchw": image_feats_bchw})
+ 
 +        selected_render_keys = (
 +            None if render_output_keys is None else set(render_output_keys)
 +        )
 +        output_device = (
 +            None if render_output_device is None else torch.device(render_output_device)
 +        )
-@@ -313,0 +321 @@ class ModelLAM(nn.Module):
+         render_res_list = []
 +        streamed_tensors = {}
-@@ -323 +331,24 @@ class ModelLAM(nn.Module):
+         for view_idx in range(num_views):
+             render_res = self.renderer.forward_animate_gs(gs_model_list, 
+                                                           query_points,
+@@ -320,7 +328,30 @@ class ModelLAM(nn.Module):
+                                                           render_h, 
+                                                           render_w, 
+                                                           render_bg_colors[:, view_idx:view_idx+1])
 -            render_res_list.append(render_res)
 +            if selected_render_keys is not None:
 +                render_res = {
@@ -56,18 +89,36 @@ diff --git a/lam/models/modeling_lam.py b/lam/models/modeling_lam.py
 +                streamed_tensors[key][:, view_idx:view_idx + value.shape[1]].copy_(value)
 +            if non_tensor_res:
 +                render_res_list.append(non_tensor_res)
-@@ -336,0 +368,4 @@ class ModelLAM(nn.Module):
+ 
+         out = defaultdict(list)
+         for res in render_res_list:
+@@ -334,6 +365,10 @@ class ModelLAM(nn.Module):
+                     out[k] = out[k][0].permute(0, 2, 3, 1)  # [1, Nv, 3, H, W] -> [Nv, 3, H, W] - > [Nv, H, W, 3] 
+             else:
+                 out[k] = v
 +        for key, value in streamed_tensors.items():
 +            out[key] = value
 +            if key in ["comp_rgb", "comp_mask", "comp_depth"]:
 +                out[key] = out[key][0].permute(0, 2, 3, 1)
+         out['cano_gs_lst'] = gs_model_list
+         return out
+ 
 diff --git a/lam/runners/infer/lam.py b/lam/runners/infer/lam.py
 --- a/lam/runners/infer/lam.py
 +++ b/lam/runners/infer/lam.py
-@@ -275 +275 @@ class LAMInferrer(Inferrer):
+@@ -272,7 +272,7 @@ class LAMInferrer(Inferrer):
+ 
+     def save_imgs_2_video(self, img_lst, v_pth, fps):
+         from moviepy.editor import ImageSequenceClip
 -        images = [image.astype(np.uint8) for image in img_lst]
 +        images = [image.astype(np.uint8, copy=False) for image in img_lst]
-@@ -301 +301,6 @@ class LAMInferrer(Inferrer):
+         clip = ImageSequenceClip(images, fps=fps)
+         clip.write_videofile(v_pth, codec='libx264')
+         print(f"Video saved successfully at {v_pth}")
+@@ -298,7 +298,12 @@ class LAMInferrer(Inferrer):
+         save_img = self.cfg.get("save_img", False)  # False
+         rendered_bg = 1.
+         ref_bg = 1.
 -        mask_path = image_path.replace("/images/", "/fg_masks/").replace(".jpg", ".png")
 +        image_dir = os.path.dirname(os.path.normpath(image_path))
 +        mask_path = os.path.join(
@@ -75,17 +126,30 @@ diff --git a/lam/runners/infer/lam.py b/lam/runners/infer/lam.py
 +            "fg_masks",
 +            os.path.splitext(os.path.basename(image_path))[0] + ".png",
 +        )
-@@ -323,2 +328,2 @@ class LAMInferrer(Inferrer):
+         if ref_bg < 1.:
+             if "VFHQ_TEST" in image_path:
+                 mask_path = image_path.replace("/VFHQ_TEST/", "/mask/").replace("/images/", "/mask/").replace(".png", ".jpg")
+@@ -320,8 +325,8 @@ class LAMInferrer(Inferrer):
+         # prepare motion seq
+         test_sample=self.cfg.get("test_sample", False)
+         # test_sample=True
 -        src = image_path.split('/')[-3]
 -        driven = motion_seqs_dir.split('/')[-2]
 +        src = os.path.basename(os.path.dirname(os.path.dirname(os.path.normpath(image_path))))
 +        driven = os.path.basename(os.path.normpath(motion_seqs_dir))
-@@ -347 +352,3 @@ class LAMInferrer(Inferrer):
+         src_driven = [src, driven]
+         motion_seq = prepare_motion_seqs(motion_seqs_dir, motion_img_dir, save_root=dump_tmp_dir, fps=motion_video_read_fps,
+                                             bg_color=rendered_bg, aspect_standard=aspect_standard, enlarge_ratio=[1.0, 1,0],
+@@ -344,11 +349,16 @@ class LAMInferrer(Inferrer):
+                                                render_c2ws=motion_seq["render_c2ws"].to(device),
+                                                render_intrs=motion_seq["render_intrs"].to(device),
+                                                render_bg_colors=motion_seq["render_bg_colors"].to(device),
 -                                               flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()})
 +                                               flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()},
 +                                               render_output_keys=("comp_rgb", "3dgs") if save_ply else ("comp_rgb",),
 +                                               render_output_device="cpu")
-@@ -350,2 +357,5 @@ class LAMInferrer(Inferrer):
+ 
+         print(f"time elapsed: {time.time() - start_time}")
 -        rgb = res["comp_rgb"].detach().cpu().numpy()  # [Nv, H, W, 3], 0-1
 -        rgb = (np.clip(rgb, 0, 1.0) * 255).astype(np.uint8)
 +        rgb_tensor = res["comp_rgb"].detach()
@@ -93,6 +157,15 @@ diff --git a/lam/runners/infer/lam.py b/lam/runners/infer/lam.py
 +        rgb = rgb_tensor.to(device="cpu", dtype=torch.uint8).numpy()
 +        del res["comp_rgb"]
 +        del rgb_tensor
-@@ -365 +375 @@ class LAMInferrer(Inferrer):
+         only_pred = rgb
+         if vis_motion:
+             # print(rgb.shape, motion_seq["vis_motion_render"].shape)
+@@ -362,7 +372,7 @@ class LAMInferrer(Inferrer):
+         os.makedirs(os.path.dirname(dump_video_path), exist_ok=True)
+         # images_to_video(rgb, output_path=dump_video_path, fps=render_fps, gradio_codec=False, verbose=True)
+         self.save_imgs_2_video(rgb, dump_video_path, render_fps)
 -        base_vid = motion_seqs_dir.strip('/').split('/')[-1]
 +        base_vid = os.path.basename(os.path.normpath(motion_seqs_dir))
+         audio_path = os.path.join(motion_seqs_dir, base_vid+".wav")
+         dump_video_path_wa = dump_video_path.replace(".mp4", "_audio.mp4")
+         self.add_audio_to_video(dump_video_path, dump_video_path_wa, audio_path)

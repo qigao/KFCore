@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-03",
+  "machine": {
+    "operating_system": "Windows",
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_memory_class_gib": 8,
+    "host_memory_class_gib": 16
+  },
+  "artifacts": {
+    "lam_one_click_archive": {
+      "file_name": "LAM-windows-one-click-install.zip",
+      "size_bytes": 8993781762,
+      "sha256": "81ca564f84df14db995868685af42d612b51b3c82204d2f6fcd366d45a4a1121"
+    },
+    "a2e_assets_archive": {
+      "file_name": "LAM_audio2exp_assets.tar",
+      "sha256": "f5759f080ec1352d454d88d5a32f09c0fc8aeaf50b9ac1fd9c34a4acd82acfa1"
+    },
+    "a2e_streaming_archive": {
+      "file_name": "LAM_audio2exp_streaming.tar",
+      "sha256": "0877f419b1b7b6856479b743b71625ad478f97434404e91288f9f0d6d516b97a"
+    }
+  },
+  "runs": {
+    "a2e": {
+      "upstream_commit": "02a703c3ea7d8e360eb43098eca85ee98a083529",
+      "python_version": "3.10.21",
+      "torch_version": "2.1.2+cu121",
+      "command": [
+        "../../lam-prototype/envs/lam-a2e/python.exe",
+        "inference.py",
+        "--config-file",
+        "configs/lam_audio2exp_config_streaming.py",
+        "--options",
+        "save_path=<result-directory>",
+        "save_json_path=<result-directory>/bsData.json",
+        "weight=pretrained_models/lam_audio2exp_streaming.tar",
+        "audio_input=assets/sample_audio/BarackObama_english.wav",
+        "ex_vol=False"
+      ],
+      "working_directory": ".cache/lam-upstream/LAM_Audio2Expression",
+      "audio_duration_seconds": 7.9953125,
+      "process_wall_seconds": 10.075,
+      "instrumented_after_torch_import_seconds": 4.671,
+      "model_construct_and_load_seconds": 1.556,
+      "forward_seconds": 0.317,
+      "frame_count": 240,
+      "fps": 30.0,
+      "expression_count": 52,
+      "minimum_weight": 0.0,
+      "maximum_weight": 0.9513577222824097,
+      "cuda_peak_allocated_bytes": 554708992,
+      "cuda_peak_reserved_bytes": 765460480
+    },
+    "lam": {
+      "source_identity": "official one-click archive SHA-256",
+      "python_version": "3.10.11",
+      "torch_version": "2.7.0+cu128",
+      "launch_command": [
+        ".glut/python.exe",
+        "app_lam.py",
+        "--blender_path",
+        "blender"
+      ],
+      "working_directory": "<extracted-directory>/LAM",
+      "required_environment": {
+        "CUDA_HOME": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8",
+        "CUDA_PATH": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8",
+        "MAX_JOBS": "1",
+        "TORCH_HOME": "<extracted-directory>/LAM/models",
+        "TORCH_EXTENSIONS_DIR": "<writable-extension-cache>"
+      },
+      "input_image": "assets/sample_input/status.png",
+      "motion": "assets/sample_motion/export/Look_In_My_Eyes",
+      "model_parameter_count": 557642254,
+      "model_construct_and_load_seconds": 17.59,
+      "model_cuda_transfer_seconds": 1.218,
+      "native_extension_first_compile_seconds": 303.815,
+      "tracking_model_setup_seconds": 9.13,
+      "image_preprocess_seconds": 3.67,
+      "flame_optimization_seconds": 49.22,
+      "tracking_export_seconds": 1.93,
+      "render_seconds": 17.556161165237427,
+      "instrumented_application_seconds": 136.38386519998312,
+      "process_wall_seconds": 148.537,
+      "render_frame_count": 519,
+      "encoded_frame_count": 520,
+      "fps": 30.0,
+      "width": 512,
+      "height": 512,
+      "cuda_peak_allocated_bytes": 4190469120,
+      "cuda_peak_reserved_bytes": 4674551808
+    }
+  },
+  "outputs": {
+    "lam_silent_video": {
+      "relative_cache_path": ".cache/lam-prototype/results/lam/official-sample/videos/status.mp4",
+      "size_bytes": 661502,
+      "sha256": "358c5bd5347da33f8d236937c659146b59605cc7613179edc630530897acb64c",
+      "codec": "h264",
+      "duration_seconds": 17.333333
+    },
+    "lam_audio_video": {
+      "relative_cache_path": ".cache/lam-prototype/results/lam/official-sample/videos/status_audio.mp4",
+      "size_bytes": 922955,
+      "sha256": "82a2a5939d5cc836e21d4eeb8cbe92b87720e0854dd17bdb211adde130ed3706",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "video_duration_seconds": 17.333333,
+      "audio_duration_seconds": 17.3
+    }
+  },
+  "limitations": [
+    "LAM stage timings and torch CUDA peaks were transcribed from an instrumented run; the temporary instrumentation was not retained as a repository tool.",
+    "The launch command reproduces the official interactive path but does not automatically select the recorded sample inputs.",
+    "save_ply=False was used; a persisted canonical Gaussian artifact was not validated.",
+    "The ARKit avatar export/runtime bridge was not executed end to end."
+  ]
+}
