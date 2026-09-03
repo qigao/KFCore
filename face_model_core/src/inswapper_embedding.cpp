@@ -1,7 +1,7 @@
 #include "kfcore/face_models/inswapper_embedding.hpp"
 
 #include "kfcore/face_models/error.hpp"
-#include "turbo_fs.h"
+#include "salts_fs.h"
 
 #include <cmath>
 #include <cstring>
@@ -31,10 +31,10 @@ struct FileBuffer final
 {
     ~FileBuffer()
     {
-        turbo_fs_buf_free(&value);
+        salts_fs_buf_free(&value);
     }
 
-    turbo_fs_buf_t value {};
+    salts_fs_buf_t value {};
 };
 
 double finite_norm(const ArcFaceResult& values, const char* subject)
@@ -91,7 +91,7 @@ InSwapperEmbeddingProjector::load(const std::filesystem::path& matrix_path)
         }
         const std::string encoded_path = matrix_path.u8string();
         FileBuffer file;
-        if (turbo_fs_read_file(encoded_path.c_str(), &file.value) != 0)
+        if (salts_fs_read_file(encoded_path.c_str(), &file.value) != 0)
         {
             throw_asset("file cannot be read: " + encoded_path);
         }

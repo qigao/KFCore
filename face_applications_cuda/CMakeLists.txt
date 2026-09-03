@@ -35,7 +35,7 @@ if(BUILD_EXAMPLES)
     KFCore::face_applications_cuda
     OpenCVLite::core
     OpenCVLite::imgcodecs
-    TurboUtils::Core)
+    Salts::Core)
   set_target_properties(face_swap_image PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(face_swap_image
@@ -53,7 +53,7 @@ if(BUILD_EXAMPLES)
     OpenCVLite::imgproc
     OpenCVLite::imgcodecs
     OpenCVLite::highgui
-    TurboUtils::Core)
+    Salts::Core)
   set_target_properties(face_swap_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(face_swap_demo

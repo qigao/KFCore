@@ -3,7 +3,7 @@ set(_yolo_tensorrt_test_folder "yolo_tensorrt/tests")
 cmake_add_test(
   NAME test_yolo_tensorrt_contract
   SOURCES test_tensorrt_contract.cpp ../src/engine_contract.cpp
-  LIBS KFCore::yolo_core TurboUtils::TinyTest
+  LIBS KFCore::yolo_core Salts::TinyTest
   INCLUDES ../include ../src ../../yolo_core/src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}")
@@ -13,14 +13,14 @@ cmake_add_test(
   LIBS
     KFCore::yolo_core
     KFCore::image_processor_cuda
-    TurboUtils::TinyTest
+    Salts::TinyTest
   INCLUDES ../src ../../yolo_core/src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}")
 cmake_add_test(
   NAME test_yolo_tensorrt_cuda_buffer
   SOURCES test_cuda_buffer.cpp ../src/cuda_buffer.cpp
-  LIBS KFCore::yolo_core CUDA::cudart TurboUtils::TinyTest
+  LIBS KFCore::yolo_core CUDA::cudart Salts::TinyTest
   DEFS KFCORE_YOLO_CUDA_BUFFER_TESTING
   INCLUDES ../src ../../yolo_core/src
   COMPILE_FEATURES cxx_std_17
@@ -28,7 +28,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_yolo_tensorrt_engine_file
   SOURCES test_engine_file.cpp ../src/engine_file.cpp
-  LIBS KFCore::yolo_core TurboUtils::TinyTest
+  LIBS KFCore::yolo_core Salts::TinyTest
   INCLUDES ../src ../../yolo_core/src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}")
@@ -43,7 +43,7 @@ cmake_add_test(
     TensorRT::nvinfer
     TensorRT::nvinfer_plugin
     CUDA::cudart
-    TurboUtils::TinyTest
+    Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}"
   TEST_PROPERTIES
@@ -66,7 +66,7 @@ cmake_add_test(
     TensorRT::nvinfer
     TensorRT::nvinfer_plugin
     CUDA::cudart
-    TurboUtils::TinyTest
+    Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}"
   TEST_PROPERTIES

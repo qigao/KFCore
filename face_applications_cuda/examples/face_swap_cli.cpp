@@ -1,6 +1,6 @@
 #include "face_swap_cli.hpp"
 
-#include "turbo_fs.h"
+#include "salts_fs.h"
 
 #include <array>
 #include <cstddef>
@@ -66,9 +66,9 @@ const std::string& value_of(const Arguments& arguments, const OptionBinding& bin
 
 void require_readable_file(const std::string& path, const char* option)
 {
-    turbo_fs_stat_t status {};
-    if (turbo_fs_stat(path.c_str(), &status) != 0 || !status.is_file ||
-        turbo_fs_access(path.c_str(), TURBO_FS_ACCESS_READ) != 0)
+    salts_fs_stat_t status {};
+    if (salts_fs_stat(path.c_str(), &status) != 0 || !status.is_file ||
+        salts_fs_access(path.c_str(), SALTS_FS_ACCESS_READ) != 0)
     {
         fail(std::string(option) + " is not a readable file: " + path);
     }

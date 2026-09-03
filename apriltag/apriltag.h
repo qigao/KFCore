@@ -43,7 +43,7 @@ extern "C" {
 #define WIN32_LEAN_AND_MEAN
 #endif
 #endif
-#include "turbo_thread.h"
+#include "salts_thread.h"
 
 #define APRILTAG_TASKS_PER_THREAD_TARGET 10
 
@@ -192,7 +192,7 @@ struct apriltag_detector
     workerpool_t *wp;
 
     // Used for thread safety.
-    turbo_mutex_t mutex;
+    salts_mutex_t mutex;
 };
 
 // Represents the detection of a tag. These are returned to the user
@@ -264,7 +264,7 @@ void apriltag_detector_destroy(apriltag_detector_t *td);
 //
 // Parameters:
 //   td      - A configured detector
-//   im_orig - A grayscale 8-bit image to search. 
+//   im_orig - A grayscale 8-bit image to search.
 //
 // Returns a zarray_t* containing apriltag_detection_t* pointers, one per
 // detected tag. The array may be empty but is never NULL. The caller is

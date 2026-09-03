@@ -48,8 +48,8 @@ endif()
 
 find_package(Threads REQUIRED)
 
-find_package(TurboUtils CONFIG REQUIRED
-             PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
+find_package(Salts CONFIG REQUIRED
+             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(TurboParser CONFIG REQUIRED
              PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
 find_package(TurboNet CONFIG REQUIRED

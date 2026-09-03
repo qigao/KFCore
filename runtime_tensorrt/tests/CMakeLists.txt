@@ -4,7 +4,7 @@ set(_runtime_tensorrt_test_includes ../src ../include)
 cmake_add_test(
   NAME test_runtime_tensorrt_contract
   SOURCES test_tensor_validation.cpp
-  LIBS KFCore::runtime_tensorrt TurboUtils::TinyTest
+  LIBS KFCore::runtime_tensorrt Salts::TinyTest
   INCLUDES ../src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}")
@@ -12,7 +12,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_runtime_tensorrt_engine_file
   SOURCES test_engine_file.cpp ../src/engine_file.cpp ../src/error.cpp
-  LIBS TurboUtils::TinyTest
+  LIBS Salts::TinyTest
   INCLUDES ${_runtime_tensorrt_test_includes}
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}")
@@ -20,7 +20,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_runtime_tensorrt_cuda_buffer
   SOURCES test_cuda_buffer.cpp ../src/cuda_buffer.cpp ../src/error.cpp
-  LIBS CUDA::cudart TurboUtils::TinyTest
+  LIBS CUDA::cudart Salts::TinyTest
   DEFS KFCORE_RUNTIME_TENSORRT_CUDA_BUFFER_TESTING=1
   INCLUDES ${_runtime_tensorrt_test_includes}
   COMPILE_FEATURES cxx_std_17
@@ -33,7 +33,7 @@ cmake_add_test(
     ../src/cuda_buffer.cpp
     ../src/cuda_device.cpp
     ../src/error.cpp
-  LIBS CUDA::cudart TurboUtils::TinyTest
+  LIBS CUDA::cudart Salts::TinyTest
   INCLUDES ${_runtime_tensorrt_test_includes}
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}")
@@ -49,7 +49,7 @@ cmake_add_test(
   NAME test_runtime_tensorrt_integration
   TEST_NAME test_runtime_tensorrt_integration_arcface
   SOURCES test_runtime_tensorrt_integration.cpp
-  LIBS KFCore::runtime_tensorrt CUDA::cudart TurboUtils::TinyTest
+  LIBS KFCore::runtime_tensorrt CUDA::cudart Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}"
   TEST_PROPERTIES
@@ -61,7 +61,7 @@ cmake_add_test(
   NAME test_runtime_tensorrt_dynamic_output_integration
   TEST_NAME test_runtime_tensorrt_dynamic_output
   SOURCES test_runtime_tensorrt_dynamic_output_integration.cpp
-  LIBS KFCore::runtime_tensorrt TurboUtils::TinyTest
+  LIBS KFCore::runtime_tensorrt Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}"
   TEST_PROPERTIES

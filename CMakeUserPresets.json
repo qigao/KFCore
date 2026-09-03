@@ -63,10 +63,8 @@
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
             },
             "environment": {
-                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
-                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
-                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-dev-user",
@@ -83,10 +81,8 @@
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
             },
             "environment": {
-                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
-                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
-                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
@@ -102,11 +98,9 @@
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
             },
             "environment": {
-                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/debug",
-                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/debug",
-                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/debug",
-                "PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "base-linux-dev-user",
@@ -122,11 +116,9 @@
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
             },
             "environment": {
-                "TURBOUTILS_ROOT": "$env{PKG_ROOT}/turboutils/release",
-                "TURBOPARSER_ROOT": "$env{PKG_ROOT}/turboparser/release",
-                "TURBONET_ROOT": "$env{PKG_ROOT}/turbonet/release",
-                "PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "release-linux-ninja",

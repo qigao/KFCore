@@ -387,7 +387,7 @@ apriltag_detector_t *apriltag_detector_create()
 
     td->tag_families = zarray_create(sizeof(apriltag_family_t*));
 
-    turbo_mutex_init(&td->mutex);
+    salts_mutex_init(&td->mutex);
 
     td->tp = timeprofile_create();
 
@@ -410,7 +410,7 @@ void apriltag_detector_destroy(apriltag_detector_t *td)
 
     apriltag_detector_clear_families(td);
 
-    turbo_mutex_destroy(&td->mutex);
+    salts_mutex_destroy(&td->mutex);
     zarray_destroy(td->tag_families);
     free(td);
 }
@@ -1012,9 +1012,9 @@ static void quad_decode_task(void *_u)
                     det->p[i][1] = p[1];
                 }
 
-                turbo_mutex_lock(&td->mutex);
+                salts_mutex_lock(&td->mutex);
                 zarray_add(task->detections, &det);
-                turbo_mutex_unlock(&td->mutex);
+                salts_mutex_unlock(&td->mutex);
             }
 
             quad_destroy(quad);
@@ -1551,4 +1551,3 @@ apriltag_detector_t *apriltag_detector_copy(apriltag_detector_t *src)
 
     return dst;
 }
-

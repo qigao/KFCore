@@ -1,7 +1,7 @@
 cmake_add_test(
   NAME test_hand_models_cuda_validation
   SOURCES test_tensorrt_backend_validation.cpp
-  LIBS KFCore::hand_models_cuda TurboUtils::TinyTest
+  LIBS KFCore::hand_models_cuda Salts::TinyTest
   INCLUDES ../src
   COMPILE_FEATURES cxx_std_17
   FOLDER "hand_models_cuda/tests")
@@ -18,7 +18,7 @@ set(_hand_cuda_classifier
 cmake_add_test(
   NAME test_hand_models_cuda_integration
   SOURCES test_tensorrt_integration.cpp
-  LIBS KFCore::hand_models_cuda TurboUtils::TinyTest
+  LIBS KFCore::hand_models_cuda Salts::TinyTest
   DEFS
     "KFCORE_HAND_TRT_TEST_PALM=\"${_hand_cuda_palm}\""
     "KFCORE_HAND_TRT_TEST_LANDMARK=\"${_hand_cuda_landmark}\""

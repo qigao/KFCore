@@ -6,14 +6,14 @@ set(_face_models_cuda_unit_tests
 cmake_add_test(
   NAME test_face_model_contracts
   SOURCES test_contracts.cpp
-  LIBS KFCore::face_models_cuda TurboUtils::TinyTest
+  LIBS KFCore::face_models_cuda Salts::TinyTest
   INCLUDES ../src ${CMAKE_SOURCE_DIR}/face_model_core/src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_face_models_cuda_test_folder}")
 cmake_add_test(
   NAME test_face_swap_adapter_api
   SOURCES test_swap_adapter_api.cpp
-  LIBS KFCore::face_models_cuda TurboUtils::TinyTest
+  LIBS KFCore::face_models_cuda Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_face_models_cuda_test_folder}")
 set(_face_mesh_engine_root "tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}")
@@ -24,7 +24,7 @@ set(_face_mesh_cuda_landmarker
 cmake_add_test(
   NAME test_facemesh_cuda_integration
   SOURCES test_facemesh_integration.cpp
-  LIBS KFCore::face_models_cuda TurboUtils::TinyTest
+  LIBS KFCore::face_models_cuda Salts::TinyTest
   DEFS
     "KFCORE_FACE_TRT_TEST_DETECTOR=\"${_face_mesh_cuda_detector}\""
     "KFCORE_FACE_TRT_TEST_LANDMARKER=\"${_face_mesh_cuda_landmarker}\""
@@ -47,7 +47,7 @@ endforeach()
 
 add_executable(test_face_models_integration test_face_models_integration.cpp)
 target_link_libraries(test_face_models_integration PRIVATE
-  KFCore::face_models_cuda TurboUtils::TinyTest)
+  KFCore::face_models_cuda Salts::TinyTest)
 target_compile_features(test_face_models_integration PRIVATE cxx_std_17)
 cmake_config_target(test_face_models_integration
   NO_INSTALL FOLDER "${_face_models_cuda_test_folder}")

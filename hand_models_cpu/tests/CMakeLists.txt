@@ -1,7 +1,7 @@
 cmake_add_test(
   NAME test_hand_models_cpu_validation
   SOURCES test_cpu_backend_validation.cpp
-  LIBS KFCore::hand_models_cpu TurboUtils::TinyTest
+  LIBS KFCore::hand_models_cpu Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "hand_models_cpu/tests")
 
@@ -15,7 +15,7 @@ set(_hand_cpu_classifier
 cmake_add_test(
   NAME test_hand_models_cpu_integration
   SOURCES test_cpu_integration.cpp
-  LIBS KFCore::hand_models_cpu TurboUtils::TinyTest
+  LIBS KFCore::hand_models_cpu Salts::TinyTest
   DEFS
     KFCORE_HAND_CPU_TEST_PALM="${_hand_cpu_palm}"
     KFCORE_HAND_CPU_TEST_LANDMARK="${_hand_cpu_landmark}"

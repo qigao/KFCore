@@ -44,10 +44,10 @@ either expressed or implied, of the Regents of The University of Michigan.
 #include "workerpool.h"
 #include "debug_print.h"
 
-#include "turbo_thread.h"
-typedef turbo_thread_t wp_thread_t;
-typedef turbo_mutex_t wp_mutex_t;
-typedef turbo_cond_t wp_cond_t;
+#include "salts_thread.h"
+typedef salts_thread_t wp_thread_t;
+typedef salts_mutex_t wp_mutex_t;
+typedef salts_cond_t wp_cond_t;
 
 struct workerpool {
     int nthreads;
@@ -78,17 +78,17 @@ static void worker_thread(void *p)
     while (1) {
         struct task *task;
 
-        turbo_mutex_lock(&wp->mutex);
+        salts_mutex_lock(&wp->mutex);
         while (wp->taskspos == zarray_size(wp->tasks) || !wp->start_predicate) {
             wp->end_count++;
-            turbo_cond_broadcast(&wp->endcond);
-            turbo_cond_wait(&wp->startcond, &wp->mutex);
+            salts_cond_broadcast(&wp->endcond);
+            salts_cond_wait(&wp->startcond, &wp->mutex);
         }
 
         zarray_get_volatile(wp->tasks, wp->taskspos, &task);
         wp->taskspos++;
-        turbo_mutex_unlock(&wp->mutex);
-        turbo_thread_yield();
+        salts_mutex_unlock(&wp->mutex);
+        salts_thread_yield();
 
         // we've been asked to exit.
         if (task->f == NULL)
@@ -113,12 +113,12 @@ workerpool_t *workerpool_create(int nthreads)
     if (nthreads > 1) {
         wp->threads = calloc(wp->nthreads, sizeof(wp_thread_t));
 
-        turbo_mutex_init(&wp->mutex);
-        turbo_cond_init(&wp->startcond);
-        turbo_cond_init(&wp->endcond);
+        salts_mutex_init(&wp->mutex);
+        salts_cond_init(&wp->startcond);
+        salts_cond_init(&wp->endcond);
 
         for (int i = 0; i < nthreads; i++) {
-            int res = turbo_thread_create(&wp->threads[i], worker_thread, wp);
+            int res = salts_thread_create(&wp->threads[i], worker_thread, wp);
             if (res != 0) {
                 debug_print("Insufficient system resources to create workerpool threads\n");
                 errno = EAGAIN;
@@ -127,11 +127,11 @@ workerpool_t *workerpool_create(int nthreads)
         }
 
         // Wait for the worker threads to be ready
-        turbo_mutex_lock(&wp->mutex);
+        salts_mutex_lock(&wp->mutex);
         while (wp->end_count < wp->nthreads) {
-            turbo_cond_wait(&wp->endcond, &wp->mutex);
+            salts_cond_wait(&wp->endcond, &wp->mutex);
         }
-        turbo_mutex_unlock(&wp->mutex);
+        salts_mutex_unlock(&wp->mutex);
     }
 
     return wp;
@@ -147,17 +147,17 @@ void workerpool_destroy(workerpool_t *wp)
         for (int i = 0; i < wp->nthreads; i++)
             workerpool_add_task(wp, NULL, NULL);
 
-        turbo_mutex_lock(&wp->mutex);
+        salts_mutex_lock(&wp->mutex);
         wp->start_predicate = true;
-        turbo_cond_broadcast(&wp->startcond);
-        turbo_mutex_unlock(&wp->mutex);
+        salts_cond_broadcast(&wp->startcond);
+        salts_mutex_unlock(&wp->mutex);
 
         for (int i = 0; i < wp->nthreads; i++)
-            turbo_thread_join(&wp->threads[i]);
+            salts_thread_join(&wp->threads[i]);
 
-        turbo_mutex_destroy(&wp->mutex);
-        turbo_cond_destroy(&wp->startcond);
-        turbo_cond_destroy(&wp->endcond);
+        salts_mutex_destroy(&wp->mutex);
+        salts_cond_destroy(&wp->startcond);
+        salts_cond_destroy(&wp->endcond);
         free(wp->threads);
     }
 
@@ -177,9 +177,9 @@ void workerpool_add_task(workerpool_t *wp, void (*f)(void *p), void *p)
     t.p = p;
 
     if (wp->nthreads > 1) {
-        turbo_mutex_lock(&wp->mutex);
+        salts_mutex_lock(&wp->mutex);
         zarray_add(wp->tasks, &t);
-        turbo_mutex_unlock(&wp->mutex);
+        salts_mutex_unlock(&wp->mutex);
     } else {
         zarray_add(wp->tasks, &t);
     }
@@ -200,19 +200,19 @@ void workerpool_run_single(workerpool_t *wp)
 void workerpool_run(workerpool_t *wp)
 {
     if (wp->nthreads > 1) {
-        turbo_mutex_lock(&wp->mutex);
+        salts_mutex_lock(&wp->mutex);
         wp->end_count = 0;
         wp->start_predicate = true;
-        turbo_cond_broadcast(&wp->startcond);
+        salts_cond_broadcast(&wp->startcond);
 
         while (wp->end_count < wp->nthreads) {
 //            printf("caught %d\n", wp->end_count);
-            turbo_cond_wait(&wp->endcond, &wp->mutex);
+            salts_cond_wait(&wp->endcond, &wp->mutex);
         }
 
         wp->taskspos = 0;
         wp->start_predicate = false;
-        turbo_mutex_unlock(&wp->mutex);
+        salts_mutex_unlock(&wp->mutex);
 
         zarray_clear(wp->tasks);
 

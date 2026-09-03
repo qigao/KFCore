@@ -4,7 +4,7 @@ foreach(_cpu_face_test IN ITEMS geometry preprocess composer)
   cmake_add_test(
     NAME ${_cpu_face_target}
     SOURCES ${_cpu_face_target}.cpp
-    LIBS KFCore::face_applications_cpu TurboUtils::TinyTest
+    LIBS KFCore::face_applications_cpu Salts::TinyTest
     INCLUDES ../src
     COMPILE_FEATURES cxx_std_17
     FOLDER "face_applications_cpu/tests")
@@ -14,7 +14,7 @@ endforeach()
 cmake_add_test(
   NAME test_cpu_face_application_validation
   SOURCES test_cpu_face_application_validation.cpp
-  LIBS KFCore::face_applications_cpu TurboUtils::TinyTest
+  LIBS KFCore::face_applications_cpu Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "face_applications_cpu/tests")
 list(APPEND _cpu_face_tests test_cpu_face_application_validation)

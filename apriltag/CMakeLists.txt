@@ -5,8 +5,9 @@ if(POLICY CMP0077)
     cmake_policy(SET CMP0077 NEW)
 endif()
 
-if(NOT TARGET TurboUtils::Core)
-    find_package(TurboNet CONFIG REQUIRED)
+if(NOT TARGET Salts::Core)
+    find_package(Salts CONFIG REQUIRED
+                 PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 endif()
 
 # Set a default build type if none was specified
@@ -88,7 +89,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     $<IF:$<TARGET_EXISTS:libjpeg-turbo::turbojpeg>,libjpeg-turbo::turbojpeg,libjpeg-turbo::turbojpeg-static>)
 target_compile_definitions(${PROJECT_NAME} PUBLIC APRILTAG_USE_LIBJPEG_TURBO=1)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC TurboUtils::Core)
+target_link_libraries(${PROJECT_NAME} PUBLIC Salts::Core)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     C_STANDARD 99

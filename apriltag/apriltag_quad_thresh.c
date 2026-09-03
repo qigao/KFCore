@@ -652,7 +652,7 @@ struct line_fit_pt* compute_lfps(int sz, zarray_t* cluster, image_u8_t* im) {
         sum_Mxy += W * fx * fy;
         sum_Myy += W * fy * fy;
         sum_W   += W;
-        
+
         // Store cumulative sums
         lfps[i].Mx = sum_Mx;
         lfps[i].My = sum_My;
@@ -1093,9 +1093,9 @@ static void do_quad_task(void *p)
         memset(&quad, 0, sizeof(struct quad));
 
         if (fit_quad(td, task->im, *cluster, &quad, task->tag_width, task->normal_border, task->reversed_border)) {
-            turbo_mutex_lock(&td->mutex);
+            salts_mutex_lock(&td->mutex);
             zarray_add(quads, &quad);
-            turbo_mutex_unlock(&td->mutex);
+            salts_mutex_unlock(&td->mutex);
         }
     }
 }
@@ -1215,7 +1215,7 @@ void do_threshold_task(void *p)
         }
     }
 }
- 
+
 image_u8_t *threshold(apriltag_detector_t *td, image_u8_t *im)
 {
     int w = im->width, h = im->height, s = im->stride;

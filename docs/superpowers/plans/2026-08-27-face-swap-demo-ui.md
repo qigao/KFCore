@@ -92,7 +92,7 @@ Expected: PASS.
 
 - [x] **Step 1: Add the executable target and require `OpenCVLite::highgui` only for examples**
 
-Link the event-loop translation unit to `KFCore::face_applications`, `OpenCVLite::imgcodecs`, `OpenCVLite::highgui`, and `TurboUtils::Core`.
+Link the event-loop translation unit to `KFCore::face_applications`, `OpenCVLite::imgcodecs`, `OpenCVLite::highgui`, and `SaltsCore`.
 
 - [x] **Step 2: Implement the synchronous event loop**
 

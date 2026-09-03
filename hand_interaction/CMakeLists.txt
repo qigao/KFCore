@@ -53,7 +53,7 @@ if(BUILD_EXAMPLES)
     KFCore::face_models_cpu
     KFCore::face_models_cuda
     TurboParser::Capture
-    TurboUtils::Core)
+    Salts::Core)
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(hand_interaction_demo

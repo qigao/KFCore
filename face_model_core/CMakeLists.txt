@@ -12,7 +12,7 @@ target_include_directories(kfcore_face_model_core
 target_compile_features(kfcore_face_model_core PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_model_core
   PUBLIC KFCore::image_processor_core
-  PRIVATE TurboUtils::Core)
+  PRIVATE Salts::Core)
 set_target_properties(kfcore_face_model_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
