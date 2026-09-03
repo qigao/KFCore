@@ -1,0 +1,98 @@
+diff --git a/app_lam.py b/app_lam.py
+--- a/app_lam.py
++++ b/app_lam.py
+@@ -97 +97 @@ def save_images2video(img_lst, v_pth, fps):
+-    images = [image.astype(np.uint8) for image in img_lst]
++    images = [image.astype(np.uint8, copy=False) for image in img_lst]
+@@ -274,2 +274,2 @@ def demo_lam(flametracking, lam, cfg):
+-        src = image_path.split('/')[-3]
+-        driven = motion_seqs_dir.split('/')[-2]
++        src = os.path.basename(os.path.dirname(os.path.dirname(os.path.normpath(image_path))))
++        driven = os.path.basename(os.path.normpath(motion_seqs_dir))
+@@ -293 +293,3 @@ def demo_lam(flametracking, lam, cfg):
+-                                        flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()})
++                                        flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()},
++                                        render_output_keys=("comp_rgb", "comp_mask"),
++                                        render_output_device="cpu")
+diff --git a/lam/models/modeling_lam.py b/lam/models/modeling_lam.py
+--- a/lam/models/modeling_lam.py
++++ b/lam/models/modeling_lam.py
+@@ -284 +284,2 @@ class ModelLAM(nn.Module):
+-                          render_intrs, render_bg_colors, flame_params):
++                          render_intrs, render_bg_colors, flame_params,
++                          render_output_keys=None, render_output_device=None):
+@@ -312,0 +314,6 @@ class ModelLAM(nn.Module):
++        selected_render_keys = (
++            None if render_output_keys is None else set(render_output_keys)
++        )
++        output_device = (
++            None if render_output_device is None else torch.device(render_output_device)
++        )
+@@ -313,0 +321 @@ class ModelLAM(nn.Module):
++        streamed_tensors = {}
+@@ -323 +331,24 @@ class ModelLAM(nn.Module):
+-            render_res_list.append(render_res)
++            if selected_render_keys is not None:
++                render_res = {
++                    key: value
++                    for key, value in render_res.items()
++                    if key in selected_render_keys
++                }
++            if output_device is None:
++                render_res_list.append(render_res)
++                continue
++
++            non_tensor_res = {}
++            for key, value in render_res.items():
++                if not isinstance(value, torch.Tensor):
++                    non_tensor_res[key] = value
++                    continue
++                if key not in streamed_tensors:
++                    streamed_tensors[key] = torch.empty(
++                        (value.shape[0], num_views, *value.shape[2:]),
++                        dtype=value.dtype,
++                        device=output_device,
++                    )
++                streamed_tensors[key][:, view_idx:view_idx + value.shape[1]].copy_(value)
++            if non_tensor_res:
++                render_res_list.append(non_tensor_res)
+@@ -336,0 +368,4 @@ class ModelLAM(nn.Module):
++        for key, value in streamed_tensors.items():
++            out[key] = value
++            if key in ["comp_rgb", "comp_mask", "comp_depth"]:
++                out[key] = out[key][0].permute(0, 2, 3, 1)
+diff --git a/lam/runners/infer/lam.py b/lam/runners/infer/lam.py
+--- a/lam/runners/infer/lam.py
++++ b/lam/runners/infer/lam.py
+@@ -275 +275 @@ class LAMInferrer(Inferrer):
+-        images = [image.astype(np.uint8) for image in img_lst]
++        images = [image.astype(np.uint8, copy=False) for image in img_lst]
+@@ -301 +301,6 @@ class LAMInferrer(Inferrer):
+-        mask_path = image_path.replace("/images/", "/fg_masks/").replace(".jpg", ".png")
++        image_dir = os.path.dirname(os.path.normpath(image_path))
++        mask_path = os.path.join(
++            os.path.dirname(image_dir),
++            "fg_masks",
++            os.path.splitext(os.path.basename(image_path))[0] + ".png",
++        )
+@@ -323,2 +328,2 @@ class LAMInferrer(Inferrer):
+-        src = image_path.split('/')[-3]
+-        driven = motion_seqs_dir.split('/')[-2]
++        src = os.path.basename(os.path.dirname(os.path.dirname(os.path.normpath(image_path))))
++        driven = os.path.basename(os.path.normpath(motion_seqs_dir))
+@@ -347 +352,3 @@ class LAMInferrer(Inferrer):
+-                                               flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()})
++                                               flame_params={k:v.to(device) for k, v in motion_seq["flame_params"].items()},
++                                               render_output_keys=("comp_rgb", "3dgs") if save_ply else ("comp_rgb",),
++                                               render_output_device="cpu")
+@@ -350,2 +357,5 @@ class LAMInferrer(Inferrer):
+-        rgb = res["comp_rgb"].detach().cpu().numpy()  # [Nv, H, W, 3], 0-1
+-        rgb = (np.clip(rgb, 0, 1.0) * 255).astype(np.uint8)
++        rgb_tensor = res["comp_rgb"].detach()
++        rgb_tensor.clamp_(0, 1.0).mul_(255)
++        rgb = rgb_tensor.to(device="cpu", dtype=torch.uint8).numpy()
++        del res["comp_rgb"]
++        del rgb_tensor
+@@ -365 +375 @@ class LAMInferrer(Inferrer):
+-        base_vid = motion_seqs_dir.strip('/').split('/')[-1]
++        base_vid = os.path.basename(os.path.normpath(motion_seqs_dir))
