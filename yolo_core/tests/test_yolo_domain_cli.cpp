@@ -11,7 +11,7 @@ using namespace kfcore::yolo::demo;
 namespace
 {
 
-turbo_video_native_mode_t mode(int width, int height, int fps, int format,
+salts_video_native_mode_t mode(int width, int height, int fps, int format,
                                std::uint64_t id)
 {
     return { width, height, static_cast<std::uint32_t>(fps), 1U, format, id };
@@ -93,10 +93,10 @@ spec("YOLOv8 domain application CLI")
 
     it("requires the default exact NV12 mode and accepts explicit supported modes")
     {
-        const std::vector<turbo_video_native_mode_t> modes {
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_RGB24, 1U),
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 2U),
-            mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_BGRA, 3U),
+        const std::vector<salts_video_native_mode_t> modes {
+            mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_RGB24, 1U),
+            mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_NV12, 2U),
+            mode(1280, 720, 30, SALTS_VIDEO_CAPTURE_FORMAT_BGRA, 3U),
         };
         CaptureRequest request;
         check(select_mode(modes, request) == 1U);
@@ -107,7 +107,7 @@ spec("YOLOv8 domain application CLI")
 
         CaptureRequest default_request;
         check_throws_as(select_mode(
-                            { mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 4U) },
+                            { mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_I420, 4U) },
                             default_request),
                         std::invalid_argument);
     }

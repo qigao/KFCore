@@ -60,11 +60,11 @@ kfcore::image::PixelFormat processor_format(int format)
 {
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return kfcore::image::PixelFormat::Rgb8;
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
         return kfcore::image::PixelFormat::Nv12;
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
         return kfcore::image::PixelFormat::I420;
     default:
         throw std::invalid_argument("captured frame format has no ImageProcessor mapping");
@@ -75,11 +75,11 @@ PixelFormat yolo_format(int format)
 {
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return PixelFormat::Rgb8;
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
         return PixelFormat::Nv12;
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
         return PixelFormat::I420;
     default:
         throw std::invalid_argument("captured frame format has no YOLO image mapping");
@@ -103,7 +103,7 @@ kfcore::image::BgrImage to_bgr(const CapturedFrame& frame,
                                std::size_t max_image_bytes)
 {
     validate_captured(frame);
-    if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_BGRA)
+    if (frame.format == SALTS_VIDEO_CAPTURE_FORMAT_BGRA)
     {
         const std::size_t destination_bytes = checked_image_bytes(
             frame.width, frame.height, 3U, max_image_bytes, "captured BGR image");
@@ -126,7 +126,7 @@ kfcore::image::BgrImage to_bgr(const CapturedFrame& frame,
         static_cast<std::size_t>(frame.width), processor_format(frame.format),
         kfcore::image::MemoryKind::Host,
     };
-    if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24)
+    if (frame.format == SALTS_VIDEO_CAPTURE_FORMAT_RGB24)
     {
         source.row_stride *= 3U;
     }
@@ -246,7 +246,7 @@ ImageView capture_image_view(const CapturedFrame& frame)
 {
     validate_captured(frame);
     std::size_t stride = static_cast<std::size_t>(frame.width);
-    if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24)
+    if (frame.format == SALTS_VIDEO_CAPTURE_FORMAT_RGB24)
     {
         stride *= 3U;
     }

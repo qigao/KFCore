@@ -21,14 +21,14 @@ cmake_add_test(
     test_yolo_domain_cli.cpp
     ../examples/yolo_domain_cli.cpp
     ../examples/yolo_domain_profile.cpp
-  LIBS KFCore::yolo_core TurboParser::Capture Salts::TinyTest
+  LIBS KFCore::yolo_core Salts::Capture Salts::TinyTest
   INCLUDES ../examples
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_core_test_folder}")
 cmake_add_test(
   NAME test_yolo_domain_capture
   SOURCES test_yolo_domain_capture.cpp ../examples/yolo_domain_capture.cpp
-  LIBS TurboParser::Capture Salts::TinyTest
+  LIBS Salts::Capture Salts::TinyTest
   INCLUDES ../examples
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_core_test_folder}")
@@ -43,7 +43,7 @@ cmake_add_test(
   LIBS
     KFCore::yolo_core
     KFCore::image_processor_cpu
-    TurboParser::Capture
+    Salts::Capture
     Salts::TinyTest
   INCLUDES ../examples ${Stb_INCLUDE_DIR}
   COMPILE_FEATURES cxx_std_17

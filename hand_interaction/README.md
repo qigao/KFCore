@@ -206,7 +206,7 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user --output-on-failure
 ```
 
-本机 TurboParser release package 若未导出 `TurboParser::Capture`，只能使用
+本机 TurboParser release package 若未导出 `Salts::Capture`，只能使用
 `-DBUILD_EXAMPLES=OFF` 验证 core 和非 demo 测试；这不代表 identity core
 测试失败。需要构建实时 demo 时，应安装包含 Capture component 的 TurboParser SDK，再使用上述
 preset 的默认 `ON` 配置重新 configure。
@@ -283,7 +283,7 @@ FaceMesh 启用时的 face preprocess、detector、mesh preprocess、mesh infere
 三张 THIG 状态图。`Single Hand V`、`Grasp` 等一次性 `ActionEvent` 不改变核心事件语义，但在
 demo 中最多保留四条、每条显示 1500ms，便于人工观察；按 `R` 会同时清除这段显示历史。
 
-若 configure 报告缺少 `TurboParser::Capture`，说明 TurboParser SDK 没有安装 Capture 导出目标；
+若 configure 报告缺少 `Salts::Capture`，说明 TurboParser SDK 没有安装 Capture 导出目标；
 在 TurboParser 源码树依次运行 `win-capture-release-user` 的 configure、build、test 和 install
 preset 后重新配置。若启动时 Windows 在进入 `main` 前退出，应先检查当前 shell 的 `PATH`
 是否包含 `opencv-lite/bin`、`turboparser/release/bin` 和相应推理 runtime 目录。

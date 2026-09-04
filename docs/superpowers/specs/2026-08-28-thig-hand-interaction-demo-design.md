@@ -6,7 +6,7 @@ KFCore already provides CPU and TensorRT hand inference, per-pipeline ByteTrack/
 and backend-neutral THIG hand interaction. It does not yet provide an executable that connects
 those pieces to a live camera. OpenCV Lite intentionally has no `videoio` component, while the
 installed TurboParser SDK provides native camera enumeration and capture through
-`TurboParser::Capture`.
+`Salts::Capture`.
 
 ## Scope
 
@@ -60,7 +60,7 @@ dependencies.
 | Capacity | Exactly two pixel vectors, each capped by configurable `max_frame_bytes`; default 64 MiB. Byte counts use checked multiplication. |
 | Backpressure | Producer never waits for inference. If an unread frame exists, it is replaced and `coalesced_frames` increments. Oversized/malformed frames are rejected and counted. |
 | Failure | Callback is `noexcept` and reports rejection through counters. Device/control-plane failures throw before the event loop or close the mailbox through the state callback. |
-| Shutdown | UI requests exit; main thread calls `turbo_capture_stop()` so callbacks drain, then destroys capture/device handles. The callback never calls stop/destroy. |
+| Shutdown | UI requests exit; main thread calls `SALTS_CAPTUREstop()` so callbacks drain, then destroys capture/device handles. The callback never calls stop/destroy. |
 | Observability | Captured, consumed, coalesced, rejected, capture timestamp, model stage timing, THIG timing, and end-to-end frame timing are displayed. |
 
 A mutex and condition variable protect the one published slot. This is preferred over a lock-free
@@ -99,7 +99,7 @@ All additions are opt-in and example-local. Existing library targets, package ex
 presets, CPU/GPU inference semantics, and OpenCV-free CPU libraries remain unchanged. Rollback is
 disabling `KFCORE_BUILD_HAND_INTERACTION_EXAMPLES` or reverting the new example sources and option.
 
-The TurboParser SDK must export `TurboParser::Capture`; having only `turbo_capture.dll/.lib/.h` is
+The TurboParser SDK must export `Salts::Capture`; having only `turbo_capture.dll/.lib/.h` is
 considered an invalid installation and configuration fails. Reinstalling TurboParser with its
 `install-win-capture-release-user` preset restores the official export target.
 

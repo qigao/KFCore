@@ -34,7 +34,7 @@ spec("hand interaction demo frame and UI")
 {
     it("converts packed RGB and BGRA to owning BGR")
     {
-        auto rgb = frame(TURBO_VIDEO_CAPTURE_FORMAT_RGB24,
+        auto rgb = frame(SALTS_VIDEO_CAPTURE_FORMAT_RGB24,
                          { 255U, 0U, 0U, 0U, 255U, 0U,
                            0U, 0U, 255U, 255U, 255U, 255U });
         cv::Mat bgr = demo::to_bgr(rgb);
@@ -46,7 +46,7 @@ spec("hand interaction demo frame and UI")
         rgb.pixels[0] = 0U;
         check_equal(bgr.at<cv::Vec3b>(0, 0)[2], (std::uint8_t)255U);
 
-        const auto bgra = frame(TURBO_VIDEO_CAPTURE_FORMAT_BGRA,
+        const auto bgra = frame(SALTS_VIDEO_CAPTURE_FORMAT_BGRA,
                                 { 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U,
                                   9U, 10U, 11U, 12U, 13U, 14U, 15U, 16U });
         bgr = demo::to_bgr(bgra);
@@ -56,9 +56,9 @@ spec("hand interaction demo frame and UI")
 
     it("converts packed NV12 and I420 black fixtures")
     {
-        const auto nv12 = frame(TURBO_VIDEO_CAPTURE_FORMAT_NV12,
+        const auto nv12 = frame(SALTS_VIDEO_CAPTURE_FORMAT_NV12,
                                 { 16U, 16U, 16U, 16U, 128U, 128U });
-        const auto i420 = frame(TURBO_VIDEO_CAPTURE_FORMAT_I420,
+        const auto i420 = frame(SALTS_VIDEO_CAPTURE_FORMAT_I420,
                                 { 16U, 16U, 16U, 16U, 128U, 128U });
         const cv::Mat nv12_bgr = demo::to_bgr(nv12);
         const cv::Mat i420_bgr = demo::to_bgr(i420);
@@ -68,15 +68,15 @@ spec("hand interaction demo frame and UI")
 
     it("rejects malformed unsupported and empty capture frames")
     {
-        auto malformed = frame(TURBO_VIDEO_CAPTURE_FORMAT_RGB24, { 1U, 2U, 3U });
+        auto malformed = frame(SALTS_VIDEO_CAPTURE_FORMAT_RGB24, { 1U, 2U, 3U });
         check_throws_as(demo::to_bgr(malformed), std::invalid_argument);
         malformed.pixels.clear();
         check_throws_as(demo::to_bgr(malformed), std::invalid_argument);
-        malformed = frame(TURBO_VIDEO_CAPTURE_FORMAT_MJPEG,
+        malformed = frame(SALTS_VIDEO_CAPTURE_FORMAT_MJPEG,
                           { 1U, 2U, 3U, 4U, 5U, 6U });
         check_throws_as(demo::to_bgr(malformed), std::invalid_argument);
         malformed.width = 3;
-        malformed.format = TURBO_VIDEO_CAPTURE_FORMAT_NV12;
+        malformed.format = SALTS_VIDEO_CAPTURE_FORMAT_NV12;
         check_throws_as(demo::to_bgr(malformed), std::invalid_argument);
     }
 

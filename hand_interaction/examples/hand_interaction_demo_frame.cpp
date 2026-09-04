@@ -17,13 +17,13 @@ cv::Mat to_bgr(const CapturedFrame& frame)
     }
 
     cv::Mat result;
-    if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24)
+    if (frame.format == SALTS_VIDEO_CAPTURE_FORMAT_RGB24)
     {
         const cv::Mat rgb(frame.height, frame.width, CV_8UC3,
                           const_cast<std::uint8_t*>(frame.pixels.data()));
         cv::cvtColor(rgb, result, cv::COLOR_RGB2BGR);
     }
-    else if (frame.format == TURBO_VIDEO_CAPTURE_FORMAT_BGRA)
+    else if (frame.format == SALTS_VIDEO_CAPTURE_FORMAT_BGRA)
     {
         const cv::Mat bgra(frame.height, frame.width, CV_8UC4,
                            const_cast<std::uint8_t*>(frame.pixels.data()));
@@ -33,7 +33,7 @@ cv::Mat to_bgr(const CapturedFrame& frame)
     {
         const cv::Mat yuv(frame.height + frame.height / 2, frame.width, CV_8UC1,
                           const_cast<std::uint8_t*>(frame.pixels.data()));
-        const int conversion = frame.format == TURBO_VIDEO_CAPTURE_FORMAT_NV12
+        const int conversion = frame.format == SALTS_VIDEO_CAPTURE_FORMAT_NV12
                                    ? cv::COLOR_YUV2BGR_NV12
                                    : cv::COLOR_YUV2BGR_I420;
         cv::cvtColor(yuv, result, conversion);

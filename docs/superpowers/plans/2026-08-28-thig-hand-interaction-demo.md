@@ -6,7 +6,7 @@
 
 **Architecture:** Keep capture, frame conversion, CLI parsing, and UI rendering in the example boundary. Copy Turbo Capture's callback-borrowed frame into a bounded latest-frame mailbox, then let the single UI/inference thread share one owning BGR image across display, HandPipeline, and HandInteractionPipeline.
 
-**Tech Stack:** C++17, TurboParser::Capture, OpenCV Lite core/imgproc/highgui, ONNX Runtime or TensorRT/CUDA, KFCore vision models/THIG, CMake presets, TinyTest.
+**Tech Stack:** C++17, Salts::Capture, OpenCV Lite core/imgproc/highgui, ONNX Runtime or TensorRT/CUDA, KFCore vision models/THIG, CMake presets, TinyTest.
 
 **Spec:** `docs/superpowers/specs/2026-08-28-thig-hand-interaction-demo-design.md`
 
@@ -32,7 +32,7 @@
 
 **Interfaces:**
 - Produces: `demo::Arguments parse_arguments(const std::vector<std::string>&, BackendAvailability)`.
-- Produces: `std::size_t select_mode(const std::vector<turbo_video_native_mode_t>&, const CaptureRequest&)`.
+- Produces: `std::size_t select_mode(const std::vector<salts_video_native_mode_t>&, const CaptureRequest&)`.
 - Consumes: explicit backend availability, camera index, mode id or exact width/height/fps, and CPU/TensorRT model paths.
 
 - [x] **Step 1: Write failing TinyTest cases.** Cover list-only operation without models, missing/duplicate/unknown options, numeric range errors, unavailable backend rejection, readable model validation, exact mode-id matching, exact geometry/fps matching, format preference, and MJPEG-only rejection.
@@ -90,9 +90,9 @@
 
 **Interfaces:**
 - Produces: executable `hand_interaction_demo` when `KFCORE_BUILD_HAND_INTERACTION_EXAMPLES=ON`.
-- Consumes: Tasks 1-3, `KFCore::hand_models_cpu` and/or `KFCore::vision_models_tensorrt`, `KFCore::hand_interaction`, `TurboParser::Capture`, and `OpenCVLite::highgui`.
+- Consumes: Tasks 1-3, `KFCore::hand_models_cpu` and/or `KFCore::vision_models_tensorrt`, `KFCore::hand_interaction`, `Salts::Capture`, and `OpenCVLite::highgui`.
 
-- [x] **Step 1: Add option dependency checks and executable target.** Require the official `TurboParser::Capture` imported target and fail configuration if the SDK was installed without capture exports.
+- [x] **Step 1: Add option dependency checks and executable target.** Require the official `Salts::Capture` imported target and fail configuration if the SDK was installed without capture exports.
 - [x] **Step 2: Build and verify the executable initially fails.** Expect missing `main` orchestration until the next step.
 - [x] **Step 3: Implement the event loop.** Handle list-only mode before model load; construct exactly one selected backend and HandPipeline, process the latest frame synchronously, feed a monotonic serial/time context to THIG, display overlay, reset both pipelines on R, and exit on Q/Escape/window close.
 - [x] **Step 4: Preserve error and timing boundaries.** Catch exceptions only in `main`, print one actionable error, return failure, and display capture/model/THIG/end-to-end timings without per-frame INFO logging.
@@ -110,7 +110,7 @@
 - Produces: `win-release-user` and `win-release-user` configure/build/test presets with OpenCV Lite and runtime DLL paths.
 - Documents: complete list, CPU launch, TensorRT launch, controls, ownership, supported formats, and troubleshooting commands.
 
-- [x] **Step 1: Repair the installed TurboParser capture export.** In the TurboParser `refactor/capture-serial-to-parser` worktree, run `cmake --preset win-capture-release-user`, build/test, then `cmake --build --preset install-win-capture-release-user`; verify a clean consumer sees `TARGET TurboParser::Capture`.
+- [x] **Step 1: Repair the installed TurboParser capture export.** In the TurboParser `refactor/capture-serial-to-parser` worktree, run `cmake --preset win-capture-release-user`, build/test, then `cmake --build --preset install-win-capture-release-user`; verify a clean consumer sees `TARGET Salts::Capture`.
 - [x] **Step 2: Add dedicated demo presets.** Keep existing vision presets unchanged; inherit their backend settings, enable only the example option, add `OPENCV_LITE_ROOT`, and include Turbo Capture/OpenCV/runtime directories in PATH.
 - [x] **Step 3: Document complete commands and expected behavior.** Include `--list-cameras`, exact mode selection, CPU model directory, TensorRT engine flags, R/Q controls, and MJPEG rejection guidance.
 - [x] **Step 4: Run focused and adjacent tests.** Configure/build the CPU demo preset; run demo CLI/capture/UI tests, hand interaction tests, vision pipeline tests, CPU real-model integration, and installed-consumer test.
@@ -120,7 +120,7 @@
 
 ## Verification record (2026-08-28)
 
-- TurboParser Capture migration: focused Capture tests 2/2 passed; installed package exports `TurboParser::Capture`.
+- TurboParser Capture migration: focused Capture tests 2/2 passed; installed package exports `Salts::Capture`.
 - CPU dedicated preset: clean configure/build and 22/22 CTest tests passed, including real ONNX models and installed consumer.
 - CPU camera smoke: Logitech BRIO mode 385, 640x480@30 NV12, model load 78.37 ms; captured 100, consumed 100, coalesced 0, rejected 0.
 - TensorRT dedicated preset: TensorRT 11.2.1 and CUDA 12.8 configure/build passed; 28/28 tests passed; `--list-cameras` loaded the GPU executable and enumerated the BRIO.

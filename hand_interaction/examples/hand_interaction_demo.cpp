@@ -54,15 +54,15 @@ const char* format_name(int format)
 {
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
         return "I420";
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
         return "NV12";
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return "RGB24";
-    case TURBO_VIDEO_CAPTURE_FORMAT_BGRA:
+    case SALTS_VIDEO_CAPTURE_FORMAT_BGRA:
         return "BGRA";
-    case TURBO_VIDEO_CAPTURE_FORMAT_MJPEG:
+    case SALTS_VIDEO_CAPTURE_FORMAT_MJPEG:
         return "MJPEG (unsupported by demo)";
     default:
         return "unknown";
@@ -86,7 +86,7 @@ void print_cameras()
         for (const auto& mode : modes)
         {
             std::cout << "  mode " << mode.mode_id << ": " << mode.width << 'x'
-                      << mode.height << '@' << turbo_video_mode_fps(&mode) << " "
+                      << mode.height << '@' << salts_video_mode_fps(&mode) << " "
                       << format_name(mode.format) << " [" << mode.framerate_numerator
                       << '/' << mode.framerate_denominator << "]\n";
         }
@@ -199,7 +199,7 @@ int run(const demo::Arguments& arguments)
     DemoWindow               window(mode.width, mode.height);
 
     std::cout << "Capturing " << device.name << " mode " << mode.mode_id << " ("
-              << mode.width << 'x' << mode.height << '@' << turbo_video_mode_fps(&mode)
+              << mode.width << 'x' << mode.height << '@' << salts_video_mode_fps(&mode)
               << ' ' << format_name(mode.format) << ")\n";
     camera.start();
     bool running = true;

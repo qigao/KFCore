@@ -101,13 +101,13 @@ Backend parse_backend(const std::string& text)
 
 bool supported_format(int format) noexcept
 {
-    return format == TURBO_VIDEO_CAPTURE_FORMAT_NV12 ||
-           format == TURBO_VIDEO_CAPTURE_FORMAT_I420 ||
-           format == TURBO_VIDEO_CAPTURE_FORMAT_RGB24 ||
-           format == TURBO_VIDEO_CAPTURE_FORMAT_BGRA;
+    return format == SALTS_VIDEO_CAPTURE_FORMAT_NV12 ||
+           format == SALTS_VIDEO_CAPTURE_FORMAT_I420 ||
+           format == SALTS_VIDEO_CAPTURE_FORMAT_RGB24 ||
+           format == SALTS_VIDEO_CAPTURE_FORMAT_BGRA;
 }
 
-int rounded_fps(const turbo_video_native_mode_t& mode)
+int rounded_fps(const salts_video_native_mode_t& mode)
 {
     if (mode.framerate_denominator == 0U)
     {
@@ -272,12 +272,12 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     return result;
 }
 
-std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
+std::size_t select_mode(const std::vector<salts_video_native_mode_t>& modes,
                         const CaptureRequest& request)
 {
     for (std::size_t index = 0U; index < modes.size(); ++index)
     {
-        const turbo_video_native_mode_t& current = modes[index];
+        const salts_video_native_mode_t& current = modes[index];
         if (request.mode_id.has_value())
         {
             if (current.mode_id == *request.mode_id && supported_format(current.format))
@@ -287,7 +287,7 @@ std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
         }
         else if (current.width == request.width && current.height == request.height &&
                  rounded_fps(current) == request.fps &&
-                 current.format == TURBO_VIDEO_CAPTURE_FORMAT_NV12)
+                 current.format == SALTS_VIDEO_CAPTURE_FORMAT_NV12)
         {
             return index;
         }

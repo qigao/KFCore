@@ -28,10 +28,6 @@ cmake_config_target(kfcore_yolo_core
 find_package(Stb REQUIRED)
 
 if(BUILD_EXAMPLES)
-  if(NOT TARGET TurboParser::Capture)
-    message(FATAL_ERROR
-      "BUILD_EXAMPLES requires a TurboParser SDK installed with Capture")
-  endif()
   if(WIN32)
     set(_kfcore_yolo_domain_window_source
       examples/yolo_domain_window_win32.cpp)
@@ -56,7 +52,7 @@ if(BUILD_EXAMPLES)
     KFCore::yolo_onnx
     KFCore::yolo_tensorrt
     KFCore::image_processor_cpu
-    TurboParser::Capture)
+    Salts::Capture)
   if(WIN32)
     target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)
   endif()

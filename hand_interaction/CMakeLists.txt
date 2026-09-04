@@ -27,11 +27,7 @@ cmake_config_target(kfcore_hand_interaction
   FOLDER "hand_interaction")
 
 if(BUILD_EXAMPLES)
-  if(NOT TARGET TurboParser::Capture)
-    message(FATAL_ERROR
-      "BUILD_EXAMPLES requires a TurboParser SDK "
-      "installed with the Capture component")
-  endif()
+ 
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
 
   add_executable(hand_interaction_demo
@@ -52,7 +48,7 @@ if(BUILD_EXAMPLES)
     KFCore::hand_models_cuda
     KFCore::face_models_cpu
     KFCore::face_models_cuda
-    TurboParser::Capture
+    Salts::Capture
     Salts::Core)
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

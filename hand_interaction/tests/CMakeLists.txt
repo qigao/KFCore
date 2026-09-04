@@ -21,7 +21,7 @@ cmake_add_test(
   LIBS
     KFCore::hand_models_cpu
     KFCore::hand_models_cuda
-    TurboParser::Capture
+    Salts::Capture
     Salts::Core
     Salts::TinyTest
   INCLUDES ../examples
@@ -36,7 +36,7 @@ if(BUILD_EXAMPLES)
       ../examples/hand_interaction_demo_capture.cpp
     LIBS
       KFCore::image_processor_core
-      TurboParser::Capture
+      Salts::Capture
       Salts::Core
       Salts::TinyTest
     INCLUDES ../examples
@@ -54,7 +54,7 @@ if(BUILD_EXAMPLES)
       KFCore::face_model_core
       OpenCVLite::core
       OpenCVLite::imgproc
-      TurboParser::Capture
+      Salts::Capture
       Salts::Core
       Salts::TinyTest
     INCLUDES ../examples

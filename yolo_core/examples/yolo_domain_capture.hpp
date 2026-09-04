@@ -1,6 +1,6 @@
 #pragma once
 
-#include <turbo_capture.h>
+#include <salts_capture.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -21,7 +21,7 @@ struct CapturedFrame
     std::vector<std::uint8_t> pixels;
     int                       width = 0;
     int                       height = 0;
-    int                       format = TURBO_VIDEO_CAPTURE_FORMAT_NV12;
+    int                       format = SALTS_VIDEO_CAPTURE_FORMAT_NV12;
     std::uint64_t             timestamp_us = 0U;
     std::uint64_t             serial = 0U;
 };
@@ -68,15 +68,15 @@ private:
     bool                    closed_ = false;
 };
 
-[[nodiscard]] std::vector<turbo_capture_device_t> list_camera_devices();
-[[nodiscard]] std::vector<turbo_video_native_mode_t>
+[[nodiscard]] std::vector<salts_capture_device_t> list_camera_devices();
+[[nodiscard]] std::vector<salts_video_native_mode_t>
 list_camera_modes(const std::string& device_id);
 
 class CameraCapture final
 {
 public:
     CameraCapture(const std::string& device_id,
-                  const turbo_video_native_mode_t& mode,
+                  const salts_video_native_mode_t& mode,
                   LatestFrameMailbox& mailbox);
     ~CameraCapture();
     CameraCapture(const CameraCapture&)            = delete;
@@ -86,12 +86,12 @@ public:
     void stop() noexcept;
 
 private:
-    static void on_frame(turbo_capture_t*, const std::uint8_t*, std::size_t,
+    static void on_frame(salts_capture_t*, const std::uint8_t*, std::size_t,
                          int, int, std::uint64_t, void*) noexcept;
-    static void on_state(turbo_capture_t*, turbo_capture_state_t, void*) noexcept;
+    static void on_state(salts_capture_t*, salts_capture_state_t, void*) noexcept;
 
-    turbo_capture_t*          capture_ = nullptr;
-    turbo_video_native_mode_t mode_ {};
+    salts_capture_t*         capture_ = nullptr;
+    salts_video_native_mode_t mode_ {};
     LatestFrameMailbox*       mailbox_ = nullptr;
     bool                      started_ = false;
 };

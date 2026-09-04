@@ -78,22 +78,22 @@ const char* format_name(int format) noexcept
 {
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
         return "I420";
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
         return "NV12";
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return "RGB24";
-    case TURBO_VIDEO_CAPTURE_FORMAT_BGRA:
+    case SALTS_VIDEO_CAPTURE_FORMAT_BGRA:
         return "BGRA";
-    case TURBO_VIDEO_CAPTURE_FORMAT_MJPEG:
+    case SALTS_VIDEO_CAPTURE_FORMAT_MJPEG:
         return "MJPEG (unsupported)";
     default:
         return "unknown";
     }
 }
 
-double mode_fps(const turbo_video_native_mode_t& mode) noexcept
+double mode_fps(const salts_video_native_mode_t& mode) noexcept
 {
     if (mode.framerate_denominator == 0U)
     {
@@ -447,7 +447,7 @@ void run_camera(const Arguments& arguments, ProcessingState& state)
         std::optional<BgrImage> image;
         double convert_ms = 0.0;
         ImageView inference_view;
-        if (captured.format == TURBO_VIDEO_CAPTURE_FORMAT_BGRA)
+        if (captured.format == SALTS_VIDEO_CAPTURE_FORMAT_BGRA)
         {
             const auto convert_start = Clock::now();
             image = to_bgr(captured, kMaximumDecodedImageBytes);

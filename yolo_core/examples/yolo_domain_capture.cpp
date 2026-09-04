@@ -39,19 +39,19 @@ std::optional<std::size_t> packed_frame_bytes(int width, int height,
     std::size_t bytes = 0U;
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
         if ((width & 1) != 0 || (height & 1) != 0 ||
             pixels > (std::numeric_limits<std::size_t>::max)() / 3U)
         {
             return std::nullopt;
         }
         return pixels * 3U / 2U;
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return checked_multiply(pixels, 3U, bytes)
                    ? std::optional<std::size_t>(bytes)
                    : std::nullopt;
-    case TURBO_VIDEO_CAPTURE_FORMAT_BGRA:
+    case SALTS_VIDEO_CAPTURE_FORMAT_BGRA:
         return checked_multiply(pixels, 4U, bytes)
                    ? std::optional<std::size_t>(bytes)
                    : std::nullopt;
@@ -147,10 +147,10 @@ CaptureCounters LatestFrameMailbox::counters() const noexcept
     return counters_;
 }
 
-std::vector<turbo_capture_device_t> list_camera_devices()
+std::vector<salts_capture_device_t> list_camera_devices()
 {
-    std::vector<turbo_capture_device_t> result(TURBO_CAPTURE_MAX_DEVICES);
-    const int count = turbo_capture_list_video_devices(
+    std::vector<salts_capture_device_t> result(SALTS_CAPTURE_MAX_DEVICES);
+    const int count = salts_capture_list_video_devices(
         result.data(), static_cast<int>(result.size()));
     if (count < 0)
     {
@@ -160,11 +160,11 @@ std::vector<turbo_capture_device_t> list_camera_devices()
     return result;
 }
 
-std::vector<turbo_video_native_mode_t>
+std::vector<salts_video_native_mode_t>
 list_camera_modes(const std::string& device_id)
 {
-    turbo_video_device_t* device = nullptr;
-    if (turbo_video_device_open(device_id.c_str(), &device) != TURBO_CAPTURE_OK ||
+    salts_video_device_t* device = nullptr;
+    if (salts_video_device_open(device_id.c_str(), &device) != SALTS_CAPTURE_OK ||
         device == nullptr)
     {
         throw std::runtime_error("Turbo Capture failed to open video device: " +
@@ -172,20 +172,20 @@ list_camera_modes(const std::string& device_id)
     }
     try
     {
-        std::size_t capacity = TURBO_CAPTURE_MAX_VIDEO_MODES;
+        std::size_t capacity = SALTS_CAPTURE_MAX_VIDEO_MODES;
         for (;;)
         {
-            std::vector<turbo_video_native_mode_t> modes(capacity);
+            std::vector<salts_video_native_mode_t> modes(capacity);
             std::size_t count = 0U;
-            if (turbo_video_device_list_modes_all(device, modes.data(), modes.size(),
-                                                  &count) != TURBO_CAPTURE_OK)
+            if (salts_video_device_list_modes_all(device, modes.data(), modes.size(),
+                                                  &count) != SALTS_CAPTURE_OK)
             {
                 throw std::runtime_error("Turbo Capture failed to list video modes");
             }
             if (count < capacity)
             {
                 modes.resize(count);
-                turbo_video_device_close(device);
+                salts_video_device_close(device);
                 return modes;
             }
             if (capacity >= kMaximumListedCameraModes)
@@ -198,37 +198,37 @@ list_camera_modes(const std::string& device_id)
     }
     catch (...)
     {
-        turbo_video_device_close(device);
+        salts_video_device_close(device);
         throw;
     }
 }
 
 CameraCapture::CameraCapture(const std::string& device_id,
-                             const turbo_video_native_mode_t& mode,
+                             const salts_video_native_mode_t& mode,
                              LatestFrameMailbox& mailbox)
     : mode_(mode)
     , mailbox_(&mailbox)
 {
-    turbo_video_device_t* device = nullptr;
-    if (turbo_video_device_open(device_id.c_str(), &device) != TURBO_CAPTURE_OK ||
+    salts_video_device_t* device = nullptr;
+    if (salts_video_device_open(device_id.c_str(), &device) != SALTS_CAPTURE_OK ||
         device == nullptr)
     {
         throw std::runtime_error("Turbo Capture failed to open selected video device");
     }
-    const int result = turbo_video_device_create_capture(device, &mode_, &capture_);
-    turbo_video_device_close(device);
-    if (result != TURBO_CAPTURE_OK || capture_ == nullptr)
+    const int result = salts_video_device_create_capture(device, &mode_, &capture_);
+    salts_video_device_close(device);
+    if (result != SALTS_CAPTURE_OK || capture_ == nullptr)
     {
         throw std::runtime_error("Turbo Capture failed to create selected video mode");
     }
-    turbo_video_capture_set_callback(capture_, &CameraCapture::on_frame, this);
-    turbo_capture_on_state(capture_, &CameraCapture::on_state);
+    salts_video_capture_set_callback(capture_, &CameraCapture::on_frame, this);
+    salts_capture_on_state(capture_, &CameraCapture::on_state);
 }
 
 CameraCapture::~CameraCapture()
 {
     stop();
-    turbo_capture_destroy(capture_);
+    salts_capture_destroy(capture_);
 }
 
 void CameraCapture::start()
@@ -237,7 +237,7 @@ void CameraCapture::start()
     {
         throw std::logic_error("camera capture is already running");
     }
-    if (turbo_capture_start(capture_) != TURBO_CAPTURE_OK)
+    if (salts_capture_start(capture_) != SALTS_CAPTURE_OK)
     {
         throw std::runtime_error("Turbo Capture failed to start selected video mode");
     }
@@ -248,12 +248,12 @@ void CameraCapture::stop() noexcept
 {
     if (started_)
     {
-        turbo_capture_stop(capture_);
+        salts_capture_stop(capture_);
         started_ = false;
     }
 }
 
-void CameraCapture::on_frame(turbo_capture_t*, const std::uint8_t* data,
+void CameraCapture::on_frame(salts_capture_t*, const std::uint8_t* data,
                              std::size_t size, int width, int height,
                              std::uint64_t timestamp, void* user_data) noexcept
 {
@@ -265,11 +265,11 @@ void CameraCapture::on_frame(turbo_capture_t*, const std::uint8_t* data,
     }
 }
 
-void CameraCapture::on_state(turbo_capture_t*, turbo_capture_state_t state,
+void CameraCapture::on_state(salts_capture_t*, salts_capture_state_t state,
                              void* user_data) noexcept
 {
     auto* self = static_cast<CameraCapture*>(user_data);
-    if (state == TURBO_CAPTURE_STATE_ERROR && self != nullptr &&
+    if (state == SALTS_CAPTURE_STATE_ERROR && self != nullptr &&
         self->mailbox_ != nullptr)
     {
         self->mailbox_->close();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <turbo_capture.h>
+#include <salts_capture.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -54,7 +54,7 @@ struct Arguments
 
 // Returns the first processable camera-provided mode matching the exact mode id
 // or geometry and frame rate. The device enumeration owns pixel-format order.
-[[nodiscard]] std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
+[[nodiscard]] std::size_t select_mode(const std::vector<salts_video_native_mode_t>& modes,
                                       const CaptureRequest& request);
 
 } // namespace kfcore::hand_interaction::demo

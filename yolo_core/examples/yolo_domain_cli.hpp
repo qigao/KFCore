@@ -2,7 +2,7 @@
 
 #include "yolo_domain_profile.hpp"
 
-#include <turbo_capture.h>
+#include <salts_capture.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -57,7 +57,7 @@ struct Arguments
 [[nodiscard]] Arguments parse_arguments(
     const std::vector<std::string>& values, BackendAvailability availability);
 [[nodiscard]] std::size_t select_mode(
-    const std::vector<turbo_video_native_mode_t>& modes,
+    const std::vector<salts_video_native_mode_t>& modes,
     const CaptureRequest& request);
 [[nodiscard]] const char* backend_name(Backend backend) noexcept;
 [[nodiscard]] std::string usage_text();

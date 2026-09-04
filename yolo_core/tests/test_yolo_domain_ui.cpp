@@ -19,7 +19,7 @@ spec("YOLOv8 domain frame UI and metrics")
         CapturedFrame rgb;
         rgb.width = 1;
         rgb.height = 1;
-        rgb.format = TURBO_VIDEO_CAPTURE_FORMAT_RGB24;
+        rgb.format = SALTS_VIDEO_CAPTURE_FORMAT_RGB24;
         rgb.pixels = { 10U, 20U, 30U };
         kfcore::image::BgrImage bgr = to_bgr(rgb, 1024U);
         check(bgr.height == 1);
@@ -31,7 +31,7 @@ spec("YOLOv8 domain frame UI and metrics")
         CapturedFrame nv12;
         nv12.width = 2;
         nv12.height = 2;
-        nv12.format = TURBO_VIDEO_CAPTURE_FORMAT_NV12;
+        nv12.format = SALTS_VIDEO_CAPTURE_FORMAT_NV12;
         nv12.pixels = { 16U, 16U, 16U, 16U, 128U, 128U };
         const kfcore::image::BgrImage nv12_bgr = to_bgr(nv12, 1024U);
         check(nv12_bgr.height == 2);

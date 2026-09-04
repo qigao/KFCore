@@ -11,7 +11,7 @@ namespace
 
 namespace demo = kfcore::hand_interaction::demo;
 
-turbo_video_native_mode_t mode(int width, int height, int fps, int format,
+salts_video_native_mode_t mode(int width, int height, int fps, int format,
                                std::uint64_t id)
 {
     return { width, height, static_cast<std::uint32_t>(fps), 1U, format, id };
@@ -124,9 +124,9 @@ spec("hand interaction demo CLI")
 
     it("selects an exact mode id")
     {
-        const std::vector<turbo_video_native_mode_t> modes {
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 7U),
-            mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_BGRA, 9U),
+        const std::vector<salts_video_native_mode_t> modes {
+            mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_NV12, 7U),
+            mode(1280, 720, 30, SALTS_VIDEO_CAPTURE_FORMAT_BGRA, 9U),
         };
         demo::CaptureRequest request;
         request.mode_id = 9U;
@@ -135,9 +135,9 @@ spec("hand interaction demo CLI")
 
     it("keeps the camera mode order instead of forcing a pixel format")
     {
-        const std::vector<turbo_video_native_mode_t> modes {
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_I420, 1U),
-            mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 2U),
+        const std::vector<salts_video_native_mode_t> modes {
+            mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_I420, 1U),
+            mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_NV12, 2U),
         };
         demo::CaptureRequest request;
         check_equal(demo::select_mode(modes, request), (std::size_t)0U);
@@ -147,11 +147,11 @@ spec("hand interaction demo CLI")
     {
         demo::CaptureRequest request;
         check_throws_as(demo::select_mode(
-                            { mode(640, 480, 30, TURBO_VIDEO_CAPTURE_FORMAT_MJPEG, 1U) },
+                            { mode(640, 480, 30, SALTS_VIDEO_CAPTURE_FORMAT_MJPEG, 1U) },
                             request),
                         std::invalid_argument);
         check_throws_as(demo::select_mode(
-                            { mode(1280, 720, 30, TURBO_VIDEO_CAPTURE_FORMAT_NV12, 1U) },
+                            { mode(1280, 720, 30, SALTS_VIDEO_CAPTURE_FORMAT_NV12, 1U) },
                             request),
                         std::invalid_argument);
     }

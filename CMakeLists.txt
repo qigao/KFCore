@@ -49,11 +49,8 @@ endif()
 find_package(Threads REQUIRED)
 
 find_package(Salts CONFIG REQUIRED
-             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-find_package(TurboParser CONFIG REQUIRED
-             PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
-find_package(TurboNet CONFIG REQUIRED
-             PATHS "$ENV{TURBONET_ROOT}" NO_DEFAULT_PATH)
+             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)  
+find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
 add_subdirectory(vendor)
 add_subdirectory(trackers)

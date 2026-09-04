@@ -45,17 +45,17 @@ bool supported_capture_format(int format) noexcept
 {
     switch (format)
     {
-    case TURBO_VIDEO_CAPTURE_FORMAT_NV12:
-    case TURBO_VIDEO_CAPTURE_FORMAT_I420:
-    case TURBO_VIDEO_CAPTURE_FORMAT_BGRA:
-    case TURBO_VIDEO_CAPTURE_FORMAT_RGB24:
+    case SALTS_VIDEO_CAPTURE_FORMAT_NV12:
+    case SALTS_VIDEO_CAPTURE_FORMAT_I420:
+    case SALTS_VIDEO_CAPTURE_FORMAT_BGRA:
+    case SALTS_VIDEO_CAPTURE_FORMAT_RGB24:
         return true;
     default:
         return false;
     }
 }
 
-int rounded_fps(const turbo_video_native_mode_t& mode)
+int rounded_fps(const salts_video_native_mode_t& mode)
 {
     if (mode.framerate_denominator == 0U)
     {
@@ -203,7 +203,7 @@ Arguments parse_arguments(const std::vector<std::string>& values,
     return result;
 }
 
-std::size_t select_mode(const std::vector<turbo_video_native_mode_t>& modes,
+std::size_t select_mode(const std::vector<salts_video_native_mode_t>& modes,
                         const CaptureRequest& request)
 {
     for (std::size_t index = 0U; index < modes.size(); ++index)
