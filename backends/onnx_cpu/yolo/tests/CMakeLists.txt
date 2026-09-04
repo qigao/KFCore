@@ -12,13 +12,13 @@ cmake_add_test(
   NAME test_yolo_onnx_integration
   SOURCES
     test_yolo_onnx_integration.cpp
-    ../../yolo_core/examples/yolo_domain_profile.cpp
+    ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples/yolo_domain_profile.cpp
   LIBS KFCore::yolo_onnx Salts::TinyTest
   DEFS
     "KFCORE_YOLO_TEST_DRONE=\"${_yolo_test_drone}\""
     "KFCORE_YOLO_TEST_FOOTBALL=\"${_yolo_test_football}\""
     "KFCORE_YOLO_TEST_PARKING=\"${_yolo_test_parking}\""
-  INCLUDES ../../yolo_core/examples
+  INCLUDES ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   FOLDER "yolo_onnx/tests")

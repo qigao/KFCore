@@ -8,7 +8,7 @@ target_include_directories(kfcore_hand_models_cuda
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/hand_model_core/src)
+    ${CMAKE_SOURCE_DIR}/vision/core/hand_models/src)
 target_compile_features(kfcore_hand_models_cuda PUBLIC cxx_std_17)
 target_link_libraries(kfcore_hand_models_cuda
   PUBLIC KFCore::hand_model_core

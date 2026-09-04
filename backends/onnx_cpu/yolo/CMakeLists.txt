@@ -5,7 +5,7 @@ target_include_directories(kfcore_yolo_onnx
     $<BUILD_INTERFACE:${KFCORE_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/yolo_core/src)
+    ${CMAKE_SOURCE_DIR}/vision/core/yolo/src)
 target_compile_features(kfcore_yolo_onnx PUBLIC cxx_std_17)
 target_link_libraries(kfcore_yolo_onnx
   PUBLIC KFCore::yolo_core

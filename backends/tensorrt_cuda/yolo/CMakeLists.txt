@@ -12,7 +12,7 @@ target_include_directories(kfcore_yolo_tensorrt
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/yolo_core/src)
+    ${CMAKE_SOURCE_DIR}/vision/core/yolo/src)
 target_link_libraries(kfcore_yolo_tensorrt
   PUBLIC KFCore::yolo_core
   PRIVATE
