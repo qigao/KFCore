@@ -1,4 +1,4 @@
-set(_face_model_core_test_folder "face_model_core/tests")
+set(_face_model_core_test_folder "vision/core/face_models/tests")
 
 cmake_add_test(
   NAME test_face_model_results

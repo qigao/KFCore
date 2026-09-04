@@ -3,7 +3,7 @@ cmake_add_test(
   SOURCES test_yolo_onnx.cpp
   LIBS KFCore::yolo_onnx Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "yolo_onnx/tests")
+  FOLDER "backends/onnx_cpu/yolo/tests")
 
 set(_yolo_test_drone "./yolo-models/yolov8n-drone.onnx")
 set(_yolo_test_football "./yolo-models/yolov8n-football.onnx")
@@ -21,7 +21,7 @@ cmake_add_test(
   INCLUDES ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-  FOLDER "yolo_onnx/tests")
+  FOLDER "backends/onnx_cpu/yolo/tests")
 
 set(_yolo_test_person "./yolo-models/yolov8s.onnx")
 cmake_add_test(
@@ -31,7 +31,7 @@ cmake_add_test(
   DEFS "KFCORE_YOLO_TEST_PERSON=\"${_yolo_test_person}\""
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-  FOLDER "yolo_onnx/tests")
+  FOLDER "backends/onnx_cpu/yolo/tests")
 
 if(WIN32)
   set_tests_properties(test_yolo_onnx test_yolo_onnx_integration

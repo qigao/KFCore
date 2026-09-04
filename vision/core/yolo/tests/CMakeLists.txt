@@ -1,4 +1,4 @@
-set(_yolo_core_test_folder "yolo_core/tests")
+set(_yolo_core_test_folder "vision/core/yolo/tests")
 
 cmake_add_test(
   NAME test_raw_yolo

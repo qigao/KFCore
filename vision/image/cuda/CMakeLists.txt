@@ -18,12 +18,12 @@ set_target_properties(kfcore_image_processor_cuda PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "image_processor_cuda")
+  FOLDER "vision/image/cuda")
 cmake_config_target(kfcore_image_processor_cuda
   ALIAS KFCore::image_processor_cuda
   EXPORT_NAME image_processor_cuda
   EXPORT_SET KFCoreTargets
-  FOLDER "image_processor_cuda")
+  FOLDER "vision/image/cuda")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

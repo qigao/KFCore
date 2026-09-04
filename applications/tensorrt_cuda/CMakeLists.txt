@@ -17,13 +17,13 @@ set_target_properties(kfcore_face_applications_cuda PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  FOLDER "face_applications_cuda"
+  FOLDER "applications/tensorrt_cuda"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 cmake_config_target(kfcore_face_applications_cuda
   ALIAS KFCore::face_applications_cuda
   EXPORT_NAME face_applications_cuda
   EXPORT_SET KFCoreTargets
-  FOLDER "face_applications_cuda")
+  FOLDER "applications/tensorrt_cuda")
 
 if(BUILD_EXAMPLES)
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc imgcodecs highgui)
@@ -39,7 +39,7 @@ if(BUILD_EXAMPLES)
   set_target_properties(face_swap_image PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(face_swap_image
-    NO_INSTALL FOLDER "face_applications_cuda/examples")
+    NO_INSTALL FOLDER "applications/tensorrt_cuda/examples")
 
   add_executable(face_swap_demo
     examples/face_swap_cli.cpp
@@ -57,7 +57,7 @@ if(BUILD_EXAMPLES)
   set_target_properties(face_swap_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(face_swap_demo
-    NO_INSTALL FOLDER "face_applications_cuda/examples")
+    NO_INSTALL FOLDER "applications/tensorrt_cuda/examples")
 endif()
 
 if(BUILD_TESTS)

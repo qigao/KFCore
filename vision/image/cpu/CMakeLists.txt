@@ -12,12 +12,12 @@ set_target_properties(kfcore_image_processor_cpu PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "image_processor_cpu")
+  FOLDER "vision/image/cpu")
 cmake_config_target(kfcore_image_processor_cpu
   ALIAS KFCore::image_processor_cpu
   EXPORT_NAME image_processor_cpu
   EXPORT_SET KFCoreTargets
-  FOLDER "image_processor_cpu")
+  FOLDER "vision/image/cpu")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

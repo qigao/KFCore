@@ -9,12 +9,12 @@ set_target_properties(kfcore_thig PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  FOLDER "thig")
+  FOLDER "vision/interaction/thig")
 cmake_config_target(kfcore_thig
   ALIAS KFCore::thig
   EXPORT_NAME thig
   EXPORT_SET KFCoreTargets
-  FOLDER "thig")
+  FOLDER "vision/interaction/thig")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

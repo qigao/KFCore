@@ -19,12 +19,12 @@ set_target_properties(kfcore_hand_interaction PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  FOLDER "hand_interaction")
+  FOLDER "vision/interaction/hand")
 cmake_config_target(kfcore_hand_interaction
   ALIAS KFCore::hand_interaction
   EXPORT_NAME hand_interaction
   EXPORT_SET KFCoreTargets
-  FOLDER "hand_interaction")
+  FOLDER "vision/interaction/hand")
 
 if(BUILD_EXAMPLES)
  
@@ -53,7 +53,7 @@ if(BUILD_EXAMPLES)
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(hand_interaction_demo
-    NO_INSTALL FOLDER "hand_interaction/examples")
+    NO_INSTALL FOLDER "vision/interaction/hand/examples")
 endif()
 
 if(BUILD_TESTS)

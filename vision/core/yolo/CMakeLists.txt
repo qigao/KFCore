@@ -18,12 +18,12 @@ set_target_properties(kfcore_yolo_core PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "yolo_core")
+  FOLDER "vision/core/yolo")
 cmake_config_target(kfcore_yolo_core
   ALIAS KFCore::yolo_core
   EXPORT_NAME yolo_core
   EXPORT_SET KFCoreTargets
-  FOLDER "yolo_core")
+  FOLDER "vision/core/yolo")
 
 find_package(Stb REQUIRED)
 
@@ -58,7 +58,7 @@ if(BUILD_EXAMPLES)
   endif()
   target_compile_features(yolov8_domain_demo PRIVATE cxx_std_17)
   cmake_config_target(yolov8_domain_demo
-    NO_INSTALL FOLDER "yolo_core/examples")
+    NO_INSTALL FOLDER "vision/core/yolo/examples")
 endif()
 
 if(BUILD_TESTS)

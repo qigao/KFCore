@@ -7,7 +7,7 @@ foreach(_cpu_face_test IN ITEMS geometry preprocess composer)
     LIBS KFCore::face_applications_cpu Salts::TinyTest
     INCLUDES ../src
     COMPILE_FEATURES cxx_std_17
-    FOLDER "face_applications_cpu/tests")
+    FOLDER "applications/onnx_cpu/tests")
   list(APPEND _cpu_face_tests ${_cpu_face_target})
 endforeach()
 
@@ -16,7 +16,7 @@ cmake_add_test(
   SOURCES test_cpu_face_application_validation.cpp
   LIBS KFCore::face_applications_cpu Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "face_applications_cpu/tests")
+  FOLDER "applications/onnx_cpu/tests")
 list(APPEND _cpu_face_tests test_cpu_face_application_validation)
 
 if(WIN32)

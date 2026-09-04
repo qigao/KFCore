@@ -24,12 +24,12 @@ set_target_properties(kfcore_face_models_cpu PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "face_models_cpu")
+  FOLDER "backends/onnx_cpu/face_models")
 cmake_config_target(kfcore_face_models_cpu
   ALIAS KFCore::face_models_cpu
   EXPORT_NAME face_models_cpu
   EXPORT_SET KFCoreTargets
-  FOLDER "face_models_cpu")
+  FOLDER "backends/onnx_cpu/face_models")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

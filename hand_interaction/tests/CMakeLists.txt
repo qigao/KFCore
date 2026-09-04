@@ -1,4 +1,4 @@
-set(_hand_test_folder "hand_interaction/tests")
+set(_hand_test_folder "vision/interaction/hand/tests")
 
 cmake_add_test(
   NAME test_hand_primitive_extractor

@@ -15,12 +15,12 @@ set_target_properties(kfcore_yolo_onnx PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "yolo_onnx")
+  FOLDER "backends/onnx_cpu/yolo")
 cmake_config_target(kfcore_yolo_onnx
   ALIAS KFCore::yolo_onnx
   EXPORT_NAME yolo_onnx
   EXPORT_SET KFCoreTargets
-  FOLDER "yolo_onnx")
+  FOLDER "backends/onnx_cpu/yolo")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

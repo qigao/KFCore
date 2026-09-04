@@ -1,4 +1,4 @@
-set(_yolo_tensorrt_test_folder "yolo_tensorrt/tests")
+set(_yolo_tensorrt_test_folder "backends/tensorrt_cuda/yolo/tests")
 
 cmake_add_test(
   NAME test_yolo_tensorrt_contract

@@ -8,12 +8,12 @@ set_target_properties(kfcore_image_processor_core PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "image_processor_core")
+  FOLDER "vision/core/image_processor")
 cmake_config_target(kfcore_image_processor_core
   ALIAS KFCore::image_processor_core
   EXPORT_NAME image_processor_core
   EXPORT_SET KFCoreTargets
-  FOLDER "image_processor_core")
+  FOLDER "vision/core/image_processor")
 
 cmake_install_headers(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"

@@ -15,13 +15,13 @@ target_link_libraries(kfcore_face_applications_cpu PUBLIC
   KFCore::face_models_cpu)
 set_target_properties(kfcore_face_applications_cpu PROPERTIES
   CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-  FOLDER "face_applications_cpu"
+  FOLDER "applications/onnx_cpu"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 cmake_config_target(kfcore_face_applications_cpu
   ALIAS KFCore::face_applications_cpu
   EXPORT_NAME face_applications_cpu
   EXPORT_SET KFCoreTargets
-  FOLDER "face_applications_cpu")
+  FOLDER "applications/onnx_cpu")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

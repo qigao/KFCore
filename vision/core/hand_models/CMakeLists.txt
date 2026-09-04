@@ -19,12 +19,12 @@ set_target_properties(kfcore_hand_model_core PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "hand_model_core")
+  FOLDER "vision/core/hand_models")
 cmake_config_target(kfcore_hand_model_core
   ALIAS KFCore::hand_model_core
   EXPORT_NAME hand_model_core
   EXPORT_SET KFCoreTargets
-  FOLDER "hand_model_core")
+  FOLDER "vision/core/hand_models")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

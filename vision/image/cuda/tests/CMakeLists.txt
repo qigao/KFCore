@@ -3,7 +3,7 @@ cmake_add_test(
   SOURCES test_image_processor.cpp
   LIBS KFCore::image_processor_cuda Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "image_processor_cuda/tests")
+  FOLDER "vision/image/cuda/tests")
 
 cmake_add_test(
   NAME test_image_processor_cuda
@@ -14,7 +14,7 @@ cmake_add_test(
     CUDA::cudart
     Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "image_processor_cuda/tests"
+  FOLDER "vision/image/cuda/tests"
   TARGET_PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
 
 cmake_add_benchmark(
@@ -26,4 +26,4 @@ cmake_add_benchmark(
     CUDA::cudart
     Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "image_processor_cuda/benchmarks")
+  FOLDER "vision/image/cuda/benchmarks")

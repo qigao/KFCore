@@ -1,4 +1,4 @@
-set(_face_models_cuda_test_folder "face_models_cuda/tests")
+set(_face_models_cuda_test_folder "backends/tensorrt_cuda/face_models/tests")
 set(_face_models_cuda_unit_tests
   test_face_model_contracts
   test_face_swap_adapter_api)

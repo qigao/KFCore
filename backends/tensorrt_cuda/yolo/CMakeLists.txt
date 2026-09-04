@@ -28,12 +28,12 @@ set_target_properties(kfcore_yolo_tensorrt PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "yolo_tensorrt")
+  FOLDER "backends/tensorrt_cuda/yolo")
 cmake_config_target(kfcore_yolo_tensorrt
   ALIAS KFCore::yolo_tensorrt
   EXPORT_NAME yolo_tensorrt
   EXPORT_SET KFCoreTargets
-  FOLDER "yolo_tensorrt")
+  FOLDER "backends/tensorrt_cuda/yolo")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

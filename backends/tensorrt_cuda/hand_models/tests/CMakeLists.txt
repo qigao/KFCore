@@ -4,7 +4,7 @@ cmake_add_test(
   LIBS KFCore::hand_models_cuda Salts::TinyTest
   INCLUDES ../src
   COMPILE_FEATURES cxx_std_17
-  FOLDER "hand_models_cuda/tests")
+  FOLDER "backends/tensorrt_cuda/hand_models/tests")
 
 set(_hand_engine_root
   "hand_gesture_model/tensorrt/${KFCORE_TENSORRT_ENGINE_PROFILE}")
@@ -25,7 +25,7 @@ cmake_add_test(
     "KFCORE_HAND_TRT_TEST_CLASSIFIER=\"${_hand_cuda_classifier}\""
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-  FOLDER "hand_models_cuda/tests")
+  FOLDER "backends/tensorrt_cuda/hand_models/tests")
 
 if(WIN32)
   set_tests_properties(

@@ -11,12 +11,12 @@ set_target_properties(kfcore_runtime_onnx PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "runtime_onnx")
+  FOLDER "backends/onnx_cpu/runtime")
 cmake_config_target(kfcore_runtime_onnx
   ALIAS KFCore::runtime_onnx
   EXPORT_NAME runtime_onnx
   EXPORT_SET KFCoreTargets
-  FOLDER "runtime_onnx")
+  FOLDER "backends/onnx_cpu/runtime")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

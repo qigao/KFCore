@@ -1,4 +1,4 @@
-set(_hand_model_core_test_folder "hand_model_core/tests")
+set(_hand_model_core_test_folder "vision/core/hand_models/tests")
 
 cmake_add_test(
   NAME test_hand_model_geometry

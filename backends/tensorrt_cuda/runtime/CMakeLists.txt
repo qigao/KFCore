@@ -24,13 +24,13 @@ set_target_properties(kfcore_runtime_tensorrt PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  FOLDER "runtime_tensorrt"
+  FOLDER "backends/tensorrt_cuda/runtime"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
 cmake_config_target(kfcore_runtime_tensorrt
   ALIAS KFCore::runtime_tensorrt
   EXPORT_NAME runtime_tensorrt
   EXPORT_SET KFCoreTargets
-  FOLDER "runtime_tensorrt")
+  FOLDER "backends/tensorrt_cuda/runtime")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

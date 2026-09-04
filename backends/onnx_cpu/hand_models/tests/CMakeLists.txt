@@ -3,7 +3,7 @@ cmake_add_test(
   SOURCES test_cpu_backend_validation.cpp
   LIBS KFCore::hand_models_cpu Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
-  FOLDER "hand_models_cpu/tests")
+  FOLDER "backends/onnx_cpu/hand_models/tests")
 
 set(_hand_cpu_palm
   "./yolo-models/hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx")
@@ -22,7 +22,7 @@ cmake_add_test(
     KFCORE_HAND_CPU_TEST_CLASSIFIER="${_hand_cpu_classifier}"
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-  FOLDER "hand_models_cpu/tests")
+  FOLDER "backends/onnx_cpu/hand_models/tests")
 
 if(WIN32)
   set_tests_properties(

@@ -1,4 +1,4 @@
-set(_face_models_cpu_test_folder "face_models_cpu/tests")
+set(_face_models_cpu_test_folder "backends/onnx_cpu/face_models/tests")
 
 cmake_add_test(
   NAME test_cpu_face_models_api

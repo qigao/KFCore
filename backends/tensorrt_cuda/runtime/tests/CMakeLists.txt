@@ -1,4 +1,4 @@
-set(_runtime_tensorrt_test_folder "runtime_tensorrt/tests")
+set(_runtime_tensorrt_test_folder "backends/tensorrt_cuda/runtime/tests")
 set(_runtime_tensorrt_test_includes ../src ../include)
 
 cmake_add_test(

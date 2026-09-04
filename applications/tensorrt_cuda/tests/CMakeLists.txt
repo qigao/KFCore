@@ -1,5 +1,5 @@
 find_package(OpenCVLite REQUIRED COMPONENTS core imgproc)
-set(_face_application_test_folder "face_applications_cuda/tests")
+set(_face_application_test_folder "applications/tensorrt_cuda/tests")
 set(_face_application_tests
   test_face_swap_cli
   test_face_swap_demo_ui

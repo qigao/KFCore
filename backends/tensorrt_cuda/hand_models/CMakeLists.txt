@@ -20,12 +20,12 @@ set_target_properties(kfcore_hand_models_cuda PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  FOLDER "hand_models_cuda")
+  FOLDER "backends/tensorrt_cuda/hand_models")
 cmake_config_target(kfcore_hand_models_cuda
   ALIAS KFCore::hand_models_cuda
   EXPORT_NAME hand_models_cuda
   EXPORT_SET KFCoreTargets
-  FOLDER "hand_models_cuda")
+  FOLDER "backends/tensorrt_cuda/hand_models")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

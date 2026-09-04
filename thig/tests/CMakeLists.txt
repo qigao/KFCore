@@ -4,4 +4,4 @@ cmake_add_test(
   LIBS KFCore::thig Salts::TinyTest
   INCLUDES ../include
   COMPILE_FEATURES cxx_std_17
-  FOLDER "thig/tests")
+  FOLDER "vision/interaction/thig/tests")
