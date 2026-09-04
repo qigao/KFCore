@@ -6,7 +6,7 @@ target_include_directories(kfcore_image_processor_cuda
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/image_processor_core/src)
+    ${CMAKE_SOURCE_DIR}/vision/core/image_processor/src)
 target_compile_features(kfcore_image_processor_cuda PUBLIC cxx_std_17)
 target_link_libraries(kfcore_image_processor_cuda
   PUBLIC KFCore::image_processor_core

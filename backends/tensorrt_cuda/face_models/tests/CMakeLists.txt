@@ -7,7 +7,7 @@ cmake_add_test(
   NAME test_face_model_contracts
   SOURCES test_contracts.cpp
   LIBS KFCore::face_models_cuda Salts::TinyTest
-  INCLUDES ../src ${CMAKE_SOURCE_DIR}/face_model_core/src
+  INCLUDES ../src ${CMAKE_SOURCE_DIR}/vision/core/face_models/src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_face_models_cuda_test_folder}")
 cmake_add_test(

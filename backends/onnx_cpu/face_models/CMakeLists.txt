@@ -14,7 +14,7 @@ target_include_directories(kfcore_face_models_cpu
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/face_model_core/src)
+    ${CMAKE_SOURCE_DIR}/vision/core/face_models/src)
 target_compile_features(kfcore_face_models_cpu PUBLIC cxx_std_17)
 target_link_libraries(kfcore_face_models_cpu
   PUBLIC KFCore::face_model_core
