@@ -16,7 +16,8 @@ cmake_config_target(kfcore_sift
   EXPORT_SET KFCoreTargets
   FOLDER "sift")
 
-add_subdirectory(vendor/popsift)
+if(KFCORE_ENABLE_CUDA)
+  add_subdirectory(vendor/popsift)
 
   add_library(kfcore_sift_popsift SHARED src/popsift_extractor.cpp)
   target_include_directories(kfcore_sift_popsift PUBLIC
@@ -43,6 +44,7 @@ add_subdirectory(vendor/popsift)
   install(SCRIPT "${KFCORE_POPSIFT_REVISION_VERIFY_SCRIPT}")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vendor/popsift/generated/UPSTREAM.md"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/KFCore/popsift")
+endif()
 
 if(BUILD_TESTS)
   add_subdirectory(tests)

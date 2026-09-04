@@ -19,8 +19,6 @@ cmake_add_test(
   NAME test_hand_interaction_demo_cli
   SOURCES test_hand_interaction_demo_cli.cpp ../examples/hand_interaction_demo_cli.cpp
   LIBS
-    KFCore::hand_models_cpu
-    KFCore::hand_models_cuda
     Salts::Capture
     Salts::Core
     Salts::TinyTest

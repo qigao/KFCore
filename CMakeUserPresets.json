@@ -24,8 +24,6 @@
             "inherits": "win-toolchain",
             "cacheVariables": {
                 "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-                "CMAKE_CUDA_COMPILER": "$env{CUDA_TOOLKIT_ROOT}/bin/nvcc.exe",
-                "CUDAToolkit_ROOT": "$env{CUDA_TOOLKIT_ROOT}",
                 "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON"
@@ -37,6 +35,15 @@
             "toolset": {
                 "value": "host=x64",
                 "strategy": "external"
+            }
+        },
+        {
+            "name": "win-cuda-paths",
+            "hidden": true,
+            "inherits": "win-paths",
+            "cacheVariables": {
+                "CMAKE_CUDA_COMPILER": "$env{CUDA_TOOLKIT_ROOT}/bin/nvcc.exe",
+                "CUDAToolkit_ROOT": "$env{CUDA_TOOLKIT_ROOT}"
             }
         },
         {
@@ -56,35 +63,63 @@
         {
             "name": "win-dev-user",
             "displayName": "Developer Build (Windows, User)",
+            "binaryDir": "${sourceDir}/build/cuda/Msvc",
             "cacheVariables": {
                 "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug/cuda"
             },
             "environment": {
                 "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
                 "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-dev-user",
-                "win-paths"
+                "win-cuda-paths"
             ]
         },
         {
             "name": "win-release-user",
             "displayName": "Release Build (Windows, User)",
+            "binaryDir": "${sourceDir}/build/cuda/Msvc-Release",
             "cacheVariables": {
                 "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/cuda"
             },
             "environment": {
                 "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
                 "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+            },
+            "inherits": [
+                "base-win-release-user",
+                "win-cuda-paths"
+            ]
+        },
+        {
+            "name": "win-cpu-release-user",
+            "displayName": "CPU Release Build (Windows, User)",
+            "binaryDir": "${sourceDir}/build/cpu/Msvc-Release",
+            "cacheVariables": {
+                "BUILD_EXAMPLES": "ON",
+                "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "OFF",
+                "KFCORE_ENABLE_ONNX_CPU": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/cpu"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cpu/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
@@ -94,16 +129,19 @@
         {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
+            "binaryDir": "${sourceDir}/build/cuda/linux-gcc-debug",
             "cacheVariables": {
                 "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug"
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/debug/cuda"
             },
             "environment": {
                 "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
                 "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-                "PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "PATH": "${sourceDir}/build/cuda/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/cuda/linux-gcc-debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "base-linux-dev-user",
@@ -113,16 +151,19 @@
         {
             "name": "linux-release-user",
             "displayName": "Release Build (Linux, User)",
+            "binaryDir": "${sourceDir}/build/cuda/linux-gcc-release",
             "cacheVariables": {
                 "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release"
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/cuda"
             },
             "environment": {
                 "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
                 "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "PATH": "${sourceDir}/build/cuda/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/cuda/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": [
                 "release-linux-ninja",
@@ -140,12 +181,51 @@
             "configurePreset": "win-release-user"
         },
         {
+            "name": "win-cpu-release-user",
+            "configurePreset": "win-cpu-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
         {
             "name": "linux-release-user",
             "configurePreset": "linux-release-user"
+        },
+        {
+            "name": "install-win-dev-user",
+            "configurePreset": "win-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-release-user",
+            "configurePreset": "win-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-cpu-release-user",
+            "configurePreset": "win-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-linux-dev-user",
+            "configurePreset": "linux-dev-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-linux-release-user",
+            "configurePreset": "linux-release-user",
+            "targets": [
+                "install"
+            ]
         }
     ],
     "testPresets": [
@@ -158,6 +238,11 @@
             "name": "win-release-user",
             "inherits": "base-test",
             "configurePreset": "win-release-user"
+        },
+        {
+            "name": "win-cpu-release-user",
+            "inherits": "base-test",
+            "configurePreset": "win-cpu-release-user"
         },
         {
             "name": "linux-dev-user",

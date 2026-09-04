@@ -633,7 +633,7 @@ target_link_libraries(my_app PRIVATE KFCore::trackers)
 
 ### YOLO CPU/CUDA 跟踪
 
-`yolo_core/`、`yolo_onnx/` 与 `yolo_tensorrt/` 分别导出
+`vision/core/yolo/`、`backends/onnx_cpu/yolo/` 与 `backends/tensorrt_cuda/yolo/` 分别导出
 `KFCore::yolo_core`、`KFCore::yolo_onnx` 和 `KFCore::yolo_tensorrt`。生产 target
 不依赖 OpenCV；ONNX 路线通过 `runtime_onnx` 在 CPU 执行，TensorRT 路线使用 CUDA。
 部署契约、容量限制与示例见 [yolo_core/README.md](yolo_core/README.md)。
@@ -668,7 +668,8 @@ device tensor。消费方必须在链接时明确选择后端，不存在运行�
 TensorRT/CUDA 绑定、执行、输出有限值与结果尺寸；raw outputs 也只保留模型输出语义。两者都不是
 模型 accuracy、标签顺序或业务阈值的验证，部署前仍需使用有 provenance 的 golden samples。
 
-Windows 的标准 `win-release-user` 从 `CMakeUserPresets.json` 提供 `TENSORRT_ROOT`；engine
+Windows 的标准 `win-release-user` 是 CUDA/TensorRT 默认构建，并从
+`CMakeUserPresets.json` 提供 `TENSORRT_ROOT`；engine
 profile 使用上述 CMake cache variable。启用真实模型测试后，Face68、
 ArcFace、Age/Gender、InSwapper 与 GFPGAN engine 都按上述 profile 目录和固定模型文件名解析；
 模型缺失时由对应集成测试明确失败。
@@ -694,10 +695,49 @@ image；它不会隐式降级到 CPU。FaceMesh 独立属于 `face_model_core/`�
 `face_models_cuda/`。Hand 的模型 I/O、容量、所有权和分阶段耗时契约见
 [hand_model_core/README.md](hand_model_core/README.md)。
 
-When building from this repository, all production modules and install rules are enabled. The only project options are:
+### Backend build profiles
+
+The default build is CUDA/TensorRT-only. CPU inference is a separate ONNX Runtime profile so that
+disabled backend DLLs and dependencies do not leak into a deployment:
+
+```powershell
+# Default CUDA/TensorRT package
+cmake --fresh --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user
+cmake --build --preset install-win-release-user
+
+# CPU/ONNX Runtime package
+cmake --fresh --preset win-cpu-release-user
+cmake --build --preset win-cpu-release-user
+ctest --preset win-cpu-release-user
+cmake --build --preset install-win-cpu-release-user
+```
+
+CUDA artifacts are generated below `build/cuda/`; release packages are installed below
+`$env:PKG_ROOT/kfcore/release/cuda/` and debug packages below
+`$env:PKG_ROOT/kfcore/debug/cuda/`. CPU artifacts use `build/cpu/` and the matching
+`$env:PKG_ROOT/kfcore/<configuration>/cpu/` package root. Do not point both profiles at one build or
+install directory: CMake does not remove DLLs left by a previously enabled backend.
+
+A consumer such as Retro should select one package root at CMake configure time, for example by
+placing `$env:PKG_ROOT/kfcore/release/cuda` or `$env:PKG_ROOT/kfcore/release/cpu` in
+`CMAKE_PREFIX_PATH`. Application source code does not need to construct either directory. The
+consumer must still link the matching explicit target, such as `KFCore::face_applications_cuda` or
+`KFCore::face_applications_cpu`; changing only the process `PATH` cannot switch an already linked
+executable between these targets.
+
+A CUDA package does not build or require ONNX Runtime, and a CPU package does not enable the CUDA
+language or require TensorRT. Building both backends is an explicit advanced configuration for a
+future runtime-selectable facade; it must use a third, isolated `hybrid` build/install root. Backend
+load failures never trigger automatic fallback.
+
+The project options are:
 
 - `BUILD_TESTS`: build local tests and installed-package consumer checks.
 - `BUILD_EXAMPLES`: build demos and example programs.
+- `KFCORE_ENABLE_CUDA`: build CUDA image processing, PopSift, and TensorRT backends (default `ON`).
+- `KFCORE_ENABLE_ONNX_CPU`: build ONNX Runtime CPU backends (default `OFF`).
 
 Machine-specific dependency and test-asset paths belong in `CMakeUserPresets.json`.
 

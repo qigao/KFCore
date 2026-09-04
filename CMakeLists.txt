@@ -56,30 +56,42 @@ add_subdirectory(vendor)
 add_subdirectory(trackers)
 
 enable_language(CXX)
-enable_language(CUDA)
-find_package(CUDAToolkit REQUIRED)
-find_package(TensorRT REQUIRED MODULE)
-find_package(ONNXRuntime REQUIRED MODULE)
+if(KFCORE_ENABLE_CUDA)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  find_package(TensorRT REQUIRED MODULE)
+endif()
+if(KFCORE_ENABLE_ONNX_CPU)
+  find_package(ONNXRuntime REQUIRED MODULE)
+endif()
 
 add_subdirectory(vision/core/image_processor)
 add_subdirectory(vision/image/cpu)
-add_subdirectory(vision/image/cuda)
+if(KFCORE_ENABLE_CUDA)
+  add_subdirectory(vision/image/cuda)
+endif()
 add_subdirectory(thig)
 add_subdirectory(sift)
 add_subdirectory(vision/core/yolo)
-add_subdirectory(backends/onnx_cpu/yolo)
-add_subdirectory(backends/tensorrt_cuda/yolo)
-add_subdirectory(backends/tensorrt_cuda/runtime)
-add_subdirectory(backends/onnx_cpu/runtime)
 add_subdirectory(vision/core/face_models)
-add_subdirectory(backends/onnx_cpu/face_models)
-add_subdirectory(backends/tensorrt_cuda/face_models)
 add_subdirectory(vision/core/hand_models)
-add_subdirectory(backends/onnx_cpu/hand_models)
-add_subdirectory(backends/tensorrt_cuda/hand_models)
 add_subdirectory(hand_interaction)
-add_subdirectory(applications/tensorrt_cuda)
-add_subdirectory(applications/onnx_cpu)
+
+if(KFCORE_ENABLE_CUDA)
+  add_subdirectory(backends/tensorrt_cuda/runtime)
+  add_subdirectory(backends/tensorrt_cuda/yolo)
+  add_subdirectory(backends/tensorrt_cuda/face_models)
+  add_subdirectory(backends/tensorrt_cuda/hand_models)
+  add_subdirectory(applications/tensorrt_cuda)
+endif()
+
+if(KFCORE_ENABLE_ONNX_CPU)
+  add_subdirectory(backends/onnx_cpu/runtime)
+  add_subdirectory(backends/onnx_cpu/yolo)
+  add_subdirectory(backends/onnx_cpu/face_models)
+  add_subdirectory(backends/onnx_cpu/hand_models)
+  add_subdirectory(applications/onnx_cpu)
+endif()
 
 add_subdirectory(apriltag)
 add_subdirectory(kalman) 
@@ -96,10 +108,16 @@ include(CMakePackageConfigHelpers)
                 kalman/navigation_tools/nav_fusion3d.h
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
 
-  install(FILES cmake/FindTensorRT.cmake
-                cmake/FindOpenCVLite.cmake
-                cmake/FindONNXRuntime.cmake
+  install(FILES cmake/FindOpenCVLite.cmake
           DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+  if(KFCORE_ENABLE_CUDA)
+    install(FILES cmake/FindTensorRT.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+  endif()
+  if(KFCORE_ENABLE_ONNX_CPU)
+    install(FILES cmake/FindONNXRuntime.cmake
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
+  endif()
 
   install(
     EXPORT KFCoreTargets

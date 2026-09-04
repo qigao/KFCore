@@ -49,10 +49,17 @@ if(BUILD_EXAMPLES)
     ${Stb_INCLUDE_DIR})
   target_link_libraries(yolov8_domain_demo PRIVATE
     KFCore::yolo_core
-    KFCore::yolo_onnx
-    KFCore::yolo_tensorrt
     KFCore::image_processor_cpu
     Salts::Capture)
+  if(KFCORE_ENABLE_ONNX_CPU)
+    target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_onnx)
+  endif()
+  if(KFCORE_ENABLE_CUDA)
+    target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_tensorrt)
+  endif()
+  target_compile_definitions(yolov8_domain_demo PRIVATE
+    KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
+    KFCORE_DEMO_ENABLE_ONNX_CPU=$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>)
   if(WIN32)
     target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)
   endif()

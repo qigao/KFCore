@@ -7,8 +7,12 @@
 
 #include "kfcore/yolo/tracking.hpp"
 
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
 #include "kfcore/yolo/onnx.hpp"
+#endif
+#if KFCORE_DEMO_ENABLE_CUDA
 #include "kfcore/yolo/tensorrt.hpp"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -36,8 +40,10 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 using kfcore::yolo::DetectionFrame;
 using kfcore::yolo::ImageView;
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
 using kfcore::yolo::OnnxDetector;
 using kfcore::yolo::OnnxDetectorOptions;
+#endif
 using kfcore::image::BgrImage;
 using namespace kfcore::yolo::demo;
 
@@ -71,7 +77,7 @@ std::vector<std::string> argument_values(int argc, char** argv)
 
 BackendAvailability compiled_backends() noexcept
 {
-    return { true, true };
+    return { KFCORE_DEMO_ENABLE_ONNX_CPU != 0, KFCORE_DEMO_ENABLE_CUDA != 0 };
 }
 
 const char* format_name(int format) noexcept
@@ -147,18 +153,26 @@ public:
         Detector result;
         if (*arguments.backend == Backend::Cpu)
         {
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
             OnnxDetectorOptions options;
             options.intra_op_threads = arguments.intra_op_threads;
             options.inter_op_threads = arguments.inter_op_threads;
             options.mirror_horizontal = arguments.mirror;
             result.cpu_ = OnnxDetector::load(arguments.model, options);
+#else
+            fail("CPU backend was not compiled into this executable");
+#endif
         }
         else
         {
+#if KFCORE_DEMO_ENABLE_CUDA
             result.engine_ = kfcore::yolo::Engine::load(arguments.model);
             kfcore::yolo::DetectorOptions options;
             options.mirror_horizontal = arguments.mirror;
             result.tensorrt_ = result.engine_->create_detector(options);
+#else
+            fail("TensorRT backend was not compiled into this executable");
+#endif
         }
         load_ms = elapsed_ms(start, Clock::now());
         return result;
@@ -166,21 +180,29 @@ public:
 
     DetectionFrame detect(const ImageView& image)
     {
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
         if (cpu_ != nullptr)
         {
             return cpu_->detect(image);
         }
+#endif
+#if KFCORE_DEMO_ENABLE_CUDA
         if (tensorrt_ != nullptr)
         {
             return tensorrt_->detect(image);
         }
+#endif
         fail("detector has no initialized backend");
     }
 
 private:
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
     std::unique_ptr<OnnxDetector> cpu_;
+#endif
+#if KFCORE_DEMO_ENABLE_CUDA
     std::shared_ptr<const kfcore::yolo::Engine> engine_;
     std::unique_ptr<kfcore::yolo::TensorRtDetector> tensorrt_;
+#endif
 };
 
 std::string lower_extension(const fs::path& path)

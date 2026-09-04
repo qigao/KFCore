@@ -7,8 +7,12 @@
 #include "kfcore/hand_interaction/hand_interaction.hpp"
 #include "kfcore/face_models/core.hpp"
 #include "kfcore/hand_models/core.hpp"
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
 #include "kfcore/hand_models/cpu.hpp"
+#endif
+#if KFCORE_DEMO_ENABLE_CUDA
 #include "kfcore/hand_models/tensorrt.hpp"
+#endif
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -47,7 +51,7 @@ constexpr double kFpsSmoothingAlpha = 0.15;
 
 demo::BackendAvailability backend_availability()
 {
-    return { true, true };
+    return { KFCORE_DEMO_ENABLE_ONNX_CPU != 0, KFCORE_DEMO_ENABLE_CUDA != 0 };
 }
 
 const char* format_name(int format)
@@ -97,12 +101,20 @@ std::unique_ptr<HandInferenceBackend> make_backend(const demo::Arguments& argume
 {
     if (arguments.backend == demo::Backend::Cpu)
     {
+#if KFCORE_DEMO_ENABLE_ONNX_CPU
         return kfcore::hand_models::CpuHandBackend::load(
             kfcore::hand_models::CpuHandOptions {});
+#else
+        throw std::runtime_error("CPU backend was not compiled into this executable");
+#endif
     }
 
+#if KFCORE_DEMO_ENABLE_CUDA
     return kfcore::hand_models::TensorRtHandBackend::load(
         kfcore::hand_models::TensorRtHandOptions {});
+#else
+    throw std::runtime_error("TensorRT backend was not compiled into this executable");
+#endif
 }
 
 kfcore::image::ImageView image_view(const cv::Mat& image)
@@ -176,12 +188,14 @@ int run(const demo::Arguments& arguments)
     auto       model_pipeline = HandPipeline::create(
         make_backend(arguments), hand_pipeline_options);
     auto       face_pipeline = demo::make_face_pipeline(arguments);
+#if KFCORE_DEMO_ENABLE_CUDA
     std::unique_ptr<kfcore::hand_models::TensorRtHandInput> tensor_rt_input;
     if (arguments.backend == demo::Backend::TensorRt)
     {
         tensor_rt_input =
             kfcore::hand_models::TensorRtHandInput::create();
     }
+#endif
     const auto model_load_finished = std::chrono::steady_clock::now();
     const auto model_load_ms = std::chrono::duration<double, std::milli>(
                                    model_load_finished - model_load_started)
@@ -249,10 +263,12 @@ int run(const demo::Arguments& arguments)
         }
         auto frame_view =
             kfcore::image::FrameView::borrow(source_view);
+#if KFCORE_DEMO_ENABLE_CUDA
         if (tensor_rt_input)
         {
             frame_view = tensor_rt_input->prepare(source_view);
         }
+#endif
         HandFrame hands = model_pipeline->process(frame_view);
         FaceMeshFrame face;
         if (face_pipeline)

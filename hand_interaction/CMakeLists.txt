@@ -44,12 +44,21 @@ if(BUILD_EXAMPLES)
     OpenCVLite::core
     OpenCVLite::imgproc
     OpenCVLite::highgui
-    KFCore::hand_models_cpu
-    KFCore::hand_models_cuda
-    KFCore::face_models_cpu
-    KFCore::face_models_cuda
     Salts::Capture
     Salts::Core)
+  if(KFCORE_ENABLE_ONNX_CPU)
+    target_link_libraries(hand_interaction_demo PRIVATE
+      KFCore::hand_models_cpu
+      KFCore::face_models_cpu)
+  endif()
+  if(KFCORE_ENABLE_CUDA)
+    target_link_libraries(hand_interaction_demo PRIVATE
+      KFCore::hand_models_cuda
+      KFCore::face_models_cuda)
+  endif()
+  target_compile_definitions(hand_interaction_demo PRIVATE
+    KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
+    KFCORE_DEMO_ENABLE_ONNX_CPU=$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>)
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(hand_interaction_demo
