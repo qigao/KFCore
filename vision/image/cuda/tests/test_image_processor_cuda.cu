@@ -433,6 +433,102 @@ spec("ImageProcessor CUDA contract")
         verify(i420, PixelFormat::I420);
     }
 
+    it("converts and mirrors a staged image into packed CUDA BGR")
+    {
+        const std::array<std::uint8_t, 6> bgr = {
+            1, 2, 3,
+            4, 5, 6,
+        };
+        const ImageView host = {
+            bgr.data(), bgr.size(), 2, 1, 6, PixelFormat::Bgr8, MemoryKind::Host,
+        };
+        auto processor = CudaImageProcessor::create();
+        const ImageView staged = processor->stage(host);
+        const ImageView mirrored = processor->convert_bgr(staged, true);
+
+        check(mirrored.memory_kind == MemoryKind::CudaDevice);
+        check(mirrored.pixel_format == PixelFormat::Bgr8);
+        check(mirrored.row_stride == 6U);
+        std::array<std::uint8_t, 6> downloaded {};
+        processor->download_bgr(mirrored, { downloaded.data(), downloaded.size() });
+        const std::array<std::uint8_t, 6> expected = {
+            4, 5, 6,
+            1, 2, 3,
+        };
+        check(downloaded == expected);
+    }
+
+    it("keeps caller-owned CUDA BGR valid across later processor conversions")
+    {
+        const std::array<std::uint8_t, 6> first = {
+            1, 2, 3,
+            4, 5, 6,
+        };
+        const std::array<std::uint8_t, 6> second = {
+            7, 8, 9,
+            10, 11, 12,
+        };
+        auto processor = CudaImageProcessor::create();
+        auto retained = CudaImageBuffer::create(0, first.size());
+
+        const ImageView retained_view = processor->convert_bgr_into(
+            { first.data(), first.size(), 2, 1, 6, PixelFormat::Bgr8,
+              MemoryKind::Host },
+            *retained, true);
+        (void)processor->convert_bgr(
+            { second.data(), second.size(), 2, 1, 6, PixelFormat::Bgr8,
+              MemoryKind::Host },
+            false);
+
+        check(retained_view.data == retained->view().data);
+        check(retained_view.memory_kind == MemoryKind::CudaDevice);
+        std::array<std::uint8_t, 6> downloaded {};
+        processor->download_bgr(retained->view(),
+                                { downloaded.data(), downloaded.size() });
+        const std::array<std::uint8_t, 6> expected = {
+            4, 5, 6,
+            1, 2, 3,
+        };
+        check(downloaded == expected);
+    }
+
+    it("fails fast when a caller-owned CUDA BGR buffer exceeds its limit")
+    {
+        const std::array<std::uint8_t, 6> bgr = {
+            1, 2, 3,
+            4, 5, 6,
+        };
+        auto processor = CudaImageProcessor::create();
+        auto too_small = CudaImageBuffer::create(0, bgr.size() - 1U);
+
+        check_throws_as(
+            processor->convert_bgr_into(
+                { bgr.data(), bgr.size(), 2, 1, 6, PixelFormat::Bgr8,
+                  MemoryKind::Host },
+                *too_small, false),
+            ImageProcessorError);
+    }
+
+    it("rejects a caller-owned CUDA BGR buffer from another available device")
+    {
+        int device_count = 0;
+        check(cudaGetDeviceCount(&device_count) == cudaSuccess);
+        if (device_count < 2)
+        {
+            return;
+        }
+        const std::array<std::uint8_t, 3> bgr = { 1, 2, 3 };
+        auto processor = CudaImageProcessor::create();
+        auto other_device = CudaImageBuffer::create(1, bgr.size());
+
+        check_throws_as(
+            processor->convert_bgr_into(
+                { bgr.data(), bgr.size(), 1, 1, 3, PixelFormat::Bgr8,
+                  MemoryKind::Host },
+                *other_device, false),
+            ImageProcessorError);
+    }
+
     it("packs padded host YUV planes into one compact CUDA image")
     {
         const std::array<std::uint8_t, 16> nv12 = {

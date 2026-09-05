@@ -709,6 +709,58 @@ namespace
         check_cuda(cudaGetLastError(), "affine_preprocess_kernel", "CUDA affine preprocessing");
     }
 
+    __global__ void convert_bgr_kernel(const std::uint8_t* source,
+                                       std::size_t source_stride,
+                                       std::int32_t source_width,
+                                       std::int32_t source_height,
+                                       PixelFormat source_format,
+                                       std::uint8_t* destination,
+                                       std::size_t total_pixels,
+                                       bool mirror_horizontal)
+    {
+        const std::size_t start =
+            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        const std::size_t step =
+            static_cast<std::size_t>(gridDim.x) * blockDim.x;
+        for (std::size_t pixel_index = start; pixel_index < total_pixels;
+             pixel_index += step)
+        {
+            const int destination_x = static_cast<int>(
+                pixel_index % static_cast<std::size_t>(source_width));
+            const int y = static_cast<int>(
+                pixel_index / static_cast<std::size_t>(source_width));
+            const int source_x = mirror_horizontal
+                ? source_width - 1 - destination_x
+                : destination_x;
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                destination[pixel_index * 3U + static_cast<std::size_t>(channel)] =
+                    static_cast<std::uint8_t>(pixel_channel(
+                        source, source_stride, source_width, source_height,
+                        source_x, y, channel, source_format, PixelFormat::Bgr8));
+            }
+        }
+    }
+
+    void launch_convert_bgr(const ImageView& source, void* destination,
+                            bool mirror_horizontal, cudaStream_t stream)
+    {
+        const std::size_t total_pixels =
+            static_cast<std::size_t>(source.width) *
+            static_cast<std::size_t>(source.height);
+        const std::size_t required_blocks = total_pixels / kThreadsPerBlock +
+            (total_pixels % kThreadsPerBlock == 0 ? 0U : 1U);
+        const dim3 block(kThreadsPerBlock);
+        const dim3 grid(static_cast<std::uint32_t>(
+            (std::min)(required_blocks, std::size_t { kMaximumBlocks })));
+        convert_bgr_kernel<<<grid, block, 0, stream>>>(
+            static_cast<const std::uint8_t*>(source.data), source.row_stride,
+            source.width, source.height, source.pixel_format,
+            static_cast<std::uint8_t*>(destination), total_pixels,
+            mirror_horizontal);
+        check_cuda(cudaGetLastError(), "convert_bgr_kernel", "CUDA BGR conversion");
+    }
+
     template <typename Value>
     __device__ float tensor_float(Value value)
     {
@@ -1025,6 +1077,91 @@ namespace
 
 } // namespace
 
+struct CudaImageBuffer::Impl final
+{
+    Impl(int configured_device_id, std::size_t configured_max_bytes)
+        : device_id(configured_device_id)
+        , max_bytes(configured_max_bytes)
+        , storage(false)
+    {
+    }
+
+    ~Impl() noexcept
+    {
+        int previous_device = device_id;
+        if (cudaGetDevice(&previous_device) != cudaSuccess)
+        {
+            storage.release();
+            return;
+        }
+        const bool restore = previous_device != device_id;
+        if (restore && cudaSetDevice(device_id) != cudaSuccess)
+        {
+            storage.release();
+            return;
+        }
+        storage.release();
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+    }
+
+    int                 device_id = 0;
+    std::size_t         max_bytes = 0;
+    OwnedCudaAllocation storage;
+    ImageView           image;
+};
+
+CudaImageBuffer::CudaImageBuffer(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+CudaImageBuffer::~CudaImageBuffer() = default;
+CudaImageBuffer::CudaImageBuffer(CudaImageBuffer&&) noexcept = default;
+CudaImageBuffer& CudaImageBuffer::operator=(CudaImageBuffer&&) noexcept = default;
+
+std::unique_ptr<CudaImageBuffer> CudaImageBuffer::create(int device_id, std::size_t max_bytes)
+{
+    if (device_id < 0)
+    {
+        throw_invalid("CUDA image buffer creation stage: device id must be non-negative");
+    }
+    if (max_bytes == 0U)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA image buffer creation stage: byte limit must be positive");
+    }
+    int device_count = 0;
+    check_cuda(cudaGetDeviceCount(&device_count), "cudaGetDeviceCount",
+               "CUDA image buffer creation");
+    if (device_id >= device_count)
+    {
+        throw_invalid("CUDA image buffer creation stage: device id is unavailable");
+    }
+    try
+    {
+        return std::unique_ptr<CudaImageBuffer>(
+            new CudaImageBuffer(std::make_unique<Impl>(device_id, max_bytes)));
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA image buffer creation stage: allocation failed");
+    }
+}
+
+ImageView CudaImageBuffer::view() const noexcept
+{
+    return impl_ ? impl_->image : ImageView {};
+}
+
+int CudaImageBuffer::device_id() const noexcept
+{
+    return impl_ ? impl_->device_id : -1;
+}
+
 void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorView& destination,
                              const BatchPlan& plan, MutableBufferView pinned_host_workspace,
                              MutableBufferView device_workspace, const PreprocessOptions& options,
@@ -1098,6 +1235,7 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
         : options(std::move(configured_options))
         , pinned_source(true)
         , device_source(false)
+        , device_bgr(false)
         , device_tensor(false)
         , device_inference_tensor(false)
         , pinned_mask(true)
@@ -1147,6 +1285,7 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
         {
             pinned_source.abandon();
             device_source.abandon();
+            device_bgr.abandon();
             device_tensor.abandon();
             device_inference_tensor.abandon();
             pinned_mask.abandon();
@@ -1167,6 +1306,7 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
         device_composite.release();
         device_mask.release();
         device_status.release();
+        device_bgr.release();
         device_source.release();
         pinned_mask.release();
         pinned_source.release();
@@ -1179,6 +1319,7 @@ void ImageProcessor::enqueue(const std::vector<ImageView>& images, const TensorV
     CudaImageProcessorOptions options;
     OwnedCudaAllocation       pinned_source;
     OwnedCudaAllocation       device_source;
+    OwnedCudaAllocation       device_bgr;
     OwnedCudaAllocation       device_tensor;
     OwnedCudaAllocation       device_inference_tensor;
     OwnedCudaAllocation       pinned_mask;
@@ -1247,6 +1388,13 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
         throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
                                   "CUDA image staging stage: source limit exceeded");
     }
+    if (source.memory_kind == MemoryKind::CudaDevice &&
+        source.data == impl_->device_source.data() &&
+        source.byte_size == layout.packed_bytes &&
+        source.row_stride == layout.row_bytes)
+    {
+        return source;
+    }
 
     int previous_device = 0;
     check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice", "CUDA image staging");
@@ -1301,6 +1449,141 @@ ImageView CudaImageProcessor::stage(const ImageView& source)
     }
     catch (...)
     {
+        if (work_pending)
+        {
+            (void)cudaStreamSynchronize(impl_->stream);
+        }
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+        throw;
+    }
+}
+
+ImageView CudaImageProcessor::convert_bgr(const ImageView& source,
+                                          bool mirror_horizontal)
+{
+    if (!impl_)
+    {
+        throw_invalid("CUDA BGR conversion stage: processor state is unavailable");
+    }
+    const ImageView staged = stage(source);
+    const std::size_t row_bytes = checked_multiply(
+        static_cast<std::size_t>(staged.width), 3U, "BGR conversion row");
+    const std::size_t packed_bytes = checked_multiply(
+        row_bytes, static_cast<std::size_t>(staged.height),
+        "BGR conversion bytes");
+    if (packed_bytes > impl_->options.max_source_bytes)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA BGR conversion stage: image limit exceeded");
+    }
+
+    int previous_device = 0;
+    check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice",
+               "CUDA BGR conversion");
+    const bool restore = previous_device != impl_->options.device_id;
+    if (restore)
+    {
+        check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice",
+                   "CUDA BGR conversion");
+    }
+    bool work_pending = false;
+    try
+    {
+        impl_->device_bgr.reserve(packed_bytes, impl_->options.max_source_bytes);
+        launch_convert_bgr(staged, impl_->device_bgr.data(), mirror_horizontal,
+                           impl_->stream);
+        work_pending = true;
+        check_cuda(cudaStreamSynchronize(impl_->stream), "cudaStreamSynchronize",
+                   "CUDA BGR conversion completion");
+        work_pending = false;
+        if (restore)
+        {
+            check_cuda(cudaSetDevice(previous_device), "cudaSetDevice",
+                       "CUDA BGR conversion device restoration");
+        }
+        return { impl_->device_bgr.data(), packed_bytes, staged.width,
+                 staged.height, row_bytes, PixelFormat::Bgr8,
+                 MemoryKind::CudaDevice };
+    }
+    catch (...)
+    {
+        if (work_pending)
+        {
+            (void)cudaStreamSynchronize(impl_->stream);
+        }
+        if (restore)
+        {
+            (void)cudaSetDevice(previous_device);
+        }
+        throw;
+    }
+}
+
+ImageView CudaImageProcessor::convert_bgr_into(const ImageView& source,
+                                               CudaImageBuffer& destination,
+                                               bool mirror_horizontal)
+{
+    if (!impl_)
+    {
+        throw_invalid("CUDA BGR conversion stage: processor state is unavailable");
+    }
+    if (!destination.impl_)
+    {
+        throw_invalid("CUDA BGR conversion stage: destination state is unavailable");
+    }
+    if (destination.impl_->device_id != impl_->options.device_id)
+    {
+        throw_invalid("CUDA BGR conversion stage: destination belongs to a different CUDA device");
+    }
+
+    const ImageView staged = stage(source);
+    const std::size_t row_bytes = checked_multiply(
+        static_cast<std::size_t>(staged.width), 3U, "BGR conversion row");
+    const std::size_t packed_bytes = checked_multiply(
+        row_bytes, static_cast<std::size_t>(staged.height), "BGR conversion bytes");
+    if (packed_bytes > impl_->options.max_source_bytes ||
+        packed_bytes > destination.impl_->max_bytes)
+    {
+        throw ImageProcessorError(ImageProcessorErrorCode::ResourceLimitExceeded,
+                                  "CUDA BGR conversion stage: image limit exceeded");
+    }
+
+    int previous_device = 0;
+    check_cuda(cudaGetDevice(&previous_device), "cudaGetDevice", "CUDA BGR conversion");
+    const bool restore = previous_device != impl_->options.device_id;
+    if (restore)
+    {
+        check_cuda(cudaSetDevice(impl_->options.device_id), "cudaSetDevice",
+                   "CUDA BGR conversion");
+    }
+    bool work_pending = false;
+    try
+    {
+        destination.impl_->image = {};
+        destination.impl_->storage.reserve(packed_bytes, destination.impl_->max_bytes);
+        launch_convert_bgr(staged, destination.impl_->storage.data(), mirror_horizontal,
+                           impl_->stream);
+        work_pending = true;
+        check_cuda(cudaStreamSynchronize(impl_->stream), "cudaStreamSynchronize",
+                   "CUDA BGR conversion completion");
+        work_pending = false;
+        if (restore)
+        {
+            check_cuda(cudaSetDevice(previous_device), "cudaSetDevice",
+                       "CUDA BGR conversion device restoration");
+        }
+        destination.impl_->image = {
+            destination.impl_->storage.data(), packed_bytes, staged.width, staged.height,
+            row_bytes, PixelFormat::Bgr8, MemoryKind::CudaDevice,
+        };
+        return destination.impl_->image;
+    }
+    catch (...)
+    {
+        destination.impl_->image = {};
         if (work_pending)
         {
             (void)cudaStreamSynchronize(impl_->stream);

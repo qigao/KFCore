@@ -10,6 +10,34 @@
 namespace kfcore::image
 {
 
+class CudaImageBuffer final
+{
+public:
+    ~CudaImageBuffer();
+
+    CudaImageBuffer(const CudaImageBuffer&)            = delete;
+    CudaImageBuffer& operator=(const CudaImageBuffer&) = delete;
+    CudaImageBuffer(CudaImageBuffer&&) noexcept;
+    CudaImageBuffer& operator=(CudaImageBuffer&&) noexcept;
+
+    // Creates reusable CUDA image storage owned by one device. Allocation grows on the first
+    // conversion and never exceeds max_bytes. Calls that mutate the buffer must not overlap any
+    // use of a view previously borrowed from it.
+    [[nodiscard]] static std::unique_ptr<CudaImageBuffer>
+    create(int device_id, std::size_t max_bytes);
+
+    // The returned view borrows this buffer and remains valid until a later conversion begins
+    // writing into the buffer, or until buffer move or destruction.
+    [[nodiscard]] ImageView view() const noexcept;
+    [[nodiscard]] int device_id() const noexcept;
+
+private:
+    friend class CudaImageProcessor;
+    struct Impl;
+    explicit CudaImageBuffer(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
 class ImageProcessor final
 {
 public:
@@ -59,6 +87,20 @@ public:
     // borrowed until the next stage call or processor destruction; process_affine does not
     // invalidate it.
     [[nodiscard]] ImageView stage(const ImageView& source);
+
+    // Synchronously converts BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY into owned packed CUDA BGR8.
+    // Horizontal mirroring is fused into the conversion. The returned view is borrowed until the
+    // next convert_bgr call or processor destruction; other processor operations do not invalidate
+    // it. The source is borrowed only for this call.
+    [[nodiscard]] ImageView convert_bgr(const ImageView& source,
+                                        bool mirror_horizontal = false);
+
+    // Synchronously converts into caller-owned reusable CUDA BGR8 storage. The returned view is
+    // borrowed from destination rather than processor scratch and therefore survives later calls
+    // on this processor. Source and destination must use the processor's configured CUDA device.
+    [[nodiscard]] ImageView convert_bgr_into(const ImageView& source,
+                                             CudaImageBuffer& destination,
+                                             bool mirror_horizontal = false);
 
     // Synchronously produces an owned CUDA NCHW tensor from
     // BGR8/RGB8/NV12/I420/NV21/YUY2/UYVY. The returned

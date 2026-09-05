@@ -21,6 +21,8 @@ constexpr std::int32_t kWidth = 640;
 constexpr std::int32_t kHeight = 480;
 constexpr std::size_t kFrameBytes =
     static_cast<std::size_t>(kWidth) * kHeight * 3U / 2U;
+constexpr std::size_t kBgrFrameBytes =
+    static_cast<std::size_t>(kWidth) * kHeight * 3U;
 constexpr std::size_t kTensorElements =
     static_cast<std::size_t>(kWidth) * kHeight * 3U;
 constexpr std::size_t kCpuSamples = 20U;
@@ -190,6 +192,34 @@ spec("640x480 NV12 preprocessing benchmark")
             {
                 throw std::runtime_error("benchmark CUDA synchronization failed");
             }
+        }
+
+        std::vector<std::uint8_t> preview(kBgrFrameBytes);
+        auto retained_frame = CudaImageBuffer::create(0, kBgrFrameBytes);
+        {
+            const ImageView staged = shared_processor->stage(source);
+            const ImageView preview_device =
+                shared_processor->convert_bgr(staged, false);
+            shared_processor->download_bgr(
+                preview_device, { preview.data(), preview.size() });
+            const ImageView inference_frame = shared_processor->convert_bgr_into(
+                staged, *retained_frame, true);
+            check(inference_frame.data != nullptr);
+            check(inference_frame.byte_size == kBgrFrameBytes);
+            check(std::any_of(preview.begin(), preview.end(),
+                              [](std::uint8_t value) { return value != 0U; }));
+        }
+        benchmark_batch(
+            "CUDA camera frame upload, preview download, retained mirror",
+            kCudaSamples)
+        {
+            const ImageView staged = shared_processor->stage(source);
+            const ImageView preview_device =
+                shared_processor->convert_bgr(staged, false);
+            shared_processor->download_bgr(
+                preview_device, { preview.data(), preview.size() });
+            (void)shared_processor->convert_bgr_into(
+                staged, *retained_frame, true);
         }
         check(sink >= 0.0F);
     }

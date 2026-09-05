@@ -104,6 +104,12 @@ letterbox 源坐标中融合执行，不会先分配或写出一张镜像图。
 `CudaImageProcessor` 是同步、单实例不可重入的便利 facade：
 
 - `stage()` 返回 processor-owned CUDA image；下次 `stage()` 使该 view 失效。
+- `convert_bgr()` 将支持的 Host/CUDA 图像转换为 packed CUDA BGR8，并可在同一
+  kernel 中水平镜像；source 仅在同步调用期间借用，下次同名调用使返回 view
+  失效。若 source 是 Host，转换前会按 `stage()` 的契约先上传。
+- `CudaImageBuffer::create(device_id, max_bytes)` 创建调用方拥有、按需增长且有硬上限的 CUDA
+  图像存储；`convert_bgr_into()` 把 packed BGR8 写入该 buffer。其 view 不受处理器后续调用
+  影响，适合由有界帧池跨线程保留；写入期间不得有读者，借用 view 不得超过 buffer 生命周期。
 - `process_affine()` 返回 processor-owned preprocess tensor；下次同名调用使该 view 失效。
 - `acquire_tensor()` 返回可由任意 CUDA inference backend 写入的独立 tensor storage；下次
   `acquire_tensor()` 使该 view 失效。
