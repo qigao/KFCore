@@ -98,10 +98,12 @@ namespace
             return DataType::Bool;
         case nvinfer1::DataType::kUINT8:
             return DataType::UInt8;
+#if NV_TENSORRT_MAJOR >= 10
         case nvinfer1::DataType::kBF16:
             return DataType::BFloat16;
         case nvinfer1::DataType::kINT64:
             return DataType::Int64;
+#endif
         default:
             throw_contract(std::string("metadata extraction stage: unsupported data type for tensor ") +
                            tensor_name);
@@ -139,20 +141,14 @@ namespace
         return shape;
     }
 
-    void validate_physical_layout(const nvinfer1::ICudaEngine& engine, const char* tensor_name,
-                                  DataType type)
+    void validate_physical_layout(const nvinfer1::ICudaEngine& engine,
+                                  const char* tensor_name)
     {
         const nvinfer1::TensorFormat format = engine.getTensorFormat(tensor_name, 0);
         const std::int32_t vectorized_dimension =
             engine.getTensorVectorizedDim(tensor_name, 0);
-        const std::int32_t components = engine.getTensorComponentsPerElement(tensor_name, 0);
-        const std::int32_t component_bytes = engine.getTensorBytesPerComponent(tensor_name, 0);
-        const std::size_t  expected_bytes = detail::scalar_byte_size(type);
 
-        if (format != nvinfer1::TensorFormat::kLINEAR || vectorized_dimension != -1 ||
-            (components != -1 && components != 1) ||
-            (component_bytes != -1 &&
-             component_bytes != static_cast<std::int32_t>(expected_bytes)))
+        if (format != nvinfer1::TensorFormat::kLINEAR || vectorized_dimension != -1)
         {
             throw_contract(std::string("metadata extraction stage: tensor must use an unpacked ") +
                            "linear scalar device format: " + tensor_name);
@@ -209,7 +205,7 @@ namespace
             descriptor.data_type = data_type(engine.getTensorDataType(name), name);
             descriptor.declared_shape =
                 shape_from_dims(engine.getTensorShape(name), name, "network declaration");
-            validate_physical_layout(engine, name, descriptor.data_type);
+            validate_physical_layout(engine, name);
 
 #if NV_TENSORRT_MAJOR > 10 || (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR >= 11)
             static_assert(detail::tensorrt_supports_alias_query(NV_TENSORRT_MAJOR,
@@ -226,7 +222,7 @@ namespace
                                                                   NV_TENSORRT_MINOR),
                           "TensorRT alias-query version gate is inconsistent");
             // Engine::load rejects 10.3 through 10.10 before file or GPU work. TensorRT
-            // 10.0 through 10.2 predates aliased plugin I/O and needs no query.
+            // 8.6 and 10.0 through 10.2 predate aliased plugin I/O and need no query.
 #endif
 
             if (descriptor.mode == TensorIoMode::Input)

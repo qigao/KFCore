@@ -83,9 +83,16 @@ foreach(_component IN ITEMS MAJOR MINOR PATCH)
   _tensorrt_read_version_component(${_component} TensorRT_VERSION_${_component})
 endforeach()
 
-if(NOT TensorRT_VERSION_MAJOR EQUAL 10 AND NOT TensorRT_VERSION_MAJOR EQUAL 11)
+set(_TensorRT_supported_version FALSE)
+if(TensorRT_VERSION_MAJOR EQUAL 8 AND TensorRT_VERSION_MINOR EQUAL 6)
+  set(_TensorRT_supported_version TRUE)
+elseif(TensorRT_VERSION_MAJOR EQUAL 10 OR TensorRT_VERSION_MAJOR EQUAL 11)
+  set(_TensorRT_supported_version TRUE)
+endif()
+if(NOT _TensorRT_supported_version)
   message(FATAL_ERROR
-    "Unsupported TensorRT major version ${TensorRT_VERSION_MAJOR}; expected 10 or 11")
+    "Unsupported TensorRT version ${TensorRT_VERSION_MAJOR}.${TensorRT_VERSION_MINOR}; "
+    "expected 8.6.x, 10.x, or 11.x")
 endif()
 set(TensorRT_VERSION
   "${TensorRT_VERSION_MAJOR}.${TensorRT_VERSION_MINOR}.${TensorRT_VERSION_PATCH}")

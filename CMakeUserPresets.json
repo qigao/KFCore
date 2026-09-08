@@ -47,6 +47,18 @@
             }
         },
         {
+            "name": "win-pascal-cuda-paths",
+            "hidden": true,
+            "inherits": "win-cuda-paths",
+            "cacheVariables": {
+                "CMAKE_CUDA_ARCHITECTURES": "61"
+            },
+            "environment": {
+                "TENSORRT_ROOT": "C:/projects/TensorRT-8.6.1",
+                "CUDNN_ROOT": "$env{PKG_ROOT}/cudnn-8.9.7-cuda12"
+            }
+        },
+        {
             "name": "linux-paths",
             "hidden": true,
             "cacheVariables": {
@@ -149,6 +161,54 @@
             ]
         },
         {
+            "name": "win-gtx1060-release-user",
+            "displayName": "GTX 1060 / SM 6.1 Release Build (Windows, User)",
+            "binaryDir": "${sourceDir}/build/cuda-pascal/gtx1060/Msvc-Release",
+            "cacheVariables": {
+                "BUILD_EXAMPLES": "ON",
+                "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
+                "KFCORE_TENSORRT_ENGINE_PROFILE": "gtx1060-sm61-trt8.6.1-default",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/cuda-pascal/gtx1060"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDNN_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda-pascal/gtx1060/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+            },
+            "inherits": [
+                "base-win-release-user",
+                "win-pascal-cuda-paths"
+            ]
+        },
+        {
+            "name": "win-gtx1070-release-user",
+            "displayName": "GTX 1070 / SM 6.1 Release Build (Windows, User)",
+            "binaryDir": "${sourceDir}/build/cuda-pascal/gtx1070/Msvc-Release",
+            "cacheVariables": {
+                "BUILD_EXAMPLES": "ON",
+                "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "ON",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
+                "KFCORE_TENSORRT_ENGINE_PROFILE": "gtx1070-sm61-trt8.6.1-default",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/cuda-pascal/gtx1070"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDNN_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda-pascal/gtx1070/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+            },
+            "inherits": [
+                "base-win-release-user",
+                "win-pascal-cuda-paths"
+            ]
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "binaryDir": "${sourceDir}/build/cuda/linux-gcc-debug",
@@ -211,6 +271,14 @@
             "configurePreset": "win-cpu-release-user"
         },
         {
+            "name": "win-gtx1060-release-user",
+            "configurePreset": "win-gtx1060-release-user"
+        },
+        {
+            "name": "win-gtx1070-release-user",
+            "configurePreset": "win-gtx1070-release-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -242,6 +310,20 @@
         {
             "name": "install-win-cpu-release-user",
             "configurePreset": "win-cpu-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-gtx1060-release-user",
+            "configurePreset": "win-gtx1060-release-user",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "install-win-gtx1070-release-user",
+            "configurePreset": "win-gtx1070-release-user",
             "targets": [
                 "install"
             ]
@@ -281,6 +363,16 @@
             "name": "win-cpu-release-user",
             "inherits": "base-test",
             "configurePreset": "win-cpu-release-user"
+        },
+        {
+            "name": "win-gtx1060-release-user",
+            "inherits": "base-test",
+            "configurePreset": "win-gtx1060-release-user"
+        },
+        {
+            "name": "win-gtx1070-release-user",
+            "inherits": "base-test",
+            "configurePreset": "win-gtx1070-release-user"
         },
         {
             "name": "linux-dev-user",

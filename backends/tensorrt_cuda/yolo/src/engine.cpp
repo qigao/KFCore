@@ -220,22 +220,20 @@ namespace
                                                 TensorDataType data_type)
     {
         const std::int32_t vectorized_dimension = engine.getTensorVectorizedDim(tensor_name);
-        std::int32_t components_per_element =
-            engine.getTensorComponentsPerElement(tensor_name);
-        std::int32_t bytes_per_component = engine.getTensorBytesPerComponent(tensor_name);
+        std::int32_t components_per_element;
+        std::int32_t bytes_per_component;
 
-        // TensorRT reports -1 for scalar component queries in some 10.x/11.x releases.
-        // Normalize that documented sentinel while preserving all vectorized values verbatim.
+        // These TensorRT queries describe vector components and TensorRT 8.6 rejects them for
+        // scalar tensors. Derive the scalar layout from the already validated data type.
         if (vectorized_dimension == -1)
         {
-            if (components_per_element == -1)
-            {
-                components_per_element = 1;
-            }
-            if (bytes_per_component == -1)
-            {
-                bytes_per_component = scalar_bytes(data_type);
-            }
+            components_per_element = 1;
+            bytes_per_component = scalar_bytes(data_type);
+        }
+        else
+        {
+            components_per_element = engine.getTensorComponentsPerElement(tensor_name);
+            bytes_per_component = engine.getTensorBytesPerComponent(tensor_name);
         }
         return { tensor_physical_format(engine.getTensorFormat(tensor_name)),
                  vectorized_dimension, components_per_element, bytes_per_component };

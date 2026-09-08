@@ -341,6 +341,16 @@ namespace
         }
     }
 
+    bool set_output_tensor_address(nvinfer1::IExecutionContext& context,
+                                   const char* tensor_name, void* address) noexcept
+    {
+#if NV_TENSORRT_MAJOR >= 10
+        return context.setOutputTensorAddress(tensor_name, address);
+#else
+        return context.setTensorAddress(tensor_name, address);
+#endif
+    }
+
     void bind_output(nvinfer1::IExecutionContext& context,
                      detail::ExecutorStagingBuffers& staging,
                      const TensorDescriptor& descriptor, const MutableTensorView& output,
@@ -355,7 +365,7 @@ namespace
             staging.device.reserve(bytes, options.max_output_bytes);
             address = staging.device.data();
         }
-        if (!context.setOutputTensorAddress(descriptor.name.c_str(), address))
+        if (!set_output_tensor_address(context, descriptor.name.c_str(), address))
         {
             throw_tensorrt("tensor address stage: output address rejected for " +
                            descriptor.name);
@@ -441,16 +451,15 @@ namespace
         {
         }
 
+#if NV_TENSORRT_MAJOR >= 10
         void* reallocateOutputAsync(const char*, void*, std::uint64_t size,
                                     std::uint64_t, cudaStream_t) noexcept override
+#else
+        void* reallocateOutput(const char*, void*, std::uint64_t size,
+                               std::uint64_t) noexcept override
+#endif
         {
-            requested_bytes_ = size;
-            if (size > capacity_)
-            {
-                capacity_exceeded_ = true;
-                return nullptr;
-            }
-            return storage_;
+            return allocate(size);
         }
 
         void notifyShape(const char*, const nvinfer1::Dims& dims) noexcept override
@@ -480,6 +489,17 @@ namespace
         }
 
     private:
+        void* allocate(std::uint64_t size) noexcept
+        {
+            requested_bytes_ = size;
+            if (size > capacity_)
+            {
+                capacity_exceeded_ = true;
+                return nullptr;
+            }
+            return storage_;
+        }
+
         void*         storage_          = nullptr;
         std::size_t   capacity_         = 0;
         std::uint64_t requested_bytes_  = 0;
@@ -540,8 +560,8 @@ namespace
             staging[index].host.reserve(bytes, request.max_byte_size);
             auto allocator = std::make_unique<BoundedOutputAllocator>(staging[index].device.data(),
                                                                       bytes);
-            if (!context.setOutputTensorAddress(descriptor.name.c_str(),
-                                                staging[index].device.data()) ||
+            if (!set_output_tensor_address(context, descriptor.name.c_str(),
+                                           staging[index].device.data()) ||
                 !context.setOutputAllocator(descriptor.name.c_str(), allocator.get()))
             {
                 throw_tensorrt("dynamic output binding stage: TensorRT rejected binding for " +

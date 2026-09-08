@@ -12,6 +12,11 @@ enum class TensorRtAliasPolicy
     QueryEngine,
 };
 
+constexpr bool tensorrt_version_supported(int major, int minor) noexcept
+{
+    return (major == 8 && minor == 6) || major == 10 || major == 11;
+}
+
 constexpr TensorRtAliasPolicy tensorrt_alias_policy(int major, int minor) noexcept
 {
     if (major > 10 || (major == 10 && minor >= 11))
@@ -32,6 +37,11 @@ constexpr bool tensorrt_supports_alias_query(int major, int minor) noexcept
 
 inline void validate_runtime_tensorrt_version(int major, int minor)
 {
+    if (!tensorrt_version_supported(major, minor))
+    {
+        throw TensorRtError(TensorRtErrorCode::EngineContractMismatch,
+                            "engine version gate stage: expected TensorRT 8.6, 10.x, or 11.x");
+    }
     if (tensorrt_alias_policy(major, minor) ==
         TensorRtAliasPolicy::RejectUnavailableQuery)
     {

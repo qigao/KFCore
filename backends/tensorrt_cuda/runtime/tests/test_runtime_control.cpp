@@ -290,8 +290,29 @@ spec("TensorRT runtime CUDA control")
         }
     }
 
+    it("accepts only the explicitly supported TensorRT release families")
+    {
+        struct VersionCase
+        {
+            int  major;
+            int  minor;
+            bool supported;
+        };
+        const std::array<VersionCase, 6> cases = {
+            VersionCase { 8, 5, false }, VersionCase { 8, 6, true },
+            VersionCase { 9, 0, false }, VersionCase { 10, 0, true },
+            VersionCase { 11, 0, true }, VersionCase { 12, 0, false },
+        };
+
+        for (const VersionCase& version : cases)
+        {
+            check(tensorrt_version_supported(version.major, version.minor) == version.supported);
+        }
+    }
+
     it("rejects an alias-capable TensorRT version before engine loading when query is unavailable")
     {
+        validate_runtime_tensorrt_version(8, 6);
         validate_runtime_tensorrt_version(10, 0);
         validate_runtime_tensorrt_version(10, 2);
         validate_runtime_tensorrt_version(10, 11);
@@ -309,6 +330,24 @@ spec("TensorRT runtime CUDA control")
             check(error.code() == TensorRtErrorCode::EngineContractMismatch);
             check(message.find("version gate stage") != std::string::npos);
             check(message.find("10.3 through 10.10") != std::string::npos);
+        }
+        check_true(threw);
+    }
+
+    it("rejects an unsupported TensorRT version before engine loading")
+    {
+        bool threw = false;
+        try
+        {
+            validate_runtime_tensorrt_version(8, 5);
+        }
+        catch (const TensorRtError& error)
+        {
+            threw = true;
+            const std::string message(error.what());
+            check(error.code() == TensorRtErrorCode::EngineContractMismatch);
+            check(message.find("version gate stage") != std::string::npos);
+            check(message.find("8.6, 10.x, or 11.x") != std::string::npos);
         }
         check_true(threw);
     }

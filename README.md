@@ -714,6 +714,32 @@ ctest --preset win-cpu-release-user
 cmake --build --preset install-win-cpu-release-user
 ```
 
+Pascal deployments use TensorRT 8.6.1 and separate packages for each GPU model. These presets
+compile CUDA code for SM 6.1 and compile the matching engine profile name into KFCore:
+
+```powershell
+# Run this profile on the GTX 1060 deployment host.
+cmake --fresh --preset win-gtx1060-release-user
+cmake --build --preset win-gtx1060-release-user
+ctest --preset win-gtx1060-release-user `
+  -R '^(test_runtime_tensorrt_control|test_yolo_tensorrt_contract|test_hand_models_cuda_validation)$'
+cmake --build --preset install-win-gtx1060-release-user
+
+# Use the corresponding four win-gtx1070-* presets on a GTX 1070 host.
+```
+
+The Pascal presets resolve TensorRT from `C:/projects/TensorRT-8.6.1`, CUDA from
+`CUDA_PATH_V12_8`, and cuDNN from `$env:PKG_ROOT/cudnn-8.9.7-cuda12`. They use isolated package
+roots below `$env:PKG_ROOT/kfcore/release/cuda-pascal/gtx1060` and `gtx1070`. TensorRT engines
+must be generated on the matching GTX host; an RTX 4060/SM 8.9 engine is not an SM 6.1 artifact,
+and TensorRT 8.6 hardware compatibility does not extend backward to Pascal. The focused CTest
+command above is device-independent; engine-backed integration tests run only after the matching
+profile has been staged under the test tree's repository-level `yolo-models` directory. See the
+[TensorRT 8.6.1 support matrix](https://docs.nvidia.com/deeplearning/tensorrt/archives/tensorrt-861/support-matrix/),
+[YOLO engine commands](vision/core/yolo/README.md),
+[face engine commands](applications/tensorrt_cuda/README.md), and
+[hand engine commands](vision/core/hand_models/README.md).
+
 CUDA artifacts are generated below `build/cuda/`; release packages are installed below
 `$env:PKG_ROOT/kfcore/release/cuda/` and debug packages below
 `$env:PKG_ROOT/kfcore/debug/cuda/`. CPU artifacts use `build/cpu/` and the matching

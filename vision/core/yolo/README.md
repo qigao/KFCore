@@ -69,3 +69,47 @@ ctest --preset win-release-user -R "test_yolo_" --output-on-failure
 设置并编译进库。ONNX detector 通过
 `KFCore::runtime_onnx` 执行，TensorRT detector 使用 CUDA 图像处理与 TensorRT SDK；两条路线
 没有自动 fallback，模型根不接受 CMake、Preset JSON、环境变量或 API 配置。
+
+## TensorRT 8.6 Pascal engine
+
+以下命令必须在匹配的 GTX 1060 或 GTX 1070 主机执行。先选择与 KFCore preset 完全相同的
+profile；不得在其他 GPU 上生成后改名。示例从仓库根使用现有部署模型目录：
+
+```powershell
+$env:TENSORRT_ROOT = 'C:\projects\TensorRT-8.6.1'
+$env:CUDNN_ROOT = 'C:\projects\cpp\external\pkgs\cudnn-8.9.7-cuda12'
+$env:PATH = "$env:TENSORRT_ROOT\lib;$env:TENSORRT_ROOT\bin;$env:CUDNN_ROOT\bin;$env:CUDA_PATH_V12_8\bin;$env:PATH"
+$models = (Resolve-Path "$PWD/build/Msvc-Release/bin/yolo-models").Path
+$device = 0
+$profile = 'gtx1060-sm61-trt8.6.1-default' # GTX 1070 使用 gtx1070-sm61-trt8.6.1-default
+$expectedGpu = 'GTX 1060' # GTX 1070 profile 同时改为 GTX 1070
+$engines = Join-Path $models "tensorrt/$profile"
+$trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
+
+$gpu = nvidia-smi --id=$device --query-gpu=name,compute_cap --format=csv,noheader,nounits
+if ($LASTEXITCODE -ne 0 -or $gpu -notmatch "$([regex]::Escape($expectedGpu)).*,\s*6\.1$") {
+    throw "Expected $expectedGpu compute capability 6.1 on device $device; got: $gpu"
+}
+if (Test-Path -LiteralPath $engines) { throw "Refusing to overwrite profile: $engines" }
+New-Item -ItemType Directory -Path $engines | Out-Null
+
+$modelsToBuild = @(
+    @{ Name = 'yolov8s'; Source = 'yolov8s.onnx' },
+    @{ Name = 'yolov8n-drone'; Source = 'yolov8n-drone.onnx' },
+    @{ Name = 'yolov8n-football'; Source = 'yolov8n-football.onnx' },
+    @{ Name = 'yolov8n-parking'; Source = 'yolov8n-parking.onnx' }
+)
+foreach ($model in $modelsToBuild) {
+    & $trtexec "--onnx=$(Join-Path $models $model.Source)" `
+      "--saveEngine=$(Join-Path $engines ($model.Name + '.engine'))" `
+      --device=$device --builderOptimizationLevel=3 --skipInference
+    if ($LASTEXITCODE -ne 0) { throw "TensorRT build failed: $($model.Name)" }
+    & $trtexec "--loadEngine=$(Join-Path $engines ($model.Name + '.engine'))" `
+      --device=$device --iterations=1 --warmUp=0 --duration=0
+    if ($LASTEXITCODE -ne 0) { throw "TensorRT smoke failed: $($model.Name)" }
+}
+```
+
+`nvidia-smi` 必须报告目标型号和 compute capability `6.1`。这些模型保持 FP32 I/O；不使用
+`--hardwareCompatibilityLevel=ampere+`，因为该模式不覆盖 Pascal。任一命令失败时保留失败日志，
+不要把不完整 profile 发布给应用。

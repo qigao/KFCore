@@ -101,6 +101,54 @@ $trtexec = Join-Path $env:TENSORRT_ROOT "bin\trtexec.exe"
 拒绝该 engine。Palm engine 必须保留 ONNX NMS 的 data-dependent 输出，不能把它伪装成固定
 候选数。
 
+TensorRT 8.6 Pascal 使用相同 shape contract，但必须在匹配的 GTX 主机选择独立 profile，并把
+TensorRT `lib` 与 cuDNN 8 加入运行时路径：
+
+```powershell
+$env:TENSORRT_ROOT = 'C:\projects\TensorRT-8.6.1'
+$env:CUDNN_ROOT = 'C:\projects\cpp\external\pkgs\cudnn-8.9.7-cuda12'
+$env:PATH = "$env:TENSORRT_ROOT\lib;$env:TENSORRT_ROOT\bin;$env:CUDNN_ROOT\bin;$env:CUDA_PATH_V12_8\bin;$env:PATH"
+$models = (Resolve-Path "$PWD/build/Msvc-Release/bin/yolo-models").Path
+$device = 0
+$profile = 'gtx1060-sm61-trt8.6.1-default' # GTX 1070 使用 gtx1070-sm61-trt8.6.1-default
+$expectedGpu = 'GTX 1060' # GTX 1070 profile 同时改为 GTX 1070
+$handEngines = Join-Path $models "hand_gesture_model/tensorrt/$profile"
+$trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
+
+$gpu = nvidia-smi --id=$device --query-gpu=name,compute_cap --format=csv,noheader,nounits
+if ($LASTEXITCODE -ne 0 -or $gpu -notmatch "$([regex]::Escape($expectedGpu)).*,\s*6\.1$") {
+    throw "Expected $expectedGpu compute capability 6.1 on device $device; got: $gpu"
+}
+if (Test-Path -LiteralPath $handEngines) { throw "Refusing to overwrite profile: $handEngines" }
+New-Item -ItemType Directory -Path $handEngines | Out-Null
+
+& $trtexec --onnx="$models/hand_gesture_model/palm_detection/palm_detection_full_inf_post_192x192.onnx" `
+  --saveEngine="$handEngines/palm_detection.engine" --device=$device --fp16 --skipInference
+if ($LASTEXITCODE -ne 0) { throw 'Palm engine build failed' }
+& $trtexec --onnx="$models/hand_gesture_model/hand_landmark/hand_landmark_sparse_Nx3x224x224.onnx" `
+  --minShapes=input:1x3x224x224 --optShapes=input:2x3x224x224 `
+  --maxShapes=input:8x3x224x224 --saveEngine="$handEngines/hand_landmark.engine" `
+  --device=$device --fp16 --skipInference
+if ($LASTEXITCODE -ne 0) { throw 'Hand landmark engine build failed' }
+& $trtexec --onnx="$models/hand_gesture_model/keypoint_classifier/keypoint_classifier.onnx" `
+  --minShapes=input:1x42 --optShapes=input:2x42 --maxShapes=input:8x42 `
+  --saveEngine="$handEngines/keypoint_classifier.engine" --device=$device --fp16 --skipInference
+if ($LASTEXITCODE -ne 0) { throw 'Gesture classifier engine build failed' }
+
+& $trtexec --loadEngine="$handEngines/palm_detection.engine" `
+  --device=$device --iterations=1 --warmUp=0 --duration=0
+if ($LASTEXITCODE -ne 0) { throw 'Palm engine smoke failed' }
+& $trtexec --loadEngine="$handEngines/hand_landmark.engine" --shapes=input:2x3x224x224 `
+  --device=$device --iterations=1 --warmUp=0 --duration=0
+if ($LASTEXITCODE -ne 0) { throw 'Hand landmark engine smoke failed' }
+& $trtexec --loadEngine="$handEngines/keypoint_classifier.engine" --shapes=input:2x42 `
+  --device=$device --iterations=1 --warmUp=0 --duration=0
+if ($LASTEXITCODE -ne 0) { throw 'Gesture classifier engine smoke failed' }
+```
+
+`nvidia-smi` 必须报告目标型号和 compute capability `6.1`。FP16 是既有 hand engine 构建
+契约；Pascal 没有 Tensor Core，最终延迟必须以对应 GTX 主机的 smoke/benchmark 为准。
+
 ## API 示例与所有权
 
 ```cpp

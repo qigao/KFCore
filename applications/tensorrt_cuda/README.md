@@ -141,6 +141,82 @@ $trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
 不是通过 TensorRT 生成。本次导出结果为 1,048,576 bytes，SHA-256 为
 `370af5bf707dafdbea8a40448d697d9697610bd223ecf92887af9c9cc7055ac8`。
 
+### TensorRT 8.6 Pascal profile
+
+Pascal profile 必须在匹配的 GTX 1060/1070 主机生成。以下命令假定 YOLO profile 目录尚未
+创建；若已由 YOLO 命令创建，先确认目录只含同一 GPU、TensorRT 8.6.1 和相同构建参数的可信
+engine，再逐条执行且不得覆盖已有文件：
+
+```powershell
+$env:TENSORRT_ROOT = 'C:\projects\TensorRT-8.6.1'
+$env:CUDNN_ROOT = 'C:\projects\cpp\external\pkgs\cudnn-8.9.7-cuda12'
+$env:PATH = "$env:TENSORRT_ROOT\lib;$env:TENSORRT_ROOT\bin;$env:CUDNN_ROOT\bin;$env:CUDA_PATH_V12_8\bin;$env:PATH"
+$models = (Resolve-Path "$PWD/build/Msvc-Release/bin/yolo-models").Path
+$device = 0
+$profile = 'gtx1060-sm61-trt8.6.1-default' # GTX 1070 使用 gtx1070-sm61-trt8.6.1-default
+$expectedGpu = 'GTX 1060' # GTX 1070 profile 同时改为 GTX 1070
+$engines = Join-Path $models "tensorrt/$profile"
+$trtexec = Join-Path $env:TENSORRT_ROOT 'bin/trtexec.exe'
+
+$gpu = nvidia-smi --id=$device --query-gpu=name,compute_cap --format=csv,noheader,nounits
+if ($LASTEXITCODE -ne 0 -or $gpu -notmatch "$([regex]::Escape($expectedGpu)).*,\s*6\.1$") {
+    throw "Expected $expectedGpu compute capability 6.1 on device $device; got: $gpu"
+}
+New-Item -ItemType Directory -Force -Path $engines | Out-Null
+$outputs = @(
+    'yolov11n-face.engine', 'face_landmark.engine', '2dfan4.engine',
+    'arcface_w600k_r50.engine', 'inswapper_128.engine', 'gfpgan_1.4.engine',
+    'age-gender.engine'
+)
+foreach ($output in $outputs) {
+    $path = Join-Path $engines $output
+    if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite engine: $path" }
+}
+
+& $trtexec --onnx="$models/yolov11n-face.onnx" `
+  --saveEngine="$engines/yolov11n-face.engine" --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'YOLO face engine build failed' }
+& $trtexec --onnx="$models/MediaPipeFaceLandmarkDetector.onnx" `
+  --saveEngine="$engines/face_landmark.engine" --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'Face landmark engine build failed' }
+& $trtexec --onnx="$models/2dfan4.onnx" `
+  --saveEngine="$engines/2dfan4.engine" --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw '2DFAN4 engine build failed' }
+& $trtexec --onnx="$models/arcface_w600k_r50.onnx" `
+  --saveEngine="$engines/arcface_w600k_r50.engine" `
+  --minShapes=input.1:1x3x112x112 --optShapes=input.1:1x3x112x112 `
+  --maxShapes=input.1:1x3x112x112 --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'ArcFace engine build failed' }
+& $trtexec --onnx="$models/inswapper_128.onnx" `
+  --saveEngine="$engines/inswapper_128.engine" --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'InSwapper engine build failed' }
+& $trtexec --onnx="$models/gfpgan_1.4.onnx" `
+  --saveEngine="$engines/gfpgan_1.4.engine" --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'GFPGAN engine build failed' }
+& $trtexec --onnx="$models/age-gender.onnx" `
+  --saveEngine="$engines/age-gender.engine" `
+  --minShapes=pixel_values:1x3x224x224 --optShapes=pixel_values:1x3x224x224 `
+  --maxShapes=pixel_values:1x3x224x224 --device=$device `
+  --skipInference --builderOptimizationLevel=3
+if ($LASTEXITCODE -ne 0) { throw 'Age/gender engine build failed' }
+
+foreach ($output in $outputs) {
+    & $trtexec "--loadEngine=$(Join-Path $engines $output)" `
+      --device=$device --iterations=1 --warmUp=0 --duration=0
+    if ($LASTEXITCODE -ne 0) { throw "TensorRT smoke failed: $output" }
+}
+```
+
+`nvidia-smi` 必须报告目标 GTX 型号与 compute capability `6.1`。GTX 1060 的 3 GiB 版本可能
+无法构建或执行 GFPGAN/InSwapper；这类资源失败不得通过降低精度、跳过模型或借用另一 GPU
+生成 engine 来掩盖。上述命令保持现有 adapter 的 FP32 I/O contract。
+
 ## 构建
 
 Windows 核心库使用调用方提供的 TensorRT；构建图片 CLI/桌面 demo 时额外使用 OpenCV Lite：
