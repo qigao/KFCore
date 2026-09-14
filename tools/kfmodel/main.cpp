@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -15,6 +16,7 @@ void usage(std::ostream& stream)
     stream << "usage:\n"
               "  kfmodel inspect <model-package-directory>\n"
               "  kfmodel validate <model-package-directory>\n"
+              "  kfmodel backend <backend-plugin>\n"
               "  kfmodel probe <model-package-directory> <backend-plugin> <device-id>\n";
 }
 
@@ -88,6 +90,35 @@ const char* data_type_name(kfcore::runtime::DataType type) noexcept
     return "unknown";
 }
 
+std::string_view platform_name() noexcept
+{
+#if defined(_WIN32)
+#  if defined(_M_X64) || defined(__x86_64__)
+    return "windows-x86_64";
+#  elif defined(_M_ARM64) || defined(__aarch64__)
+    return "windows-aarch64";
+#  else
+    return "windows-unknown";
+#  endif
+#elif defined(__linux__)
+#  if defined(__x86_64__)
+    return "linux-x86_64";
+#  elif defined(__aarch64__)
+    return "linux-aarch64";
+#  else
+    return "linux-unknown";
+#  endif
+#else
+    return "unsupported-unknown";
+#endif
+}
+
+void print_runtime_version(const kfcore::runtime::RuntimeVersion& version)
+{
+    std::cout << version.major << '.' << version.minor << '.'
+              << version.patch << '.' << version.build;
+}
+
 void print_shape(const kfcore::runtime::TensorShape& shape)
 {
     std::cout << '[';
@@ -97,6 +128,45 @@ void print_shape(const kfcore::runtime::TensorShape& shape)
         std::cout << shape[index];
     }
     std::cout << ']';
+}
+
+int inspect_backend(const std::filesystem::path& plugin_path)
+{
+    kfcore::runtime::Runtime runtime;
+    const auto backend = runtime.load_backend(plugin_path);
+    if (!backend)
+    {
+        throw kfcore::runtime::RuntimeError(
+            kfcore::runtime::RuntimeErrorCode::BackendFailure,
+            "runtime returned no backend after plugin load");
+    }
+
+    std::cout << "backend=" << backend->id()
+              << " name=\"" << backend->name() << '"'
+              << " platform=" << platform_name();
+    const auto& version = backend->execution_runtime_version();
+    if (version.major != 0U || version.minor != 0U ||
+        version.patch != 0U || version.build != 0U)
+    {
+        std::cout << " runtime_version=";
+        print_runtime_version(version);
+    }
+    std::cout << '\n';
+
+    const auto devices = backend->devices();
+    std::cout << "devices=" << devices.size() << '\n';
+    for (const auto& device : devices)
+    {
+        std::cout << "device=" << device.id << " name=\"" << device.name << '"';
+        if (device.compute_capability_major != 0U)
+        {
+            std::cout << " compute_capability="
+                      << device.compute_capability_major << '.'
+                      << device.compute_capability_minor;
+        }
+        std::cout << '\n';
+    }
+    return 0;
 }
 
 int probe(const kfcore::runtime::ModelPackage& package,
@@ -160,9 +230,11 @@ int main(int argc, char** argv)
 
     const std::string command(argv[1]);
     const bool package_only = command == "inspect" || command == "validate";
+    const bool backend_command = command == "backend";
     const bool probe_command = command == "probe";
-    if ((!package_only && !probe_command) ||
+    if ((!package_only && !backend_command && !probe_command) ||
         (package_only && argc != 3) ||
+        (backend_command && argc != 3) ||
         (probe_command && argc != 5) ||
         (probe_command && (argv[3] == nullptr || argv[4] == nullptr)))
     {
@@ -172,6 +244,9 @@ int main(int argc, char** argv)
 
     try
     {
+        if (backend_command)
+            return inspect_backend(std::filesystem::path(argv[2]));
+
         const auto package = kfcore::runtime::ModelPackage::load(
             std::filesystem::path(argv[2]));
         if (command == "inspect") return inspect(package);
