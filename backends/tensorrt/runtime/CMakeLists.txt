@@ -16,7 +16,7 @@ target_include_directories(kfcore_runtime_tensorrt
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(kfcore_runtime_tensorrt PUBLIC cxx_std_17)
 target_link_libraries(kfcore_runtime_tensorrt PRIVATE
-  CUDA::cudart
+  CUDA::cudart_static
   TensorRT::nvinfer
   TensorRT::nvinfer_plugin)
 set_target_properties(kfcore_runtime_tensorrt PROPERTIES
