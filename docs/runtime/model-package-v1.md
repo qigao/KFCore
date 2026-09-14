@@ -19,7 +19,7 @@ models/rtmw-l-384x288/
   "schema": "kfcore.model/1",
   "id": "rtmw-l-384x288",
   "version": "1.0",
-  "model_type": "rtmw-whole-body",
+  "model_type": "pose.rtmw",
   "variant": "coco-wholebody-133",
   "artifacts": [
     {
@@ -49,6 +49,8 @@ models/rtmw-l-384x288/
   ]
 }
 ```
+
+`pose.rtmw` is the canonical Model Package V1 type accepted by the typed `kfcore::pose::Rtmw` API. The backend-neutral YOLO API accepts the canonical `yolo-detection` type (and currently also recognizes `yolo` during migration).
 
 `artifacts` is represented by a TBE `group<Artifact>` internally but is ordinary JSON array syntax in `model.json`.
 
@@ -87,8 +89,8 @@ A model that must not run on CPU simply omits a CPU-compatible artifact/route or
 
 ```cpp
 kfcore::runtime::Runtime runtime;
-runtime.load_backend("plugins/kfcore_backend_tensorrt.dll");
-runtime.load_backend("plugins/kfcore_backend_onnxruntime.dll");
+(void)runtime.load_backend("plugins/kfcore_backend_tensorrt.dll");
+(void)runtime.load_backend("plugins/kfcore_backend_onnxruntime.dll");
 
 const auto package = kfcore::runtime::ModelPackage::load("models/rtmw-l-384x288");
 auto pose = kfcore::pose::Rtmw::load(runtime, package, policy);
