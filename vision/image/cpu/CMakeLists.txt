@@ -1,4 +1,4 @@
-add_library(kfcore_image_processor_cpu SHARED src/cpu.cpp)
+add_library(kfcore_image_processor_cpu STATIC src/cpu.cpp)
 target_include_directories(kfcore_image_processor_cpu
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -11,7 +11,6 @@ set_target_properties(kfcore_image_processor_cpu PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/image/cpu")
 cmake_config_target(kfcore_image_processor_cpu
   ALIAS KFCore::image_processor_cpu
