@@ -93,6 +93,7 @@ endif()
 
 if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
   add_subdirectory(backends/onnx_cpu/runtime)
+  add_subdirectory(backends/onnx_cpu/plugin)
   add_subdirectory(backends/onnx_cpu/yolo)
   add_subdirectory(backends/onnx_cpu/face_models)
   add_subdirectory(backends/onnx_cpu/hand_models)
