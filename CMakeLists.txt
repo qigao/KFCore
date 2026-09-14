@@ -73,8 +73,8 @@ add_subdirectory(vision/core/hand_models)
 add_subdirectory(hand_interaction)
 
 if(KFCORE_ENABLE_TENSORRT)
-  add_subdirectory(backends/tensorrt_cuda/runtime)
-  add_subdirectory(backends/tensorrt_cuda/plugin)
+  add_subdirectory(backends/tensorrt/runtime)
+  add_subdirectory(backends/tensorrt/plugin)
 endif()
 
 if(KFCORE_ENABLE_ONNXRUNTIME)
