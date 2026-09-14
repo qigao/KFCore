@@ -78,6 +78,16 @@ kf_memory_kind_v1 to_abi(MemoryKind kind)
     throw RuntimeError(RuntimeErrorCode::InvalidArgument, "unknown runtime memory kind");
 }
 
+std::uint32_t checked_rank(const TensorShape& shape)
+{
+    if (shape.size() > static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)()))
+    {
+        throw RuntimeError(RuntimeErrorCode::InvalidArgument,
+                           "tensor rank exceeds ABI v1 range");
+    }
+    return static_cast<std::uint32_t>(shape.size());
+}
+
 std::filesystem::path canonical_artifact_path(const std::filesystem::path& path)
 {
     if (path.empty())
@@ -388,7 +398,10 @@ std::vector<TensorDescriptor> ExecutableModel::tensors() const
         TensorDescriptor tensor;
         tensor.name = copy_string(info.name);
         tensor.data_type = from_abi(info.data_type);
-        tensor.shape.assign(info.dimensions, info.dimensions + info.rank);
+        if (info.rank != 0U)
+        {
+            tensor.shape.assign(info.dimensions, info.dimensions + info.rank);
+        }
         tensor.is_input = info.io == KF_TENSOR_IO_V1_INPUT;
         result.push_back(std::move(tensor));
     }
@@ -429,7 +442,7 @@ void ExecutionContext::run(const std::vector<TensorView>& inputs,
     {
         abi_inputs.push_back({
             sizeof(kf_tensor_view_v1), abi_string(input.name), to_abi(input.data_type),
-            input.shape.data(), static_cast<std::uint32_t>(input.shape.size()), input.data,
+            input.shape.data(), checked_rank(input.shape), input.data,
             static_cast<std::uint64_t>(input.byte_size), to_abi(input.memory_kind),
             abi_string(input.device_id),
         });
@@ -441,7 +454,7 @@ void ExecutionContext::run(const std::vector<TensorView>& inputs,
     {
         abi_outputs.push_back({
             sizeof(kf_mutable_tensor_view_v1), abi_string(output.name), to_abi(output.data_type),
-            output.shape.data(), static_cast<std::uint32_t>(output.shape.size()), output.data,
+            output.shape.data(), checked_rank(output.shape), output.data,
             static_cast<std::uint64_t>(output.byte_size), to_abi(output.memory_kind),
             abi_string(output.device_id),
         });
