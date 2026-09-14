@@ -1,5 +1,6 @@
 #include "kfcore/yolo/onnx.hpp"
 #include "yolo_domain_profile.hpp"
+#include "yolo_semantic_contract.hpp"
 
 #include "tinytest.hpp"
 
@@ -63,23 +64,10 @@ spec("YOLOv8 ONNX Runtime real-model integration")
 
             const DetectionFrame frame = detector->detect(
                 image_view(pixels, kSourceWidth, kSourceHeight));
-            check(frame.image_width == kSourceWidth);
-            check(frame.image_height == kSourceHeight);
-            check(frame.detections.size() <= detector->max_detections());
             const std::size_t class_count = domain_profile(model.kind).class_labels.size();
-            for (const Detection& detection : frame.detections)
-            {
-                check_true(std::isfinite(detection.score));
-                check_true(detection.score > 0.0F && detection.score <= 1.0F);
-                check(detection.class_id >= 0);
-                check(static_cast<std::size_t>(detection.class_id) < class_count);
-                check_true(detection.box.left >= 0.0F);
-                check_true(detection.box.top >= 0.0F);
-                check_true(detection.box.right <= static_cast<float>(kSourceWidth));
-                check_true(detection.box.bottom <= static_cast<float>(kSourceHeight));
-                check_true(detection.box.left < detection.box.right);
-                check_true(detection.box.top < detection.box.bottom);
-            }
+            kfcore::yolo::test::check_semantic_contract(
+                frame, kSourceWidth, kSourceHeight, class_count);
+            check(frame.detections.size() <= detector->max_detections());
 
             std::vector<std::uint8_t> nv12(
                 static_cast<std::size_t>(kSourceWidth) * kSourceHeight * 3U / 2U,
@@ -93,8 +81,8 @@ spec("YOLOv8 ONNX Runtime real-model integration")
                 MemoryKind::Host,
             };
             const DetectionFrame native_frame = detector->detect(native_view);
-            check(native_frame.image_width == kSourceWidth);
-            check(native_frame.image_height == kSourceHeight);
+            kfcore::yolo::test::check_semantic_contract(
+                native_frame, kSourceWidth, kSourceHeight, class_count);
             check(native_frame.detections.size() <= detector->max_detections());
         }
     }

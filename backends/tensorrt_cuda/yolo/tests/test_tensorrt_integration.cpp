@@ -1,4 +1,5 @@
 #include "kfcore/yolo/tensorrt.hpp"
+#include "yolo_semantic_contract.hpp"
 #include "tinytest.hpp"
 
 #include <NvInfer.h>
@@ -244,8 +245,7 @@ spec("TensorRT YOLO integration")
         auto detector = engine->create_detector(DetectorOptions {});
         OwnedRgbImage image(640, 384);
         const DetectionFrame result = detector->detect(image.view());
-        check(result.image_width == 640);
-        check(result.image_height == 384);
+        kfcore::yolo::test::check_semantic_contract(result, 640, 384);
     }
 #else
     it("rejects a missing engine file with a typed error")
@@ -299,13 +299,8 @@ spec("TensorRT YOLO integration")
         }
         for (const DetectionFrame& result : results)
         {
-            for (const Detection& detection : result.detections)
-            {
-                check(detection.box.left >= 0.0f);
-                check(detection.box.top >= 0.0f);
-                check(detection.box.right <= static_cast<float>(result.image_width));
-                check(detection.box.bottom <= static_cast<float>(result.image_height));
-            }
+            kfcore::yolo::test::check_semantic_contract(
+                result, result.image_width, result.image_height);
         }
     }
 
@@ -327,8 +322,8 @@ spec("TensorRT YOLO integration")
             check(results.size() == profile.minimum_batch);
             for (const DetectionFrame& result : results)
             {
-                check(result.image_width == image.view().width);
-                check(result.image_height == image.view().height);
+                kfcore::yolo::test::check_semantic_contract(
+                    result, image.view().width, image.view().height);
             }
         }
     }
@@ -353,6 +348,8 @@ spec("TensorRT YOLO integration")
 
         const DetectionFrame host_result = detector->detect(host.view());
         const DetectionFrame device_result = detector->detect(device.view());
+        kfcore::yolo::test::check_semantic_contract(host_result, 640, 384);
+        kfcore::yolo::test::check_semantic_contract(device_result, 640, 384);
         check_same_frame(device_result, host_result);
     }
 
@@ -363,7 +360,11 @@ spec("TensorRT YOLO integration")
         auto second = engine->create_detector(DetectorOptions {});
         OwnedRgbImage image(640, 384);
 
-        check_same_frame(second->detect(image.view()), first->detect(image.view()));
+        const DetectionFrame first_result = first->detect(image.view());
+        const DetectionFrame second_result = second->detect(image.view());
+        kfcore::yolo::test::check_semantic_contract(first_result, 640, 384);
+        kfcore::yolo::test::check_semantic_contract(second_result, 640, 384);
+        check_same_frame(second_result, first_result);
     }
 
     it("rejects a host pointer labeled as CUDA-device memory")

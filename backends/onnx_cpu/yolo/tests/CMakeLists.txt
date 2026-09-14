@@ -18,7 +18,9 @@ cmake_add_test(
     "KFCORE_YOLO_TEST_DRONE=\"${_yolo_test_drone}\""
     "KFCORE_YOLO_TEST_FOOTBALL=\"${_yolo_test_football}\""
     "KFCORE_YOLO_TEST_PARKING=\"${_yolo_test_parking}\""
-  INCLUDES ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples
+  INCLUDES
+    ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples
+    ${CMAKE_SOURCE_DIR}/vision/core/yolo/tests
   COMPILE_FEATURES cxx_std_17
   TEST_PROPERTIES WORKING_DIRECTORY "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}"
   FOLDER "backends/onnx_cpu/yolo/tests")

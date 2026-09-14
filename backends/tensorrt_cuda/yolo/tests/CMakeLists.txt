@@ -44,6 +44,7 @@ cmake_add_test(
     TensorRT::nvinfer_plugin
     CUDA::cudart
     Salts::TinyTest
+  INCLUDES ${CMAKE_SOURCE_DIR}/vision/core/yolo/tests
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_tensorrt_test_folder}"
   TEST_PROPERTIES
