@@ -1,4 +1,4 @@
-add_library(kfcore_image_processor_cuda SHARED
+add_library(kfcore_image_processor_cuda STATIC
   src/image_processor.cpp
   src/image_processor_cuda.cu)
 target_include_directories(kfcore_image_processor_cuda
@@ -17,7 +17,6 @@ set_target_properties(kfcore_image_processor_cuda PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/image/cuda")
 cmake_config_target(kfcore_image_processor_cuda
   ALIAS KFCore::image_processor_cuda
