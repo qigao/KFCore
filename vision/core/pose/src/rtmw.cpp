@@ -525,12 +525,10 @@ struct Rtmw::Impl final
         simcc_y.allocate(simcc_y_extent, options.max_output_bytes);
     }
 
-    WholeBodyPose infer_one(const image::ImageView& image, const RectF& box)
+    WholeBodyPose infer_one(const image::BgrImage& source, const RectF& box)
     {
         const CropGeometry geometry = crop_geometry(
             box, options, input_width_value, input_height_value);
-        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
-            image, options.max_source_bytes);
         const image::BgrImage crop = image::CpuImageProcessor::warp_affine_bgr(
             source, input_width_value, input_height_value,
             destination_to_source(geometry, input_width_value, input_height_value),
@@ -700,7 +698,9 @@ WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box
     UseGuard guard(impl_->in_use);
     try
     {
-        return impl_->infer_one(image, person_box);
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
+        return impl_->infer_one(source, person_box);
     }
     catch (const PoseError&)
     {
@@ -734,11 +734,13 @@ std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
     UseGuard guard(impl_->in_use);
     try
     {
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
         std::vector<WholeBodyPose> result;
         result.reserve(person_boxes.size());
         for (const RectF& box : person_boxes)
         {
-            result.push_back(impl_->infer_one(image, box));
+            result.push_back(impl_->infer_one(source, box));
         }
         return result;
     }
