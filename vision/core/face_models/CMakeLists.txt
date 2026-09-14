@@ -26,7 +26,8 @@ cmake_config_target(kfcore_face_model_core
   FOLDER "vision/core/face_models")
 
 add_library(kfcore_face_model_runtime SHARED
-  src/runtime.cpp)
+  src/runtime.cpp
+  src/prepared_models.cpp)
 target_include_directories(kfcore_face_model_runtime
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
