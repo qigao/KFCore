@@ -6,6 +6,23 @@ target_include_directories(kfcore_runtime_onnx PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(kfcore_runtime_onnx PUBLIC cxx_std_17)
 target_link_libraries(kfcore_runtime_onnx PRIVATE ONNXRuntime::ONNXRuntime)
+if(WIN32)
+  target_compile_definitions(kfcore_runtime_onnx PRIVATE
+    "KFCORE_ONNX_RUNTIME_RELATIVE_PATH=\"${ONNXRuntime_RUNTIME_RELATIVE_PATH}\"")
+endif()
+if(KFCORE_ENABLE_ONNX_CUDA)
+  set(KFCORE_ONNX_CUDA_DEVICE_ID "0" CACHE STRING "ONNX CUDA device ordinal")
+  set(KFCORE_ONNX_CUDA_MEMORY_LIMIT "2147483648" CACHE STRING "ONNX CUDA arena limit per session in bytes")
+  if(NOT KFCORE_ONNX_CUDA_DEVICE_ID MATCHES "^(0|[1-9][0-9]*)$" OR
+     NOT KFCORE_ONNX_CUDA_MEMORY_LIMIT MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "ONNX CUDA device must be nonnegative and memory limit must be positive integers")
+  endif()
+  target_compile_definitions(kfcore_runtime_onnx PRIVATE
+    KFCORE_ONNX_CUDA
+    KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNX_CUDA_ALLOW_CPU_NODES}>
+    "KFCORE_ONNX_CUDA_DEVICE_ID=\"${KFCORE_ONNX_CUDA_DEVICE_ID}\""
+    "KFCORE_ONNX_CUDA_MEMORY_LIMIT=\"${KFCORE_ONNX_CUDA_MEMORY_LIMIT}\"")
+endif()
 set_target_properties(kfcore_runtime_onnx PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON

@@ -5,6 +5,34 @@
     ],
     "configurePresets": [
         {
+            "name": "win-onnx-cuda-release-user",
+            "displayName": "ONNX Runtime CUDA Release (no TensorRT)",
+            "inherits": [
+                "base-win-release-user",
+                "win-paths"
+            ],
+            "binaryDir": "${sourceDir}/build/onnx-cuda/Msvc-Release",
+            "cacheVariables": {
+                "KFCORE_MODEL_TEST_WORKING_DIRECTORY": "C:/projects/project-cpp-template/build/Msvc-Release/bin/Retro",
+                "BUILD_EXAMPLES": "ON",
+                "BUILD_TESTS": "ON",
+                "KFCORE_ENABLE_CUDA": "OFF",
+                "KFCORE_ENABLE_ONNX_CPU": "OFF",
+                "KFCORE_ENABLE_ONNX_CUDA": "ON",
+                "KFCORE_ONNX_CUDA_ALLOW_CPU_NODES": "ON",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/kfcore/release/onnx-cuda"
+            },
+            "environment": {
+                "ONNXRUNTIME_ROOT": "$env{PKG_ROOT}/onnxruntime-gpu",
+                "CUDNN_ROOT": "C:/Program Files/NVIDIA/CUDNN/v9.13",
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "${sourceDir}/build/onnx-cuda/Msvc-Release/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{CUDNN_ROOT}/bin/12.9${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
             "name": "win-toolchain",
             "hidden": true,
             "environment": {
@@ -143,6 +171,8 @@
             "displayName": "CPU Release Build (Windows, User)",
             "binaryDir": "${sourceDir}/build/cpu/Msvc-Release",
             "cacheVariables": {
+                "KFCORE_MODEL_TEST_WORKING_DIRECTORY": "C:/projects/project-cpp-template/build/Msvc-Release/bin/Retro",
+                "VCPKG_MANIFEST_MODE": "ON",
                 "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
                 "KFCORE_ENABLE_CUDA": "OFF",
@@ -168,7 +198,7 @@
                 "BUILD_EXAMPLES": "ON",
                 "BUILD_TESTS": "ON",
                 "KFCORE_ENABLE_CUDA": "ON",
-                "KFCORE_ENABLE_ONNX_CPU": "OFF",
+                "KFCORE_ENABLE_ONNX_CPU": "ON",
                 "KFCORE_TENSORRT_ENGINE_PROFILE": "gtx1060-sm61-trt8.6.1-default",
                 "VCPKG_MANIFEST_MODE": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
@@ -177,7 +207,7 @@
             "environment": {
                 "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
                 "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "PATH": "$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDNN_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda-pascal/gtx1060/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
+                "PATH": "$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{CUDA_TOOLKIT_ROOT}/bin${pathListSep}$env{TENSORRT_ROOT}/lib${pathListSep}$env{TENSORRT_ROOT}/bin${pathListSep}$env{CUDNN_ROOT}/bin${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}${sourceDir}/build/cuda-pascal/gtx1060/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}${pathListSep}$penv{PATH}"
             },
             "inherits": [
                 "base-win-release-user",
@@ -254,6 +284,17 @@
         }
     ],
     "buildPresets": [
+        {
+            "name": "win-onnx-cuda-release-user",
+            "configurePreset": "win-onnx-cuda-release-user"
+        },
+        {
+            "name": "install-win-onnx-cuda-release-user",
+            "configurePreset": "win-onnx-cuda-release-user",
+            "targets": [
+                "install"
+            ]
+        },
         {
             "name": "win-dev-user",
             "configurePreset": "win-dev-user"
@@ -344,6 +385,11 @@
         }
     ],
     "testPresets": [
+        {
+            "name": "win-onnx-cuda-release-user",
+            "inherits": "base-test",
+            "configurePreset": "win-onnx-cuda-release-user"
+        },
         {
             "name": "win-dev-user",
             "inherits": "base-test",

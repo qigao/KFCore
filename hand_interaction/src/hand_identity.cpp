@@ -206,6 +206,13 @@ public:
     std::unordered_set<int> used_canonical_ids;
     std::vector<PendingMatch> pending_matches;
     std::vector<std::size_t> new_identity_observations;
+    std::unordered_map<int, const HandIdentityObservation*> live_raw_observations;
+    for (const auto& observation : observations) {
+      if (observation.raw_track_id < 0 || !IsReliable(observation)) continue;
+      const auto [entry, inserted] = live_raw_observations.emplace(
+          observation.raw_track_id, &observation);
+      if (!inserted) entry->second = nullptr;
+    }
     for (std::size_t index = 0; index < observations.size(); ++index) {
       if (observations[index].appearance &&
           !IsValidAppearance(*observations[index].appearance)) {
@@ -277,6 +284,18 @@ public:
         const std::uint64_t age = frame_index_ - state.last_seen_frame;
         const double distance_scale_ratio = PredictedDistanceRatio(
             observation, state, frame_index_, config_.maximum_prediction_frames);
+        // A separately visible, reliable raw owner makes this identity
+        // unavailable to a far newcomer with only matching shape evidence.
+        // Dormant identities and appearance-based crossings remain candidates.
+        const auto live_owner = live_raw_observations.find(state.raw_track_id);
+        if (!raw_continuity && !compatible_appearance &&
+            distance_scale_ratio > config_.maximum_distance_scale_ratio &&
+            live_owner != live_raw_observations.end() && live_owner->second &&
+            PredictedDistanceRatio(*live_owner->second, state, frame_index_,
+                                   config_.maximum_prediction_frames) <=
+                config_.maximum_distance_scale_ratio) {
+          continue;
+        }
         const double capped_age_ratio = static_cast<double>(
             std::min<std::uint64_t>(age,
                                     static_cast<std::uint64_t>(config_.reacquire_frames))) /

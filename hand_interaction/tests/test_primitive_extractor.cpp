@@ -803,6 +803,43 @@ spec("hand primitive extractor")
               HandIdentityAssociation::Ambiguous);
     }
 
+    it("gives a later separated hand its own identity and pose in either input order")
+    {
+        for (const bool reverse_input : {false, true})
+        {
+            HandPrimitiveExtractor extractor;
+            HandFrame first_frame;
+            first_frame.hands.push_back(v_hand(4));
+            const auto first = extractor.process(first_frame, frame_context(1));
+            const int first_id = first.hands[0].canonical_id;
+
+            HandFrame both = first_frame;
+            both.hands.push_back(v_hand(19));
+            translate_hand(both.hands[1], 350.0F, 0.0F);
+            if (reverse_input) std::reverse(both.hands.begin(), both.hands.end());
+            const std::size_t old_index = reverse_input ? 1U : 0U;
+            const std::size_t new_index = reverse_input ? 0U : 1U;
+            int second_id = 0;
+            for (std::uint64_t serial = 2; serial <= 6; ++serial)
+            {
+                const auto result = extractor.process(
+                    both, frame_context(serial, static_cast<int>(serial * 33)));
+                check(result.hands[old_index].canonical_id == first_id);
+                check(result.hands[new_index].canonical_id > 0);
+                check(result.hands[new_index].canonical_id != first_id);
+                if (second_id == 0) second_id = result.hands[new_index].canonical_id;
+                check(result.hands[new_index].canonical_id == second_id);
+                for (const int identity : {first_id, second_id})
+                {
+                    check(std::any_of(result.observations.begin(), result.observations.end(),
+                        [identity](const Observation& item) {
+                            return item.source.id == identity && item.relation == "Shape V";
+                        }));
+                }
+            }
+        }
+    }
+
     it("withholds duplicate competitors independent of input order")
     {
         const auto resolve_duplicates = [](bool reverse_input) {

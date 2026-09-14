@@ -18,7 +18,7 @@ cmake_add_test(
     "KFCORE_FACE_CPU_TEST_DETECTOR=\"${_face_cpu_detector}\""
     "KFCORE_FACE_CPU_TEST_LANDMARKER=\"${_face_cpu_landmarker}\""
   COMPILE_FEATURES cxx_std_17
-  TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  TEST_PROPERTIES WORKING_DIRECTORY "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}"
   FOLDER "${_face_models_cpu_test_folder}")
 
 add_executable(test_cpu_face_models_integration test_cpu_face_models_integration.cpp)
@@ -45,7 +45,7 @@ foreach(_cpu_face_model_mapping IN ITEMS
     "KFCORE_CPU_FACE_MODEL_TEST_KIND=${_cpu_face_model_kind}"
     "KFCORE_CPU_FACE_MODEL_TEST_PATH=${_cpu_face_model_path}")
   set_property(TEST ${_cpu_face_test_name} PROPERTY WORKING_DIRECTORY
-    "${PROJECT_SOURCE_DIR}")
+    "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}")
   list(APPEND _face_models_cpu_tests ${_cpu_face_test_name})
 endforeach()
 

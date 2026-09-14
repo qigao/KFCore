@@ -95,6 +95,12 @@ ID 为 `0`，不会退回为仅按位置匹配。候选还必须满足 `maximum_
 handedness 翻转视为分类噪声，但在双手交叉或外观冲突时仍不强制归属。若两个观测对同一最佳 ID 的
 成本差小于 `ambiguity_cost_margin`，两者均为 `0`，不按输入顺序取胜。
 
+同一帧内，若某个旧 ID 的唯一可靠 raw 观测仍位于其预测位置附近，则空间上分离的新手不能仅凭相同
+骨架形状争用该 ID。新手超出 `maximum_distance_scale_ratio`、旧 raw 观测在此范围内、且新手没有
+raw 连续性或兼容外观证据时，该 ID 从新手的候选中排除；候选为空则分配新 ID。因此双手先后入镜时
+可各自输出手型和动作状态。重复 raw ID、低置信度 raw 观测不构成唯一可靠归属；重叠歧义、休眠 ID
+重获和有外观证据的交叉仍按原有匹配规则处理。此修复不改变接口、结构体布局或置信度阈值。
+
 `PrimitiveFrame::hands[].association` 由同一个 registry 在提交匹配时生成，是 canonical ID 来源的唯一事实源：
 `NewIdentity` 表示新分配，`RawTrackContinuity` 表示沿用同一 raw ByteTrack ID，`ShapeReacquired` 表示 raw
 ID 已变化或暂不可用且仅由形状等证据重获，`AppearanceReacquired` 表示 raw ID 变化后有可比较外观证据
@@ -102,7 +108,7 @@ ID 已变化或暂不可用且仅由形状等证据重获，`AppearanceReacquire
 `UnreliableObservation` 表示置信度、几何或形状证据不可用。UI 和其他消费者只能展示该值，不应从 ID
 变化反推原因。
 
-`maximum_distance_scale_ratio` 与 `maximum_linear_scale_ratio` 是有限的软证据饱和值：预测距离分别按前者
+除上述同帧已占用 ID 的排除条件外，`maximum_distance_scale_ratio` 与 `maximum_linear_scale_ratio` 是有限的软证据饱和值：预测距离分别按前者
 线性归一化到 `[0, 1]`，尺度比的对数差按 `log(后者)` 归一化到 `[0, 1]`。它们不会放宽形状或
 handedness gate；部署应以实际镜头、手势和 landmark 噪声校准这些阈值。
 

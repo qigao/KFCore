@@ -20,7 +20,7 @@ cmake_add_test(
     "KFCORE_YOLO_TEST_PARKING=\"${_yolo_test_parking}\""
   INCLUDES ${CMAKE_SOURCE_DIR}/vision/core/yolo/examples
   COMPILE_FEATURES cxx_std_17
-  TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  TEST_PROPERTIES WORKING_DIRECTORY "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}"
   FOLDER "backends/onnx_cpu/yolo/tests")
 
 set(_yolo_test_person "./yolo-models/yolov8s.onnx")
@@ -30,7 +30,7 @@ cmake_add_test(
   LIBS KFCore::yolo_onnx Salts::TinyTest
   DEFS "KFCORE_YOLO_TEST_PERSON=\"${_yolo_test_person}\""
   COMPILE_FEATURES cxx_std_17
-  TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  TEST_PROPERTIES WORKING_DIRECTORY "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}"
   FOLDER "backends/onnx_cpu/yolo/tests")
 
 if(WIN32)

@@ -21,7 +21,7 @@ cmake_add_test(
     KFCORE_HAND_CPU_TEST_LANDMARK="${_hand_cpu_landmark}"
     KFCORE_HAND_CPU_TEST_CLASSIFIER="${_hand_cpu_classifier}"
   COMPILE_FEATURES cxx_std_17
-  TEST_PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  TEST_PROPERTIES WORKING_DIRECTORY "${KFCORE_MODEL_TEST_WORKING_DIRECTORY}"
   FOLDER "backends/onnx_cpu/hand_models/tests")
 
 if(WIN32)

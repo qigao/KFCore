@@ -51,7 +51,7 @@ if(BUILD_EXAMPLES)
     KFCore::yolo_core
     KFCore::image_processor_cpu
     Salts::Capture)
-  if(KFCORE_ENABLE_ONNX_CPU)
+  if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
     target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_onnx)
   endif()
   if(KFCORE_ENABLE_CUDA)
@@ -59,7 +59,7 @@ if(BUILD_EXAMPLES)
   endif()
   target_compile_definitions(yolov8_domain_demo PRIVATE
     KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
-    KFCORE_DEMO_ENABLE_ONNX_CPU=$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>)
+    KFCORE_DEMO_ENABLE_ONNX_CPU=$<OR:$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>,$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>>)
   if(WIN32)
     target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)
   endif()

@@ -42,6 +42,24 @@ if(NOT _ONNXRuntime_library)
 endif()
 _onnxruntime_require_contained("${_ONNXRuntime_library}" "library")
 
+if(KFCORE_ENABLE_ONNX_CUDA OR KFCore_ONNX_CUDA_ENABLED)
+  foreach(_provider IN ITEMS cuda shared)
+    unset(_ONNXRuntime_provider CACHE)
+    if(WIN32)
+      set(_provider_filename "onnxruntime_providers_${_provider}.dll")
+    else()
+      set(_provider_filename "libonnxruntime_providers_${_provider}.so")
+    endif()
+    find_file(_ONNXRuntime_provider NAMES "${_provider_filename}"
+      PATHS "${_ONNXRuntime_root}/lib" "${_ONNXRuntime_root}/lib64"
+      NO_DEFAULT_PATH)
+    if(NOT _ONNXRuntime_provider)
+      message(FATAL_ERROR "ONNX CUDA requires ${_provider_filename} in ONNXRUNTIME_ROOT; a CPU SDK is insufficient")
+    endif()
+    _onnxruntime_require_contained("${_ONNXRuntime_provider}" "${_provider} provider")
+  endforeach()
+endif()
+
 if(EXISTS "${_ONNXRuntime_root}/VERSION_NUMBER")
   file(STRINGS "${_ONNXRuntime_root}/VERSION_NUMBER" ONNXRuntime_VERSION LIMIT_COUNT 1)
 endif()
@@ -57,6 +75,8 @@ if(NOT TARGET ONNXRuntime::ONNXRuntime)
       message(FATAL_ERROR "ONNXRUNTIME_ROOT does not contain onnxruntime.dll")
     endif()
     _onnxruntime_require_contained("${_ONNXRuntime_runtime}" "runtime")
+    file(RELATIVE_PATH ONNXRuntime_RUNTIME_RELATIVE_PATH
+      "${_ONNXRuntime_root}" "${_ONNXRuntime_runtime}")
     add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED)
     set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
       IMPORTED_IMPLIB "${_ONNXRuntime_library}"

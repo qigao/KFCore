@@ -1,7 +1,16 @@
 #include "kfcore/runtime_onnx/runtime.hpp"
 
+#define ORT_API_MANUAL_INIT
 #include <onnxruntime_cxx_api.h>
+#ifdef KFCORE_ONNX_CUDA
+#include <onnxruntime_session_options_config_keys.h>
+#endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#include <cstdlib>
 #include <limits>
 #include <new>
 #include <system_error>
@@ -11,6 +20,64 @@ namespace kfcore::runtime_onnx
 {
 namespace
 {
+
+// The library must outlive every environment and tensor using its API table.
+// Explicit loading also prevents Windows' system ORT from shadowing the SDK.
+class RuntimeLibrary final
+{
+public:
+    RuntimeLibrary()
+    {
+#ifdef _WIN32
+        const wchar_t* root = _wgetenv(L"ONNXRUNTIME_ROOT");
+        if (root == nullptr || *root == L'\0')
+        {
+            throw Error(ErrorCode::RuntimeFailure, "ONNX load stage: ONNXRUNTIME_ROOT is required");
+        }
+        const auto path = std::filesystem::path(root) / KFCORE_ONNX_RUNTIME_RELATIVE_PATH;
+        if (!path.is_absolute())
+        {
+            throw Error(ErrorCode::RuntimeFailure, "ONNX load stage: ONNXRUNTIME_ROOT must be absolute");
+        }
+        module_ = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (module_ == nullptr)
+        {
+            throw Error(ErrorCode::RuntimeFailure,
+                        "ONNX load stage: " + path.u8string() + " Windows error " +
+                            std::to_string(GetLastError()));
+        }
+        using GetApiBase = const OrtApiBase* (ORT_API_CALL*)();
+        const auto get_api_base = reinterpret_cast<GetApiBase>(GetProcAddress(module_, "OrtGetApiBase"));
+        const OrtApiBase* base = get_api_base == nullptr ? nullptr : get_api_base();
+#else
+        const OrtApiBase* base = OrtGetApiBase();
+#endif
+        const OrtApi* api = base == nullptr ? nullptr : base->GetApi(ORT_API_VERSION);
+        if (api == nullptr)
+        {
+#ifdef _WIN32
+            FreeLibrary(module_);
+            module_ = nullptr;
+#endif
+            throw Error(ErrorCode::RuntimeFailure, "ONNX load stage: runtime API version mismatch");
+        }
+        Ort::InitApi(api);
+    }
+
+    ~RuntimeLibrary()
+    {
+#ifdef _WIN32
+        FreeLibrary(module_);
+#endif
+    }
+    RuntimeLibrary(const RuntimeLibrary&) = delete;
+    RuntimeLibrary& operator=(const RuntimeLibrary&) = delete;
+
+private:
+#ifdef _WIN32
+    HMODULE module_ = nullptr;
+#endif
+};
 
 [[noreturn]] void throw_contract(const std::string& model, const std::string& detail)
 {
@@ -198,6 +265,7 @@ Environment::Environment(const char* log_id)
     }
     try
     {
+        static const RuntimeLibrary library;
         impl_ = std::make_unique<Impl>(log_id);
     }
     catch (const Ort::Exception& error)
@@ -240,6 +308,23 @@ struct Session::Impl final
             session_options.SetInterOpNumThreads(options.inter_op_threads);
         }
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+#ifdef KFCORE_ONNX_CUDA
+        OrtCUDAProviderOptionsV2* raw_cuda_options = nullptr;
+        Ort::ThrowOnError(Ort::GetApi().CreateCUDAProviderOptions(&raw_cuda_options));
+        const auto release_cuda_options = [](OrtCUDAProviderOptionsV2* value) {
+            Ort::GetApi().ReleaseCUDAProviderOptions(value);
+        };
+        const std::unique_ptr<OrtCUDAProviderOptionsV2, decltype(release_cuda_options)>
+            cuda_options(raw_cuda_options, release_cuda_options);
+        const char* keys[] = { "device_id", "gpu_mem_limit", "use_tf32" };
+        const char* values[] = { KFCORE_ONNX_CUDA_DEVICE_ID, KFCORE_ONNX_CUDA_MEMORY_LIMIT, "0" };
+        Ort::ThrowOnError(Ort::GetApi().UpdateCUDAProviderOptions(
+            cuda_options.get(), keys, values, sizeof(keys) / sizeof(keys[0])));
+        session_options.AppendExecutionProvider_CUDA_V2(*cuda_options);
+        // CPU placement is opt-in; CUDA creation above remains mandatory in either mode.
+        session_options.AddConfigEntry(kOrtSessionOptionsDisableCPUEPFallback,
+                                       KFCORE_ONNX_CUDA_ALLOW_CPU_NODES ? "0" : "1");
+#endif
 #ifdef _WIN32
         session = std::make_unique<Ort::Session>(environment, model_path.c_str(), session_options);
 #else
