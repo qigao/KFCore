@@ -6,10 +6,12 @@ KFCore is a backend-neutral C/C++ inference and vision runtime.
 
 Logical models are independent from execution backends. Applications use typed model APIs such as YOLO and RTMW, while execution is selected per model through runtime-loaded backend plugins.
 
-Supported execution components in this branch:
+KFCore uses a **static SDK + dynamic backend plugin** layout. Normal KFCore libraries are installed as static archives; the only KFCore DLL/shared-library boundaries are execution plugins:
 
 - `kfcore_backend_tensorrt` — TensorRT execution on CUDA devices.
 - `kfcore_backend_onnxruntime` — ONNX Runtime execution with CPU and optional CUDA providers.
+
+TensorRT's KFCore runtime implementation is statically linked into the TensorRT backend plugin. Core/image/YOLO/pose/face/hand/tracking/SIFT/pipeline libraries do not require separate KFCore DLLs.
 
 CPU/CUDA are execution devices/providers, not separate model APIs. TensorRT engines are derived artifacts selected from a Model Package using exact TensorRT runtime, platform, and declared hardware-compatibility metadata.
 
@@ -85,6 +87,8 @@ KFCORE_INSTALL_PLUGINDIR=plugins
 ```
 
 `CMakeUserPresets.json` defines the execution capabilities through reusable runtime capability presets.
+
+A CUDA-enabled installed static SDK requires CMake consumers to have `CUDAToolkit` available for CUDA-backed static targets. TensorRT and ONNX Runtime remain runtime plugin dependencies rather than normal KFCore link dependencies.
 
 ## Model packages and runtime probe
 
