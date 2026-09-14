@@ -107,4 +107,4 @@ build\bin\kfmodel.exe inspect  C:\models\rtmw-l-384x288
 build\bin\kfmodel.exe validate C:\models\rtmw-l-384x288
 ```
 
-For a TensorRT artifact, validation requires ONNX source provenance, TensorRT major version, exact CUDA compute capability, and precision metadata.
+For a TensorRT artifact, validation requires ONNX source provenance, exact TensorRT `major.minor.patch.build`, target platform, hardware compatibility mode, CUDA compute capability, and precision metadata. `exact-device` packages also require the CUDA device name. TensorRT version-compatible plans are outside the V1 trust model.
