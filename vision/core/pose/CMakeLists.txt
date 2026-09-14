@@ -1,0 +1,26 @@
+add_library(kfcore_pose_core SHARED
+  src/rtmw.cpp)
+target_include_directories(kfcore_pose_core
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_features(kfcore_pose_core PUBLIC cxx_std_17)
+target_link_libraries(kfcore_pose_core
+  PUBLIC KFCore::runtime_core KFCore::image_processor_core
+  PRIVATE KFCore::image_processor_cpu)
+set_target_properties(kfcore_pose_core PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+  FOLDER "vision/core/pose")
+cmake_config_target(kfcore_pose_core
+  ALIAS KFCore::pose_core
+  EXPORT_NAME pose_core
+  EXPORT_SET KFCoreTargets
+  FOLDER "vision/core/pose")
+
+cmake_install_headers(
+  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  PATTERNS "*.hpp")

@@ -1,0 +1,783 @@
+#include "kfcore/pose/rtmw.hpp"
+
+#include "kfcore/image_processor/cpu.hpp"
+#include "kfcore/image_processor/error.hpp"
+#include "kfcore/runtime/error.hpp"
+
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace kfcore::pose
+{
+namespace
+{
+
+[[noreturn]] void throw_invalid(const std::string& detail)
+{
+    throw PoseError(PoseErrorCode::InvalidArgument, "RTMW: " + detail);
+}
+
+[[noreturn]] void throw_contract(const std::string& detail)
+{
+    throw PoseError(PoseErrorCode::ModelContractMismatch,
+                    "RTMW model contract: " + detail);
+}
+
+[[noreturn]] void throw_runtime(const std::string& detail)
+{
+    throw PoseError(PoseErrorCode::RuntimeFailure, "RTMW runtime: " + detail);
+}
+
+[[noreturn]] void throw_resource(const std::string& detail)
+{
+    throw PoseError(PoseErrorCode::ResourceLimitExceeded,
+                    "RTMW resource limit: " + detail);
+}
+
+std::size_t checked_multiply(std::size_t left, std::size_t right,
+                             const char* subject)
+{
+    if (left != 0U && right > (std::numeric_limits<std::size_t>::max)() / left)
+    {
+        throw_resource(std::string(subject) + " byte count overflow");
+    }
+    return left * right;
+}
+
+std::size_t element_size(runtime::DataType type)
+{
+    switch (type)
+    {
+    case runtime::DataType::Float32: return sizeof(float);
+    case runtime::DataType::Float16: return sizeof(std::uint16_t);
+    default: throw_contract("RTMW tensors must use FP32 or FP16");
+    }
+}
+
+std::uint16_t float_to_half(float value) noexcept
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const std::uint32_t sign = (bits >> 16U) & 0x8000U;
+    const std::uint32_t exponent = (bits >> 23U) & 0xffU;
+    const std::uint32_t mantissa = bits & 0x7fffffU;
+    if (exponent == 0xffU)
+    {
+        return static_cast<std::uint16_t>(sign | (mantissa == 0U ? 0x7c00U : 0x7e00U));
+    }
+    const int adjusted = static_cast<int>(exponent) - 127 + 15;
+    if (adjusted >= 31)
+    {
+        return static_cast<std::uint16_t>(sign | 0x7c00U);
+    }
+    if (adjusted <= 0)
+    {
+        if (adjusted < -10)
+        {
+            return static_cast<std::uint16_t>(sign);
+        }
+        const std::uint32_t normalized = mantissa | 0x800000U;
+        const int shift = 14 - adjusted;
+        const std::uint32_t rounded =
+            (normalized + (UINT32_C(1) << (shift - 1))) >> shift;
+        return static_cast<std::uint16_t>(sign | rounded);
+    }
+    const std::uint32_t rounded = mantissa + 0x1000U;
+    if ((rounded & 0x800000U) != 0U)
+    {
+        return static_cast<std::uint16_t>(
+            sign | (static_cast<std::uint32_t>(adjusted + 1) << 10U));
+    }
+    return static_cast<std::uint16_t>(
+        sign | (static_cast<std::uint32_t>(adjusted) << 10U) |
+        (rounded >> 13U));
+}
+
+float half_to_float(std::uint16_t bits) noexcept
+{
+    const bool negative = (bits & UINT16_C(0x8000)) != 0U;
+    const std::uint16_t exponent = static_cast<std::uint16_t>((bits >> 10U) & 0x1fU);
+    const std::uint16_t fraction = static_cast<std::uint16_t>(bits & 0x03ffU);
+    float value = 0.0F;
+    if (exponent == 0U)
+    {
+        value = std::ldexp(static_cast<float>(fraction), -24);
+    }
+    else if (exponent == 0x1fU)
+    {
+        value = fraction == 0U ? (std::numeric_limits<float>::infinity)()
+                               : (std::numeric_limits<float>::quiet_NaN)();
+    }
+    else
+    {
+        value = std::ldexp(static_cast<float>(UINT16_C(0x0400) + fraction),
+                           static_cast<int>(exponent) - 25);
+    }
+    return negative ? -value : value;
+}
+
+float tensor_value(const void* data, runtime::DataType type, std::size_t index)
+{
+    if (data == nullptr)
+    {
+        throw_contract("SimCC output storage is null");
+    }
+    if (type == runtime::DataType::Float32)
+    {
+        return static_cast<const float*>(data)[index];
+    }
+    if (type == runtime::DataType::Float16)
+    {
+        return half_to_float(static_cast<const std::uint16_t*>(data)[index]);
+    }
+    throw_contract("SimCC output must use FP32 or FP16");
+}
+
+void validate_options(const RtmwOptions& options)
+{
+    if ((options.input_width < 0) || (options.input_height < 0) ||
+        ((options.input_width == 0) != (options.input_height == 0)))
+    {
+        throw_invalid("input width and height must both be zero or both be positive");
+    }
+    if (!std::isfinite(options.bbox_padding) || options.bbox_padding <= 0.0F ||
+        !std::isfinite(options.simcc_split_ratio) || options.simcc_split_ratio <= 0.0F)
+    {
+        throw_invalid("bbox padding and SimCC split ratio must be finite and positive");
+    }
+    if (!std::isfinite(options.border_value) || options.border_value < 0.0F ||
+        options.border_value > 255.0F)
+    {
+        throw_invalid("border value must be finite within [0,255]");
+    }
+    for (std::size_t channel = 0U; channel < 3U; ++channel)
+    {
+        if (!std::isfinite(options.mean[channel]) ||
+            !std::isfinite(options.stddev[channel]) || options.stddev[channel] <= 0.0F)
+        {
+            throw_invalid("normalization mean must be finite and stddev positive");
+        }
+    }
+    if (options.max_source_bytes == 0U || options.max_tensor_bytes == 0U ||
+        options.max_output_bytes == 0U)
+    {
+        throw_resource("configured byte limits must be positive");
+    }
+}
+
+struct CropGeometry
+{
+    float center_x = 0.0F;
+    float center_y = 0.0F;
+    float scale_width = 0.0F;
+    float scale_height = 0.0F;
+};
+
+CropGeometry crop_geometry(const RectF& box, const RtmwOptions& options,
+                           std::int32_t input_width, std::int32_t input_height)
+{
+    if (!std::isfinite(box.x) || !std::isfinite(box.y) ||
+        !std::isfinite(box.width) || !std::isfinite(box.height) ||
+        box.width <= 0.0F || box.height <= 0.0F)
+    {
+        throw_invalid("person bbox must be finite with positive width and height");
+    }
+
+    CropGeometry geometry;
+    geometry.center_x = box.x + box.width * 0.5F;
+    geometry.center_y = box.y + box.height * 0.5F;
+    geometry.scale_width = box.width * options.bbox_padding;
+    geometry.scale_height = box.height * options.bbox_padding;
+
+    const float aspect = static_cast<float>(input_width) /
+                         static_cast<float>(input_height);
+    if (geometry.scale_width > geometry.scale_height * aspect)
+    {
+        geometry.scale_height = geometry.scale_width / aspect;
+    }
+    else
+    {
+        geometry.scale_width = geometry.scale_height * aspect;
+    }
+    return geometry;
+}
+
+image::AffineTransform destination_to_source(const CropGeometry& geometry,
+                                             std::int32_t input_width,
+                                             std::int32_t input_height)
+{
+    const float scale_x = geometry.scale_width / static_cast<float>(input_width);
+    const float scale_y = geometry.scale_height / static_cast<float>(input_height);
+    return {{
+        scale_x,
+        0.0F,
+        geometry.center_x - geometry.scale_width * 0.5F,
+        0.0F,
+        scale_y,
+        geometry.center_y - geometry.scale_height * 0.5F,
+    }};
+}
+
+std::int32_t resolve_spatial(std::int64_t declared, std::int32_t requested,
+                             const char* name)
+{
+    if (declared > 0)
+    {
+        if (declared > (std::numeric_limits<std::int32_t>::max)())
+        {
+            throw_contract(std::string(name) + " exceeds int32 range");
+        }
+        const auto value = static_cast<std::int32_t>(declared);
+        if (requested > 0 && requested != value)
+        {
+            throw_contract(std::string(name) + " conflicts with static artifact shape");
+        }
+        return value;
+    }
+    if (declared == -1 && requested > 0)
+    {
+        return requested;
+    }
+    throw_contract(std::string(name) +
+                   " is dynamic; RtmwOptions must provide an explicit size");
+}
+
+runtime::TensorShape resolve_input_shape(const runtime::TensorDescriptor& input,
+                                         const RtmwOptions& options,
+                                         std::int32_t& input_width,
+                                         std::int32_t& input_height)
+{
+    if (input.shape.size() != 4U)
+    {
+        throw_contract("input tensor must be NCHW rank 4");
+    }
+    runtime::TensorShape shape = input.shape;
+    if (shape[0] == -1)
+    {
+        shape[0] = 1;
+    }
+    if (shape[0] != 1)
+    {
+        throw_contract("RTMW v1 supports batch size 1 per execution context call");
+    }
+    if (shape[1] == -1)
+    {
+        shape[1] = 3;
+    }
+    if (shape[1] != 3)
+    {
+        throw_contract("input tensor must have three channels");
+    }
+    input_height = resolve_spatial(shape[2], options.input_height, "input height");
+    input_width = resolve_spatial(shape[3], options.input_width, "input width");
+    shape[2] = input_height;
+    shape[3] = input_width;
+    return shape;
+}
+
+std::size_t expected_simcc_extent(std::int32_t input_extent, float split_ratio,
+                                  const char* axis)
+{
+    const double value = static_cast<double>(input_extent) *
+                         static_cast<double>(split_ratio);
+    const auto rounded = static_cast<std::int64_t>(std::llround(value));
+    if (rounded <= 0 || std::fabs(value - static_cast<double>(rounded)) > 1.0e-4)
+    {
+        throw_contract(std::string("SimCC ") + axis +
+                       " extent is not integral for the configured split ratio");
+    }
+    return static_cast<std::size_t>(rounded);
+}
+
+bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
+                            std::size_t expected_extent)
+{
+    if (tensor.shape.size() == 2U)
+    {
+        return (tensor.shape[0] == -1 ||
+                tensor.shape[0] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+               (tensor.shape[1] == -1 ||
+                tensor.shape[1] == static_cast<std::int64_t>(expected_extent));
+    }
+    if (tensor.shape.size() == 3U)
+    {
+        return (tensor.shape[0] == -1 || tensor.shape[0] == 1) &&
+               (tensor.shape[1] == -1 ||
+                tensor.shape[1] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+               (tensor.shape[2] == -1 ||
+                tensor.shape[2] == static_cast<std::int64_t>(expected_extent));
+    }
+    return false;
+}
+
+const runtime::TensorDescriptor& choose_simcc_output(
+    const std::vector<runtime::TensorDescriptor>& outputs,
+    const std::string& requested_name,
+    std::size_t expected_extent,
+    const char* axis)
+{
+    if (!requested_name.empty())
+    {
+        const auto named = std::find_if(outputs.begin(), outputs.end(),
+            [&](const runtime::TensorDescriptor& tensor) {
+                return tensor.name == requested_name;
+            });
+        if (named != outputs.end())
+        {
+            if (!compatible_simcc_shape(*named, expected_extent))
+            {
+                throw_contract(std::string("named SimCC ") + axis +
+                               " tensor has an incompatible shape");
+            }
+            return *named;
+        }
+    }
+
+    const runtime::TensorDescriptor* match = nullptr;
+    for (const auto& tensor : outputs)
+    {
+        if (!compatible_simcc_shape(tensor, expected_extent))
+        {
+            continue;
+        }
+        if (match != nullptr)
+        {
+            throw_contract(std::string("multiple candidate SimCC ") + axis +
+                           " outputs; configure the tensor name explicitly");
+        }
+        match = &tensor;
+    }
+    if (match == nullptr)
+    {
+        throw_contract(std::string("missing SimCC ") + axis + " output tensor");
+    }
+    return *match;
+}
+
+runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tensor,
+                                          std::size_t extent)
+{
+    runtime::TensorShape shape = tensor.shape;
+    if (shape.size() == 2U)
+    {
+        if (shape[0] == -1)
+        {
+            shape[0] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+        }
+        if (shape[1] == -1)
+        {
+            shape[1] = static_cast<std::int64_t>(extent);
+        }
+        return shape;
+    }
+    if (shape.size() == 3U)
+    {
+        if (shape[0] == -1)
+        {
+            shape[0] = 1;
+        }
+        if (shape[1] == -1)
+        {
+            shape[1] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+        }
+        if (shape[2] == -1)
+        {
+            shape[2] = static_cast<std::int64_t>(extent);
+        }
+        return shape;
+    }
+    throw_contract("SimCC output rank must be 2 or 3");
+}
+
+class UseGuard final
+{
+public:
+    explicit UseGuard(std::atomic_flag& flag)
+        : flag_(flag)
+    {
+        if (flag_.test_and_set(std::memory_order_acquire))
+        {
+            throw_invalid("calls on one RTMW instance must not overlap");
+        }
+    }
+
+    ~UseGuard()
+    {
+        flag_.clear(std::memory_order_release);
+    }
+
+private:
+    std::atomic_flag& flag_;
+};
+
+struct HostTensorBuffer
+{
+    runtime::TensorDescriptor descriptor;
+    runtime::TensorShape shape;
+    std::vector<std::max_align_t> storage;
+    std::size_t bytes = 0U;
+
+    void allocate(std::size_t extent, std::size_t max_output_bytes)
+    {
+        shape = resolved_simcc_shape(descriptor, extent);
+        const std::size_t elements = checked_multiply(
+            kWholeBodyKeypointCount, extent, descriptor.name.c_str());
+        bytes = checked_multiply(elements, element_size(descriptor.data_type),
+                                 descriptor.name.c_str());
+        if (bytes > max_output_bytes)
+        {
+            throw_resource("SimCC output exceeds configured output byte limit");
+        }
+        const std::size_t units =
+            (bytes + sizeof(std::max_align_t) - 1U) / sizeof(std::max_align_t);
+        storage.resize(units);
+    }
+
+    void* data() noexcept
+    {
+        return storage.empty() ? nullptr : storage.data();
+    }
+
+    const void* data() const noexcept
+    {
+        return storage.empty() ? nullptr : storage.data();
+    }
+
+    runtime::MutableTensorView view()
+    {
+        return {descriptor.name, descriptor.data_type, shape, data(), bytes,
+                runtime::MemoryKind::Host, {}};
+    }
+};
+
+} // namespace
+
+struct Rtmw::Impl final
+{
+    Impl(runtime::ResolvedModel resolved_value, RtmwOptions options_value)
+        : resolved(std::move(resolved_value))
+        , options(std::move(options_value))
+        , context(resolved.model->create_context())
+    {
+        validate_contract();
+    }
+
+    void validate_contract()
+    {
+        const auto tensors = resolved.model->tensors();
+        std::vector<runtime::TensorDescriptor> inputs;
+        std::vector<runtime::TensorDescriptor> outputs;
+        for (const auto& tensor : tensors)
+        {
+            (tensor.is_input ? inputs : outputs).push_back(tensor);
+        }
+        if (inputs.size() != 1U)
+        {
+            throw_contract("RTMW requires exactly one image input tensor");
+        }
+        if (outputs.size() < 2U)
+        {
+            throw_contract("RTMW requires SimCC X and Y output tensors");
+        }
+
+        input_descriptor = inputs.front();
+        if (!options.input_name.empty() && input_descriptor.name != options.input_name)
+        {
+            throw_contract("input tensor name does not match RtmwOptions::input_name");
+        }
+        if (input_descriptor.data_type != runtime::DataType::Float32 &&
+            input_descriptor.data_type != runtime::DataType::Float16)
+        {
+            throw_contract("input tensor must use FP32 or FP16");
+        }
+        input_shape = resolve_input_shape(input_descriptor, options,
+                                          input_width_value, input_height_value);
+
+        simcc_x_extent = expected_simcc_extent(input_width_value,
+                                               options.simcc_split_ratio, "X");
+        simcc_y_extent = expected_simcc_extent(input_height_value,
+                                               options.simcc_split_ratio, "Y");
+        simcc_x.descriptor = choose_simcc_output(outputs, options.simcc_x_name,
+                                                  simcc_x_extent, "X");
+        simcc_y.descriptor = choose_simcc_output(outputs, options.simcc_y_name,
+                                                  simcc_y_extent, "Y");
+        if (simcc_x.descriptor.name == simcc_y.descriptor.name)
+        {
+            throw_contract("SimCC X and Y must be distinct output tensors");
+        }
+        if ((simcc_x.descriptor.data_type != runtime::DataType::Float32 &&
+             simcc_x.descriptor.data_type != runtime::DataType::Float16) ||
+            (simcc_y.descriptor.data_type != runtime::DataType::Float32 &&
+             simcc_y.descriptor.data_type != runtime::DataType::Float16))
+        {
+            throw_contract("SimCC outputs must use FP32 or FP16");
+        }
+        simcc_x.allocate(simcc_x_extent, options.max_output_bytes);
+        simcc_y.allocate(simcc_y_extent, options.max_output_bytes);
+    }
+
+    WholeBodyPose infer_one(const image::ImageView& image, const RectF& box)
+    {
+        const CropGeometry geometry = crop_geometry(
+            box, options, input_width_value, input_height_value);
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, options.max_source_bytes);
+        const image::BgrImage crop = image::CpuImageProcessor::warp_affine_bgr(
+            source, input_width_value, input_height_value,
+            destination_to_source(geometry, input_width_value, input_height_value),
+            options.border_value, options.max_source_bytes);
+
+        image::PreprocessOptions preprocess;
+        preprocess.output_format = image::PixelFormat::Rgb8;
+        preprocess.mean = options.mean;
+        preprocess.stddev = options.stddev;
+        preprocess.border_value = options.border_value;
+        const std::vector<float> input_float = image::CpuImageProcessor::to_nchw(
+            crop, preprocess, options.max_tensor_bytes);
+
+        const std::size_t input_bytes = checked_multiply(
+            input_float.size(), element_size(input_descriptor.data_type), "input tensor");
+        if (input_bytes > options.max_tensor_bytes)
+        {
+            throw_resource("input tensor exceeds configured byte limit");
+        }
+
+        std::vector<std::uint16_t> input_half;
+        const void* input_data = input_float.data();
+        if (input_descriptor.data_type == runtime::DataType::Float16)
+        {
+            input_half.resize(input_float.size());
+            std::transform(input_float.begin(), input_float.end(), input_half.begin(),
+                           [](float value) { return float_to_half(value); });
+            input_data = input_half.data();
+        }
+
+        runtime::TensorView input_view {
+            input_descriptor.name,
+            input_descriptor.data_type,
+            input_shape,
+            input_data,
+            input_bytes,
+            runtime::MemoryKind::Host,
+            {},
+        };
+        std::vector<runtime::MutableTensorView> outputs {
+            simcc_x.view(), simcc_y.view()
+        };
+        context->run({input_view}, outputs);
+
+        WholeBodyPose result;
+        result.source_box = box;
+        for (std::size_t keypoint = 0U; keypoint < kWholeBodyKeypointCount; ++keypoint)
+        {
+            const std::size_t x_base = keypoint * simcc_x_extent;
+            const std::size_t y_base = keypoint * simcc_y_extent;
+            float max_x = -(std::numeric_limits<float>::infinity)();
+            float max_y = -(std::numeric_limits<float>::infinity)();
+            std::size_t x_index = 0U;
+            std::size_t y_index = 0U;
+            for (std::size_t index = 0U; index < simcc_x_extent; ++index)
+            {
+                const float value = tensor_value(simcc_x.data(),
+                                                 simcc_x.descriptor.data_type,
+                                                 x_base + index);
+                if (value > max_x)
+                {
+                    max_x = value;
+                    x_index = index;
+                }
+            }
+            for (std::size_t index = 0U; index < simcc_y_extent; ++index)
+            {
+                const float value = tensor_value(simcc_y.data(),
+                                                 simcc_y.descriptor.data_type,
+                                                 y_base + index);
+                if (value > max_y)
+                {
+                    max_y = value;
+                    y_index = index;
+                }
+            }
+            if (!std::isfinite(max_x) || !std::isfinite(max_y))
+            {
+                throw_contract("SimCC output contains non-finite maximum response");
+            }
+
+            Keypoint point;
+            point.score = (std::min)(max_x, max_y);
+            if (point.score > 0.0F)
+            {
+                const float model_x = static_cast<float>(x_index) /
+                                      options.simcc_split_ratio;
+                const float model_y = static_cast<float>(y_index) /
+                                      options.simcc_split_ratio;
+                point.x = model_x / static_cast<float>(input_width_value) *
+                              geometry.scale_width +
+                          geometry.center_x - geometry.scale_width * 0.5F;
+                point.y = model_y / static_cast<float>(input_height_value) *
+                              geometry.scale_height +
+                          geometry.center_y - geometry.scale_height * 0.5F;
+            }
+            result.keypoints[keypoint] = point;
+        }
+        return result;
+    }
+
+    runtime::ResolvedModel resolved;
+    RtmwOptions options;
+    std::unique_ptr<runtime::ExecutionContext> context;
+    runtime::TensorDescriptor input_descriptor;
+    runtime::TensorShape input_shape;
+    std::int32_t input_width_value = 0;
+    std::int32_t input_height_value = 0;
+    std::size_t simcc_x_extent = 0U;
+    std::size_t simcc_y_extent = 0U;
+    HostTensorBuffer simcc_x;
+    HostTensorBuffer simcc_y;
+    std::atomic_flag in_use = ATOMIC_FLAG_INIT;
+};
+
+Rtmw::Rtmw(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+Rtmw::~Rtmw() = default;
+
+std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
+                                 const runtime::ModelPackage& package,
+                                 const runtime::ExecutionPolicy& policy,
+                                 const RtmwOptions& options)
+{
+    validate_options(options);
+    if (package.model_type() != "pose.rtmw")
+    {
+        throw_contract("ModelPackage model_type must be 'pose.rtmw'");
+    }
+    try
+    {
+        runtime::ResolvedModel resolved = runtime.load_model(package, policy);
+        return std::unique_ptr<Rtmw>(
+            new Rtmw(std::make_unique<Impl>(std::move(resolved), options)));
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("model allocation failed");
+    }
+}
+
+WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        return impl_->infer_one(image, person_box);
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("inference allocation failed");
+    }
+}
+
+std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
+                                       const std::vector<RectF>& person_boxes)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        std::vector<WholeBodyPose> result;
+        result.reserve(person_boxes.size());
+        for (const RectF& box : person_boxes)
+        {
+            result.push_back(impl_->infer_one(image, box));
+        }
+        return result;
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("batch inference allocation failed");
+    }
+}
+
+std::int32_t Rtmw::input_width() const noexcept
+{
+    return impl_ ? impl_->input_width_value : 0;
+}
+
+std::int32_t Rtmw::input_height() const noexcept
+{
+    return impl_ ? impl_->input_height_value : 0;
+}
+
+const runtime::ExecutionRoute& Rtmw::execution_route() const noexcept
+{
+    static const runtime::ExecutionRoute empty {};
+    return impl_ ? impl_->resolved.route : empty;
+}
+
+} // namespace kfcore::pose
