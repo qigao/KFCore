@@ -3,6 +3,7 @@
 #include "kfcore/runtime/error.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <sstream>
 #include <string_view>
@@ -85,31 +86,115 @@ parse_compute_capability(std::string_view value, std::string_view artifact_id)
     return {major, minor};
 }
 
+RuntimeVersion parse_runtime_version(std::string_view value,
+                                     std::string_view artifact_id)
+{
+    RuntimeVersion result;
+    std::array<std::uint32_t*, 4U> fields{
+        &result.major, &result.minor, &result.patch, &result.build};
+    std::size_t begin = 0U;
+    for (std::size_t index = 0U; index < fields.size(); ++index)
+    {
+        const std::size_t end = index + 1U == fields.size()
+                                    ? value.size()
+                                    : value.find('.', begin);
+        if (end == std::string_view::npos || end == begin)
+        {
+            throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                               "artifact '" + std::string(artifact_id) +
+                                   "' runtime_version must use major.minor.patch.build form");
+        }
+        const char* first = value.data() + begin;
+        const char* last = value.data() + end;
+        const auto parsed = std::from_chars(first, last, *fields[index]);
+        if (parsed.ec != std::errc{} || parsed.ptr != last)
+        {
+            throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                               "artifact '" + std::string(artifact_id) +
+                                   "' runtime_version is invalid");
+        }
+        begin = end + 1U;
+    }
+    if (begin != value.size() + 1U || result.major == 0U)
+    {
+        throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                           "artifact '" + std::string(artifact_id) +
+                               "' runtime_version must use major.minor.patch.build form");
+    }
+    return result;
+}
+
+std::string_view current_platform() noexcept
+{
+#if defined(_WIN32)
+#  if defined(_M_X64) || defined(__x86_64__)
+    return "windows-x86_64";
+#  elif defined(_M_ARM64) || defined(__aarch64__)
+    return "windows-aarch64";
+#  else
+    return "windows-unknown";
+#  endif
+#elif defined(__linux__)
+#  if defined(__x86_64__)
+    return "linux-x86_64";
+#  elif defined(__aarch64__)
+    return "linux-aarch64";
+#  else
+    return "linux-unknown";
+#  endif
+#else
+    return "unsupported-unknown";
+#endif
+}
+
+bool runtime_version_matches(const RuntimeVersion& required,
+                             const RuntimeVersion& actual) noexcept
+{
+    return required.major == actual.major &&
+           required.minor == actual.minor &&
+           required.patch == actual.patch &&
+           required.build == actual.build;
+}
+
 bool artifact_runtime_matches(const ModelArtifact& artifact,
                               const BackendPlugin& backend,
                               const BackendDevice& device)
 {
-    if (artifact.runtime_major != 0U)
+    if (artifact.format != "tensorrt-engine")
     {
-        const RuntimeVersion& runtime = backend.execution_runtime_version();
-        if (runtime.major == 0U || runtime.major != artifact.runtime_major)
-        {
-            return false;
-        }
+        return true;
     }
 
-    if (!artifact.compute_capability.empty())
+    if (artifact.platform != current_platform())
     {
-        const auto required = parse_compute_capability(artifact.compute_capability,
-                                                       artifact.id);
-        if (device.compute_capability_major == 0U ||
-            device.compute_capability_major != required.first ||
-            device.compute_capability_minor != required.second)
-        {
-            return false;
-        }
+        return false;
     }
-    return true;
+
+    const RuntimeVersion required =
+        parse_runtime_version(artifact.runtime_version, artifact.id);
+    if (!runtime_version_matches(required, backend.execution_runtime_version()))
+    {
+        return false;
+    }
+
+    const auto required_cc =
+        parse_compute_capability(artifact.compute_capability, artifact.id);
+    if (device.compute_capability_major == 0U ||
+        device.compute_capability_major != required_cc.first ||
+        device.compute_capability_minor != required_cc.second)
+    {
+        return false;
+    }
+
+    if (artifact.hardware_compatibility == "same-compute-capability")
+    {
+        return true;
+    }
+    if (artifact.hardware_compatibility == "exact-device")
+    {
+        return !artifact.device_name.empty() && artifact.device_name == device.name;
+    }
+    return false;
 }
 
 std::string describe_policy(const ExecutionPolicy& policy)
