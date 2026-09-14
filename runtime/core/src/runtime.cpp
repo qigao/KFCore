@@ -10,15 +10,25 @@ namespace kfcore::runtime
 namespace
 {
 
+bool unversioned_backend_stem(const std::filesystem::path& path,
+                              std::string_view required_prefix)
+{
+    const std::string stem = path.stem().string();
+    return stem.rfind(required_prefix, 0U) == 0U &&
+           stem.find('.', required_prefix.size()) == std::string::npos;
+}
+
 bool backend_library_name(const std::filesystem::path& path)
 {
-    const std::string filename = path.filename().string();
 #if defined(_WIN32)
-    return filename.rfind("kfcore_backend_", 0U) == 0U && path.extension() == ".dll";
+    return path.extension() == ".dll" &&
+           unversioned_backend_stem(path, "kfcore_backend_");
 #elif defined(__APPLE__)
-    return filename.rfind("libkfcore_backend_", 0U) == 0U && path.extension() == ".dylib";
+    return path.extension() == ".dylib" &&
+           unversioned_backend_stem(path, "libkfcore_backend_");
 #else
-    return filename.rfind("libkfcore_backend_", 0U) == 0U && path.extension() == ".so";
+    return path.extension() == ".so" &&
+           unversioned_backend_stem(path, "libkfcore_backend_");
 #endif
 }
 
