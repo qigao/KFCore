@@ -89,10 +89,10 @@ std::vector<DetectionFrame> decode_compact_nms(
             throw_inference(
                 "output validation stage: image and transform vector size is inconsistent");
         }
-        if (outputs.detections == nullptr || outputs.max_detections == 0U)
+        if (outputs.detections == nullptr && outputs.detections_count != 0U)
         {
             throw_inference(
-                "output validation stage: output pointer or maximum detections is invalid");
+                "output validation stage: non-empty detections require output storage");
         }
         if (outputs.output_type != TensorDataType::Float16 &&
             outputs.output_type != TensorDataType::Float32)
