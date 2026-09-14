@@ -50,9 +50,28 @@ models/rtmw-l-384x288/
 }
 ```
 
-`pose.rtmw` is the canonical Model Package V1 type accepted by the typed `kfcore::pose::Rtmw` API. The backend-neutral YOLO API accepts the canonical `yolo-detection` type (and currently also recognizes `yolo` during migration).
-
 `artifacts` is represented by a TBE `group<Artifact>` internally but is ordinary JSON array syntax in `model.json`.
+
+## Canonical model types
+
+Model Package V1 uses canonical model identities only. There are no compatibility aliases for old backend-specific model names.
+
+| `model_type` | Typed API |
+| --- | --- |
+| `yolo-detection` | `kfcore::yolo::YoloDetector` |
+| `pose.rtmw` | `kfcore::pose::Rtmw` |
+| `face.detector` | `kfcore::face_models::FaceDetector` |
+| `face.landmarker` | `kfcore::face_models::FaceLandmarker` |
+| `face.face68` | `kfcore::face_models::Face68` |
+| `face.arcface` | `kfcore::face_models::ArcFace` |
+| `face.age-gender` | `kfcore::face_models::AgeGender` |
+| `face.inswapper` | `kfcore::face_models::InSwapper` |
+| `face.gfpgan` | `kfcore::face_models::GfpGan` |
+| `hand.palm-detector` | Palm stage of `kfcore::hand_models::HandBackend` |
+| `hand.landmarker` | Landmark stage of `kfcore::hand_models::HandBackend` |
+| `hand.gesture-classifier` | Gesture stage of `kfcore::hand_models::HandBackend` |
+
+The three Hand packages remain separate logical models. Each can use its own `ExecutionPolicy`; the pipeline does not implicitly force Palm, landmark, and gesture classification onto the same backend or device.
 
 ## TensorRT rules
 
@@ -98,6 +117,12 @@ auto pose = kfcore::pose::Rtmw::load(runtime, package, policy);
 
 The same logical model API is used regardless of which execution backend is selected.
 
+## Dynamic outputs
+
+Plugin ABI v1.2 adds bounded dynamic Host outputs for tensors whose actual shape is known only after execution. The caller supplies a maximum byte capacity; the backend returns the actual shape and actual byte count after a synchronous run.
+
+This is used for data-dependent outputs such as the Palm detector `[N,8]` result. It is not an implicit unbounded allocation API and it does not claim dynamic CUDA-memory interoperability.
+
 ## Inspection and integrity validation
 
 KFCore builds the `kfmodel` utility by default:
@@ -115,6 +140,8 @@ The manifest is not a preprocessing DSL. Model-specific behavior stays in typed 
 
 - YOLO owns letterbox and detection decode semantics.
 - RTMW owns bbox padding/aspect correction, affine preprocessing, normalization, SimCC decoding, and coordinate restoration.
+- Face models own face-specific preprocessing/decoding contracts.
+- Hand owns Palm decode, per-hand landmark geometry, gesture feature construction, and stage composition.
 - backend DLLs only execute tensors.
 
 This keeps ONNX Runtime and TensorRT interchangeable without moving model semantics into execution plugins.
