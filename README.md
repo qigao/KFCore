@@ -21,16 +21,18 @@ See:
 
 ## Runtime loading
 
+KFCore execution plugins install to `${CMAKE_INSTALL_PREFIX}/${KFCORE_INSTALL_PLUGINDIR}`. The default `KFCORE_INSTALL_PLUGINDIR` is `plugins`.
+
 ```cpp
 kfcore::runtime::Runtime runtime;
-(void)runtime.load_backend("plugins/kfcore_backend_tensorrt.dll");
-(void)runtime.load_backend("plugins/kfcore_backend_onnxruntime.dll");
+(void)runtime.load_backend("<prefix>/plugins/kfcore_backend_tensorrt.dll");
+(void)runtime.load_backend("<prefix>/plugins/kfcore_backend_onnxruntime.dll");
 ```
 
 Or load from one explicitly controlled plugin directory:
 
 ```cpp
-(void)runtime.load_backends_from("plugins");
+(void)runtime.load_backends_from("<prefix>/plugins");
 ```
 
 KFCore does not scan system DLL paths for execution plugins.
@@ -74,7 +76,13 @@ KFCORE_ONNXRUNTIME_ENABLE_CUDA
 KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES
 ```
 
-`CMakeUserPresets.json` defines these through reusable runtime capability presets.
+Plugin deployment uses:
+
+```text
+KFCORE_INSTALL_PLUGINDIR=plugins
+```
+
+`CMakeUserPresets.json` defines the execution capabilities through reusable runtime capability presets.
 
 ## Model packages
 

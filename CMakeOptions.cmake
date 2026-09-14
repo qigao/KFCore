@@ -3,6 +3,9 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 option(BUILD_EXAMPLES "Build example programs" OFF)
 option(BUILD_TESTS "Build test cases" OFF)
 
+set(KFCORE_INSTALL_PLUGINDIR "plugins" CACHE STRING
+    "Install directory, relative to CMAKE_INSTALL_PREFIX, for KFCore execution plugins")
+
 option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" ON)
 option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" ON)
 option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
