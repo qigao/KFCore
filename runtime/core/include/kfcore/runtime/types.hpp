@@ -67,6 +67,18 @@ struct MutableTensorView
     std::string_view device_id;
 };
 
+struct DynamicMutableTensorView
+{
+    std::string_view name;
+    DataType         data_type = DataType::Float32;
+    void*            data = nullptr;
+    std::size_t      capacity_bytes = 0U;
+    MemoryKind       memory_kind = MemoryKind::Host;
+    std::string_view device_id;
+    TensorShape      shape;
+    std::size_t      byte_size = 0U;
+};
+
 struct BackendDevice
 {
     std::string   id;

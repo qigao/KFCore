@@ -55,6 +55,9 @@ public:
     void run(const std::vector<TensorView>& inputs,
              const std::vector<MutableTensorView>& outputs);
 
+    void run_dynamic(const std::vector<TensorView>& inputs,
+                     std::vector<DynamicMutableTensorView>& outputs);
+
 private:
     friend class ExecutableModel;
     struct Impl;

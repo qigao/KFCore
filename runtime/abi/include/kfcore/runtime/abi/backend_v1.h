@@ -8,8 +8,9 @@ extern "C" {
 #endif
 
 #define KFCORE_BACKEND_ABI_V1_MAJOR UINT32_C(1)
-#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(1)
+#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(2)
 #define KFCORE_BACKEND_QUERY_V1_SYMBOL "kfcore_backend_query_v1"
+#define KFCORE_TENSOR_MAX_RANK_V1 UINT32_C(16)
 
 typedef int32_t kf_status_v1;
 #define KF_STATUS_V1_OK INT32_C(0)
@@ -50,6 +51,7 @@ typedef uint64_t kf_backend_capability_v1;
 #define KF_BACKEND_CAP_V1_PINNED_MEMORY (UINT64_C(1) << 1)
 #define KF_BACKEND_CAP_V1_DEVICE_MEMORY (UINT64_C(1) << 2)
 #define KF_BACKEND_CAP_V1_CUDA_MEMORY_INTEROP (UINT64_C(1) << 3)
+#define KF_BACKEND_CAP_V1_DYNAMIC_HOST_OUTPUT (UINT64_C(1) << 4)
 
 typedef struct kf_backend_handle_v1_t* kf_backend_handle_v1;
 typedef struct kf_model_handle_v1_t* kf_model_handle_v1;
@@ -155,6 +157,21 @@ typedef struct kf_mutable_tensor_view_v1
     kf_string_view_v1 device_id;
 } kf_mutable_tensor_view_v1;
 
+/* ABI v1.2: caller supplies bounded Host storage; backend writes actual shape/byte count. */
+typedef struct kf_dynamic_output_v1
+{
+    uint32_t struct_size;
+    kf_string_view_v1 name;
+    kf_data_type_v1 data_type;
+    void* data;
+    uint64_t capacity_bytes;
+    kf_memory_kind_v1 memory_kind;
+    kf_string_view_v1 device_id;
+    int64_t dimensions[KFCORE_TENSOR_MAX_RANK_V1];
+    uint32_t rank;
+    uint64_t byte_size;
+} kf_dynamic_output_v1;
+
 typedef struct kf_backend_api_v1
 {
     uint32_t struct_size;
@@ -194,6 +211,13 @@ typedef struct kf_backend_api_v1
                                       char*,
                                       uint64_t,
                                       uint64_t*);
+
+    /* ABI v1.2 append-only function. Dynamic output memory is Host-only in v1.2. */
+    kf_status_v1 (*run_dynamic)(kf_context_handle_v1,
+                                const kf_tensor_view_v1*,
+                                uint64_t,
+                                kf_dynamic_output_v1*,
+                                uint64_t);
 } kf_backend_api_v1;
 
 typedef kf_status_v1 (*kfcore_backend_query_v1_fn)(uint32_t requested_abi_major,
