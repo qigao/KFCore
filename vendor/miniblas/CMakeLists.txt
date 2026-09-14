@@ -1,6 +1,7 @@
 add_library(miniblas STATIC miniblas.c linalg.c miniblas.h linalg.h)
 
-target_include_directories(miniblas PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(miniblas
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 find_path(SIMDE_INCLUDE_DIRS "simde/simde-common.h" REQUIRED)
 target_include_directories(miniblas PRIVATE ${SIMDE_INCLUDE_DIRS})
