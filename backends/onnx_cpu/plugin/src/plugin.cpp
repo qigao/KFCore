@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -42,15 +43,24 @@ struct RuntimeLibrary final
         {
             throw std::runtime_error("ONNXRUNTIME_ROOT is required to load ONNX Runtime");
         }
-        const std::filesystem::path path =
+        const std::filesystem::path configured =
             std::filesystem::path(root) / KFCORE_ONNX_RUNTIME_RELATIVE_PATH;
-        if (!path.is_absolute())
+        if (!configured.is_absolute())
         {
             throw std::runtime_error("ONNXRUNTIME_ROOT must resolve ONNX Runtime to an absolute path");
         }
+        std::error_code path_error;
+        const std::filesystem::path path = std::filesystem::canonical(configured, path_error);
+        if (path_error || !std::filesystem::is_regular_file(path, path_error) || path_error)
+        {
+            throw std::runtime_error("ONNX Runtime library is not a canonical regular file: " +
+                                     configured.u8string());
+        }
 
 #if defined(_WIN32)
-        module = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        module = LoadLibraryExW(
+            path.c_str(), nullptr,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (module == nullptr)
         {
             throw std::runtime_error("LoadLibraryExW failed for ONNX Runtime: " + path.u8string());
@@ -58,7 +68,12 @@ struct RuntimeLibrary final
         using GetApiBase = const OrtApiBase* (ORT_API_CALL*)();
         const auto get_api_base =
             reinterpret_cast<GetApiBase>(GetProcAddress(module, "OrtGetApiBase"));
-        const OrtApiBase* base = get_api_base == nullptr ? nullptr : get_api_base();
+        if (get_api_base == nullptr)
+        {
+            close();
+            throw std::runtime_error("GetProcAddress failed for OrtGetApiBase");
+        }
+        const OrtApiBase* base = get_api_base();
 #else
         module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (module == nullptr)
@@ -72,8 +87,13 @@ struct RuntimeLibrary final
         using GetApiBase = const OrtApiBase* (*)();
         const auto get_api_base = reinterpret_cast<GetApiBase>(dlsym(module, "OrtGetApiBase"));
         const char* symbol_error = dlerror();
-        const OrtApiBase* base =
-            symbol_error == nullptr && get_api_base != nullptr ? get_api_base() : nullptr;
+        if (symbol_error != nullptr || get_api_base == nullptr)
+        {
+            const std::string detail = symbol_error == nullptr ? "" : std::string(": ") + symbol_error;
+            close();
+            throw std::runtime_error("dlsym failed for OrtGetApiBase" + detail);
+        }
+        const OrtApiBase* base = get_api_base();
 #endif
         const OrtApi* api = base == nullptr ? nullptr : base->GetApi(ORT_API_VERSION);
         if (api == nullptr)
@@ -274,6 +294,11 @@ std::vector<DeviceInfo> enumerate_devices()
 #ifdef KFCORE_ONNX_CUDA
     int count = 0;
     const cudaError_t count_status = cudaGetDeviceCount(&count);
+    if (count_status == cudaErrorNoDevice || count_status == cudaErrorInsufficientDriver)
+    {
+        (void)cudaGetLastError();
+        return result;
+    }
     if (count_status != cudaSuccess)
     {
         throw std::runtime_error(std::string("cudaGetDeviceCount failed: ") +
@@ -502,7 +527,7 @@ kf_status_v1 get_backend_info(kf_backend_handle_v1 backend,
 #endif
     *out_info = {
         sizeof(kf_backend_info_v1), abi_view(kId), abi_view(kName), 1U, 0U, 0U,
-        capabilities,
+        capabilities, 0U, 0U, 0U,
     };
     return KF_STATUS_V1_OK;
 }
@@ -532,6 +557,7 @@ kf_status_v1 get_device_info(kf_backend_handle_v1 backend,
         (device.cuda ? KF_BACKEND_CAP_V1_DEVICE_MEMORY : 0U);
     *out_info = {
         sizeof(kf_device_info_v1), abi_view(device.id), abi_view(device.name), capabilities,
+        0U, 0U,
     };
     return KF_STATUS_V1_OK;
 }
