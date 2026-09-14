@@ -6,13 +6,15 @@
 #include "kfcore/runtime/runtime.hpp"
 #include "kfcore/yolo/types.hpp"
 
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace kfcore::yolo
 {
+
+inline constexpr std::string_view kYoloDetectionModelType = "yolo-detection";
 
 struct YoloDetectorOptions
 {
