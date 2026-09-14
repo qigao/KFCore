@@ -11,7 +11,7 @@ Supported execution components in this branch:
 - `kfcore_backend_tensorrt` — TensorRT execution on CUDA devices.
 - `kfcore_backend_onnxruntime` — ONNX Runtime execution with CPU and optional CUDA providers.
 
-CPU/CUDA are execution devices/providers, not separate model APIs. TensorRT engines are derived artifacts selected from a Model Package based on TensorRT major version and CUDA compute capability.
+CPU/CUDA are execution devices/providers, not separate model APIs. TensorRT engines are derived artifacts selected from a Model Package by exact TensorRT runtime version, target platform, and declared GPU hardware compatibility before deserialization.
 
 See:
 
@@ -95,4 +95,4 @@ kfmodel inspect <model-package-directory>
 kfmodel validate <model-package-directory>
 ```
 
-TensorRT artifacts require source-model provenance, TensorRT major version, exact CUDA compute capability, and explicit precision metadata.
+TensorRT artifacts require source-model provenance, exact `major.minor.patch.build` TensorRT runtime version, target platform, declared GPU hardware compatibility, compute capability, and explicit precision metadata. V1 does not enable version-compatible TensorRT plans or lean-runtime host code.
