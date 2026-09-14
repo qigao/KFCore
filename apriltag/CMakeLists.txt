@@ -43,10 +43,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND CMAKE_C_SIMULATE_ID MATCHES "MSVC")
-    # error: 'strdup' is deprecated: The POSIX name for this item is deprecated. Instead, use the ISO C and C++ conformant name: _strdup.
-    # "strdup" is standard since C23
     add_definitions(-D _CRT_NONSTDC_NO_DEPRECATE)
-    # ignore "'fopen' is deprecated" and "'strncpy' is deprecated" warnings
     add_definitions(-D _CRT_SECURE_NO_WARNINGS)
 endif()
 
@@ -60,9 +57,8 @@ else()
     set(APRILTAG_WITH_MINIBLAS_HELPERS OFF)
 endif()
 
-# Library
 file(GLOB TAG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/tag*.c)
-add_library(${PROJECT_NAME} SHARED ${APRILTAG_SRCS} ${COMMON_SRC} ${TAG_FILES})
+add_library(${PROJECT_NAME} STATIC ${APRILTAG_SRCS} ${COMMON_SRC} ${TAG_FILES})
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE AND NOT CMAKE_C_SIMULATE_ID MATCHES "MSVC")
     target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-z,relro,-z,now,-z,defs")
@@ -96,15 +92,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
     DEBUG_POSTFIX "d"
-    POSITION_INDEPENDENT_CODE ON
-    WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    POSITION_INDEPENDENT_CODE ON)
 cmake_config_target(${PROJECT_NAME}
     ALIAS KFCore::apriltag
     NO_INSTALL
-    FOLDER "apriltag"
-    VERSION ${PROJECT_VERSION}
-    SOVERSION 3)
-
+    FOLDER "apriltag")
 
 include(GNUInstallDirs)
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -112,15 +104,12 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>/apriltag")
 
-# Examples
 if(BUILD_EXAMPLES)
-    # apriltag_demo
     add_executable(apriltag_demo example/apriltag_demo.c)
     target_link_libraries(apriltag_demo PRIVATE KFCore::apriltag)
     cmake_config_target(apriltag_demo
         NO_INSTALL FOLDER "apriltag/examples")
 
-    # apriltag_print_tag
     find_path(STB_IMAGE_WRITE_INCLUDE_DIR NAMES stb_image_write.h REQUIRED)
     add_executable(apriltag_print_tag example/apriltag_print_tag.c)
     target_include_directories(apriltag_print_tag PRIVATE ${STB_IMAGE_WRITE_INCLUDE_DIR})
@@ -128,13 +117,10 @@ if(BUILD_EXAMPLES)
     cmake_config_target(apriltag_print_tag
         NO_INSTALL FOLDER "apriltag/examples")
 
-    # opencv_demo
     set(_OpenCV_REQUIRED_COMPONENTS core imgproc videoio highgui)
     find_package(OpenCV COMPONENTS ${_OpenCV_REQUIRED_COMPONENTS} QUIET CONFIG)
     if(OpenCV_FOUND)
         enable_language(CXX)
-        # NB: contrib required for TickMeter in OpenCV 2.4. This is only required for 16.04 backwards compatibility and can be removed in the future.
-        #     If we add it to the find_package initially, the demo won't build for newer OpenCV versions
         if(OpenCV_VERSION VERSION_LESS "3.0.0")
             list(APPEND _OpenCV_REQUIRED_COMPONENTS contrib)
             find_package(OpenCV COMPONENTS ${_OpenCV_REQUIRED_COMPONENTS} CONFIG)
