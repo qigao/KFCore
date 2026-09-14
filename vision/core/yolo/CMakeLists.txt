@@ -1,5 +1,6 @@
 add_library(kfcore_yolo_core SHARED
   src/compact_nms.cpp
+  src/efficient_nms.cpp
   src/raw_yolo.cpp
   src/tracking.cpp)
 target_include_directories(kfcore_yolo_core
@@ -22,6 +23,33 @@ set_target_properties(kfcore_yolo_core PROPERTIES
 cmake_config_target(kfcore_yolo_core
   ALIAS KFCore::yolo_core
   EXPORT_NAME yolo_core
+  EXPORT_SET KFCoreTargets
+  FOLDER "vision/core/yolo")
+
+add_library(kfcore_yolo_runtime SHARED
+  src/runtime_detector.cpp)
+target_include_directories(kfcore_yolo_runtime
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_features(kfcore_yolo_runtime PUBLIC cxx_std_17)
+target_link_libraries(kfcore_yolo_runtime
+  PUBLIC
+    KFCore::yolo_core
+    KFCore::runtime_core
+  PRIVATE
+    KFCore::image_processor_cpu)
+set_target_properties(kfcore_yolo_runtime PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
+  FOLDER "vision/core/yolo")
+cmake_config_target(kfcore_yolo_runtime
+  ALIAS KFCore::yolo_runtime
+  EXPORT_NAME yolo_runtime
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/yolo")
 
@@ -54,11 +82,12 @@ if(BUILD_EXAMPLES)
   if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
     target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_onnx)
   endif()
-  if(KFCORE_ENABLE_CUDA)
+  if(KFCORE_ENABLE_TENSORRT)
     target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_tensorrt)
   endif()
   target_compile_definitions(yolov8_domain_demo PRIVATE
     KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
+    KFCORE_DEMO_ENABLE_TENSORRT=$<BOOL:${KFCORE_ENABLE_TENSORRT}>
     KFCORE_DEMO_ENABLE_ONNX_CPU=$<OR:$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>,$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>>)
   if(WIN32)
     target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)

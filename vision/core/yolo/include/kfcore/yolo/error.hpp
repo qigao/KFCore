@@ -15,6 +15,7 @@ enum class YoloErrorCode {
     CudaFailure,
     TrackerAllocationFailure,
     ResourceLimitExceeded,
+    RuntimeFailure,
 };
 
 class YoloError final : public std::runtime_error {
