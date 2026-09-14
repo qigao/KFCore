@@ -233,7 +233,7 @@ InputStorage prepare_input(const PreparedTensorView& view,
         std::transform(view.data, view.data + view.element_count,
                        result.half.begin(), float_to_half);
         result.data = result.half.data();
-        result.bytes = checked_multiply(view.element_count, sizeof(std::uint16_t),
+        result.bytes = checked_multiply(result.half.size(), sizeof(std::uint16_t),
                                         "prepared input");
     }
     else
@@ -290,7 +290,7 @@ public:
     CommonModel(runtime::ResolvedModel resolved,
                 std::vector<Shape> input_shapes,
                 std::vector<Shape> output_shapes,
-                PreparedFaceModelOptions options)
+                PreparedFaceModelOptions options) try
         : resolved_(std::move(resolved)), input_shapes_(std::move(input_shapes)),
           output_shapes_(std::move(output_shapes)), options_(options),
           context_(resolved_.model->create_context())
@@ -310,6 +310,18 @@ public:
                 throw_resource("aggregate outputs exceed max_output_bytes");
             aggregate += outputs_[i].bytes;
         }
+    }
+    catch (const FaceModelError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("prepared face model allocation failed");
     }
 
     std::vector<std::vector<float>> run(const std::vector<PreparedTensorView>& prepared)
