@@ -6,6 +6,7 @@
 #include "kfcore/runtime/runtime.hpp"
 #include "kfcore/yolo/types.hpp"
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
