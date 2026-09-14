@@ -22,6 +22,9 @@ public:
     [[nodiscard]] std::shared_ptr<BackendPlugin>
     load_backend(const std::filesystem::path& explicit_path);
 
+    [[nodiscard]] std::vector<std::shared_ptr<BackendPlugin>>
+    load_backends_from(const std::filesystem::path& controlled_directory);
+
     [[nodiscard]] std::shared_ptr<BackendPlugin> backend(std::string_view backend_id) const;
     [[nodiscard]] std::vector<std::string> backend_ids() const;
 
