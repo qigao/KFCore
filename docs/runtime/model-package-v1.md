@@ -107,7 +107,7 @@ Every TensorRT artifact therefore requires all of the following:
 - `device_name` is required for `exact-device` and must match the CUDA device name reported by the runtime.
 - `precision` is explicit, for example `fp32`, `fp16`, or `int8`.
 
-`exact-device` is the conservative default for engines built without an explicit TensorRT hardware-compatibility level. `same-compute-capability` may only be declared for an engine that was intentionally built with TensorRT same-compute-capability hardware compatibility; the manifest is a deployment assertion, not a mechanism that changes an already-built engine.
+`exact-device` is the conservative default for engines built without an explicit TensorRT hardware-compatibility level. `same-compute-capability` may only be declared for an engine intentionally built with TensorRT same-compute-capability hardware compatibility, and KFCore only accepts that mode for `runtime_version` 10.9 or newer. TensorRT 8.6/Pascal packages therefore use `exact-device` in Model Package V1. The manifest is a deployment assertion, not a mechanism that changes an already-built engine.
 
 The resolver requires exact `runtime_version`, exact `platform`, and the declared hardware compatibility before it calls the backend probe or attempts engine deserialization. An ABI older than v1.3 cannot report the TensorRT build component and therefore cannot prove compatibility for a V1 TensorRT package.
 
@@ -158,7 +158,7 @@ kfmodel inspect  <package-directory>
 kfmodel validate <package-directory>
 ```
 
-`validate` checks manifest rules, package-relative path confinement, artifact SHA-256 values, derived-artifact source provenance, and the required TensorRT deployment metadata.
+`validate` checks manifest rules, package-relative path confinement, artifact SHA-256 values, derived-artifact source provenance, and the required TensorRT deployment metadata. Runtime selection additionally rejects `same-compute-capability` TensorRT artifacts whose declared runtime is older than 10.9.
 
 ## Typed model semantics
 
