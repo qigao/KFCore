@@ -20,7 +20,6 @@ endif()
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
     set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE  STRING "Choose the type of build." FORCE)
-    # Set the possible values of build type for cmake-gui
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS  "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
@@ -59,10 +58,6 @@ endif()
 
 file(GLOB TAG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/tag*.c)
 add_library(${PROJECT_NAME} STATIC ${APRILTAG_SRCS} ${COMMON_SRC} ${TAG_FILES})
-
-if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE AND NOT CMAKE_C_SIMULATE_ID MATCHES "MSVC")
-    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-z,relro,-z,now,-z,defs")
-endif()
 
 if (MSVC)
     add_compile_definitions("_CRT_SECURE_NO_WARNINGS")
