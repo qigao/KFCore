@@ -193,8 +193,9 @@ std::vector<DeviceInfo> enumerate_cuda_devices()
     return result;
 }
 
+template <typename ModelHandle>
 std::vector<kfcore::tensorrt::TensorView> convert_inputs(
-    kf_model_handle_v1 model,
+    ModelHandle model,
     const kf_tensor_view_v1* inputs,
     std::uint64_t input_count)
 {
@@ -269,10 +270,7 @@ kf_status_v1 create_backend(const kf_backend_create_info_v1* info,
     }
 }
 
-void destroy_backend(kf_backend_handle_v1 backend) noexcept
-{
-    delete backend;
-}
+void destroy_backend(kf_backend_handle_v1 backend) noexcept { delete backend; }
 
 kf_status_v1 get_backend_info(kf_backend_handle_v1 backend,
                               kf_backend_info_v1* out_info) noexcept
@@ -303,8 +301,7 @@ kf_status_v1 get_backend_info(kf_backend_handle_v1 backend,
 kf_status_v1 get_device_count(kf_backend_handle_v1 backend,
                               std::uint64_t* out_count) noexcept
 {
-    if (backend == nullptr || out_count == nullptr)
-        return KF_STATUS_V1_INVALID_ARGUMENT;
+    if (backend == nullptr || out_count == nullptr) return KF_STATUS_V1_INVALID_ARGUMENT;
     *out_count = static_cast<std::uint64_t>(backend->devices.size());
     return KF_STATUS_V1_OK;
 }
@@ -348,13 +345,11 @@ kf_status_v1 probe_artifact(kf_backend_handle_v1 backend,
         const bool regular_file = std::filesystem::is_regular_file(path, error) && !error;
         const bool supported = view(artifact->format) == "tensorrt-engine" && regular_file &&
                                find_device(backend->devices, view(device_id)) != nullptr;
-        *out_probe = {
-            sizeof(kf_artifact_probe_v1),
+        *out_probe = {sizeof(kf_artifact_probe_v1),
             supported ? KF_ARTIFACT_SUPPORT_V1_SUPPORTED : KF_ARTIFACT_SUPPORT_V1_UNSUPPORTED,
             supported ? (KF_BACKEND_CAP_V1_HOST_MEMORY |
                          KF_BACKEND_CAP_V1_DEVICE_MEMORY |
-                         KF_BACKEND_CAP_V1_DYNAMIC_HOST_OUTPUT) : 0U,
-        };
+                         KF_BACKEND_CAP_V1_DYNAMIC_HOST_OUTPUT) : 0U};
         return KF_STATUS_V1_OK;
     }
     catch (...)
@@ -401,10 +396,7 @@ kf_status_v1 load_model(kf_backend_handle_v1 backend,
     }
 }
 
-void destroy_model(kf_model_handle_v1 model) noexcept
-{
-    delete model;
-}
+void destroy_model(kf_model_handle_v1 model) noexcept { delete model; }
 
 kf_status_v1 get_tensor_count(kf_model_handle_v1 model,
                               std::uint64_t* out_count) noexcept
@@ -426,13 +418,11 @@ kf_status_v1 get_tensor_info(kf_model_handle_v1 model,
             index >= model->engine->tensors().size())
             return KF_STATUS_V1_INVALID_ARGUMENT;
         const auto& tensor = model->engine->tensors()[static_cast<std::size_t>(index)];
-        *out_info = {
-            sizeof(kf_tensor_desc_v1), abi_view(tensor.name), abi_type(tensor.data_type),
+        *out_info = {sizeof(kf_tensor_desc_v1), abi_view(tensor.name), abi_type(tensor.data_type),
             tensor.declared_shape.empty() ? nullptr : tensor.declared_shape.data(),
             static_cast<std::uint32_t>(tensor.declared_shape.size()),
             tensor.mode == kfcore::tensorrt::TensorIoMode::Input ?
-                KF_TENSOR_IO_V1_INPUT : KF_TENSOR_IO_V1_OUTPUT,
-        };
+                KF_TENSOR_IO_V1_INPUT : KF_TENSOR_IO_V1_OUTPUT};
         return KF_STATUS_V1_OK;
     }
     catch (...)
@@ -462,10 +452,7 @@ kf_status_v1 create_context(kf_model_handle_v1 model,
     }
 }
 
-void destroy_context(kf_context_handle_v1 context) noexcept
-{
-    delete context;
-}
+void destroy_context(kf_context_handle_v1 context) noexcept { delete context; }
 
 kf_status_v1 run(kf_context_handle_v1 context,
                  const kf_tensor_view_v1* inputs,
@@ -537,10 +524,8 @@ kf_status_v1 run_dynamic(kf_context_handle_v1 context,
                 output.memory_kind != KF_MEMORY_KIND_V1_HOST || output.data == nullptr ||
                 output.capacity_bytes == 0U)
                 return KF_STATUS_V1_INVALID_ARGUMENT;
-            requests.push_back({
-                std::string(view(output.name)), runtime_type(output.data_type),
-                static_cast<std::size_t>(output.capacity_bytes),
-            });
+            requests.push_back({std::string(view(output.name)), runtime_type(output.data_type),
+                                static_cast<std::size_t>(output.capacity_bytes)});
         }
 
         const auto actual = context->executor->run_dynamic(runtime_inputs, requests);
@@ -567,7 +552,8 @@ kf_status_v1 run_dynamic(kf_context_handle_v1 context,
 
             if (!iterator->bytes.empty())
                 std::memcpy(output.data, iterator->bytes.data(), iterator->bytes.size());
-            std::fill(std::begin(output.dimensions), std::end(output.dimensions), INT64_C(0));
+            std::fill(output.dimensions,
+                      output.dimensions + KFCORE_TENSOR_MAX_RANK_V1, INT64_C(0));
             for (std::size_t dimension = 0U; dimension < iterator->shape.size(); ++dimension)
                 output.dimensions[dimension] = iterator->shape[dimension];
             output.rank = static_cast<std::uint32_t>(iterator->shape.size());
@@ -641,8 +627,7 @@ kfcore_backend_query_v1(std::uint32_t requested_abi_major,
     api.destroy_context = &destroy_context;
     api.run = &run;
     api.format_last_error = &format_last_error;
-    if (requested_abi_minor >= 2U)
-        api.run_dynamic = &run_dynamic;
+    if (requested_abi_minor >= 2U) api.run_dynamic = &run_dynamic;
 
     std::memcpy(out_api, &api, required_size);
     return KF_STATUS_V1_OK;
