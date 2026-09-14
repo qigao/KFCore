@@ -41,12 +41,15 @@ MemoryKind yolo_memory_kind(image::MemoryKind kind)
 
 DetectionFrame YoloDetector::detect(const image::ImageView& image)
 {
-    return detect({image.data,
-                   image.width,
-                   image.height,
-                   image.row_stride,
-                   yolo_pixel_format(image.pixel_format),
-                   yolo_memory_kind(image.memory_kind)});
+    const ImageView adapted {
+        image.data,
+        image.width,
+        image.height,
+        image.row_stride,
+        yolo_pixel_format(image.pixel_format),
+        yolo_memory_kind(image.memory_kind),
+    };
+    return detect(adapted);
 }
 
 } // namespace kfcore::yolo
