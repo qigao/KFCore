@@ -8,46 +8,50 @@ cmake_add_test(
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_yolo_core_test_folder}")
 
-cmake_add_test(
-  NAME test_yolo_domain_profile
-  SOURCES test_yolo_domain_profile.cpp ../examples/yolo_domain_profile.cpp
-  LIBS KFCore::yolo_core Salts::TinyTest
-  INCLUDES ../examples
-  COMPILE_FEATURES cxx_std_17
-  FOLDER "${_yolo_core_test_folder}")
-cmake_add_test(
-  NAME test_yolo_domain_cli
-  SOURCES
-    test_yolo_domain_cli.cpp
-    ../examples/yolo_domain_cli.cpp
-    ../examples/yolo_domain_profile.cpp
-  LIBS KFCore::yolo_core Salts::Capture Salts::TinyTest
-  INCLUDES ../examples
-  COMPILE_FEATURES cxx_std_17
-  FOLDER "${_yolo_core_test_folder}")
-cmake_add_test(
-  NAME test_yolo_domain_capture
-  SOURCES test_yolo_domain_capture.cpp ../examples/yolo_domain_capture.cpp
-  LIBS Salts::Capture Salts::TinyTest
-  INCLUDES ../examples
-  COMPILE_FEATURES cxx_std_17
-  FOLDER "${_yolo_core_test_folder}")
-cmake_add_test(
-  NAME test_yolo_domain_ui
-  SOURCES
-    test_yolo_domain_ui.cpp
-    ../examples/yolo_domain_capture.cpp
-    ../examples/yolo_domain_frame.cpp
-    ../examples/yolo_domain_profile.cpp
-    ../examples/yolo_domain_ui.cpp
-  LIBS
-    KFCore::yolo_core
-    KFCore::image_processor_cpu
-    Salts::Capture
-    Salts::TinyTest
-  INCLUDES ../examples ${Stb_INCLUDE_DIR}
-  COMPILE_FEATURES cxx_std_17
-  FOLDER "${_yolo_core_test_folder}")
+if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
+  find_package(Stb REQUIRED)
+  cmake_add_test(
+    NAME test_yolo_domain_profile
+    SOURCES test_yolo_domain_profile.cpp ../examples/yolo_domain_profile.cpp
+    LIBS KFCore::yolo_core Salts::TinyTest
+    INCLUDES ../examples
+    COMPILE_FEATURES cxx_std_17
+    FOLDER "${_yolo_core_test_folder}")
+  cmake_add_test(
+    NAME test_yolo_domain_cli
+    SOURCES
+      test_yolo_domain_cli.cpp
+      ../examples/yolo_domain_cli.cpp
+      ../examples/yolo_domain_profile.cpp
+    LIBS KFCore::yolo_core Salts::Capture Salts::TinyTest
+    INCLUDES ../examples
+    COMPILE_FEATURES cxx_std_17
+    FOLDER "${_yolo_core_test_folder}")
+  cmake_add_test(
+    NAME test_yolo_domain_capture
+    SOURCES test_yolo_domain_capture.cpp ../examples/yolo_domain_capture.cpp
+    LIBS Salts::Capture Salts::TinyTest
+    INCLUDES ../examples
+    COMPILE_FEATURES cxx_std_17
+    FOLDER "${_yolo_core_test_folder}")
+  cmake_add_test(
+    NAME test_yolo_domain_ui
+    SOURCES
+      test_yolo_domain_ui.cpp
+      ../examples/yolo_domain_capture.cpp
+      ../examples/yolo_domain_frame.cpp
+      ../examples/yolo_domain_profile.cpp
+      ../examples/yolo_domain_ui.cpp
+    LIBS
+      KFCore::yolo_core
+      KFCore::image_processor_cpu
+      Salts::Capture
+      Salts::TinyTest
+    INCLUDES ../examples ${Stb_INCLUDE_DIR}
+    COMPILE_FEATURES cxx_std_17
+    FOLDER "${_yolo_core_test_folder}")
+endif()
+
 cmake_add_test(
   NAME test_yolo_tracking
   SOURCES
