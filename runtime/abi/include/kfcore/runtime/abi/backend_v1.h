@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define KFCORE_BACKEND_ABI_V1_MAJOR UINT32_C(1)
-#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(2)
+#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(3)
 #define KFCORE_BACKEND_QUERY_V1_SYMBOL "kfcore_backend_query_v1"
 #define KFCORE_TENSOR_MAX_RANK_V1 UINT32_C(16)
 
@@ -81,6 +81,8 @@ typedef struct kf_backend_info_v1
     uint32_t execution_runtime_major;
     uint32_t execution_runtime_minor;
     uint32_t execution_runtime_patch;
+    /* ABI v1.3 append-only field. Zero means unknown/not applicable. */
+    uint32_t execution_runtime_build;
 } kf_backend_info_v1;
 
 typedef struct kf_device_info_v1
