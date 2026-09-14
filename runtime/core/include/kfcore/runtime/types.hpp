@@ -35,6 +35,7 @@ struct RuntimeVersion
     std::uint32_t major = 0U;
     std::uint32_t minor = 0U;
     std::uint32_t patch = 0U;
+    std::uint32_t build = 0U;
 };
 
 struct TensorDescriptor
