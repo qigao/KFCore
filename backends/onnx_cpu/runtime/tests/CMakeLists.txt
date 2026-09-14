@@ -9,8 +9,8 @@ add_executable(test_runtime_onnx_execution test_runtime_onnx_execution.cpp)
 target_link_libraries(test_runtime_onnx_execution PRIVATE KFCore::runtime_onnx Salts::TinyTest)
 target_compile_features(test_runtime_onnx_execution PRIVATE cxx_std_17)
 target_compile_definitions(test_runtime_onnx_execution PRIVATE
-  KFCORE_TEST_ONNX_CUDA=$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>
-  KFCORE_TEST_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNX_CUDA_ALLOW_CPU_NODES}>
+  KFCORE_TEST_ONNX_CUDA=$<BOOL:${KFCORE_ONNXRUNTIME_ENABLE_CUDA}>
+  KFCORE_TEST_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES}>
   "KFCORE_ONNX_FIXTURES=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 add_test(NAME test_runtime_onnx_execution COMMAND test_runtime_onnx_execution)
 if(WIN32)
