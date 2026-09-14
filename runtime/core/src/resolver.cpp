@@ -124,6 +124,12 @@ RuntimeVersion parse_runtime_version(std::string_view value,
     return result;
 }
 
+bool supports_same_compute_capability(const RuntimeVersion& version) noexcept
+{
+    return version.major > 10U ||
+           (version.major == 10U && version.minor >= 9U);
+}
+
 std::string_view current_platform() noexcept
 {
 #if defined(_WIN32)
@@ -188,6 +194,13 @@ bool artifact_runtime_matches(const ModelArtifact& artifact,
 
     if (artifact.hardware_compatibility == "same-compute-capability")
     {
+        if (!supports_same_compute_capability(required))
+        {
+            throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                               "TensorRT artifact '" + artifact.id +
+                                   "' uses same-compute-capability but TensorRT "
+                                   "runtime_version is older than 10.9");
+        }
         return true;
     }
     if (artifact.hardware_compatibility == "exact-device")
