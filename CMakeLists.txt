@@ -56,6 +56,9 @@ add_subdirectory(vendor)
 add_subdirectory(trackers)
 
 enable_language(CXX)
+add_subdirectory(runtime/abi)
+add_subdirectory(runtime/core)
+
 if(KFCORE_ENABLE_CUDA)
   enable_language(CUDA)
   find_package(CUDAToolkit REQUIRED)

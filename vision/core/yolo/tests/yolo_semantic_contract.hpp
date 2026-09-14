@@ -39,9 +39,6 @@ inline void check_semantic_contract(const DetectionFrame& frame,
         check_true(detection.box.left <= detection.box.right);
         check_true(detection.box.top <= detection.box.bottom);
     }
-
-    // RED sentinel: remove only after CI proves both backend integration paths execute this helper.
-    check_true(false);
 }
 
 } // namespace kfcore::yolo::test
