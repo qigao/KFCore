@@ -22,9 +22,15 @@ The important deployment DLLs on Windows are:
 ```text
 plugins/kfcore_backend_tensorrt.dll
 plugins/kfcore_runtime_tensorrt.dll
+plugins/nvinfer_<major>.dll
+plugins/nvinfer_plugin_<major>.dll
 ```
 
-They are installed together in the controlled KFCore plugin directory. On Linux the TensorRT backend plugin has an `$ORIGIN` install rpath so the internal KFCore TensorRT runtime library can live beside it.
+TensorRT 8.6 packages that use unversioned DLL names are supported as well. During a Windows build KFCore copies the validated `nvinfer` and `nvinfer_plugin` runtime DLLs from the configured `TENSORRT_ROOT` beside `kfcore_backend_tensorrt.dll`; `cmake --install` installs the same files into the controlled plugin directory. KFCore CUDA targets link `CUDA::cudart_static`, so the KFCore DLLs themselves do not rely on `cudart` being found through `PATH`.
+
+KFCore V1 uses the standard/full TensorRT runtime for ordinary prebuilt engines. Lean/dispatch runtimes are intentionally not deployed because they correspond to TensorRT version-compatible engines, which are outside the Model Package V1 trust model. A TensorRT engine that uses optional external CUDA, cuBLAS, cuDNN, or custom-plugin dependencies must still deploy those dependencies according to that engine's build contract; KFCore does not weaken its DLL search policy to discover them from the process current directory or an arbitrary system path.
+
+On Linux the TensorRT backend plugin has an `$ORIGIN` install rpath so the internal KFCore TensorRT runtime library can live beside it. System/package TensorRT and CUDA shared-library deployment remains the platform package manager/runtime-linker responsibility.
 
 ## ONNX Runtime CPU plugin
 
@@ -58,7 +64,7 @@ cmake --build build-ort-cuda
 cmake --install build-ort-cuda
 ```
 
-The single ONNX Runtime plugin always exposes `cpu`; when the CUDA provider is built and a usable CUDA device is present it additionally exposes `cuda:N` devices. `KFCORE_ENABLE_CUDA` controls KFCore CUDA image/compute components and is independent of the ORT CUDA provider.
+The single ONNX Runtime plugin always exposes `cpu`; when the CUDA provider is built and a usable CUDA device is present it additionally exposes `cuda:N` devices. `KFCORE_ENABLE_CUDA` controls KFCore CUDA image/compute components and is independent of the ORT CUDA provider. KFCore links its direct CUDA runtime use statically; ONNX Runtime CUDA-provider dependencies remain part of the selected ONNX Runtime distribution and must be deployed according to that distribution's contract.
 
 ## TensorRT + ONNX Runtime in one process
 
