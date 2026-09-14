@@ -26,17 +26,27 @@ set_target_properties(kfcore_runtime_tensorrt PROPERTIES
   CXX_EXTENSIONS OFF
   FOLDER "backends/tensorrt_cuda/runtime"
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
-cmake_config_target(kfcore_runtime_tensorrt
-  ALIAS KFCore::runtime_tensorrt
-  EXPORT_NAME runtime_tensorrt
-  EXPORT_SET KFCoreTargets
-  FOLDER "backends/tensorrt_cuda/runtime")
+
+if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
+  cmake_config_target(kfcore_runtime_tensorrt
+    ALIAS KFCore::runtime_tensorrt
+    EXPORT_NAME runtime_tensorrt
+    EXPORT_SET KFCoreTargets
+    FOLDER "backends/tensorrt_cuda/runtime")
+else()
+  cmake_config_target(kfcore_runtime_tensorrt
+    ALIAS KFCore::runtime_tensorrt
+    PLUGIN
+    FOLDER "backends/tensorrt_cuda/runtime")
+endif()
 
 if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-cmake_install_headers(
-  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  PATTERNS "*.hpp")
+if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
+  cmake_install_headers(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    PATTERNS "*.hpp")
+endif()
