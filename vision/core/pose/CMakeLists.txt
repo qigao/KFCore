@@ -1,4 +1,4 @@
-add_library(kfcore_pose_core SHARED
+add_library(kfcore_pose_core STATIC
   src/rtmw.cpp)
 target_include_directories(kfcore_pose_core
   PUBLIC
@@ -12,7 +12,6 @@ set_target_properties(kfcore_pose_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/pose")
 cmake_config_target(kfcore_pose_core
   ALIAS KFCore::pose_core
