@@ -241,9 +241,14 @@ std::shared_ptr<BackendPlugin> BackendPlugin::load(const std::filesystem::path& 
     state->backend_name = copy_string(info.backend_name);
     state->backend_capabilities = info.capabilities;
     if (state->api.abi_minor >= 1U)
-        state->runtime_version = {info.execution_runtime_major,
-                                  info.execution_runtime_minor,
-                                  info.execution_runtime_patch};
+    {
+        state->runtime_version = {
+            info.execution_runtime_major,
+            info.execution_runtime_minor,
+            info.execution_runtime_patch,
+            state->api.abi_minor >= 3U ? info.execution_runtime_build : 0U,
+        };
+    }
     if (state->backend_id.empty())
         throw RuntimeError(RuntimeErrorCode::AbiMismatch,
                            "runtime backend id must not be empty");
