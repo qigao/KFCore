@@ -1,4 +1,4 @@
-add_library(kfcore_face_model_core SHARED
+add_library(kfcore_face_model_core STATIC
   src/decode.cpp
   src/error.cpp
   src/facemesh_decode.cpp
@@ -17,7 +17,6 @@ set_target_properties(kfcore_face_model_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/face_models")
 cmake_config_target(kfcore_face_model_core
   ALIAS KFCore::face_model_core
@@ -25,7 +24,7 @@ cmake_config_target(kfcore_face_model_core
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/face_models")
 
-add_library(kfcore_face_model_runtime SHARED
+add_library(kfcore_face_model_runtime STATIC
   src/runtime.cpp
   src/prepared_models.cpp)
 target_include_directories(kfcore_face_model_runtime
@@ -45,7 +44,6 @@ set_target_properties(kfcore_face_model_runtime PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/face_models")
 cmake_config_target(kfcore_face_model_runtime
   ALIAS KFCore::face_model_runtime
