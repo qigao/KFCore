@@ -362,6 +362,12 @@ struct HostOutput
         return {descriptor.name, descriptor.data_type, shape, data(), bytes,
                 runtime::MemoryKind::Host, {}};
     }
+
+    runtime::DynamicMutableTensorView dynamic_view()
+    {
+        return {descriptor.name, descriptor.data_type, data(), bytes,
+                runtime::MemoryKind::Host, {}, {}, 0U};
+    }
 };
 
 std::string lower(std::string value)
@@ -429,6 +435,12 @@ struct YoloDetector::Impl final
             }
             HostOutput output;
             output.descriptor = output_descriptors[0];
+            if ((output.descriptor.shape[0] != -1 && output.descriptor.shape[0] != 1) ||
+                output.descriptor.shape[2] != static_cast<std::int64_t>(kCompactValues))
+            {
+                throw_contract("compact-nms declared output shape must be [1,N,6]");
+            }
+            compact_dynamic_output = output.descriptor.shape[1] == -1;
             output.shape = resolve_output_shape(output.descriptor, options.max_detections, true);
             if (output.shape[0] != 1 || output.shape[2] != static_cast<std::int64_t>(kCompactValues))
             {
@@ -439,7 +451,7 @@ struct YoloDetector::Impl final
             {
                 throw_contract("compact-nms output must be FP32 or FP16");
             }
-            detection_count = static_cast<std::size_t>(output.shape[1]);
+            detection_count = compact_dynamic_output ? 0U : static_cast<std::size_t>(output.shape[1]);
             output.allocate(options.max_output_bytes);
             outputs.push_back(std::move(output));
         }
@@ -527,7 +539,6 @@ struct YoloDetector::Impl final
         if (count_index == missing || boxes_index == missing || scores_index == missing ||
             labels_index == missing)
         {
-            // Fall back to shape/type roles for engines whose tensor names are customized.
             for (std::size_t i = 0U; i < outputs.size(); ++i)
             {
                 const auto& output = outputs[i];
@@ -590,6 +601,7 @@ struct YoloDetector::Impl final
     std::int32_t input_width_value = 0;
     std::int32_t input_height_value = 0;
     OutputLayout layout = OutputLayout::RawYolo;
+    bool compact_dynamic_output = false;
     std::size_t detection_count = 0U;
     std::size_t class_count = 0U;
     std::size_t candidate_count = 0U;
@@ -666,27 +678,61 @@ DetectionFrame YoloDetector::detect(const ImageView& image)
             {impl_->input_descriptor.name, impl_->input_descriptor.data_type,
              impl_->input_shape, input_data, input_bytes, runtime::MemoryKind::Host, {}}
         };
-        std::vector<runtime::MutableTensorView> output_views;
-        output_views.reserve(impl_->outputs.size());
-        std::size_t aggregate_output_bytes = 0U;
-        for (auto& output : impl_->outputs)
+
+        std::size_t compact_detection_count = impl_->detection_count;
+        if (impl_->layout == Impl::OutputLayout::CompactNms && impl_->compact_dynamic_output)
         {
-            if (output.bytes > impl_->options.max_output_bytes - aggregate_output_bytes)
+            auto& output = impl_->outputs.front();
+            std::vector<runtime::DynamicMutableTensorView> dynamic_outputs{output.dynamic_view()};
+            impl_->context->run_dynamic(inputs, dynamic_outputs);
+            const auto& actual = dynamic_outputs.front();
+            if (actual.shape.size() != 3U || actual.shape[0] != 1 || actual.shape[1] < 0 ||
+                actual.shape[2] != static_cast<std::int64_t>(kCompactValues))
             {
-                throw_resource("aggregate outputs exceed max_output_bytes");
+                throw_contract("compact-nms dynamic output must resolve to [1,N,6]");
             }
-            aggregate_output_bytes += output.bytes;
-            output_views.push_back(output.view());
+            if (static_cast<std::uintmax_t>(actual.shape[1]) >
+                static_cast<std::uintmax_t>(impl_->options.max_detections))
+            {
+                throw_resource("compact-nms dynamic output exceeds max_detections");
+            }
+            compact_detection_count = static_cast<std::size_t>(actual.shape[1]);
+            const std::size_t actual_elements = checked_multiply(
+                compact_detection_count, kCompactValues, "compact-nms dynamic output");
+            const std::size_t expected_bytes = checked_multiply(
+                actual_elements, element_size(output.descriptor.data_type),
+                "compact-nms dynamic output");
+            if (actual.byte_size != expected_bytes)
+            {
+                throw_contract("compact-nms dynamic output byte count does not match actual shape");
+            }
         }
-        impl_->context->run(inputs, output_views);
+        else
+        {
+            std::vector<runtime::MutableTensorView> output_views;
+            output_views.reserve(impl_->outputs.size());
+            std::size_t aggregate_output_bytes = 0U;
+            for (auto& output : impl_->outputs)
+            {
+                if (output.bytes > impl_->options.max_output_bytes - aggregate_output_bytes)
+                {
+                    throw_resource("aggregate outputs exceed max_output_bytes");
+                }
+                aggregate_output_bytes += output.bytes;
+                output_views.push_back(output.view());
+            }
+            impl_->context->run(inputs, output_views);
+        }
 
         const std::vector<ImageView> images{image};
         const std::vector<detail::LetterboxTransform> transforms{transform};
         if (impl_->layout == Impl::OutputLayout::CompactNms)
         {
             const auto& output = impl_->outputs.front();
+            const std::size_t compact_elements = checked_multiply(
+                compact_detection_count, kCompactValues, "compact-nms output");
             const detail::CompactNmsOutputView view{
-                output.data(), output.count(), impl_->detection_count,
+                output.data(), compact_elements, compact_detection_count,
                 decoder_type(output.descriptor.data_type)};
             return detail::decode_compact_nms(images, transforms, view).front();
         }
