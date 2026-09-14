@@ -22,8 +22,14 @@ void print_artifact(const kfcore::runtime::ModelArtifact& artifact)
               << " path=" << artifact.path.generic_u8string();
     if (!artifact.flavor.empty())
         std::cout << " flavor=" << artifact.flavor;
-    if (artifact.runtime_major != 0U)
-        std::cout << " runtime_major=" << artifact.runtime_major;
+    if (!artifact.runtime_version.empty())
+        std::cout << " runtime_version=" << artifact.runtime_version;
+    if (!artifact.platform.empty())
+        std::cout << " platform=" << artifact.platform;
+    if (!artifact.hardware_compatibility.empty())
+        std::cout << " hardware_compatibility=" << artifact.hardware_compatibility;
+    if (!artifact.device_name.empty())
+        std::cout << " device_name=\"" << artifact.device_name << '"';
     if (!artifact.compute_capability.empty())
         std::cout << " compute_capability=" << artifact.compute_capability;
     if (!artifact.precision.empty())
