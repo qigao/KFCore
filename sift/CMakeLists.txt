@@ -18,20 +18,19 @@ cmake_config_target(kfcore_sift
 if(KFCORE_ENABLE_CUDA)
   add_subdirectory(vendor/popsift)
 
-  add_library(kfcore_sift_popsift SHARED src/popsift_extractor.cpp)
+  add_library(kfcore_sift_popsift STATIC src/popsift_extractor.cpp)
   target_include_directories(kfcore_sift_popsift PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   target_compile_features(kfcore_sift_popsift PUBLIC cxx_std_17)
   target_link_libraries(kfcore_sift_popsift
     PUBLIC KFCore::sift
-    PRIVATE KFCore::image_processor_cuda kfcore_popsift_internal CUDA::cudart_static)
+    PRIVATE KFCore::image_processor_cuda KFCore::popsift_internal)
   set_target_properties(kfcore_sift_popsift PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    FOLDER "sift"
-    WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    FOLDER "sift")
   cmake_config_target(kfcore_sift_popsift
     ALIAS KFCore::sift_popsift
     EXPORT_NAME sift_popsift
