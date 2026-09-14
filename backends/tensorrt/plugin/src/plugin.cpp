@@ -27,6 +27,8 @@ thread_local std::string g_last_error;
 
 constexpr std::size_t kBackendInfoV10Size =
     offsetof(kf_backend_info_v1, execution_runtime_major);
+constexpr std::size_t kBackendInfoV11Size =
+    offsetof(kf_backend_info_v1, execution_runtime_build);
 constexpr std::size_t kDeviceInfoV10Size =
     offsetof(kf_device_info_v1, compute_capability_major);
 constexpr std::size_t kBackendApiV11Size =
@@ -284,17 +286,19 @@ kf_status_v1 get_backend_info(kf_backend_handle_v1 backend,
     out_info->backend_id = abi_view(kId);
     out_info->backend_name = abi_view(kName);
     out_info->backend_version_major = 1U;
-    out_info->backend_version_minor = 2U;
+    out_info->backend_version_minor = 3U;
     out_info->backend_version_patch = 0U;
     out_info->capabilities = KF_BACKEND_CAP_V1_HOST_MEMORY |
                              KF_BACKEND_CAP_V1_DEVICE_MEMORY |
                              KF_BACKEND_CAP_V1_DYNAMIC_HOST_OUTPUT;
-    if (caller_size >= sizeof(kf_backend_info_v1))
+    if (caller_size >= kBackendInfoV11Size)
     {
         out_info->execution_runtime_major = NV_TENSORRT_MAJOR;
         out_info->execution_runtime_minor = NV_TENSORRT_MINOR;
         out_info->execution_runtime_patch = NV_TENSORRT_PATCH;
     }
+    if (caller_size >= sizeof(kf_backend_info_v1))
+        out_info->execution_runtime_build = NV_TENSORRT_BUILD;
     return KF_STATUS_V1_OK;
 }
 
