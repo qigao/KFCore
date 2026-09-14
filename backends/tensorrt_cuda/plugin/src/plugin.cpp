@@ -3,9 +3,11 @@
 #include "kfcore/tensorrt/runtime.hpp"
 #include "kfcore/tensorrt/types.hpp"
 
+#include <NvInferVersion.h>
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -21,11 +23,18 @@ namespace
 
 thread_local std::string g_last_error;
 
+constexpr std::size_t kBackendInfoV10Size =
+    offsetof(kf_backend_info_v1, execution_runtime_major);
+constexpr std::size_t kDeviceInfoV10Size =
+    offsetof(kf_device_info_v1, compute_capability_major);
+
 struct DeviceInfo
 {
     std::string id;
     std::string name;
     int ordinal = 0;
+    std::uint32_t compute_capability_major = 0U;
+    std::uint32_t compute_capability_minor = 0U;
 };
 
 std::string_view view(kf_string_view_v1 value)
@@ -187,6 +196,8 @@ std::vector<DeviceInfo> enumerate_cuda_devices()
         device.id = "cuda:" + std::to_string(ordinal);
         device.name = properties.name;
         device.ordinal = ordinal;
+        device.compute_capability_major = static_cast<std::uint32_t>(properties.major);
+        device.compute_capability_minor = static_cast<std::uint32_t>(properties.minor);
         result.push_back(std::move(device));
     }
     return result;
@@ -245,18 +256,26 @@ void destroy_backend(kf_backend_handle_v1 backend) noexcept
 kf_status_v1 get_backend_info(kf_backend_handle_v1 backend,
                               kf_backend_info_v1* out_info) noexcept
 {
-    if (backend == nullptr || out_info == nullptr ||
-        out_info->struct_size < sizeof(kf_backend_info_v1))
+    if (backend == nullptr || out_info == nullptr || out_info->struct_size < kBackendInfoV10Size)
     {
         return KF_STATUS_V1_INVALID_ARGUMENT;
     }
+    const std::uint32_t caller_size = out_info->struct_size;
     static constexpr std::string_view kId = "tensorrt";
     static constexpr std::string_view kName = "KFCore TensorRT";
-    *out_info = {
-        sizeof(kf_backend_info_v1), abi_view(kId), abi_view(kName),
-        1U, 0U, 0U,
-        KF_BACKEND_CAP_V1_HOST_MEMORY | KF_BACKEND_CAP_V1_DEVICE_MEMORY,
-    };
+    out_info->struct_size = sizeof(kf_backend_info_v1);
+    out_info->backend_id = abi_view(kId);
+    out_info->backend_name = abi_view(kName);
+    out_info->backend_version_major = 1U;
+    out_info->backend_version_minor = 0U;
+    out_info->backend_version_patch = 0U;
+    out_info->capabilities = KF_BACKEND_CAP_V1_HOST_MEMORY | KF_BACKEND_CAP_V1_DEVICE_MEMORY;
+    if (caller_size >= sizeof(kf_backend_info_v1))
+    {
+        out_info->execution_runtime_major = NV_TENSORRT_MAJOR;
+        out_info->execution_runtime_minor = NV_TENSORRT_MINOR;
+        out_info->execution_runtime_patch = NV_TENSORRT_PATCH;
+    }
     return KF_STATUS_V1_OK;
 }
 
@@ -274,17 +293,22 @@ kf_status_v1 get_device_info(kf_backend_handle_v1 backend,
                              std::uint64_t index,
                              kf_device_info_v1* out_info) noexcept
 {
-    if (backend == nullptr || out_info == nullptr ||
-        out_info->struct_size < sizeof(kf_device_info_v1) ||
+    if (backend == nullptr || out_info == nullptr || out_info->struct_size < kDeviceInfoV10Size ||
         index >= backend->devices.size())
     {
         return KF_STATUS_V1_INVALID_ARGUMENT;
     }
+    const std::uint32_t caller_size = out_info->struct_size;
     const DeviceInfo& device = backend->devices[static_cast<std::size_t>(index)];
-    *out_info = {
-        sizeof(kf_device_info_v1), abi_view(device.id), abi_view(device.name),
-        KF_BACKEND_CAP_V1_HOST_MEMORY | KF_BACKEND_CAP_V1_DEVICE_MEMORY,
-    };
+    out_info->struct_size = sizeof(kf_device_info_v1);
+    out_info->device_id = abi_view(device.id);
+    out_info->device_name = abi_view(device.name);
+    out_info->capabilities = KF_BACKEND_CAP_V1_HOST_MEMORY | KF_BACKEND_CAP_V1_DEVICE_MEMORY;
+    if (caller_size >= sizeof(kf_device_info_v1))
+    {
+        out_info->compute_capability_major = device.compute_capability_major;
+        out_info->compute_capability_minor = device.compute_capability_minor;
+    }
     return KF_STATUS_V1_OK;
 }
 

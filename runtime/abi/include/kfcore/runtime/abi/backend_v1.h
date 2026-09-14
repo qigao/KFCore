@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define KFCORE_BACKEND_ABI_V1_MAJOR UINT32_C(1)
-#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(0)
+#define KFCORE_BACKEND_ABI_V1_MINOR UINT32_C(1)
 #define KFCORE_BACKEND_QUERY_V1_SYMBOL "kfcore_backend_query_v1"
 
 typedef int32_t kf_status_v1;
@@ -75,6 +75,10 @@ typedef struct kf_backend_info_v1
     uint32_t backend_version_minor;
     uint32_t backend_version_patch;
     kf_backend_capability_v1 capabilities;
+    /* ABI v1.1 append-only fields. Zero means unknown/not applicable. */
+    uint32_t execution_runtime_major;
+    uint32_t execution_runtime_minor;
+    uint32_t execution_runtime_patch;
 } kf_backend_info_v1;
 
 typedef struct kf_device_info_v1
@@ -83,6 +87,9 @@ typedef struct kf_device_info_v1
     kf_string_view_v1 device_id;
     kf_string_view_v1 device_name;
     kf_backend_capability_v1 capabilities;
+    /* ABI v1.1 append-only fields. Zero means unknown/not applicable. */
+    uint32_t compute_capability_major;
+    uint32_t compute_capability_minor;
 } kf_device_info_v1;
 
 typedef struct kf_artifact_desc_v1

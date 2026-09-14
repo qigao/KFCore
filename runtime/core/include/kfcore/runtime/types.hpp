@@ -30,6 +30,13 @@ enum class MemoryKind : std::uint32_t
 
 using TensorShape = std::vector<std::int64_t>;
 
+struct RuntimeVersion
+{
+    std::uint32_t major = 0U;
+    std::uint32_t minor = 0U;
+    std::uint32_t patch = 0U;
+};
+
 struct TensorDescriptor
 {
     std::string name;
@@ -65,6 +72,8 @@ struct BackendDevice
     std::string   id;
     std::string   name;
     std::uint64_t capabilities = 0U;
+    std::uint32_t compute_capability_major = 0U;
+    std::uint32_t compute_capability_minor = 0U;
 };
 
 } // namespace kfcore::runtime

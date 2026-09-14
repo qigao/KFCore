@@ -75,6 +75,7 @@ public:
     [[nodiscard]] const std::string& id() const noexcept;
     [[nodiscard]] const std::string& name() const noexcept;
     [[nodiscard]] std::uint64_t capabilities() const noexcept;
+    [[nodiscard]] const RuntimeVersion& execution_runtime_version() const noexcept;
     [[nodiscard]] std::vector<BackendDevice> devices() const;
     [[nodiscard]] bool can_load(const ModelLoadRequest& request) const;
     [[nodiscard]] std::shared_ptr<ExecutableModel> load_model(const ModelLoadRequest& request) const;

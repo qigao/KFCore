@@ -3,7 +3,9 @@
 #include "kfcore/runtime/error.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace kfcore::runtime
@@ -28,14 +30,6 @@ bool device_constraint_matches(std::string_view constraint, std::string_view dev
     return constraint == device_id;
 }
 
-bool backend_has_device(const BackendPlugin& backend, std::string_view device_id)
-{
-    const auto devices = backend.devices();
-    return std::any_of(devices.begin(), devices.end(), [&](const BackendDevice& device) {
-        return device.id == device_id;
-    });
-}
-
 std::shared_ptr<BackendPlugin> find_policy_backend(const BackendRegistry& registry,
                                                    std::string_view backend_id)
 {
@@ -51,6 +45,71 @@ std::shared_ptr<BackendPlugin> find_policy_backend(const BackendRegistry& regist
         }
         throw;
     }
+}
+
+const BackendDevice* find_device(const std::vector<BackendDevice>& devices,
+                                 std::string_view device_id)
+{
+    const auto iterator = std::find_if(devices.begin(), devices.end(),
+                                       [&](const BackendDevice& device) {
+                                           return device.id == device_id;
+                                       });
+    return iterator == devices.end() ? nullptr : &*iterator;
+}
+
+std::pair<std::uint32_t, std::uint32_t>
+parse_compute_capability(std::string_view value, std::string_view artifact_id)
+{
+    const std::size_t dot = value.find('.');
+    if (dot == std::string_view::npos || dot == 0U || dot + 1U >= value.size() ||
+        value.find('.', dot + 1U) != std::string_view::npos)
+    {
+        throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                           "artifact '" + std::string(artifact_id) +
+                               "' compute_capability must use major.minor form");
+    }
+
+    std::uint32_t major = 0U;
+    std::uint32_t minor = 0U;
+    const char* begin = value.data();
+    const char* end = value.data() + value.size();
+    const auto major_result = std::from_chars(begin, begin + dot, major);
+    const auto minor_result = std::from_chars(begin + dot + 1U, end, minor);
+    if (major_result.ec != std::errc{} || major_result.ptr != begin + dot ||
+        minor_result.ec != std::errc{} || minor_result.ptr != end || major == 0U)
+    {
+        throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                           "artifact '" + std::string(artifact_id) +
+                               "' compute_capability is invalid");
+    }
+    return {major, minor};
+}
+
+bool artifact_runtime_matches(const ModelArtifact& artifact,
+                              const BackendPlugin& backend,
+                              const BackendDevice& device)
+{
+    if (artifact.runtime_major != 0U)
+    {
+        const RuntimeVersion& runtime = backend.execution_runtime_version();
+        if (runtime.major == 0U || runtime.major != artifact.runtime_major)
+        {
+            return false;
+        }
+    }
+
+    if (!artifact.compute_capability.empty())
+    {
+        const auto required = parse_compute_capability(artifact.compute_capability,
+                                                       artifact.id);
+        if (device.compute_capability_major == 0U ||
+            device.compute_capability_major != required.first ||
+            device.compute_capability_minor != required.second)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::string describe_policy(const ExecutionPolicy& policy)
@@ -111,7 +170,13 @@ ResolvedModel ModelResolver::load(const ModelPackage& package,
     for (const auto& preference : policy.preferences())
     {
         auto backend = find_policy_backend(registry, preference.backend_id);
-        if (!backend || !backend_has_device(*backend, preference.device_id))
+        if (!backend)
+        {
+            continue;
+        }
+        const std::vector<BackendDevice> devices = backend->devices();
+        const BackendDevice* selected_device = find_device(devices, preference.device_id);
+        if (selected_device == nullptr)
         {
             continue;
         }
@@ -119,7 +184,8 @@ ResolvedModel ModelResolver::load(const ModelPackage& package,
         for (const auto& artifact : package.artifacts())
         {
             if (artifact.backend != preference.backend_id ||
-                !device_constraint_matches(artifact.device, preference.device_id))
+                !device_constraint_matches(artifact.device, preference.device_id) ||
+                !artifact_runtime_matches(artifact, *backend, *selected_device))
             {
                 continue;
             }

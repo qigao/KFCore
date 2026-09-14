@@ -25,7 +25,8 @@ std::string copy_string(kf_string_view_v1 value)
     {
         return {};
     }
-    if (value.data == nullptr || value.size > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
+    if (value.data == nullptr ||
+        value.size > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
     {
         throw RuntimeError(RuntimeErrorCode::BackendFailure,
                            "runtime backend returned an invalid string view");
@@ -129,6 +130,7 @@ struct BackendPlugin::State final
     std::string backend_id;
     std::string backend_name;
     std::uint64_t backend_capabilities = 0U;
+    RuntimeVersion runtime_version;
 
     ~State()
     {
@@ -146,7 +148,8 @@ struct BackendPlugin::State final
             return {};
         }
         std::uint64_t required = 0U;
-        if (api.format_last_error(backend, nullptr, 0U, &required) != KF_STATUS_V1_OK || required == 0U ||
+        if (api.format_last_error(backend, nullptr, 0U, &required) != KF_STATUS_V1_OK ||
+            required == 0U ||
             required > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
         {
             return {};
@@ -201,7 +204,8 @@ struct ExecutionContext::Impl final
 
     ~Impl()
     {
-        if (context != nullptr && model && model->backend && model->backend->api.destroy_context != nullptr)
+        if (context != nullptr && model && model->backend &&
+            model->backend->api.destroy_context != nullptr)
         {
             model->backend->api.destroy_context(context);
             context = nullptr;
@@ -224,15 +228,22 @@ std::shared_ptr<BackendPlugin> BackendPlugin::load(const std::filesystem::path& 
 
     kf_backend_api_v1 api {};
     api.struct_size = sizeof(api);
-    const kf_status_v1 query_status = query(KFCORE_BACKEND_ABI_V1_MAJOR,
-                                            KFCORE_BACKEND_ABI_V1_MINOR,
-                                            &api);
+    kf_status_v1 query_status = query(KFCORE_BACKEND_ABI_V1_MAJOR,
+                                      KFCORE_BACKEND_ABI_V1_MINOR,
+                                      &api);
+    if (query_status != KF_STATUS_V1_OK && KFCORE_BACKEND_ABI_V1_MINOR != 0U)
+    {
+        api = {};
+        api.struct_size = sizeof(api);
+        query_status = query(KFCORE_BACKEND_ABI_V1_MAJOR, 0U, &api);
+    }
     if (query_status != KF_STATUS_V1_OK)
     {
         throw RuntimeError(RuntimeErrorCode::AbiMismatch,
                            "runtime backend rejected ABI v1 query: " + module->path().string());
     }
-    if (api.struct_size < sizeof(kf_backend_api_v1) || api.abi_major != KFCORE_BACKEND_ABI_V1_MAJOR)
+    if (api.struct_size < sizeof(kf_backend_api_v1) ||
+        api.abi_major != KFCORE_BACKEND_ABI_V1_MAJOR)
     {
         throw RuntimeError(RuntimeErrorCode::AbiMismatch,
                            "runtime backend returned an incompatible ABI table");
@@ -267,6 +278,14 @@ std::shared_ptr<BackendPlugin> BackendPlugin::load(const std::filesystem::path& 
     state->backend_id = copy_string(info.backend_id);
     state->backend_name = copy_string(info.backend_name);
     state->backend_capabilities = info.capabilities;
+    if (state->api.abi_minor >= 1U)
+    {
+        state->runtime_version = {
+            info.execution_runtime_major,
+            info.execution_runtime_minor,
+            info.execution_runtime_patch,
+        };
+    }
     if (state->backend_id.empty())
     {
         throw RuntimeError(RuntimeErrorCode::AbiMismatch,
@@ -290,6 +309,11 @@ std::uint64_t BackendPlugin::capabilities() const noexcept
     return state_->backend_capabilities;
 }
 
+const RuntimeVersion& BackendPlugin::execution_runtime_version() const noexcept
+{
+    return state_->runtime_version;
+}
+
 std::vector<BackendDevice> BackendPlugin::devices() const
 {
     std::uint64_t count = 0U;
@@ -305,11 +329,17 @@ std::vector<BackendDevice> BackendPlugin::devices() const
     {
         kf_device_info_v1 info {};
         info.struct_size = sizeof(info);
-        state_->check(state_->api.get_device_info(state_->backend, index, &info), "get_device_info");
+        state_->check(state_->api.get_device_info(state_->backend, index, &info),
+                      "get_device_info");
         BackendDevice device;
         device.id = copy_string(info.device_id);
         device.name = copy_string(info.device_name);
         device.capabilities = info.capabilities;
+        if (state_->api.abi_minor >= 1U)
+        {
+            device.compute_capability_major = info.compute_capability_major;
+            device.compute_capability_minor = info.compute_capability_minor;
+        }
         if (device.id.empty())
         {
             throw RuntimeError(RuntimeErrorCode::BackendFailure,
@@ -355,7 +385,8 @@ std::shared_ptr<ExecutableModel> BackendPlugin::load_model(const ModelLoadReques
 
     auto model_state = std::make_shared<ExecutableModel::State>();
     model_state->backend = state_;
-    state_->check(state_->api.load_model(state_->backend, &info, &model_state->model), "load_model");
+    state_->check(state_->api.load_model(state_->backend, &info, &model_state->model),
+                  "load_model");
     if (model_state->model == nullptr)
     {
         throw RuntimeError(RuntimeErrorCode::BackendFailure,
