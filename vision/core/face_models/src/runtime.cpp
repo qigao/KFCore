@@ -229,10 +229,25 @@ struct HostBuffer
                 runtime::MemoryKind::Host, {}};
     }
 
-    std::vector<float> floats() const
+    runtime::DynamicMutableTensorView dynamic_view()
     {
-        const std::size_t count = element_count(shape, descriptor.name.c_str());
+        return {descriptor.name, descriptor.data_type, data(), bytes,
+                runtime::MemoryKind::Host, {}, {}, 0U};
+    }
+
+    std::vector<float> floats(std::size_t count) const
+    {
+        const std::size_t required = checked_multiply(
+            count, element_size(descriptor.data_type), descriptor.name.c_str());
+        if (required > bytes)
+        {
+            throw_resource("requested output values exceed allocated capacity");
+        }
         std::vector<float> result(count);
+        if (count == 0U)
+        {
+            return result;
+        }
         if (descriptor.data_type == runtime::DataType::Float32)
         {
             std::memcpy(result.data(), data(), count * sizeof(float));
@@ -241,6 +256,11 @@ struct HostBuffer
         const auto* input = static_cast<const std::uint16_t*>(data());
         std::transform(input, input + count, result.begin(), half_to_float);
         return result;
+    }
+
+    std::vector<float> floats() const
+    {
+        return floats(element_count(shape, descriptor.name.c_str()));
     }
 };
 
@@ -330,14 +350,24 @@ struct FaceDetector::Impl final
             throw_contract("face detector output must have rank 3");
         }
         output.descriptor = outputs[0];
-        output.shape = outputs[0].shape;
+        if ((output.descriptor.shape[0] != -1 && output.descriptor.shape[0] != 1) ||
+            output.descriptor.shape[2] != 6)
+        {
+            throw_contract("face detector declared output must be [1,N,6]");
+        }
+        dynamic_output = output.descriptor.shape[1] == -1;
+        output.shape = output.descriptor.shape;
         if (output.shape[0] == -1) output.shape[0] = 1;
         if (output.shape[1] == -1)
             output.shape[1] = static_cast<std::int64_t>(options.max_detections);
-        if (output.shape[2] == -1) output.shape[2] = 6;
         if (output.shape[0] != 1 || output.shape[1] <= 0 || output.shape[2] != 6)
         {
             throw_contract("face detector output must resolve to [1,N,6]");
+        }
+        if (static_cast<std::uintmax_t>(output.shape[1]) >
+            static_cast<std::uintmax_t>(options.max_detections))
+        {
+            throw_resource("face detector output rows exceed max_detections");
         }
         output.allocate(options.max_output_bytes);
     }
@@ -349,6 +379,7 @@ struct FaceDetector::Impl final
     std::vector<runtime::TensorDescriptor> outputs;
     runtime::TensorShape input_shape;
     HostBuffer output;
+    bool dynamic_output = false;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
 
@@ -406,12 +437,45 @@ FaceDetectionsResult FaceDetector::infer_all(const image::ImageView& source)
         const runtime::TensorView input_view{
             impl_->inputs[0].name, impl_->inputs[0].data_type, impl_->input_shape,
             input.data, input.bytes, runtime::MemoryKind::Host, {}};
-        auto output_view = impl_->output.view();
+        std::size_t detection_count = static_cast<std::size_t>(impl_->output.shape[1]);
         const Clock::time_point inference_started = Clock::now();
-        impl_->context->run({input_view}, {output_view});
+        if (impl_->dynamic_output)
+        {
+            std::vector<runtime::DynamicMutableTensorView> dynamic_outputs{
+                impl_->output.dynamic_view()};
+            impl_->context->run_dynamic({input_view}, dynamic_outputs);
+            const auto& actual = dynamic_outputs.front();
+            if (actual.shape.size() != 3U || actual.shape[0] != 1 || actual.shape[1] < 0 ||
+                actual.shape[2] != 6)
+            {
+                throw_contract("face detector dynamic output must resolve to [1,N,6]");
+            }
+            if (static_cast<std::uintmax_t>(actual.shape[1]) >
+                static_cast<std::uintmax_t>(impl_->options.max_detections))
+            {
+                throw_resource("face detector dynamic output exceeds max_detections");
+            }
+            detection_count = static_cast<std::size_t>(actual.shape[1]);
+            const std::size_t actual_elements = checked_multiply(
+                detection_count, 6U, "face detector dynamic output");
+            const std::size_t expected_bytes = checked_multiply(
+                actual_elements, element_size(impl_->output.descriptor.data_type),
+                "face detector dynamic output");
+            if (actual.byte_size != expected_bytes)
+            {
+                throw_contract("face detector dynamic output byte count does not match shape");
+            }
+        }
+        else
+        {
+            auto output_view = impl_->output.view();
+            impl_->context->run({input_view}, {output_view});
+        }
         result.inference_ms = elapsed_ms(inference_started);
 
-        const std::vector<float> values = impl_->output.floats();
+        const std::size_t value_count = checked_multiply(
+            detection_count, 6U, "face detector output");
+        const std::vector<float> values = impl_->output.floats(value_count);
         result.faces = detail::decode_yolo12_faces(
             values.data(), values.size(), impl_->options.face_class_id,
             impl_->options.face_detection_score_threshold, letterbox,
