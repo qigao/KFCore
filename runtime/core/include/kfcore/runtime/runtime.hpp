@@ -1,0 +1,35 @@
+#pragma once
+
+#include "kfcore/runtime/plugin.hpp"
+
+#include <filesystem>
+#include <memory>
+#include <string_view>
+#include <vector>
+
+namespace kfcore::runtime
+{
+
+class Runtime final
+{
+public:
+    Runtime() = default;
+    Runtime(const Runtime&) = delete;
+    Runtime& operator=(const Runtime&) = delete;
+    Runtime(Runtime&&) noexcept = default;
+    Runtime& operator=(Runtime&&) noexcept = default;
+
+    [[nodiscard]] std::shared_ptr<BackendPlugin>
+    load_backend(const std::filesystem::path& explicit_path);
+
+    [[nodiscard]] std::shared_ptr<BackendPlugin> backend(std::string_view backend_id) const;
+    [[nodiscard]] std::vector<std::string> backend_ids() const;
+
+    [[nodiscard]] BackendRegistry& backends() noexcept;
+    [[nodiscard]] const BackendRegistry& backends() const noexcept;
+
+private:
+    BackendRegistry backends_;
+};
+
+} // namespace kfcore::runtime

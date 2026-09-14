@@ -27,7 +27,8 @@ cmake_config_target(kfcore_yolo_core
   FOLDER "vision/core/yolo")
 
 add_library(kfcore_yolo_runtime SHARED
-  src/runtime_detector.cpp)
+  src/runtime_detector.cpp
+  src/runtime_detector_facade.cpp)
 target_include_directories(kfcore_yolo_runtime
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -79,7 +80,7 @@ if(BUILD_EXAMPLES)
     KFCore::yolo_core
     KFCore::image_processor_cpu
     Salts::Capture)
-  if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
+  if(KFCORE_ENABLE_ONNXRUNTIME)
     target_link_libraries(yolov8_domain_demo PRIVATE KFCore::yolo_onnx)
   endif()
   if(KFCORE_ENABLE_TENSORRT)
@@ -88,7 +89,7 @@ if(BUILD_EXAMPLES)
   target_compile_definitions(yolov8_domain_demo PRIVATE
     KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
     KFCORE_DEMO_ENABLE_TENSORRT=$<BOOL:${KFCORE_ENABLE_TENSORRT}>
-    KFCORE_DEMO_ENABLE_ONNX_CPU=$<OR:$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>,$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>>)
+    KFCORE_DEMO_ENABLE_ONNX_CPU=$<BOOL:${KFCORE_ENABLE_ONNXRUNTIME}>)
   if(WIN32)
     target_link_libraries(yolov8_domain_demo PRIVATE user32 gdi32)
   endif()

@@ -2,9 +2,9 @@
 
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/resolver.hpp"
+#include "kfcore/runtime/runtime.hpp"
 #include "kfcore/yolo/types.hpp"
 
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -38,6 +38,12 @@ public:
     [[nodiscard]] static std::unique_ptr<YoloDetector> load(
         const runtime::ModelPackage& package,
         const runtime::BackendRegistry& backends,
+        const runtime::ExecutionPolicy& policy,
+        const YoloDetectorOptions& options = {});
+
+    [[nodiscard]] static std::unique_ptr<YoloDetector> load(
+        runtime::Runtime& runtime,
+        const runtime::ModelPackage& package,
         const runtime::ExecutionPolicy& policy,
         const YoloDetectorOptions& options = {});
 

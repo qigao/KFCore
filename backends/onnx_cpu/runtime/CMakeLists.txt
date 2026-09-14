@@ -10,16 +10,19 @@ if(WIN32)
   target_compile_definitions(kfcore_runtime_onnx PRIVATE
     "KFCORE_ONNX_RUNTIME_RELATIVE_PATH=\"${ONNXRuntime_RUNTIME_RELATIVE_PATH}\"")
 endif()
-if(KFCORE_ENABLE_ONNX_CUDA)
-  set(KFCORE_ONNX_CUDA_DEVICE_ID "0" CACHE STRING "ONNX CUDA device ordinal")
-  set(KFCORE_ONNX_CUDA_MEMORY_LIMIT "2147483648" CACHE STRING "ONNX CUDA arena limit per session in bytes")
+if(KFCORE_ONNXRUNTIME_ENABLE_CUDA)
+  set(KFCORE_ONNX_CUDA_DEVICE_ID "0" CACHE STRING
+      "CUDA device ordinal used only by the transitional direct ONNX Runtime wrapper")
+  set(KFCORE_ONNX_CUDA_MEMORY_LIMIT "2147483648" CACHE STRING
+      "CUDA arena limit used only by the transitional direct ONNX Runtime wrapper")
   if(NOT KFCORE_ONNX_CUDA_DEVICE_ID MATCHES "^(0|[1-9][0-9]*)$" OR
      NOT KFCORE_ONNX_CUDA_MEMORY_LIMIT MATCHES "^[1-9][0-9]*$")
-    message(FATAL_ERROR "ONNX CUDA device must be nonnegative and memory limit must be positive integers")
+    message(FATAL_ERROR
+      "ONNX Runtime CUDA device must be nonnegative and memory limit must be positive integers")
   endif()
   target_compile_definitions(kfcore_runtime_onnx PRIVATE
     KFCORE_ONNX_CUDA
-    KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNX_CUDA_ALLOW_CPU_NODES}>
+    KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES}>
     "KFCORE_ONNX_CUDA_DEVICE_ID=\"${KFCORE_ONNX_CUDA_DEVICE_ID}\""
     "KFCORE_ONNX_CUDA_MEMORY_LIMIT=\"${KFCORE_ONNX_CUDA_MEMORY_LIMIT}\"")
 endif()

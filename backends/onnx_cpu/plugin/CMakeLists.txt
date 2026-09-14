@@ -17,12 +17,11 @@ target_link_libraries(kfcore_backend_onnxruntime PRIVATE
   ${CMAKE_DL_LIBS})
 target_compile_definitions(kfcore_backend_onnxruntime PRIVATE
   "KFCORE_ONNX_RUNTIME_RELATIVE_PATH=\"${_kfcore_ort_runtime_relative}\"")
-if(KFCORE_ENABLE_ONNX_CUDA)
-  find_package(CUDAToolkit REQUIRED)
+if(KFCORE_ONNXRUNTIME_ENABLE_CUDA)
   target_link_libraries(kfcore_backend_onnxruntime PRIVATE CUDA::cudart)
   target_compile_definitions(kfcore_backend_onnxruntime PRIVATE
     KFCORE_ONNX_CUDA
-    KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNX_CUDA_ALLOW_CPU_NODES}>)
+    KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES}>)
 endif()
 set_target_properties(kfcore_backend_onnxruntime PROPERTIES
   CXX_STANDARD 17

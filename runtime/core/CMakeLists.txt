@@ -2,7 +2,8 @@ add_library(kfcore_runtime_core STATIC
   src/dynamic_library.cpp
   src/model_package.cpp
   src/plugin.cpp
-  src/resolver.cpp)
+  src/resolver.cpp
+  src/runtime.cpp)
 target_include_directories(kfcore_runtime_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
