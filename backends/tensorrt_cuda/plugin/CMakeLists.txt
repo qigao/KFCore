@@ -13,6 +13,10 @@ set_target_properties(kfcore_backend_tensorrt PROPERTIES
   CXX_EXTENSIONS OFF
   OUTPUT_NAME "kfcore_backend_tensorrt"
   FOLDER "backends/tensorrt_cuda/plugin")
+if(UNIX AND NOT APPLE)
+  set_target_properties(kfcore_backend_tensorrt PROPERTIES
+    INSTALL_RPATH "$ORIGIN")
+endif()
 cmake_config_target(kfcore_backend_tensorrt
   PLUGIN
   FOLDER "backends/tensorrt_cuda/plugin")
