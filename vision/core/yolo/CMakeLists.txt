@@ -1,4 +1,4 @@
-add_library(kfcore_yolo_core SHARED
+add_library(kfcore_yolo_core STATIC
   src/compact_nms.cpp
   src/efficient_nms.cpp
   src/raw_yolo.cpp
@@ -17,7 +17,6 @@ set_target_properties(kfcore_yolo_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/yolo")
 cmake_config_target(kfcore_yolo_core
   ALIAS KFCore::yolo_core
@@ -25,7 +24,7 @@ cmake_config_target(kfcore_yolo_core
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/yolo")
 
-add_library(kfcore_yolo_runtime SHARED
+add_library(kfcore_yolo_runtime STATIC
   src/runtime_detector.cpp
   src/runtime_detector_facade.cpp
   src/runtime_detector_image_view.cpp)
@@ -46,7 +45,6 @@ set_target_properties(kfcore_yolo_runtime PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/yolo")
 cmake_config_target(kfcore_yolo_runtime
   ALIAS KFCore::yolo_runtime
