@@ -1,7 +1,7 @@
 find_package(CUDAToolkit REQUIRED)
 find_package(TensorRT REQUIRED)
 
-add_library(kfcore_runtime_tensorrt SHARED
+add_library(kfcore_runtime_tensorrt STATIC
   src/cuda_buffer.cpp
   src/cuda_device.cpp
   src/engine.cpp
@@ -23,11 +23,10 @@ set_target_properties(kfcore_runtime_tensorrt PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  FOLDER "backends/tensorrt/runtime"
-  WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  FOLDER "backends/tensorrt/runtime")
 cmake_config_target(kfcore_runtime_tensorrt
   ALIAS KFCore::runtime_tensorrt
-  PLUGIN
+  NO_INSTALL
   FOLDER "backends/tensorrt/runtime")
 
 if(BUILD_TESTS)
