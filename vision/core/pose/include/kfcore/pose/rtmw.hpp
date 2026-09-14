@@ -12,10 +12,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kfcore::pose
 {
+
+inline constexpr std::string_view kRtmwModelType = "pose.rtmw";
 
 struct RtmwOptions
 {
