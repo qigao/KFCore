@@ -10,7 +10,7 @@ target_include_directories(kfcore_image_processor_cuda
 target_compile_features(kfcore_image_processor_cuda PUBLIC cxx_std_17)
 target_link_libraries(kfcore_image_processor_cuda
   PUBLIC KFCore::image_processor_core
-  PRIVATE CUDA::cudart)
+  PRIVATE CUDA::cudart_static)
 set_target_properties(kfcore_image_processor_cuda PROPERTIES
   CUDA_STANDARD 17
   CUDA_STANDARD_REQUIRED ON
