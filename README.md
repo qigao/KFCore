@@ -11,7 +11,7 @@ Supported execution components in this branch:
 - `kfcore_backend_tensorrt` — TensorRT execution on CUDA devices.
 - `kfcore_backend_onnxruntime` — ONNX Runtime execution with CPU and optional CUDA providers.
 
-CPU/CUDA are execution devices/providers, not separate model APIs. TensorRT engines are derived artifacts selected from a Model Package by exact TensorRT runtime version, target platform, and declared GPU hardware compatibility before deserialization.
+CPU/CUDA are execution devices/providers, not separate model APIs. TensorRT engines are derived artifacts selected from a Model Package using exact TensorRT runtime, platform, and declared hardware-compatibility metadata.
 
 See:
 
@@ -86,7 +86,7 @@ KFCORE_INSTALL_PLUGINDIR=plugins
 
 `CMakeUserPresets.json` defines the execution capabilities through reusable runtime capability presets.
 
-## Model packages
+## Model packages and runtime probe
 
 Use the `kfmodel` tool to inspect and validate model packages:
 
@@ -95,4 +95,18 @@ kfmodel inspect <model-package-directory>
 kfmodel validate <model-package-directory>
 ```
 
-TensorRT artifacts require source-model provenance, exact `major.minor.patch.build` TensorRT runtime version, target platform, declared GPU hardware compatibility, compute capability, and explicit precision metadata. V1 does not enable version-compatible TensorRT plans or lean-runtime host code.
+Use `probe` after build/install to exercise the actual runtime-loaded backend path through model resolution and execution-context creation:
+
+```text
+kfmodel probe <model-package-directory> <backend-plugin> <device-id>
+```
+
+For example:
+
+```text
+kfmodel probe C:\models\rtmw-l-384x288 <prefix>\plugins\kfcore_backend_tensorrt.dll cuda:0
+```
+
+A successful probe prints the selected route and tensor contract, then ends with `runtime probe ready: <model-id>`.
+
+TensorRT artifacts require ONNX source provenance, exact TensorRT `major.minor.patch.build`, target platform, hardware-compatibility metadata, CUDA compute capability, and explicit precision metadata. `same-compute-capability` is accepted only for TensorRT 10.9 or newer; TensorRT 8.6/Pascal packages use `exact-device`.
