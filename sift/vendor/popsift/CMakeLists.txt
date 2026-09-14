@@ -131,11 +131,11 @@ add_library(kfcore_popsift_internal STATIC
   src/popsift/common/device_prop.cu)
 
 target_include_directories(kfcore_popsift_internal PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/src"
-  "${_popsift_generated_dir}"
-  "${_popsift_generated_dir}/popsift")
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<BUILD_INTERFACE:${_popsift_generated_dir}>
+  $<BUILD_INTERFACE:${_popsift_generated_dir}/popsift>)
 target_link_libraries(kfcore_popsift_internal
-  PUBLIC CUDA::cudart_static Threads::Threads)
+  PRIVATE CUDA::cudart_static Threads::Threads)
 target_compile_features(kfcore_popsift_internal PUBLIC cxx_std_17)
 set_target_properties(kfcore_popsift_internal PROPERTIES
   CXX_STANDARD 17
@@ -147,6 +147,11 @@ set_target_properties(kfcore_popsift_internal PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
   CUDA_RESOLVE_DEVICE_SYMBOLS ON
   POSITION_INDEPENDENT_CODE ON
+  FOLDER "sift/internal")
+cmake_config_target(kfcore_popsift_internal
+  ALIAS KFCore::popsift_internal
+  EXPORT_NAME popsift_internal
+  EXPORT_SET KFCoreTargets
   FOLDER "sift/internal")
 if(MSVC)
   target_compile_options(kfcore_popsift_internal PRIVATE
