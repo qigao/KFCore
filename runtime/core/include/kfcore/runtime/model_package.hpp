@@ -23,7 +23,14 @@ struct ModelArtifact
 
     std::string source_artifact;
     std::string source_sha256;
-    std::uint32_t runtime_major = 0U;
+
+    // TensorRT deployment compatibility. V1 supports exact runtime plans only;
+    // version-compatible plans with embedded/externally loaded lean runtimes are
+    // intentionally outside the V1 trust model.
+    std::string runtime_version;
+    std::string platform;
+    std::string hardware_compatibility;
+    std::string device_name;
     std::string compute_capability;
     std::string precision;
     std::string profile;
