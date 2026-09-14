@@ -55,9 +55,8 @@ cmake_config_target(kfcore_yolo_runtime
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/yolo")
 
-find_package(Stb REQUIRED)
-
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLES AND KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
+  find_package(Stb REQUIRED)
   if(WIN32)
     set(_kfcore_yolo_domain_window_source
       examples/yolo_domain_window_win32.cpp)
