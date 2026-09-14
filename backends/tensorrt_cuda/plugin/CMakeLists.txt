@@ -4,6 +4,7 @@ target_compile_features(kfcore_backend_tensorrt PRIVATE cxx_std_17)
 target_link_libraries(kfcore_backend_tensorrt PRIVATE
   KFCore::runtime_abi
   KFCore::runtime_tensorrt
+  TensorRT::nvinfer
   CUDA::cudart)
 target_include_directories(kfcore_backend_tensorrt PRIVATE
   ${CMAKE_SOURCE_DIR}/runtime/abi/include)
