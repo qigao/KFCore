@@ -22,8 +22,9 @@ constexpr char kManifestSchema[] =
     "group Artifact { "
     "string id; string format; string path; optional string flavor; string sha256; "
     "string backend; string device; optional string source_artifact; optional string source_sha256; "
-    "optional uint32 runtime_major; optional string compute_capability; optional string precision; "
-    "optional string profile; } "
+    "optional string runtime_version; optional string platform; "
+    "optional string hardware_compatibility; optional string device_name; "
+    "optional string compute_capability; optional string precision; optional string profile; } "
     "message Package { string schema; string id; string version; string model_type; "
     "optional string variant; group<Artifact> artifacts; }";
 
@@ -127,22 +128,6 @@ std::string optional_string(const DataBindRecordView& view, const char* name,
     return value.data == nullptr ? std::string{} : std::string(value.data, value.length);
 }
 
-std::uint32_t optional_u32(const DataBindRecordView& view, const char* name,
-                           DataBindError& error)
-{
-    DataBindRecordField field = DATA_BIND_RECORD_FIELD_INIT;
-    if (data_bind_record_view_find_field(&view, name, &field, &error) != DATA_BIND_OK)
-    {
-        return 0U;
-    }
-    std::uint32_t value = 0U;
-    if (data_bind_record_field_get_u32(&field, &value, &error) != DATA_BIND_OK)
-    {
-        invalid_package(std::string("artifact field '") + name + "' must be uint32");
-    }
-    return value;
-}
-
 bool valid_sha256(std::string_view value)
 {
     if (value.size() != SALTS_CRYPTO_SHA256_DIGEST_SIZE * 2U)
@@ -179,6 +164,58 @@ bool valid_compute_capability(std::string_view value)
         }
     }
     return value.front() != '0';
+}
+
+bool valid_runtime_version(std::string_view value)
+{
+    std::size_t component = 0U;
+    std::size_t start = 0U;
+    while (start <= value.size())
+    {
+        const std::size_t end = value.find('.', start);
+        const std::size_t stop = end == std::string_view::npos ? value.size() : end;
+        if (stop == start || component >= 4U)
+        {
+            return false;
+        }
+        bool nonzero = false;
+        for (std::size_t index = start; index < stop; ++index)
+        {
+            const unsigned char c = static_cast<unsigned char>(value[index]);
+            if (!std::isdigit(c))
+            {
+                return false;
+            }
+            nonzero = nonzero || value[index] != '0';
+        }
+        if (component == 0U && !nonzero)
+        {
+            return false;
+        }
+        ++component;
+        if (end == std::string_view::npos)
+        {
+            break;
+        }
+        start = end + 1U;
+    }
+    return component == 4U;
+}
+
+bool valid_platform(std::string_view value)
+{
+    return value == "windows-x86_64" || value == "windows-aarch64" ||
+           value == "linux-x86_64" || value == "linux-aarch64";
+}
+
+bool valid_hardware_compatibility(std::string_view value)
+{
+    return value == "exact-device" || value == "same-compute-capability";
+}
+
+bool valid_yolo_flavor(std::string_view value)
+{
+    return value == "raw-yolo" || value == "compact-nms" || value == "efficient-nms";
 }
 
 bool cuda_device_constraint(std::string_view value)
@@ -299,10 +336,26 @@ void validate_artifact(const ModelArtifact& artifact)
             invalid_package("TensorRT artifact '" + artifact.id +
                             "' requires source_artifact and source_sha256 provenance");
         }
-        if (artifact.runtime_major == 0U)
+        if (!valid_runtime_version(artifact.runtime_version))
         {
             invalid_package("TensorRT artifact '" + artifact.id +
-                            "' requires runtime_major");
+                            "' requires runtime_version in major.minor.patch.build form");
+        }
+        if (!valid_platform(artifact.platform))
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires a supported platform identifier");
+        }
+        if (!valid_hardware_compatibility(artifact.hardware_compatibility))
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires hardware_compatibility='exact-device' or "
+                            "'same-compute-capability'");
+        }
+        if (artifact.hardware_compatibility == "exact-device" && artifact.device_name.empty())
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' with exact-device compatibility requires device_name");
         }
         if (!valid_compute_capability(artifact.compute_capability))
         {
@@ -388,11 +441,19 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
         artifact.device = required_string(view, "device", error);
         artifact.source_artifact = optional_string(view, "source_artifact", error);
         artifact.source_sha256 = optional_string(view, "source_sha256", error);
-        artifact.runtime_major = optional_u32(view, "runtime_major", error);
+        artifact.runtime_version = optional_string(view, "runtime_version", error);
+        artifact.platform = optional_string(view, "platform", error);
+        artifact.hardware_compatibility = optional_string(view, "hardware_compatibility", error);
+        artifact.device_name = optional_string(view, "device_name", error);
         artifact.compute_capability = optional_string(view, "compute_capability", error);
         artifact.precision = optional_string(view, "precision", error);
         artifact.profile = optional_string(view, "profile", error);
         validate_artifact(artifact);
+        if (result.model_type_ == "yolo-detection" && !valid_yolo_flavor(artifact.flavor))
+        {
+            invalid_package("YOLO artifact '" + artifact.id +
+                            "' requires flavor raw-yolo, compact-nms, or efficient-nms");
+        }
         (void)contained_path(result.root_, artifact.path);
 
         for (const ModelArtifact& existing : result.artifacts_)
