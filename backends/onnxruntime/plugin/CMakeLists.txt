@@ -18,7 +18,7 @@ target_link_libraries(kfcore_backend_onnxruntime PRIVATE
 target_compile_definitions(kfcore_backend_onnxruntime PRIVATE
   "KFCORE_ONNX_RUNTIME_RELATIVE_PATH=\"${_kfcore_ort_runtime_relative}\"")
 if(KFCORE_ONNXRUNTIME_ENABLE_CUDA)
-  target_link_libraries(kfcore_backend_onnxruntime PRIVATE CUDA::cudart)
+  target_link_libraries(kfcore_backend_onnxruntime PRIVATE CUDA::cudart_static)
   target_compile_definitions(kfcore_backend_onnxruntime PRIVATE
     KFCORE_ONNX_CUDA
     KFCORE_ONNX_CUDA_ALLOW_CPU_NODES=$<BOOL:${KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES}>)
