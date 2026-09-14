@@ -5,6 +5,18 @@ option(BUILD_TESTS "Build test cases" OFF)
 
 set(KFCORE_INSTALL_PLUGINDIR "plugins" CACHE STRING
     "Install directory, relative to CMAKE_INSTALL_PREFIX, for KFCore execution plugins")
+if(KFCORE_INSTALL_PLUGINDIR STREQUAL "" OR
+   IS_ABSOLUTE "${KFCORE_INSTALL_PLUGINDIR}")
+  message(FATAL_ERROR
+    "KFCORE_INSTALL_PLUGINDIR must be a non-empty path relative to CMAKE_INSTALL_PREFIX")
+endif()
+string(REPLACE "\\" "/" _kfcore_install_plugindir_normalized
+       "${KFCORE_INSTALL_PLUGINDIR}")
+if(_kfcore_install_plugindir_normalized MATCHES "(^|/)\\.\\.(/|$)")
+  message(FATAL_ERROR
+    "KFCORE_INSTALL_PLUGINDIR must stay within CMAKE_INSTALL_PREFIX")
+endif()
+unset(_kfcore_install_plugindir_normalized)
 
 option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" ON)
 option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" ON)

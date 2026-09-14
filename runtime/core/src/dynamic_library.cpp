@@ -26,10 +26,11 @@ std::filesystem::path canonical_library_path(const std::filesystem::path& path)
 
     std::error_code error;
     const std::filesystem::path canonical = std::filesystem::canonical(path, error);
-    if (error)
+    if (error || !std::filesystem::is_regular_file(canonical, error) || error)
     {
         throw RuntimeError(RuntimeErrorCode::FileIo,
-                           "runtime module path cannot be resolved: " + path.string());
+                           "runtime module path is not a canonical regular file: " +
+                               path.string());
     }
     return canonical;
 }
