@@ -18,6 +18,12 @@ std::vector<std::string> Runtime::backend_ids() const
     return backends_.backend_ids();
 }
 
+ResolvedModel Runtime::load_model(const ModelPackage& package,
+                                  const ExecutionPolicy& policy) const
+{
+    return ModelResolver::load(package, backends_, policy);
+}
+
 BackendRegistry& Runtime::backends() noexcept
 {
     return backends_;
