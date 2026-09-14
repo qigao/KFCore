@@ -104,6 +104,19 @@ To use another controlled install location, configure it explicitly:
 -DKFCORE_INSTALL_PLUGINDIR=lib/kfcore/plugins
 ```
 
+## Backend metadata
+
+Before authoring or checking a TensorRT Model Package, inspect the installed plugin directly:
+
+```powershell
+<prefix>\bin\kfmodel.exe backend `
+  <prefix>\plugins\kfcore_backend_tensorrt.dll
+```
+
+The command prints the backend ID/name, current platform, exact TensorRT `major.minor.patch.build`, and the available CUDA device IDs, names, and compute capabilities. Those values are the runtime-side facts used by the resolver; `hardware_compatibility` remains an assertion about how the engine itself was built.
+
+For ONNX Runtime the same command lists the provider-backed devices exposed by that plugin. Set `ONNXRUNTIME_ROOT` first because loading the plugin initializes its explicitly configured runtime library.
+
 ## Model package check
 
 Before running an application:
