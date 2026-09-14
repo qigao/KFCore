@@ -27,22 +27,6 @@ include(CMakeOptions.cmake)
 include(GNUInstallDirs)
 include(CmakeUtils)
 
-set(KFCORE_GENERATED_INCLUDE_DIR
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
-if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
-  set(KFCORE_TENSORRT_ENGINE_PROFILE
-      "rtx4060-sm89-trt11.2.1-default"
-      CACHE STRING "Legacy TensorRT engine profile directory under yolo-models/tensorrt")
-  if(NOT KFCORE_TENSORRT_ENGINE_PROFILE MATCHES "^[A-Za-z0-9._-]+$")
-    message(FATAL_ERROR
-      "KFCORE_TENSORRT_ENGINE_PROFILE must be one path segment")
-  endif()
-  configure_file(
-    cmake/model_configuration.hpp.in
-    "${KFCORE_GENERATED_INCLUDE_DIR}/kfcore/model_configuration.hpp"
-    @ONLY)
-endif()
-
 if(BUILD_TESTS)
   enable_testing()
 endif()
@@ -91,23 +75,10 @@ add_subdirectory(hand_interaction)
 if(KFCORE_ENABLE_TENSORRT)
   add_subdirectory(backends/tensorrt_cuda/runtime)
   add_subdirectory(backends/tensorrt_cuda/plugin)
-  if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
-    add_subdirectory(backends/tensorrt_cuda/yolo)
-    add_subdirectory(backends/tensorrt_cuda/face_models)
-    add_subdirectory(backends/tensorrt_cuda/hand_models)
-    add_subdirectory(applications/tensorrt_cuda)
-  endif()
 endif()
 
 if(KFCORE_ENABLE_ONNXRUNTIME)
-  add_subdirectory(backends/onnx_cpu/plugin)
-  if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
-    add_subdirectory(backends/onnx_cpu/runtime)
-    add_subdirectory(backends/onnx_cpu/yolo)
-    add_subdirectory(backends/onnx_cpu/face_models)
-    add_subdirectory(backends/onnx_cpu/hand_models)
-    add_subdirectory(applications/onnx_cpu)
-  endif()
+  add_subdirectory(backends/onnxruntime/plugin)
 endif()
 
 add_subdirectory(apriltag)
@@ -124,17 +95,6 @@ install(FILES kalman/navigation_tools/frame_transform.h
               kalman/navigation_tools/nav_fusion2d.h
               kalman/navigation_tools/nav_fusion3d.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore/navigation_tools")
-
-install(FILES cmake/FindOpenCVLite.cmake
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS AND KFCORE_ENABLE_TENSORRT)
-  install(FILES cmake/FindTensorRT.cmake
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-endif()
-if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS AND KFCORE_ENABLE_ONNXRUNTIME)
-  install(FILES cmake/FindONNXRuntime.cmake
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-endif()
 
 install(
   EXPORT KFCoreTargets
@@ -153,9 +113,3 @@ write_basic_package_version_file(
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/KFCoreConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KFCore")
-
-if(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
-  install(FILES
-          "${KFCORE_GENERATED_INCLUDE_DIR}/kfcore/model_configuration.hpp"
-          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
-endif()

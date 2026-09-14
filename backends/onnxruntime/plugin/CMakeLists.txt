@@ -28,7 +28,7 @@ set_target_properties(kfcore_backend_onnxruntime PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   OUTPUT_NAME "kfcore_backend_onnxruntime"
-  FOLDER "backends/onnx_cpu/plugin")
+  FOLDER "backends/onnxruntime/plugin")
 cmake_config_target(kfcore_backend_onnxruntime
   PLUGIN
-  FOLDER "backends/onnx_cpu/plugin")
+  FOLDER "backends/onnxruntime/plugin")

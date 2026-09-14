@@ -9,9 +9,6 @@ option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
 option(KFCORE_ONNXRUNTIME_ENABLE_CUDA
        "Expose CUDA devices from the ONNX Runtime backend when the installed ORT SDK provides CUDA EP"
        OFF)
-option(KFCORE_ENABLE_LEGACY_MODEL_BACKENDS
-       "Build deprecated runtime-specific model wrappers and applications"
-       OFF)
 
 if(KFCORE_ENABLE_TENSORRT AND NOT KFCORE_ENABLE_CUDA)
   message(FATAL_ERROR "TensorRT requires KFCORE_ENABLE_CUDA=ON")
