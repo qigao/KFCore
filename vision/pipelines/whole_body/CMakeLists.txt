@@ -1,4 +1,4 @@
-add_library(kfcore_whole_body_pipeline SHARED
+add_library(kfcore_whole_body_pipeline STATIC
   src/whole_body.cpp)
 target_include_directories(kfcore_whole_body_pipeline
   PUBLIC
@@ -14,7 +14,6 @@ set_target_properties(kfcore_whole_body_pipeline PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/pipelines/whole_body")
 cmake_config_target(kfcore_whole_body_pipeline
   ALIAS KFCore::whole_body_pipeline
