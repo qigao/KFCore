@@ -6,6 +6,7 @@
 #include <salts/crypto.h>
 
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -158,6 +159,33 @@ bool valid_sha256(std::string_view value)
     return true;
 }
 
+bool valid_compute_capability(std::string_view value)
+{
+    const std::size_t dot = value.find('.');
+    if (dot == std::string_view::npos || dot == 0U || dot + 1U >= value.size() ||
+        value.find('.', dot + 1U) != std::string_view::npos)
+    {
+        return false;
+    }
+    for (std::size_t i = 0U; i < value.size(); ++i)
+    {
+        if (i == dot)
+        {
+            continue;
+        }
+        if (!std::isdigit(static_cast<unsigned char>(value[i])))
+        {
+            return false;
+        }
+    }
+    return value.front() != '0';
+}
+
+bool cuda_device_constraint(std::string_view value)
+{
+    return value == "cuda" || value.rfind("cuda:", 0U) == 0U;
+}
+
 std::filesystem::path contained_path(const std::filesystem::path& root,
                                      const std::filesystem::path& relative)
 {
@@ -252,6 +280,40 @@ void validate_artifact(const ModelArtifact& artifact)
     if (!artifact.source_sha256.empty() && !valid_sha256(artifact.source_sha256))
     {
         invalid_package("artifact '" + artifact.id + "' has invalid source SHA-256");
+    }
+
+    if (artifact.format == "tensorrt-engine")
+    {
+        if (artifact.backend != "tensorrt")
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' must declare backend='tensorrt'");
+        }
+        if (!cuda_device_constraint(artifact.device))
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' must declare a CUDA device constraint");
+        }
+        if (artifact.source_artifact.empty() || artifact.source_sha256.empty())
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires source_artifact and source_sha256 provenance");
+        }
+        if (artifact.runtime_major == 0U)
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires runtime_major");
+        }
+        if (!valid_compute_capability(artifact.compute_capability))
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires compute_capability in major.minor form");
+        }
+        if (artifact.precision.empty())
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' requires precision metadata");
+        }
     }
 }
 
@@ -349,11 +411,20 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
         {
             continue;
         }
+        if (artifact.source_artifact == artifact.id)
+        {
+            invalid_package("artifact '" + artifact.id + "' cannot derive from itself");
+        }
         const ModelArtifact& source = result.artifact(artifact.source_artifact);
         if (artifact.source_sha256.empty() || artifact.source_sha256 != source.sha256)
         {
             invalid_package("artifact '" + artifact.id +
                             "' source_sha256 does not match its declared source artifact");
+        }
+        if (artifact.format == "tensorrt-engine" && source.format != "onnx")
+        {
+            invalid_package("TensorRT artifact '" + artifact.id +
+                            "' must derive from an ONNX source artifact");
         }
     }
     return result;
@@ -403,6 +474,7 @@ void verify_model_artifact(const ModelPackage& package, const ModelArtifact& art
     {
         const ModelArtifact& source = package.artifact(artifact.source_artifact);
         const auto source_path = package.artifact_path(source);
+        error.clear();
         if (source.sha256 != artifact.source_sha256 ||
             !std::filesystem::is_regular_file(source_path, error) || error ||
             sha256_file(source_path) != source.sha256)
