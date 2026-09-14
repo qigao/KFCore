@@ -2,6 +2,7 @@
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/runtime.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <string>
