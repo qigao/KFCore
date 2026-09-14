@@ -17,7 +17,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -27,7 +26,6 @@ namespace
 {
 
 using Clock = std::chrono::steady_clock;
-constexpr std::size_t kImageChannels = 3U;
 constexpr std::size_t kHandOutputWidth = kHandLandmarkCount * 3U;
 constexpr std::size_t kClassifierFeatureWidth = kHandLandmarkCount * 2U;
 
@@ -64,9 +62,7 @@ std::size_t checked_multiply(std::size_t left, std::size_t right,
                              const char* subject)
 {
     if (left != 0U && right > (std::numeric_limits<std::size_t>::max)() / left)
-    {
         throw_resource(std::string(subject) + " size overflow");
-    }
     return left * right;
 }
 
@@ -79,17 +75,13 @@ void validate_options(const HandRuntimeOptions& options)
         !std::isfinite(options.hand_score_threshold) ||
         options.palm_score_threshold < 0.0F || options.palm_score_threshold > 1.0F ||
         options.hand_score_threshold < 0.0F || options.hand_score_threshold > 1.0F)
-    {
         throw_invalid("options contain invalid limits or score thresholds");
-    }
 }
 
 void validate_host_image(const image::ImageView& image)
 {
     if (image.memory_kind != image::MemoryKind::Host)
-    {
         throw_invalid("v1 hand preprocessing accepts Host images only");
-    }
 }
 
 std::size_t element_size(runtime::DataType type)
@@ -155,9 +147,7 @@ std::size_t element_count(const runtime::TensorShape& shape, const char* subject
         if (dimension <= 0 ||
             static_cast<std::uintmax_t>(dimension) >
                 static_cast<std::uintmax_t>((std::numeric_limits<std::size_t>::max)()))
-        {
             throw_contract(std::string(subject) + " contains unresolved dimensions");
-        }
         result = checked_multiply(result, static_cast<std::size_t>(dimension), subject);
     }
     return result;
@@ -165,27 +155,24 @@ std::size_t element_count(const runtime::TensorShape& shape, const char* subject
 
 runtime::TensorShape resolve_image_input(const runtime::TensorDescriptor& descriptor,
                                          std::int32_t extent,
-                                         bool dynamic_batch,
+                                         bool allow_dynamic_batch,
                                          const char* subject)
 {
     if (descriptor.shape.size() != 4U)
         throw_contract(std::string(subject) + " input must be NCHW rank 4");
     runtime::TensorShape shape = descriptor.shape;
-    if (shape[0] == -1) shape[0] = dynamic_batch ? -1 : 1;
+    if (shape[0] == -1)
+        shape[0] = allow_dynamic_batch ? -1 : 1;
     if (shape[1] == -1) shape[1] = 3;
     if (shape[2] == -1) shape[2] = extent;
     if (shape[3] == -1) shape[3] = extent;
-    if ((!dynamic_batch && shape[0] != 1) ||
-        (dynamic_batch && shape[0] != -1 && shape[0] <= 0) ||
+    if ((!allow_dynamic_batch && shape[0] != 1) ||
+        (allow_dynamic_batch && shape[0] != -1 && shape[0] != 1) ||
         shape[1] != 3 || shape[2] != extent || shape[3] != extent)
-    {
         throw_contract(std::string(subject) + " image input has incompatible shape");
-    }
     if (descriptor.data_type != runtime::DataType::Float32 &&
         descriptor.data_type != runtime::DataType::Float16)
-    {
         throw_contract(std::string(subject) + " input must use FP32 or FP16");
-    }
     return shape;
 }
 
@@ -228,8 +215,9 @@ struct HostBuffer
         const std::size_t required = checked_multiply(
             element_count(shape, descriptor.name.c_str()), element_size(descriptor.data_type),
             descriptor.name.c_str());
-        if (required > capacity_bytes) throw_resource("runtime output exceeds allocated capacity");
-        return {descriptor.name, descriptor.data_type, shape, data(), capacity_bytes,
+        if (required > capacity_bytes)
+            throw_resource("runtime output exceeds allocated capacity");
+        return {descriptor.name, descriptor.data_type, shape, data(), required,
                 runtime::MemoryKind::Host, {}};
     }
 
@@ -240,9 +228,7 @@ struct HostBuffer
             throw_contract("requested floating values from non-floating tensor");
         std::vector<float> result(count);
         if (descriptor.data_type == runtime::DataType::Float32)
-        {
             std::memcpy(result.data(), data(), count * sizeof(float));
-        }
         else
         {
             const auto* input = static_cast<const std::uint16_t*>(data());
@@ -289,10 +275,9 @@ PreparedInput prepare_input(std::vector<float> values, runtime::DataType type,
         result.data = result.fp16.data();
     }
     else
-    {
         throw_contract("hand model input must use FP32 or FP16");
-    }
-    if (result.bytes > max_bytes) throw_resource("input tensor exceeds max_tensor_bytes");
+    if (result.bytes > max_bytes)
+        throw_resource("input tensor exceeds max_tensor_bytes");
     return result;
 }
 
@@ -325,10 +310,12 @@ const runtime::TensorDescriptor& one_input(
     for (const auto& tensor : tensors)
     {
         if (!tensor.is_input) continue;
-        if (result != nullptr) throw_contract(std::string(subject) + " requires one input");
+        if (result != nullptr)
+            throw_contract(std::string(subject) + " requires one input");
         result = &tensor;
     }
-    if (result == nullptr) throw_contract(std::string(subject) + " has no input");
+    if (result == nullptr)
+        throw_contract(std::string(subject) + " has no input");
     return *result;
 }
 
@@ -336,15 +323,16 @@ std::vector<runtime::TensorDescriptor> outputs(
     const std::vector<runtime::TensorDescriptor>& tensors)
 {
     std::vector<runtime::TensorDescriptor> result;
-    for (const auto& tensor : tensors) if (!tensor.is_input) result.push_back(tensor);
+    for (const auto& tensor : tensors)
+        if (!tensor.is_input) result.push_back(tensor);
     return result;
 }
 
 std::string lower(std::string value)
 {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    for (char& c : value)
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
     return value;
 }
 
@@ -381,8 +369,10 @@ struct HandBackend::Impl final
             palm_output.descriptor.data_type != runtime::DataType::Float16)
             throw_contract("palm output must use FP32 or FP16");
         std::size_t rows = options.max_palm_candidates;
-        if (out[0].shape[0] > 0) rows = static_cast<std::size_t>(out[0].shape[0]);
-        if (out[0].shape[1] != -1 && out[0].shape[1] != static_cast<std::int64_t>(kPalmRowWidth))
+        if (out[0].shape[0] > 0)
+            rows = static_cast<std::size_t>(out[0].shape[0]);
+        if (out[0].shape[1] != -1 &&
+            out[0].shape[1] != static_cast<std::int64_t>(kPalmRowWidth))
             throw_contract("palm output width must be 8");
         palm_output.allocate(checked_multiply(rows, kPalmRowWidth, "palm output"),
                              options.max_output_bytes);
@@ -396,17 +386,18 @@ struct HandBackend::Impl final
         landmark_input_shape = resolve_image_input(
             landmark_input, kHandLandmarkInputExtent, true, "hand landmarker");
         const auto out = outputs(tensors);
-        if (out.size() != 3U) throw_contract("hand landmarker requires three outputs");
+        if (out.size() != 3U)
+            throw_contract("hand landmarker requires three outputs");
         for (const auto& descriptor : out)
         {
             const std::string name = lower(descriptor.name);
-            if (descriptor.shape.size() != 2U) throw_contract("hand landmark outputs must have rank 2");
+            if (descriptor.shape.size() != 2U)
+                throw_contract("hand landmark outputs must have rank 2");
             const std::int64_t width = descriptor.shape[1];
             if ((width == -1 || width == static_cast<std::int64_t>(kHandOutputWidth)) &&
-                (name.find("xyz") != std::string::npos || name.find("landmark") != std::string::npos))
-            {
+                (name.find("xyz") != std::string::npos ||
+                 name.find("landmark") != std::string::npos))
                 landmark_xyz.descriptor = descriptor;
-            }
             else if (width == -1 || width == 1)
             {
                 if (name.find("score") != std::string::npos)
@@ -417,7 +408,8 @@ struct HandBackend::Impl final
                     handedness.descriptor = descriptor;
             }
         }
-        if (landmark_xyz.descriptor.name.empty() || landmark_score.descriptor.name.empty() ||
+        if (landmark_xyz.descriptor.name.empty() ||
+            landmark_score.descriptor.name.empty() ||
             handedness.descriptor.name.empty())
             throw_contract("cannot identify landmark, score, and handedness outputs");
         for (auto* buffer : {&landmark_xyz, &landmark_score, &handedness})
@@ -426,11 +418,9 @@ struct HandBackend::Impl final
                 buffer->descriptor.data_type != runtime::DataType::Float16)
                 throw_contract("hand landmark outputs must use FP32 or FP16");
         }
-        landmark_xyz.allocate(checked_multiply(options.max_hands, kHandOutputWidth,
-                                               "landmark output"),
-                              options.max_output_bytes);
-        landmark_score.allocate(options.max_hands, options.max_output_bytes);
-        handedness.allocate(options.max_hands, options.max_output_bytes);
+        landmark_xyz.allocate(kHandOutputWidth, options.max_output_bytes);
+        landmark_score.allocate(1U, options.max_output_bytes);
+        handedness.allocate(1U, options.max_output_bytes);
     }
 
     void configure_classifier()
@@ -505,7 +495,8 @@ std::unique_ptr<HandBackend> HandBackend::load(
 
 HandFrame HandBackend::infer(const image::ImageView& source)
 {
-    if (!impl_) throw_invalid("hand backend state is unavailable");
+    if (!impl_)
+        throw_invalid("hand backend state is unavailable");
     UseGuard guard(impl_->in_use);
     validate_host_image(source);
     try
@@ -547,82 +538,72 @@ HandFrame HandBackend::infer(const image::ImageView& source)
             return result;
         }
 
-        const Clock::time_point landmark_preprocess_started = Clock::now();
         const image::BgrImage packed = image::CpuImageProcessor::copy_bgr(
             source, impl_->options.max_source_bytes);
-        const std::size_t one_hand_elements = kImageChannels *
-            static_cast<std::size_t>(kHandLandmarkInputExtent) *
-            static_cast<std::size_t>(kHandLandmarkInputExtent);
-        std::vector<float> hand_batch;
-        hand_batch.reserve(checked_multiply(palms.size(), one_hand_elements, "hand batch"));
+        std::vector<std::array<float, kClassifierFeatureWidth>> classifier_features;
+        classifier_features.reserve(palms.size());
+        result.hands.reserve(palms.size());
+
         for (const PalmDetection& palm : palms)
         {
+            const Clock::time_point preprocess_started = Clock::now();
             const image::AffineTransform transform = detail::hand_roi_transform(
                 palm.roi, kHandLandmarkInputExtent);
             const image::BgrImage crop = image::CpuImageProcessor::warp_affine_bgr(
                 packed, kHandLandmarkInputExtent, kHandLandmarkInputExtent,
                 transform, 0.0F, impl_->options.max_source_bytes);
-            std::vector<float> tensor = image::CpuImageProcessor::to_nchw(
-                crop, rgb_unit_options(), impl_->options.max_tensor_bytes);
-            hand_batch.insert(hand_batch.end(), tensor.begin(), tensor.end());
-        }
-        PreparedInput landmark_input = prepare_input(
-            std::move(hand_batch), impl_->landmark_input.data_type,
-            impl_->options.max_tensor_bytes);
-        result.timings.preprocess_ms += elapsed_ms(landmark_preprocess_started);
+            PreparedInput landmark_input = prepare_input(
+                image::CpuImageProcessor::to_nchw(
+                    crop, rgb_unit_options(), impl_->options.max_tensor_bytes),
+                impl_->landmark_input.data_type, impl_->options.max_tensor_bytes);
+            result.timings.preprocess_ms += elapsed_ms(preprocess_started);
 
-        const std::size_t hand_count = palms.size();
-        runtime::TensorShape landmark_input_shape = impl_->landmark_input_shape;
-        if (landmark_input_shape[0] == -1)
-            landmark_input_shape[0] = static_cast<std::int64_t>(hand_count);
-        if (landmark_input_shape[0] != static_cast<std::int64_t>(hand_count))
-            throw_contract("hand landmarker static batch does not match detected hands");
-        const runtime::TensorView landmark_input_view{
-            impl_->landmark_input.name, impl_->landmark_input.data_type,
-            landmark_input_shape, landmark_input.data, landmark_input.bytes,
-            runtime::MemoryKind::Host, {}};
-        const auto xyz_shape = batch_shape(impl_->landmark_xyz.descriptor, hand_count,
-                                           static_cast<std::int64_t>(kHandOutputWidth),
-                                           "hand landmarks");
-        const auto score_shape = batch_shape(impl_->landmark_score.descriptor, hand_count, 1,
-                                             "hand score");
-        const auto handed_shape = batch_shape(impl_->handedness.descriptor, hand_count, 1,
-                                              "handedness");
-        auto xyz_view = impl_->landmark_xyz.view(xyz_shape);
-        auto score_view = impl_->landmark_score.view(score_shape);
-        auto handed_view = impl_->handedness.view(handed_shape);
-        const Clock::time_point landmark_inference_started = Clock::now();
-        impl_->landmark_context->run({landmark_input_view},
-                                     {xyz_view, score_view, handed_view});
-        result.timings.landmark_inference_ms = elapsed_ms(landmark_inference_started);
-        const std::vector<float> xyz_values = impl_->landmark_xyz.floats(
-            hand_count * kHandOutputWidth);
-        const std::vector<float> score_values = impl_->landmark_score.floats(hand_count);
-        const std::vector<float> handed_values = impl_->handedness.floats(hand_count);
+            runtime::TensorShape landmark_input_shape = impl_->landmark_input_shape;
+            if (landmark_input_shape[0] == -1) landmark_input_shape[0] = 1;
+            if (landmark_input_shape[0] != 1)
+                throw_contract("hand landmarker must accept batch size 1 in runtime v1");
+            const runtime::TensorView landmark_input_view{
+                impl_->landmark_input.name, impl_->landmark_input.data_type,
+                landmark_input_shape, landmark_input.data, landmark_input.bytes,
+                runtime::MemoryKind::Host, {}};
+            const auto xyz_shape = batch_shape(impl_->landmark_xyz.descriptor, 1U,
+                                               static_cast<std::int64_t>(kHandOutputWidth),
+                                               "hand landmarks");
+            const auto score_shape = batch_shape(impl_->landmark_score.descriptor, 1U, 1,
+                                                 "hand score");
+            const auto handed_shape = batch_shape(impl_->handedness.descriptor, 1U, 1,
+                                                  "handedness");
+            auto xyz_view = impl_->landmark_xyz.view(xyz_shape);
+            auto score_view = impl_->landmark_score.view(score_shape);
+            auto handed_view = impl_->handedness.view(handed_shape);
+            const Clock::time_point inference_started = Clock::now();
+            impl_->landmark_context->run({landmark_input_view},
+                                         {xyz_view, score_view, handed_view});
+            result.timings.landmark_inference_ms += elapsed_ms(inference_started);
 
-        std::vector<std::array<float, kClassifierFeatureWidth>> classifier_features;
-        classifier_features.reserve(hand_count);
-        result.hands.reserve(hand_count);
-        const Clock::time_point classifier_preprocess_started = Clock::now();
-        for (std::size_t index = 0U; index < hand_count; ++index)
-        {
-            const float score = score_values[index];
-            if (!std::isfinite(score)) throw_contract("hand landmark score is non-finite");
-            if (score < impl_->options.hand_score_threshold) continue;
+            const std::vector<float> xyz_values = impl_->landmark_xyz.floats(kHandOutputWidth);
+            const std::vector<float> score_values = impl_->landmark_score.floats(1U);
+            const std::vector<float> handed_values = impl_->handedness.floats(1U);
+            const float score = score_values[0];
+            if (!std::isfinite(score))
+                throw_contract("hand landmark score is non-finite");
+            if (score < impl_->options.hand_score_threshold)
+                continue;
+
             HandResult hand_result;
-            hand_result.palm = palms[index];
+            hand_result.palm = palm;
             hand_result.landmark_confidence = score;
-            hand_result.handedness = detail::decode_handedness(handed_values[index]);
+            hand_result.handedness = detail::decode_handedness(handed_values[0]);
             hand_result.landmarks = detail::decode_hand_landmarks(
-                xyz_values.data() + index * kHandOutputWidth,
-                kHandOutputWidth, palms[index].roi, kHandLandmarkInputExtent);
+                xyz_values.data(), xyz_values.size(), palm.roi,
+                kHandLandmarkInputExtent);
             classifier_features.push_back(detail::make_keypoint_features(hand_result.landmarks));
             result.hands.push_back(std::move(hand_result));
         }
-        result.timings.preprocess_ms += elapsed_ms(classifier_preprocess_started);
 
         if (!result.hands.empty())
         {
+            const Clock::time_point classifier_preprocess_started = Clock::now();
             std::vector<float> classifier_values;
             classifier_values.reserve(result.hands.size() * kClassifierFeatureWidth);
             for (const auto& feature : classifier_features)
@@ -630,6 +611,8 @@ HandFrame HandBackend::infer(const image::ImageView& source)
             PreparedInput classifier_input = prepare_input(
                 std::move(classifier_values), impl_->classifier_input.data_type,
                 impl_->options.max_tensor_bytes);
+            result.timings.preprocess_ms += elapsed_ms(classifier_preprocess_started);
+
             runtime::TensorShape classifier_input_shape = impl_->classifier_input.shape;
             if (classifier_input_shape[0] == -1)
                 classifier_input_shape[0] = static_cast<std::int64_t>(result.hands.size());
