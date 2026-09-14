@@ -36,6 +36,23 @@ bool backend_has_device(const BackendPlugin& backend, std::string_view device_id
     });
 }
 
+std::shared_ptr<BackendPlugin> find_policy_backend(const BackendRegistry& registry,
+                                                   std::string_view backend_id)
+{
+    try
+    {
+        return registry.find(backend_id);
+    }
+    catch (const RuntimeError& error)
+    {
+        if (error.code() == RuntimeErrorCode::NotFound)
+        {
+            return {};
+        }
+        throw;
+    }
+}
+
 std::string describe_policy(const ExecutionPolicy& policy)
 {
     std::ostringstream stream;
@@ -93,7 +110,7 @@ ResolvedModel ModelResolver::load(const ModelPackage& package,
 {
     for (const auto& preference : policy.preferences())
     {
-        auto backend = registry.find(preference.backend_id);
+        auto backend = find_policy_backend(registry, preference.backend_id);
         if (!backend || !backend_has_device(*backend, preference.device_id))
         {
             continue;
