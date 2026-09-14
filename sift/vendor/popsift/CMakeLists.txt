@@ -135,7 +135,7 @@ target_include_directories(kfcore_popsift_internal PUBLIC
   "${_popsift_generated_dir}"
   "${_popsift_generated_dir}/popsift")
 target_link_libraries(kfcore_popsift_internal
-  PUBLIC CUDA::cudart Threads::Threads)
+  PUBLIC CUDA::cudart_static Threads::Threads)
 target_compile_features(kfcore_popsift_internal PUBLIC cxx_std_17)
 set_target_properties(kfcore_popsift_internal PROPERTIES
   CXX_STANDARD 17
