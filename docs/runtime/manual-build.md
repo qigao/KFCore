@@ -1,8 +1,29 @@
 # Manual build of the backend-neutral runtime
 
-KFCore builds only the backend-neutral runtime architecture. Execution SDKs are runtime-loaded backend plugins; typed model APIs do not link to ONNX Runtime or TensorRT directly.
+KFCore builds the backend-neutral runtime architecture with a static SDK and runtime-loaded execution plugins. Model, vision, preprocessing, tracking, runtime-core, and pipeline targets are static archives; only backend plugin boundaries are shared libraries.
 
-Runtime plugins install to `${CMAKE_INSTALL_PREFIX}/${KFCORE_INSTALL_PLUGINDIR}`. `KFCORE_INSTALL_PLUGINDIR` defaults to `plugins`, so a normal install places all execution plugins and plugin-internal runtime libraries together under `<prefix>/plugins`.
+Static libraries install under `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}`. Runtime plugins install to `${CMAKE_INSTALL_PREFIX}/${KFCORE_INSTALL_PLUGINDIR}`. `KFCORE_INSTALL_PLUGINDIR` defaults to `plugins`.
+
+## Static SDK layout
+
+The normal KFCore targets are static, including:
+
+- `KFCore::kfcore`
+- `KFCore::trackers`
+- `KFCore::runtime_core`
+- `KFCore::image_processor_core`
+- `KFCore::image_processor_cpu`
+- `KFCore::image_processor_cuda` when CUDA compute support is enabled
+- `KFCore::sift` and `KFCore::sift_popsift`
+- `KFCore::yolo_core` and `KFCore::yolo_runtime`
+- `KFCore::pose_core`
+- `KFCore::face_model_core` and `KFCore::face_model_runtime`
+- `KFCore::hand_model_core` and `KFCore::hand_model_runtime`
+- `KFCore::whole_body_pipeline`
+
+Internal archives such as miniblas and PopSift are also installed/exported only to close static-link dependencies; they are named as internal CMake targets and are not public API surfaces.
+
+A CUDA-enabled static SDK needs `CUDAToolkit` available when a downstream CMake project consumes CUDA-backed KFCore targets. TensorRT and ONNX Runtime themselves remain runtime plugin dependencies and are not part of the normal KFCore consumer link interface.
 
 ## TensorRT runtime plugin
 
@@ -17,20 +38,21 @@ cmake --build build
 cmake --install build
 ```
 
-The important deployment DLLs on Windows are:
+The important KFCore/TensorRT deployment DLLs on Windows are:
 
 ```text
 plugins/kfcore_backend_tensorrt.dll
-plugins/kfcore_runtime_tensorrt.dll
 plugins/nvinfer_<major>.dll
 plugins/nvinfer_plugin_<major>.dll
 ```
 
-TensorRT 8.6 packages that use unversioned DLL names are supported as well. During a Windows build KFCore copies the validated `nvinfer` and `nvinfer_plugin` runtime DLLs from the configured `TENSORRT_ROOT` beside `kfcore_backend_tensorrt.dll`; `cmake --install` installs the same files into the controlled plugin directory. KFCore CUDA targets link `CUDA::cudart_static`, so the KFCore DLLs themselves do not rely on `cudart` being found through `PATH`.
+There is no separate `kfcore_runtime_tensorrt.dll`; the KFCore TensorRT runtime implementation is statically linked into `kfcore_backend_tensorrt.dll`.
+
+TensorRT 8.6 packages that use unversioned DLL names are supported as well. During a Windows build KFCore copies the validated `nvinfer` and `nvinfer_plugin` runtime DLLs from the configured `TENSORRT_ROOT` beside `kfcore_backend_tensorrt.dll`; `cmake --install` installs the same files into the controlled plugin directory. KFCore CUDA code links `CUDA::cudart_static`, so KFCore DLLs themselves do not rely on `cudart` being found through `PATH`.
 
 KFCore V1 uses the standard/full TensorRT runtime for ordinary prebuilt engines. Lean/dispatch runtimes are intentionally not deployed because they correspond to TensorRT version-compatible engines, which are outside the Model Package V1 trust model. A TensorRT engine that uses optional external CUDA, cuBLAS, cuDNN, or custom-plugin dependencies must still deploy those dependencies according to that engine's build contract; KFCore does not weaken its DLL search policy to discover them from the process current directory or an arbitrary system path.
 
-On Linux the TensorRT backend plugin has an `$ORIGIN` install rpath so the internal KFCore TensorRT runtime library can live beside it. System/package TensorRT and CUDA shared-library deployment remains the platform package manager/runtime-linker responsibility.
+On Linux the backend plugin remains the only KFCore shared execution boundary. TensorRT/CUDA shared-library deployment remains the platform package manager/runtime-linker responsibility.
 
 ## ONNX Runtime CPU plugin
 
