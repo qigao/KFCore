@@ -9,15 +9,20 @@ set(KFCore_ONNXRUNTIME_CUDA_ENABLED @KFCORE_ONNXRUNTIME_ENABLE_CUDA@)
 set(KFCore_ONNXRUNTIME_CPU_NODES_ALLOWED @KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES@)
 set(KFCore_PLUGIN_DIR "${PACKAGE_PREFIX_DIR}/@KFCORE_INSTALL_PLUGINDIR@")
 
+find_dependency(Threads REQUIRED)
 find_dependency(Salts CONFIG REQUIRED
   PATHS "$ENV{SALTS_ROOT}"
   NO_DEFAULT_PATH)
 find_dependency(SaltsUtils CONFIG REQUIRED
   PATHS "$ENV{SALTS_UTILS_ROOT}"
   NO_DEFAULT_PATH)
+if(KFCore_CUDA_ENABLED)
+  find_dependency(CUDAToolkit REQUIRED)
+endif()
 
-# Execution backends are runtime-loaded deployment plugins and deliberately do
-# not expose TensorRT, ONNX Runtime, or CUDA SDK link dependencies to consumers.
+# TensorRT and ONNX Runtime remain runtime-loaded plugin dependencies and are
+# deliberately absent from the consumer link interface. CUDA is only a link
+# dependency for the optional statically linked KFCore CUDA compute targets.
 include("${CMAKE_CURRENT_LIST_DIR}/KFCoreTargets.cmake")
 
 find_dependency(trackers CONFIG
