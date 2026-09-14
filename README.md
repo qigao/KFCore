@@ -64,6 +64,8 @@ auto pipeline = kfcore::pipelines::WholeBodyPipeline::create(
     std::move(detector), std::move(pose));
 ```
 
+YOLO packages use only the canonical `model_type="yolo-detection"`. Every YOLO artifact explicitly declares one of the V1 semantic flavors `raw-yolo`, `compact-nms`, or `efficient-nms`; decoder flavor is never inferred from the selected backend. Dynamic compact-NMS `[1,-1,6]` output uses plugin ABI v1.2 and preserves the actual detection count, including the valid `N=0` case.
+
 ## Build switches
 
 The execution-capability switches are:
