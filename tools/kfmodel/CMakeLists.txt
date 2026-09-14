@@ -6,4 +6,5 @@ set_target_properties(kfmodel PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   FOLDER "tools/kfmodel")
-cmake_config_target(kfmodel FOLDER "tools/kfmodel")
+install(TARGETS kfmodel
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
