@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kfcore/image_processor/types.hpp"
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/resolver.hpp"
 #include "kfcore/runtime/runtime.hpp"
@@ -49,6 +50,7 @@ public:
         const YoloDetectorOptions& options = {});
 
     [[nodiscard]] DetectionFrame detect(const ImageView& image);
+    [[nodiscard]] DetectionFrame detect(const image::ImageView& image);
 
     [[nodiscard]] std::int32_t input_width() const noexcept;
     [[nodiscard]] std::int32_t input_height() const noexcept;

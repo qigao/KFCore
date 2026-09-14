@@ -28,7 +28,8 @@ cmake_config_target(kfcore_yolo_core
 
 add_library(kfcore_yolo_runtime SHARED
   src/runtime_detector.cpp
-  src/runtime_detector_facade.cpp)
+  src/runtime_detector_facade.cpp
+  src/runtime_detector_image_view.cpp)
 target_include_directories(kfcore_yolo_runtime
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
