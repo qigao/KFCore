@@ -158,6 +158,6 @@ if(MSVC)
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>)
 endif()
 if(BUILD_TESTS)
-  target_compile_definitions(kfcore_popsift_internal PUBLIC
+  target_compile_definitions(kfcore_popsift_internal PRIVATE
     KFCORE_POPSIFT_TESTING=1)
 endif()
