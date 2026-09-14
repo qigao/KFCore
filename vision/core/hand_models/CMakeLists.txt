@@ -1,4 +1,4 @@
-add_library(kfcore_hand_model_core SHARED
+add_library(kfcore_hand_model_core STATIC
   src/decode.cpp
   src/error.cpp
   src/geometry.cpp
@@ -18,7 +18,6 @@ set_target_properties(kfcore_hand_model_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/hand_models")
 cmake_config_target(kfcore_hand_model_core
   ALIAS KFCore::hand_model_core
@@ -26,7 +25,7 @@ cmake_config_target(kfcore_hand_model_core
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/hand_models")
 
-add_library(kfcore_hand_model_runtime SHARED
+add_library(kfcore_hand_model_runtime STATIC
   src/runtime.cpp)
 target_include_directories(kfcore_hand_model_runtime
   PUBLIC
@@ -45,7 +44,6 @@ set_target_properties(kfcore_hand_model_runtime PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
   FOLDER "vision/core/hand_models")
 cmake_config_target(kfcore_hand_model_runtime
   ALIAS KFCore::hand_model_runtime
