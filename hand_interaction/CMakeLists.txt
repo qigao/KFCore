@@ -26,8 +26,7 @@ cmake_config_target(kfcore_hand_interaction
   EXPORT_SET KFCoreTargets
   FOLDER "vision/interaction/hand")
 
-if(BUILD_EXAMPLES)
- 
+if(BUILD_EXAMPLES AND KFCORE_ENABLE_LEGACY_MODEL_BACKENDS)
   find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
 
   add_executable(hand_interaction_demo
@@ -46,19 +45,19 @@ if(BUILD_EXAMPLES)
     OpenCVLite::highgui
     Salts::Capture
     Salts::Core)
-  if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
+  if(KFCORE_ENABLE_ONNXRUNTIME)
     target_link_libraries(hand_interaction_demo PRIVATE
       KFCore::hand_models_cpu
       KFCore::face_models_cpu)
   endif()
-  if(KFCORE_ENABLE_CUDA)
+  if(KFCORE_ENABLE_TENSORRT)
     target_link_libraries(hand_interaction_demo PRIVATE
       KFCore::hand_models_cuda
       KFCore::face_models_cuda)
   endif()
   target_compile_definitions(hand_interaction_demo PRIVATE
-    KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
-    KFCORE_DEMO_ENABLE_ONNX_CPU=$<OR:$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>,$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>>)
+    KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_TENSORRT}>
+    KFCORE_DEMO_ENABLE_ONNX_CPU=$<BOOL:${KFCORE_ENABLE_ONNXRUNTIME}>)
   set_target_properties(hand_interaction_demo PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   cmake_config_target(hand_interaction_demo
