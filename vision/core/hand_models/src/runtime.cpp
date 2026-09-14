@@ -221,12 +221,20 @@ struct HostBuffer
                 runtime::MemoryKind::Host, {}};
     }
 
+    runtime::DynamicMutableTensorView dynamic_view()
+    {
+        return {descriptor.name, descriptor.data_type, data(), capacity_bytes,
+                runtime::MemoryKind::Host, {}, {}, 0U};
+    }
+
     std::vector<float> floats(std::size_t count) const
     {
         if (descriptor.data_type != runtime::DataType::Float32 &&
             descriptor.data_type != runtime::DataType::Float16)
             throw_contract("requested floating values from non-floating tensor");
         std::vector<float> result(count);
+        if (count == 0U)
+            return result;
         if (descriptor.data_type == runtime::DataType::Float32)
             std::memcpy(result.data(), data(), count * sizeof(float));
         else
@@ -368,12 +376,15 @@ struct HandBackend::Impl final
         if (palm_output.descriptor.data_type != runtime::DataType::Float32 &&
             palm_output.descriptor.data_type != runtime::DataType::Float16)
             throw_contract("palm output must use FP32 or FP16");
+        palm_dynamic_output = out[0].shape[0] == -1 || out[0].shape[1] == -1;
         std::size_t rows = options.max_palm_candidates;
         if (out[0].shape[0] > 0)
             rows = static_cast<std::size_t>(out[0].shape[0]);
         if (out[0].shape[1] != -1 &&
             out[0].shape[1] != static_cast<std::int64_t>(kPalmRowWidth))
             throw_contract("palm output width must be 8");
+        if (rows > options.max_palm_candidates)
+            throw_resource("Palm model output rows exceed max_palm_candidates");
         palm_output.allocate(checked_multiply(rows, kPalmRowWidth, "palm output"),
                              options.max_output_bytes);
         palm_rows_capacity = rows;
@@ -453,6 +464,7 @@ struct HandBackend::Impl final
     runtime::TensorShape palm_input_shape;
     HostBuffer palm_output;
     std::size_t palm_rows_capacity = 0U;
+    bool palm_dynamic_output = false;
     runtime::TensorDescriptor landmark_input;
     runtime::TensorShape landmark_input_shape;
     HostBuffer landmark_xyz;
@@ -517,16 +529,41 @@ HandFrame HandBackend::infer(const image::ImageView& source)
         const runtime::TensorView palm_input_view{
             impl_->palm_input.name, impl_->palm_input.data_type, impl_->palm_input_shape,
             palm_input.data, palm_input.bytes, runtime::MemoryKind::Host, {}};
-        runtime::TensorShape palm_output_shape = impl_->palm_output.descriptor.shape;
-        if (palm_output_shape[0] == -1)
-            palm_output_shape[0] = static_cast<std::int64_t>(impl_->palm_rows_capacity);
-        if (palm_output_shape[1] == -1)
-            palm_output_shape[1] = static_cast<std::int64_t>(kPalmRowWidth);
-        auto palm_output_view = impl_->palm_output.view(palm_output_shape);
-        const Clock::time_point palm_inference_started = Clock::now();
-        impl_->palm_context->run({palm_input_view}, {palm_output_view});
-        result.timings.palm_inference_ms = elapsed_ms(palm_inference_started);
-        const std::size_t palm_elements = element_count(palm_output_shape, "palm output");
+
+        std::size_t palm_elements = 0U;
+        if (impl_->palm_dynamic_output)
+        {
+            std::vector<runtime::DynamicMutableTensorView> palm_outputs;
+            palm_outputs.push_back(impl_->palm_output.dynamic_view());
+            const Clock::time_point palm_inference_started = Clock::now();
+            impl_->palm_context->run_dynamic({palm_input_view}, palm_outputs);
+            result.timings.palm_inference_ms = elapsed_ms(palm_inference_started);
+
+            const auto& actual = palm_outputs.front();
+            if (actual.shape.size() != 2U || actual.shape[0] < 0 ||
+                actual.shape[1] != static_cast<std::int64_t>(kPalmRowWidth))
+                throw_contract("Palm dynamic output must resolve to [N,8]");
+            const std::size_t rows = static_cast<std::size_t>(actual.shape[0]);
+            if (rows > impl_->palm_rows_capacity ||
+                rows > impl_->options.max_palm_candidates)
+                throw_resource("Palm dynamic output rows exceed configured capacity");
+            palm_elements = checked_multiply(rows, kPalmRowWidth, "Palm dynamic output");
+            const std::size_t expected_bytes = checked_multiply(
+                palm_elements, element_size(impl_->palm_output.descriptor.data_type),
+                "Palm dynamic output");
+            if (actual.byte_size != expected_bytes)
+                throw_contract("Palm dynamic output byte count does not match actual shape");
+        }
+        else
+        {
+            const runtime::TensorShape palm_output_shape = impl_->palm_output.descriptor.shape;
+            auto palm_output_view = impl_->palm_output.view(palm_output_shape);
+            const Clock::time_point palm_inference_started = Clock::now();
+            impl_->palm_context->run({palm_input_view}, {palm_output_view});
+            result.timings.palm_inference_ms = elapsed_ms(palm_inference_started);
+            palm_elements = element_count(palm_output_shape, "palm output");
+        }
+
         const std::vector<float> palm_values = impl_->palm_output.floats(palm_elements);
         std::vector<PalmDetection> palms = detail::decode_palms(
             palm_values.data(), palm_values.size(), impl_->options.palm_score_threshold,
