@@ -3,7 +3,7 @@ project(uuid LANGUAGES C)
 
 # Create a static library target
 add_library(uuid STATIC uuid.c uuid.h)
-add_library(TurboScript::uuid ALIAS uuid)
+add_library(KFCore::uuid ALIAS uuid)
 
 # Include the current directory so that the header can be found
 target_include_directories(uuid
@@ -23,7 +23,8 @@ set_target_properties(uuid PROPERTIES
 cmake_config_target(
     uuid
     FOLDER "vendor/uuid"
-    EXPORT_NAME uuid)
+    EXPORT_NAME uuid
+    EXPORT_SET KFCoreTargets)
 
 install(FILES uuid.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
