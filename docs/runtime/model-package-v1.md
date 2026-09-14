@@ -73,6 +73,20 @@ Model Package V1 uses canonical model identities only. There are no compatibilit
 
 The three Hand packages remain separate logical models. Each can use its own `ExecutionPolicy`; the pipeline does not implicitly force Palm, landmark, and gesture classification onto the same backend or device.
 
+## YOLO artifact flavors
+
+`yolo-detection` artifacts must declare `flavor` explicitly. KFCore does not infer decoder semantics from the selected backend, output count, tensor names, or tensor shapes.
+
+Supported V1 flavors are:
+
+- `raw-yolo` — one raw detection head with semantic shape `[1,4+C,A]`; KFCore performs score filtering and NMS.
+- `compact-nms` — one NMS-complete tensor with semantic shape `[1,N,6]`, where each row is box coordinates, score, and class id.
+- `efficient-nms` — four NMS-complete tensors for detection count, boxes, scores, and labels.
+
+A static `compact-nms` artifact can expose `[1,N,6]`. A data-dependent compact artifact can expose `[1,-1,6]`; KFCore then uses plugin ABI v1.2 bounded dynamic Host output and validates the actual `[1,N,6]` shape after execution. `N=0` is a valid empty detection result. The configured `YoloDetectorOptions::max_detections` remains the hard caller-side bound for dynamic N.
+
+Different artifacts for the same logical YOLO model may use different flavors as long as every flavor maps to the same typed semantic API: `Image -> DetectionFrame`.
+
 ## TensorRT rules
 
 A `tensorrt-engine` artifact is a derived deployment artifact, not a model identity. Model Package V1 therefore requires all of the following:
@@ -121,7 +135,7 @@ The same logical model API is used regardless of which execution backend is sele
 
 Plugin ABI v1.2 adds bounded dynamic Host outputs for tensors whose actual shape is known only after execution. The caller supplies a maximum byte capacity; the backend returns the actual shape and actual byte count after a synchronous run.
 
-This is used for data-dependent outputs such as the Palm detector `[N,8]` result. It is not an implicit unbounded allocation API and it does not claim dynamic CUDA-memory interoperability.
+This is used for data-dependent outputs such as the Palm detector `[N,8]` result and dynamic compact-NMS `[1,N,6]` detection results. Zero-sized result axes are valid when the typed model semantics allow them. It is not an implicit unbounded allocation API and it does not claim dynamic CUDA-memory interoperability.
 
 ## Inspection and integrity validation
 
