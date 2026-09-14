@@ -88,7 +88,15 @@ KFCORE_INSTALL_PLUGINDIR=plugins
 
 ## Model packages and runtime probe
 
-Use the `kfmodel` tool to inspect and validate model packages:
+Use `kfmodel` to inspect the installed execution backend metadata needed by a Model Package:
+
+```text
+kfmodel backend <backend-plugin>
+```
+
+For TensorRT this prints the exact execution runtime version plus CUDA device IDs, names, and compute capabilities.
+
+Inspect and validate model packages with:
 
 ```text
 kfmodel inspect <model-package-directory>
@@ -104,6 +112,7 @@ kfmodel probe <model-package-directory> <backend-plugin> <device-id>
 For example:
 
 ```text
+kfmodel backend <prefix>\plugins\kfcore_backend_tensorrt.dll
 kfmodel probe C:\models\rtmw-l-384x288 <prefix>\plugins\kfcore_backend_tensorrt.dll cuda:0
 ```
 
