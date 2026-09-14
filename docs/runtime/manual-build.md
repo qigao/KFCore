@@ -113,4 +113,35 @@ build\bin\kfmodel.exe inspect  C:\models\rtmw-l-384x288
 build\bin\kfmodel.exe validate C:\models\rtmw-l-384x288
 ```
 
-For a TensorRT artifact, validation requires ONNX source provenance, exact TensorRT `major.minor.patch.build`, target platform, hardware compatibility mode, CUDA compute capability, and precision metadata. `exact-device` packages also require the CUDA device name. TensorRT version-compatible plans are outside the V1 trust model.
+For a TensorRT artifact, validation requires ONNX source provenance, exact TensorRT `major.minor.patch.build`, target platform, hardware compatibility mode, CUDA compute capability, and precision metadata. `exact-device` packages also require the CUDA device name. `same-compute-capability` is accepted only for TensorRT 10.9 or newer; TensorRT 8.6/Pascal packages use `exact-device`. TensorRT version-compatible plans are outside the V1 trust model.
+
+## Installed runtime probe
+
+`kfmodel probe` verifies the runtime-loaded execution path without requiring model-specific input data. It loads one explicit backend plugin, constructs an exact execution policy from the backend's reported ID and the requested device, resolves the package, loads/deserializes the selected artifact, creates an execution context, and prints the discovered tensor contract.
+
+For an installed TensorRT package on Windows:
+
+```powershell
+<prefix>\bin\kfmodel.exe probe `
+  C:\models\rtmw-l-384x288 `
+  <prefix>\plugins\kfcore_backend_tensorrt.dll `
+  cuda:0
+```
+
+For an installed ONNX Runtime CPU package:
+
+```powershell
+$env:ONNXRUNTIME_ROOT = "C:\path\to\onnxruntime"
+<prefix>\bin\kfmodel.exe probe `
+  C:\models\rtmw-l-384x288 `
+  <prefix>\plugins\kfcore_backend_onnxruntime.dll `
+  cpu
+```
+
+A successful probe ends with:
+
+```text
+runtime probe ready: <model-id>
+```
+
+The probe deliberately uses an explicit plugin path rather than loading every plugin in a directory. This keeps a TensorRT smoke independent from an unconfigured ONNX Runtime installation, and vice versa, while still exercising the same secure dynamic loader and resolver used by applications.
