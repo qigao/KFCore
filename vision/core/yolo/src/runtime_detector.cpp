@@ -414,22 +414,10 @@ struct YoloDetector::Impl final
         input_shape = resolve_input_shape(input_descriptor, options, input_width_value,
                                           input_height_value);
 
-        std::string flavor = lower(resolved.route.artifact.flavor);
+        const std::string flavor = lower(resolved.route.artifact.flavor);
         if (flavor.empty())
         {
-            if (output_descriptors.size() == 4U)
-            {
-                flavor = "efficient-nms";
-            }
-            else if (output_descriptors.size() == 1U && output_descriptors[0].shape.size() == 3U &&
-                     output_descriptors[0].shape.back() == static_cast<std::int64_t>(kCompactValues))
-            {
-                flavor = "compact-nms";
-            }
-            else
-            {
-                flavor = "raw-yolo";
-            }
+            throw_contract("YOLO artifact must declare flavor explicitly");
         }
 
         if (flavor == "compact-nms")
@@ -624,9 +612,9 @@ std::unique_ptr<YoloDetector> YoloDetector::load(
     const YoloDetectorOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != "yolo" && package.model_type() != "yolo-detection")
+    if (package.model_type() != kYoloDetectionModelType)
     {
-        throw_contract("model package type is not yolo/yolo-detection");
+        throw_contract("ModelPackage model_type must be 'yolo-detection'");
     }
     try
     {
