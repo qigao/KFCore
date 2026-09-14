@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kfcore::runtime
@@ -49,5 +50,7 @@ private:
     std::string variant_;
     std::vector<ModelArtifact> artifacts_;
 };
+
+void verify_model_artifact(const ModelPackage& package, const ModelArtifact& artifact);
 
 } // namespace kfcore::runtime

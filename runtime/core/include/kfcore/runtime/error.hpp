@@ -17,6 +17,9 @@ enum class RuntimeErrorCode
     BackendFailure,
     DuplicateBackend,
     NotFound,
+    InvalidModelPackage,
+    ArtifactIntegrity,
+    NoCompatibleExecution,
 };
 
 class RuntimeError final : public std::runtime_error
