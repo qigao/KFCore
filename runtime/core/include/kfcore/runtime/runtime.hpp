@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kfcore/runtime/plugin.hpp"
+#include "kfcore/runtime/resolver.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -24,6 +24,9 @@ public:
 
     [[nodiscard]] std::shared_ptr<BackendPlugin> backend(std::string_view backend_id) const;
     [[nodiscard]] std::vector<std::string> backend_ids() const;
+
+    [[nodiscard]] ResolvedModel load_model(const ModelPackage& package,
+                                           const ExecutionPolicy& policy) const;
 
     [[nodiscard]] BackendRegistry& backends() noexcept;
     [[nodiscard]] const BackendRegistry& backends() const noexcept;
