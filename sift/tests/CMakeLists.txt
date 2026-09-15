@@ -24,7 +24,7 @@ if(KFCORE_ENABLE_CUDA)
   cmake_add_test(
     NAME test_popsift_internal
     SOURCES test_popsift_internal.cpp
-    LIBS kfcore_popsift_internal Threads::Threads Salts::TinyTest
+    LIBS kfcore_popsift_internal CUDA::cudart_static Threads::Threads Salts::TinyTest
     DEFS KFCORE_POPSIFT_TESTING=1
     INCLUDES ../vendor/popsift/src
     COMPILE_FEATURES cxx_std_17
