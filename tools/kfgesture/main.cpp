@@ -4,6 +4,7 @@
 #include "kfcore/runtime/resolver.hpp"
 #include "kfcore/runtime/runtime.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
