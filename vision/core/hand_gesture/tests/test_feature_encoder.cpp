@@ -30,7 +30,7 @@ HandResult sample_hand(Handedness handedness)
     return hand;
 }
 
-bool near(float left, float right, float tolerance = 1e-5F)
+bool nearly_equal(float left, float right, float tolerance = 1e-5F)
 {
     return std::fabs(left - right) <= tolerance;
 }
@@ -46,18 +46,18 @@ spec("temporal gesture feature encoder")
             GestureFrameMetadata {1'000'000'000ULL, 1000, 500});
 
         check_true(encoded.values.size() == kTemporalGestureFeatureCount);
-        check_true(near(encoded.values[63], 0.10F));
-        check_true(near(encoded.values[64], 0.16F));
-        check_true(near(encoded.values[65], 0.0F));
-        check_true(near(encoded.values[66], 0.0F));
-        check_true(near(encoded.values[70], 1.0F));
-        check_true(near(encoded.values[71], 0.90F));
-        check_true(near(encoded.values[72], 0.95F));
-        check_true(near(encoded.values[73], 0.0F));
-        check_true(near(encoded.values[74], 0.0F));
-        check_true(near(encoded.values[75], 1.0F));
-        check_true(near(encoded.values[76], 0.0F));
-        check_true(near(encoded.values[77], 0.0F));
+        check_true(nearly_equal(encoded.values[63], 0.10F));
+        check_true(nearly_equal(encoded.values[64], 0.16F));
+        check_true(nearly_equal(encoded.values[65], 0.0F));
+        check_true(nearly_equal(encoded.values[66], 0.0F));
+        check_true(nearly_equal(encoded.values[70], 1.0F));
+        check_true(nearly_equal(encoded.values[71], 0.90F));
+        check_true(nearly_equal(encoded.values[72], 0.95F));
+        check_true(nearly_equal(encoded.values[73], 0.0F));
+        check_true(nearly_equal(encoded.values[74], 0.0F));
+        check_true(nearly_equal(encoded.values[75], 1.0F));
+        check_true(nearly_equal(encoded.values[76], 0.0F));
+        check_true(nearly_equal(encoded.values[77], 0.0F));
     }
 
     it("mirrors local x for left hands without changing global wrist position")
@@ -69,11 +69,11 @@ spec("temporal gesture feature encoder")
             sample_hand(Handedness::Left),
             GestureFrameMetadata {1'000'000'000ULL, 1000, 500});
 
-        check_true(near(left.values[3], -right.values[3]));
-        check_true(near(left.values[4], right.values[4]));
-        check_true(near(left.values[63], right.values[63]));
-        check_true(near(left.values[64], right.values[64]));
-        check_true(near(left.values[70], -1.0F));
+        check_true(nearly_equal(left.values[3], -right.values[3]));
+        check_true(nearly_equal(left.values[4], right.values[4]));
+        check_true(nearly_equal(left.values[63], right.values[63]));
+        check_true(nearly_equal(left.values[64], right.values[64]));
+        check_true(nearly_equal(left.values[70], -1.0F));
     }
 
     it("encodes normalized velocity in units per second")
@@ -93,8 +93,8 @@ spec("temporal gesture feature encoder")
             GestureFrameMetadata {1'500'000'000ULL, 1000, 500},
             first.next_state);
 
-        check_true(near(second.values[65], 0.02F));
-        check_true(near(second.values[66], 0.02F));
-        check_true(near(second.values[73], 0.50F));
+        check_true(nearly_equal(second.values[65], 0.02F));
+        check_true(nearly_equal(second.values[66], 0.02F));
+        check_true(nearly_equal(second.values[73], 0.50F));
     }
 }
