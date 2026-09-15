@@ -1,12 +1,16 @@
 add_library(kfcore_hand_gesture STATIC
-  src/feature_encoder.cpp)
+  src/error.cpp
+  src/feature_encoder.cpp
+  src/runtime.cpp)
 target_include_directories(kfcore_hand_gesture
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(kfcore_hand_gesture PUBLIC cxx_std_17)
 target_link_libraries(kfcore_hand_gesture
-  PUBLIC KFCore::hand_model_core)
+  PUBLIC
+    KFCore::hand_model_core
+    KFCore::runtime_core)
 set_target_properties(kfcore_hand_gesture PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
