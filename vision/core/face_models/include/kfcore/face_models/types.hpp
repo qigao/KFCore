@@ -97,14 +97,13 @@ struct FaceMeshFrame
     FaceMeshTimings                   timings;
 };
 
-struct FaceMeshPipelineOptions
+struct FaceMeshOptions
 {
     float landmark_score_threshold = 0.50F;
 };
 
 struct Face68Landmark
 {
-    // x and y use the model's 256-pixel input coordinate system. score is returned unchanged.
     float x     = 0.0f;
     float y     = 0.0f;
     float score = 0.0f;
@@ -113,6 +112,7 @@ struct Face68Landmark
 using Face68Result    = std::array<Face68Landmark, kFace68LandmarkCount>;
 using ArcFaceResult   = std::array<float, kArcFaceEmbeddingLength>;
 using AgeGenderResult = std::array<float, kAgeGenderLogitCount>;
+
 struct InSwapperResult
 {
     std::vector<float> values;

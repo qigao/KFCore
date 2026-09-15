@@ -2,9 +2,8 @@
 #
 # This subdirectory builds the `kfcore` target that contains every Kalman
 # filter implementation (Takasu, UDU, EKF, UKF) together with the supporting
-# linear-algebra and mini-BLAS helpers.  The target is consumed by the
-# top-level project and by the test executables through the KFCore::kfcore
-# alias.
+# linear-algebra and mini-BLAS helpers. The target is consumed by the
+# top-level project and by test executables through the KFCore::kfcore alias.
 
 set(KFCORE_SOURCES
     kalman_takasu.c
@@ -20,13 +19,12 @@ set(KFCORE_PUBLIC_HEADERS
     kalman_ukf.h
     signal_filters.h)
 
-add_library(kfcore SHARED)
+add_library(kfcore STATIC)
 
 target_sources(kfcore
     PRIVATE ${KFCORE_SOURCES}
             ${KFCORE_PUBLIC_HEADERS})
 
-# Public include directory so consumers can do `#include <kalman_takasu.h>`.
 target_include_directories(kfcore
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -34,12 +32,8 @@ target_include_directories(kfcore
 
 target_compile_features(kfcore PUBLIC c_std_11)
 
-# Link the vendored mini-BLAS / linear-algebra library privately into kfcore.
-# kfcore is a shared library, so installed consumers do not need the private
-# miniblas archive or target.
-target_link_libraries(kfcore PRIVATE miniblas)
+target_link_libraries(kfcore PRIVATE KFCore::miniblas_internal)
 
-# Navigation helper functions are part of the standard KFCore package.
 list(APPEND KFCORE_PUBLIC_HEADERS
         navigation_tools/frame_transform.h
         navigation_tools/navtoolbox.h
@@ -64,21 +58,16 @@ target_compile_options(kfcore
         $<$<C_COMPILER_ID:MSVC>:/W4>
         $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Wdouble-promotion>)
 
-# Link the math library on platforms that expose it as a separate library.
 if(NOT WIN32)
     target_link_libraries(kfcore PUBLIC m)
 endif()
 
-set_target_properties(kfcore PROPERTIES
-    WINDOWS_EXPORT_ALL_SYMBOLS ON)
 cmake_config_target(kfcore
     ALIAS KFCore::kfcore
     EXPORT_NAME kfcore
     EXPORT_SET KFCoreTargets
     FOLDER "kalman")
 
-# Expose the list of public headers to the parent scope so the top-level
-# project can reuse them for install rules and package config generation.
 set(KFCORE_PUBLIC_HEADERS ${KFCORE_PUBLIC_HEADERS} PARENT_SCOPE)
 if(BUILD_TESTS)
     add_subdirectory(tests)

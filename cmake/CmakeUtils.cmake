@@ -1,13 +1,10 @@
-# TurboScript CMake utilities
+# KFCore CMake utilities
 
 include(GNUInstallDirs)
 
-if(NOT DEFINED TURBOSCRIPT_INSTALL_PLUGINDIR)
-    if(WIN32)
-        set(TURBOSCRIPT_INSTALL_PLUGINDIR "${CMAKE_INSTALL_BINDIR}")
-    else()
-        set(TURBOSCRIPT_INSTALL_PLUGINDIR "${CMAKE_INSTALL_LIBDIR}")
-    endif()
+if(NOT DEFINED KFCORE_INSTALL_PLUGINDIR)
+    set(KFCORE_INSTALL_PLUGINDIR "plugins" CACHE STRING
+        "Install directory, relative to CMAKE_INSTALL_PREFIX, for KFCore execution plugins")
 endif()
 
 function(cmake_config_target target_name)
@@ -17,7 +14,7 @@ function(cmake_config_target target_name)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     if(NOT ARG_EXPORT_SET)
-        set(ARG_EXPORT_SET TurboScriptTargets)
+        set(ARG_EXPORT_SET KFCoreTargets)
     endif()
 
     if(ARG_ALIAS)
@@ -33,7 +30,7 @@ function(cmake_config_target target_name)
     endif()
 
     get_target_property(target_type ${target_name} TYPE)
-    if(target_type STREQUAL "SHARED_LIBRARY" OR target_type STREQUAL "STATIC_LIBRARY")
+    if(target_type STREQUAL "SHARED_LIBRARY")
         if(NOT ARG_VERSION AND PROJECT_VERSION)
             set(ARG_VERSION ${PROJECT_VERSION})
         endif()
@@ -58,9 +55,9 @@ function(cmake_config_target target_name)
                 target_link_options(${target_name} PRIVATE "LINKER:--no-as-needed")
             endif()
             install(TARGETS ${target_name}
-                LIBRARY DESTINATION ${TURBOSCRIPT_INSTALL_PLUGINDIR}
+                LIBRARY DESTINATION ${KFCORE_INSTALL_PLUGINDIR}
                 ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                RUNTIME DESTINATION ${TURBOSCRIPT_INSTALL_PLUGINDIR})
+                RUNTIME DESTINATION ${KFCORE_INSTALL_PLUGINDIR})
         else()
             install(TARGETS ${target_name}
                 EXPORT ${ARG_EXPORT_SET}

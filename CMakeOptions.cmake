@@ -2,17 +2,40 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 option(BUILD_EXAMPLES "Build example programs" OFF)
 option(BUILD_TESTS "Build test cases" OFF)
-option(KFCORE_ENABLE_CUDA "Build CUDA and TensorRT backends" ON)
-option(KFCORE_ENABLE_ONNX_CPU "Build ONNX Runtime CPU backends" OFF)
-option(KFCORE_ENABLE_ONNX_CUDA "Build ONNX Runtime CUDA backends" OFF)
-if(KFCORE_ENABLE_ONNX_CUDA AND KFCORE_ENABLE_ONNX_CPU)
-  message(FATAL_ERROR "Select one ONNX provider per build: ONNX_CPU or ONNX_CUDA")
+
+set(KFCORE_INSTALL_PLUGINDIR "plugins" CACHE STRING
+    "Install directory, relative to CMAKE_INSTALL_PREFIX, for KFCore execution plugins")
+if(KFCORE_INSTALL_PLUGINDIR STREQUAL "" OR
+   IS_ABSOLUTE "${KFCORE_INSTALL_PLUGINDIR}")
+  message(FATAL_ERROR
+    "KFCORE_INSTALL_PLUGINDIR must be a non-empty path relative to CMAKE_INSTALL_PREFIX")
 endif()
-if(KFCORE_ENABLE_ONNX_CUDA AND KFCORE_ENABLE_CUDA)
-  message(FATAL_ERROR "ONNX_CUDA builds require KFCORE_ENABLE_CUDA=OFF to exclude TensorRT")
+string(REPLACE "\\" "/" _kfcore_install_plugindir_normalized
+       "${KFCORE_INSTALL_PLUGINDIR}")
+if(_kfcore_install_plugindir_normalized MATCHES "(^|/)\\.\\.(/|$)")
+  message(FATAL_ERROR
+    "KFCORE_INSTALL_PLUGINDIR must stay within CMAKE_INSTALL_PREFIX")
+endif()
+unset(_kfcore_install_plugindir_normalized)
+
+option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" ON)
+option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" ON)
+option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
+option(KFCORE_ONNXRUNTIME_ENABLE_CUDA
+       "Expose CUDA devices from the ONNX Runtime backend when the installed ORT SDK provides CUDA EP"
+       OFF)
+
+if(KFCORE_ENABLE_TENSORRT AND NOT KFCORE_ENABLE_CUDA)
+  message(FATAL_ERROR "TensorRT requires KFCORE_ENABLE_CUDA=ON")
+endif()
+if(KFCORE_ONNXRUNTIME_ENABLE_CUDA AND NOT KFCORE_ENABLE_ONNXRUNTIME)
+  message(FATAL_ERROR
+    "KFCORE_ONNXRUNTIME_ENABLE_CUDA requires KFCORE_ENABLE_ONNXRUNTIME=ON")
 endif()
 
 set(KFCORE_MODEL_TEST_WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" CACHE PATH
-    "Working directory containing yolo-models for real-model integration tests")
+    "Working directory containing model assets for real-model integration tests")
 
-option(KFCORE_ONNX_CUDA_ALLOW_CPU_NODES "Allow ORT CPU node placement alongside the required CUDA provider" OFF)
+option(KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES
+       "Allow ORT CPU node placement inside an explicitly selected CUDA session"
+       OFF)

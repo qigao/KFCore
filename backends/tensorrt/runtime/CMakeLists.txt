@@ -1,0 +1,34 @@
+find_package(CUDAToolkit REQUIRED)
+find_package(TensorRT REQUIRED)
+
+add_library(kfcore_runtime_tensorrt STATIC
+  src/cuda_buffer.cpp
+  src/cuda_device.cpp
+  src/engine.cpp
+  src/engine_file.cpp
+  src/error.cpp
+  src/executor.cpp
+  src/tensor_validation.cpp)
+target_include_directories(kfcore_runtime_tensorrt
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_features(kfcore_runtime_tensorrt PUBLIC cxx_std_17)
+target_link_libraries(kfcore_runtime_tensorrt PRIVATE
+  CUDA::cudart_static
+  TensorRT::nvinfer
+  TensorRT::nvinfer_plugin)
+set_target_properties(kfcore_runtime_tensorrt PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  FOLDER "backends/tensorrt/runtime")
+cmake_config_target(kfcore_runtime_tensorrt
+  ALIAS KFCore::runtime_tensorrt
+  NO_INSTALL
+  FOLDER "backends/tensorrt/runtime")
+
+if(BUILD_TESTS)
+  add_subdirectory(tests)
+endif()

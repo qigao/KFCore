@@ -129,13 +129,13 @@ struct HandResult
 
 struct StageTimings
 {
-    double preprocess_ms          = 0.0;
-    double palm_inference_ms      = 0.0;
-    double landmark_inference_ms  = 0.0;
+    double preprocess_ms           = 0.0;
+    double palm_inference_ms       = 0.0;
+    double landmark_inference_ms   = 0.0;
     double classifier_inference_ms = 0.0;
-    double appearance_ms          = 0.0;
-    double tracking_ms            = 0.0;
-    double total_ms               = 0.0;
+    double appearance_ms           = 0.0;
+    double tracking_ms             = 0.0;
+    double total_ms                = 0.0;
 };
 
 struct HandFrame
@@ -156,14 +156,14 @@ struct ByteTrackOptions
 
 struct HandAppearanceOptions
 {
-    bool  enabled                       = false;
-    float minimum_palm_span_pixels      = 8.0F;
+    bool  enabled                            = false;
+    float minimum_palm_span_pixels           = 8.0F;
     float minimum_part_in_frame_sample_ratio = 0.75F;
 };
 
-struct HandPipelineOptions
+struct HandTrackingOptions
 {
-    std::size_t     max_hands = 8;
+    std::size_t max_hands = 8;
     ByteTrackOptions tracker;
     HandAppearanceOptions appearance;
 };

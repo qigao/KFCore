@@ -26,45 +26,6 @@ cmake_config_target(kfcore_hand_interaction
   EXPORT_SET KFCoreTargets
   FOLDER "vision/interaction/hand")
 
-if(BUILD_EXAMPLES)
- 
-  find_package(OpenCVLite REQUIRED COMPONENTS core imgproc highgui)
-
-  add_executable(hand_interaction_demo
-    examples/hand_interaction_demo.cpp
-    examples/hand_interaction_demo_cli.cpp
-    examples/hand_interaction_demo_capture.cpp
-    examples/hand_interaction_demo_face.cpp
-    examples/hand_interaction_demo_frame.cpp
-    examples/hand_interaction_demo_ui.cpp)
-  target_include_directories(hand_interaction_demo PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/examples)
-  target_link_libraries(hand_interaction_demo PRIVATE
-    KFCore::hand_interaction
-    OpenCVLite::core
-    OpenCVLite::imgproc
-    OpenCVLite::highgui
-    Salts::Capture
-    Salts::Core)
-  if(KFCORE_ENABLE_ONNX_CPU OR KFCORE_ENABLE_ONNX_CUDA)
-    target_link_libraries(hand_interaction_demo PRIVATE
-      KFCore::hand_models_cpu
-      KFCore::face_models_cpu)
-  endif()
-  if(KFCORE_ENABLE_CUDA)
-    target_link_libraries(hand_interaction_demo PRIVATE
-      KFCore::hand_models_cuda
-      KFCore::face_models_cuda)
-  endif()
-  target_compile_definitions(hand_interaction_demo PRIVATE
-    KFCORE_DEMO_ENABLE_CUDA=$<BOOL:${KFCORE_ENABLE_CUDA}>
-    KFCORE_DEMO_ENABLE_ONNX_CPU=$<OR:$<BOOL:${KFCORE_ENABLE_ONNX_CPU}>,$<BOOL:${KFCORE_ENABLE_ONNX_CUDA}>>)
-  set_target_properties(hand_interaction_demo PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-  cmake_config_target(hand_interaction_demo
-    NO_INSTALL FOLDER "vision/interaction/hand/examples")
-endif()
-
 if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()

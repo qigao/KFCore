@@ -1,20 +1,19 @@
 include(CMakePackageConfigHelpers)
 
-add_library(trackers SHARED src/tracker.c)
+add_library(trackers STATIC src/tracker.c)
 target_include_directories(
   trackers PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                   $<INSTALL_INTERFACE:include>)
 
 target_link_libraries(trackers PUBLIC KFCore::kfcore)
-target_link_libraries(trackers PRIVATE miniblas)
+target_link_libraries(trackers PRIVATE KFCore::miniblas_internal)
 
 set_target_properties(
   trackers
   PROPERTIES C_STANDARD 11
              C_STANDARD_REQUIRED ON
              C_EXTENSIONS OFF
-             EXPORT_NAME trackers
-             WINDOWS_EXPORT_ALL_SYMBOLS ON)
+             EXPORT_NAME trackers)
 cmake_config_target(trackers
   ALIAS KFCore::trackers
   EXPORT_NAME trackers
