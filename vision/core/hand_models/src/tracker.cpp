@@ -8,7 +8,6 @@
 #include <cmath>
 #include <limits>
 #include <memory>
-#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +18,7 @@ namespace
 {
 
 using Clock = std::chrono::steady_clock;
+using TrackerPtr = std::unique_ptr<bytetrack_t, void (*)(bytetrack_t*)>;
 
 [[noreturn]] void throw_invalid(const std::string& detail)
 {
@@ -133,14 +133,14 @@ private:
 
 struct HandTracker::Impl final
 {
-    Impl(HandTrackingOptions options_value, bytetrack_t* tracker_value)
+    Impl(HandTrackingOptions options_value, TrackerPtr tracker_value)
         : options(std::move(options_value))
-        , tracker(tracker_value, bytetrack_destroy)
+        , tracker(std::move(tracker_value))
     {
     }
 
     HandTrackingOptions options;
-    std::unique_ptr<bytetrack_t, void (*)(bytetrack_t*)> tracker;
+    TrackerPtr tracker;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
 
@@ -156,22 +156,14 @@ std::unique_ptr<HandTracker> HandTracker::create(const HandTrackingOptions& opti
     }
     const bytetrack_config_t config = tracker_config(options.tracker);
     validate_appearance_options(options.appearance);
-    bytetrack_t* tracker = bytetrack_create(&config);
-    if (tracker == nullptr)
+    TrackerPtr tracker(bytetrack_create(&config), bytetrack_destroy);
+    if (!tracker)
     {
         throw HandModelError(HandModelErrorCode::TrackerFailure,
                              "hand tracker creation failed");
     }
-    try
-    {
-        return std::unique_ptr<HandTracker>(new HandTracker(
-            std::make_unique<Impl>(options, tracker)));
-    }
-    catch (...)
-    {
-        bytetrack_destroy(tracker);
-        throw;
-    }
+    return std::unique_ptr<HandTracker>(new HandTracker(
+        std::make_unique<Impl>(options, std::move(tracker))));
 }
 
 HandFrame HandTracker::update(HandFrame frame)
@@ -247,8 +239,7 @@ HandFrame HandTracker::update(const image::ImageView& source, HandFrame frame)
                              "ByteTrack clone failed with status " +
                                  std::to_string(static_cast<int>(clone_status)));
     }
-    std::unique_ptr<bytetrack_t, void (*)(bytetrack_t*)> candidate_tracker(
-        candidate_tracker_raw, bytetrack_destroy);
+    TrackerPtr candidate_tracker(candidate_tracker_raw, bytetrack_destroy);
     std::vector<tracked_detection_ex_t> tracked(frame.hands.size());
     std::size_t written = 0;
     const tracker_status_t status = bytetrack_update_ex(
