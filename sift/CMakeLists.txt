@@ -25,7 +25,10 @@ if(KFCORE_ENABLE_CUDA)
   target_compile_features(kfcore_sift_popsift PUBLIC cxx_std_17)
   target_link_libraries(kfcore_sift_popsift
     PUBLIC KFCore::sift
-    PRIVATE KFCore::image_processor_cuda KFCore::popsift_internal)
+    PRIVATE
+      KFCore::image_processor_cuda
+      KFCore::popsift_internal
+      CUDA::cudart_static)
   set_target_properties(kfcore_sift_popsift PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
