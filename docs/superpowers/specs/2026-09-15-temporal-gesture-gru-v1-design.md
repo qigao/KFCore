@@ -1,0 +1,514 @@
+# Temporal Gesture GRU V1 Design
+
+## Status
+
+Proposed architecture for replacing hand-specific threshold/timing gesture recognition with a learned causal temporal model while preserving deterministic application-state semantics.
+
+This phase changes the hand gesture-recognition architecture. It does not change the execution-plugin ABI and does not add a new backend.
+
+## Goals
+
+1. Recognize dynamic gestures such as wave, swipe, grab/release and click from tracked hand motion without encoding each gesture as a collection of hand-authored dwell, reversal, duration, or action thresholds.
+2. Keep recognition causal and streaming: one frame enters, one hidden state is updated, and no future frame is required.
+3. Reuse KFCore Model Package V1 and the backend-neutral runtime. ONNX Runtime CPU is the required V1 execution route; TensorRT is an optional derived artifact later.
+4. Separate learned gesture recognition from deterministic application state/action mapping.
+5. Keep per-hand memory bounded and resettable.
+6. Preserve explicit failure, capacity, and confidence boundaries. There is no implicit fallback.
+
+## Non-goals
+
+- Video/RGB sequence modeling in V1.
+- Transformers, TCNs, bidirectional recurrent models, or future-frame lookahead.
+- Multi-person or multi-hand joint recurrent inference in V1.
+- Learned hand identity/re-identification.
+- Moving model-specific behavior into backend plugins.
+- TensorRT engine generation inside KFCore runtime.
+- Encoding application navigation/business rules in the GRU.
+- Keeping compatibility aliases for the old THIG hand-gesture contract.
+
+## Architectural decision
+
+Hand gesture recognition becomes:
+
+```text
+HandDetector
+    |
+HandTracker
+    |
+per-track HandFrame
+    |
+GestureFeatureEncoder
+    |
+TemporalGestureRecognizer (causal GRU)
+    |
+GestureEvent
+    |
+InteractionStateMachine
+    |
+ActionEvent
+```
+
+The GRU replaces the hand-specific temporal-pattern recognition currently expressed through THIG windows, dwell times, sequence/repeat nodes, wave reversal limits, gesture cooldowns, and related thresholds.
+
+THIG is not deleted as part of V1. It remains a generic temporal graph library until its remaining consumers are evaluated separately. After V1 migration, `hand_interaction` must not depend on THIG for recognizing wave/swipe/grab/click patterns.
+
+The deterministic layer after recognition is intentionally thin. It may enforce legal state transitions and application context, but it must not reconstruct gesture recognition through new duration/dwell/reversal thresholds.
+
+## Why GRU
+
+Dynamic hand gestures are trajectory patterns rather than isolated categorical states. A causal GRU can learn:
+
+- motion reversal sequences such as left-right-left wave;
+- amplitude and velocity jointly;
+- variable execution speed;
+- incomplete versus completed gestures;
+- pose transitions such as open -> closed -> open;
+- tolerance to frame-rate variation, mild jitter, dropped observations, and natural user variation.
+
+These are poorly represented by an expanding set of independently tuned millisecond and distance thresholds.
+
+## Module boundaries
+
+### `vision/core/hand_gesture`
+
+New static KFCore module. It owns model semantics and the typed C++ API.
+
+Primary types:
+
+```cpp
+namespace kfcore::hand_gesture {
+
+enum class GestureClass : std::uint8_t {
+    None = 0,
+    Wave,
+    SwipeLeft,
+    SwipeRight,
+    Grab,
+    Release,
+    Point,
+    Click,
+};
+
+enum class GesturePhase : std::uint8_t {
+    Idle = 0,
+    Start,
+    Active,
+    End,
+};
+
+struct GestureEvent {
+    int track_id = -1;
+    GestureClass gesture = GestureClass::None;
+    GesturePhase phase = GesturePhase::Idle;
+    float confidence = 0.0F;
+    std::uint64_t timestamp_ns = 0;
+};
+
+class GestureFeatureEncoder final;
+class TemporalGestureRecognizer final;
+
+} // namespace kfcore::hand_gesture
+```
+
+`GestureFeatureEncoder` contains deterministic canonicalization only. It does not classify temporal gestures.
+
+`TemporalGestureRecognizer` owns one recurrent state per live hand track and executes one model step per observation.
+
+### `hand_interaction`
+
+`hand_interaction` consumes `GestureEvent` plus application/external context and maps recognized gestures to semantic actions or application states.
+
+It may retain deterministic state such as "menu open", "drag active", or "selected object", but not gesture-specific dwell/reversal windows.
+
+### `thig`
+
+No new hand-gesture functionality is added to THIG. Existing generic THIG APIs remain unchanged in V1. Removal, retention, or independent reuse is a later decision.
+
+## Per-frame feature contract
+
+V1 uses one fixed FP32 feature vector per tracked hand.
+
+### Canonicalization
+
+For every valid hand observation:
+
+1. Use the wrist landmark as the local origin.
+2. Normalize local landmark coordinates by palm scale.
+3. Mirror local x coordinates for left hands so local hand-shape geometry shares one canonical orientation.
+4. Preserve global motion direction separately; left/right swipe semantics must not be destroyed by local mirroring.
+5. Clamp `dt` to the accepted runtime range before encoding.
+6. Reject non-finite or invalid geometry rather than silently substituting zeros.
+
+Palm scale is derived from stable palm landmarks and must be strictly positive.
+
+### V1 feature vector: 78 FP32 values
+
+| Range | Count | Meaning |
+| --- | ---: | --- |
+| local landmarks | 63 | 21 x `(x,y,z)`, wrist-centered and palm-scale normalized |
+| global wrist position | 2 | image-normalized `(x,y)` |
+| global wrist velocity | 2 | image-normalized units per second |
+| palm scale | 1 | palm scale normalized by image diagonal |
+| palm orientation | 2 | `sin(theta), cos(theta)` |
+| handedness | 1 | `-1=left, 0=unknown, +1=right` |
+| landmark confidence | 1 | `[0,1]` |
+| palm confidence | 1 | `[0,1]` |
+| delta time | 1 | seconds since previous accepted observation |
+| static pose one-hot | 4 | `Unknown, Open, Closed, Pointer` from `HandResult::gesture` |
+| **total** | **78** | |
+
+V1 intentionally does not feed THIG `Observation` values into the GRU. Otherwise the old threshold system would remain an upstream hidden dependency.
+
+## Track and state semantics
+
+Recognition state is keyed by `HandResult::track_id` in V1.
+
+Each active track owns:
+
+```text
+previous accepted timestamp
+previous global wrist position
+GRU hidden state [2,1,64]
+active gesture decoder state
+```
+
+State is reset when:
+
+- the caller explicitly calls `reset()`;
+- a track disappears longer than the configured maximum observation gap;
+- the same track id reappears with an invalid/non-monotonic timestamp;
+- model execution or feature validation fails for that track.
+
+V1 does not carry GRU state across a ByteTrack identity change. Canonical long-gap hand re-identification can be designed separately.
+
+## Model contract
+
+Canonical model type:
+
+```text
+gesture.temporal-gru
+```
+
+Typed API:
+
+```text
+kfcore::hand_gesture::TemporalGestureRecognizer
+```
+
+V1 model architecture used for training/reference export:
+
+```text
+input size: 78
+GRU layers: 2
+hidden size: 64
+unidirectional: true
+gesture head: 64 -> 8
+phase head: 64 -> 4
+```
+
+The runtime contract is fixed even if training implementation details change.
+
+### Tensor names and shapes
+
+Inputs:
+
+```text
+features   FP32 [1,78]
+hidden_in  FP32 [2,1,64]
+```
+
+Outputs:
+
+```text
+gesture_logits FP32 [1,8]
+phase_logits   FP32 [1,4]
+hidden_out     FP32 [2,1,64]
+```
+
+All dimensions are fixed in V1. Dynamic recurrent shapes are deliberately excluded.
+
+The ONNX export may internally reshape/unsqueeze for the standard ONNX GRU operator, but the public model tensor contract above remains fixed.
+
+## Streaming execution
+
+For each accepted hand observation:
+
+```text
+HandResult + frame/timestamp metadata
+    -> encode 78 features
+    -> execute model(features, hidden_in)
+    -> validate finite logits and hidden_out
+    -> softmax heads
+    -> update hidden state
+    -> decode GestureEvent
+```
+
+The recognizer is synchronous and causal. Hidden state is committed only after a successful complete model step.
+
+A failed model step must not partially advance recurrent state.
+
+## Event decoding
+
+The model predicts both gesture class and gesture phase every frame.
+
+V1 gesture classes are exactly:
+
+```text
+0 none
+1 wave
+2 swipe_left
+3 swipe_right
+4 grab
+5 release
+6 point
+7 click
+```
+
+V1 phases are exactly:
+
+```text
+0 idle
+1 start
+2 active
+3 end
+```
+
+The runtime decoder may enforce only structural validity:
+
+- `Start` opens an event;
+- `Active` continues the same event;
+- `End` closes the same event;
+- invalid phase/class combinations are rejected or normalized to no event according to the typed-model contract;
+- an explicit minimum confidence floor may suppress low-confidence output.
+
+It must not use gesture-specific dwell times, reversal windows, repeat counters, or duration thresholds.
+
+`confidence` is the selected gesture probability after softmax. Phase probability remains an internal diagnostic in V1 unless later promoted to the public event type.
+
+## Model Package integration
+
+`gesture.temporal-gru` is added to Model Package V1 canonical model types.
+
+Required V1 artifact:
+
+```json
+{
+  "id": "onnx-cpu",
+  "format": "onnx",
+  "path": "temporal_gesture.onnx",
+  "flavor": "causal-gru-v1",
+  "sha256": "<sha256>",
+  "backend": "onnxruntime",
+  "device": "cpu"
+}
+```
+
+The package may later contain TensorRT derived artifacts under the existing exact-runtime rules. TensorRT support is not required for Temporal Gesture V1 acceptance.
+
+No runtime ABI extension is required: the model uses ordinary fixed-shape Host tensors and explicit recurrent hidden-state tensors.
+
+## Runtime policy
+
+V1 requires an explicit ONNX Runtime CPU execution policy for the temporal model. Example:
+
+```cpp
+const auto gesture_policy = runtime::ExecutionPolicy::exact(
+    {"onnxruntime", "cpu"});
+```
+
+The hand detector may independently execute on TensorRT CUDA, ORT CUDA, or ORT CPU. Gesture recognition is a separate logical model and therefore may choose its own backend/device.
+
+There is no implicit fallback from a requested gesture execution route.
+
+## Public API sketch
+
+```cpp
+namespace kfcore::hand_gesture {
+
+struct TemporalGestureOptions {
+    float minimum_confidence = 0.70F;
+    std::uint64_t maximum_observation_gap_ns = 350'000'000ULL;
+    std::size_t maximum_tracks = 8U;
+};
+
+class TemporalGestureRecognizer final {
+public:
+    static std::unique_ptr<TemporalGestureRecognizer> load(
+        runtime::Runtime& runtime,
+        const runtime::ModelPackage& package,
+        const runtime::ExecutionPolicy& policy,
+        const TemporalGestureOptions& options = {});
+
+    std::vector<GestureEvent> update(
+        const hand_models::HandFrame& frame,
+        const GestureFrameMetadata& metadata);
+
+    void reset();
+    void reset_track(int track_id);
+
+    const runtime::ExecutionRoute& execution_route() const noexcept;
+};
+
+} // namespace kfcore::hand_gesture
+```
+
+The concrete API may use `std::span` only if the project language baseline is raised; V1 remains C++17-compatible.
+
+## Capacity and failure rules
+
+- `maximum_tracks` is a hard bound.
+- No unbounded per-track history is stored. Only the GRU hidden state and previous-frame feature metadata are retained.
+- Unknown or negative `track_id` values are not accepted for recurrent state.
+- Timestamps must be monotonic per track.
+- Feature values, logits, probabilities, and hidden state must be finite.
+- A model tensor contract mismatch fails at load time.
+- A runtime failure fails the affected call; hidden state is not committed.
+- Capacity exhaustion is an explicit error, not eviction by undocumented policy.
+
+## Training data contract
+
+Training is outside the C++ runtime, but KFCore defines the semantic dataset contract so exported models are reproducible.
+
+Each frame record contains at least:
+
+```text
+sequence_id
+track_id
+timestamp_ns
+image_width
+image_height
+21 xyz hand landmarks
+palm box / palm confidence
+landmark confidence
+handedness
+static pose class
+gesture class label
+gesture phase label
+```
+
+The training pipeline must call the same canonical feature transformation as the C++ runtime, or use a bit-for-bit compatible reference implementation verified against golden vectors.
+
+### Required augmentation
+
+Training should include:
+
+- variable frame spacing / FPS;
+- temporal speed scaling;
+- mild landmark noise;
+- short dropped-observation gaps;
+- left/right hand examples and mirroring;
+- different gesture amplitude;
+- incomplete gesture prefixes;
+- non-gesture motion as hard negatives.
+
+Augmentation must not change the semantic direction label for global left/right swipe motion.
+
+## Labeling semantics
+
+A dynamic gesture is labeled with both class and phase.
+
+Example wave:
+
+```text
+none/idle
+wave/start
+wave/active
+wave/active
+wave/end
+none/idle
+```
+
+Incomplete wave attempts should remain `none` or terminate without a valid `end`, depending on the dataset annotation policy. The policy must be consistent across training and evaluation sets.
+
+The train/validation/test split must be subject-separated where user identity data is available. Frame-random splitting is not acceptable because adjacent frames leak nearly identical trajectories.
+
+## Evaluation gates
+
+A model is not accepted only because per-frame accuracy is high.
+
+Required evaluation includes:
+
+- gesture event precision/recall/F1;
+- false activations per minute on non-gesture motion;
+- event completion latency;
+- incomplete-gesture rejection;
+- confusion matrix, especially wave versus swipe and grab versus click;
+- results across multiple frame rates or irregular frame spacing;
+- subject-separated validation/test performance.
+
+Threshold selection uses validation data only. Test-set thresholds must not be tuned post hoc.
+
+## Interaction-state layer
+
+The deterministic state layer consumes `GestureEvent`, not raw landmark primitives.
+
+Examples:
+
+```text
+wave/end       + menu state -> next item
+swipe_left/end + gallery     -> previous page
+grab/start     + object hit  -> begin drag
+release/end    + dragging    -> drop
+```
+
+This layer may include application legality, exclusivity, target binding, and cooldown required by product semantics. It must not decide whether a physical wave occurred by re-checking motion duration or reversals.
+
+## THIG migration
+
+V1 migration is deliberately one-way:
+
+1. Add `vision/core/hand_gesture` and `gesture.temporal-gru`.
+2. Feed GRU `GestureEvent` output into `hand_interaction`.
+3. Remove hand-specific THIG gesture-pattern construction and the corresponding dwell/reversal/window settings.
+4. Keep generic THIG library code untouched unless no remaining consumer exists.
+5. Do not provide a legacy adapter that synthesizes THIG `Observation` events from GRU output.
+
+Settings expected to disappear from the hand gesture-recognition path include the hand-authored timing controls for direction dwell/windows, wave reversal/total duration, grab transition timing, click timing, and similar gesture-specific temporal thresholds.
+
+Basic data-quality bounds such as model confidence, maximum observation gap, maximum tracks, and invalid-tensor rejection remain explicit runtime controls.
+
+## Naming cleanup
+
+The existing Model Package documentation still refers to the merged pre-cleanup `HandBackend` name for the three hand stages. V1 implementation must update that documentation to the current `HandDetector` naming while adding `gesture.temporal-gru`.
+
+## Deployment
+
+V1 deployment is intentionally lightweight:
+
+```text
+GPU or CPU:
+  HandDetector
+
+CPU:
+  temporal_gesture.onnx
+  ONNX Runtime backend plugin
+
+stateful C++:
+  HandTracker
+  TemporalGestureRecognizer recurrent state
+  InteractionStateMachine
+```
+
+The GRU is expected to be small enough that CPU execution avoids unnecessary GPU synchronization. Performance must still be measured rather than assumed.
+
+## Compatibility
+
+No old THIG hand-gesture configuration compatibility is required.
+
+No old `HandInteractionSettings` gesture-timing fields are preserved as aliases when their recognition responsibility moves into the model.
+
+Generic THIG public API compatibility is outside this spec because THIG itself is not being redesigned here.
+
+## Acceptance criteria
+
+Temporal Gesture V1 is complete when:
+
+1. `gesture.temporal-gru` loads through existing Runtime/ModelPackage using explicit ORT CPU policy.
+2. C++ feature encoding matches the frozen 78-value contract and a training/reference encoder on golden inputs.
+3. A fixed-shape causal GRU step accepts `[1,78] + [2,1,64]` and returns gesture logits, phase logits, and next hidden state.
+4. Per-track recurrent state is bounded, resettable, and transactionally updated only after successful inference.
+5. `wave` is recognized from learned sequence behavior without THIG wave reversal/duration rules.
+6. `hand_interaction` consumes `GestureEvent` rather than hand-specific THIG temporal patterns for the migrated gesture set.
+7. There is no implicit backend/device fallback and no runtime ABI extension.
+8. Documentation and Model Package canonical model type tables reflect `HandDetector` and `gesture.temporal-gru`.
+9. Manual build remains the project acceptance path; model-quality claims require the evaluation protocol above rather than compile success alone.
