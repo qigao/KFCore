@@ -20,7 +20,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_runtime_tensorrt_cuda_buffer
   SOURCES test_cuda_buffer.cpp ../src/cuda_buffer.cpp ../src/error.cpp
-  LIBS CUDA::cudart Salts::TinyTest
+  LIBS CUDA::cudart_static Salts::TinyTest
   DEFS KFCORE_RUNTIME_TENSORRT_CUDA_BUFFER_TESTING=1
   INCLUDES ${_runtime_tensorrt_test_includes}
   COMPILE_FEATURES cxx_std_17
@@ -33,7 +33,7 @@ cmake_add_test(
     ../src/cuda_buffer.cpp
     ../src/cuda_device.cpp
     ../src/error.cpp
-  LIBS CUDA::cudart Salts::TinyTest
+  LIBS CUDA::cudart_static Salts::TinyTest
   INCLUDES ${_runtime_tensorrt_test_includes}
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_runtime_tensorrt_test_folder}")
@@ -48,7 +48,7 @@ if(KFCORE_TENSORRT_TEST_ENGINE_ARCFACE)
     NAME test_runtime_tensorrt_integration
     TEST_NAME test_runtime_tensorrt_integration_arcface
     SOURCES test_runtime_tensorrt_integration.cpp
-    LIBS KFCore::runtime_tensorrt CUDA::cudart Salts::TinyTest
+    LIBS KFCore::runtime_tensorrt CUDA::cudart_static Salts::TinyTest
     COMPILE_FEATURES cxx_std_17
     FOLDER "${_runtime_tensorrt_test_folder}"
     TEST_PROPERTIES
