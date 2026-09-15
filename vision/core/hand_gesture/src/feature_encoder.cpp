@@ -110,7 +110,6 @@ EncodedGestureFeatures GestureFeatureEncoder::encode(
 
     require_unit(hand.landmark_confidence, "landmark confidence");
     require_unit(hand.palm.confidence, "palm confidence");
-    require_finite(hand.palm.roi.rotation_radians, "palm ROI rotation");
 
     for (const auto& landmark : hand.landmarks)
     {
