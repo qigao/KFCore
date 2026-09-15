@@ -5,8 +5,8 @@ It is deliberately separate from the production C++ runtime.
 
 ## Python environment
 
-Use a Python environment with PyTorch and ONNX installed. Record the exact package
-versions used for a production training run together with the dataset/model artifact.
+Use Python 3.10+ with PyTorch and ONNX installed. Record the exact package versions
+used for a production training run together with the dataset/model artifact.
 
 ## Dataset JSONL contract
 
@@ -51,6 +51,19 @@ python tools/temporal_gesture/train.py \
 The trainer uses the same two-layer GRU (`input=78`, `hidden=64`) as the exported
 streaming model. Training uses full sequences; export wraps the same weights as one
 causal frame step with explicit hidden state.
+
+## Evaluate event quality
+
+```text
+python tools/temporal_gesture/evaluate.py \
+  --checkpoint build/gesture/temporal_gesture.pt \
+  --dataset data/gesture_test.jsonl \
+  --output build/gesture/test_metrics.json
+```
+
+Evaluation reports event precision/recall/F1, false activations per minute,
+completion latency and an 8x8 frame confusion matrix. Use a subject-separated test
+set; do not tune runtime thresholds on the test set.
 
 ## Export a trained Model Package
 
