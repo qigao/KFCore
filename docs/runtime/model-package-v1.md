@@ -70,11 +70,14 @@ Model Package V1 uses canonical model identities only. There are no compatibilit
 | `face.age-gender` | `kfcore::face_models::AgeGender` |
 | `face.inswapper` | `kfcore::face_models::InSwapper` |
 | `face.gfpgan` | `kfcore::face_models::GfpGan` |
-| `hand.palm-detector` | Palm stage of `kfcore::hand_models::HandBackend` |
-| `hand.landmarker` | Landmark stage of `kfcore::hand_models::HandBackend` |
-| `hand.gesture-classifier` | Gesture stage of `kfcore::hand_models::HandBackend` |
+| `hand.palm-detector` | Palm stage of `kfcore::hand_models::HandDetector` |
+| `hand.landmarker` | Landmark stage of `kfcore::hand_models::HandDetector` |
+| `hand.gesture-classifier` | Static-pose stage of `kfcore::hand_models::HandDetector` |
+| `gesture.temporal-gru` | `kfcore::hand_gesture::TemporalGestureRecognizer` |
 
-The three Hand packages remain separate logical models. Each can use its own `ExecutionPolicy`; the pipeline does not implicitly force Palm, landmark, and gesture classification onto the same backend or device.
+The three Hand packages remain separate logical models. Each can use its own `ExecutionPolicy`; `HandDetector` does not implicitly force Palm, landmark, and static-pose classification onto the same backend or device.
+
+The temporal gesture recognizer is a fourth, independent logical model. V1 deliberately requires an explicit ONNX Runtime CPU route for it, while Hand detection may independently run on TensorRT CUDA, ORT CUDA, or ORT CPU.
 
 ## YOLO artifact flavors
 
@@ -89,6 +92,43 @@ Supported V1 flavors are:
 A static `compact-nms` artifact can expose `[1,N,6]`. A data-dependent compact artifact can expose `[1,-1,6]`; KFCore then uses plugin ABI v1.2 bounded dynamic Host output and validates the actual `[1,N,6]` shape after execution. `N=0` is a valid empty detection result. The configured `YoloDetectorOptions::max_detections` remains the hard caller-side bound for dynamic N.
 
 Different artifacts for the same logical YOLO model may use different flavors as long as every flavor maps to the same typed semantic API: `Image -> DetectionFrame`.
+
+## Temporal gesture artifact flavor
+
+`gesture.temporal-gru` V1 uses the explicit artifact flavor:
+
+```text
+causal-gru-v1
+```
+
+The required V1 artifact is an ONNX model routed explicitly to ONNX Runtime CPU:
+
+```json
+{
+  "id": "onnx-cpu",
+  "format": "onnx",
+  "path": "temporal_gesture.onnx",
+  "flavor": "causal-gru-v1",
+  "sha256": "<64 lowercase hex characters>",
+  "backend": "onnxruntime",
+  "device": "cpu"
+}
+```
+
+The typed runtime validates the fixed FP32 tensor contract at load time:
+
+```text
+inputs
+  features          [1,78]
+  hidden_in         [2,1,64]
+
+outputs
+  gesture_logits    [1,8]
+  phase_logits      [1,4]
+  hidden_out        [2,1,64]
+```
+
+All tensors are fixed-shape Host tensors in V1. No plugin ABI extension and no dynamic-output capability are required. A future TensorRT derived artifact may be added under the ordinary exact-runtime TensorRT rules, but TensorRT is not required for Temporal Gesture V1.
 
 ## TensorRT rules
 
@@ -128,6 +168,8 @@ const auto policy = ExecutionPolicy::ordered({
 
 A model that must not run on CPU simply omits a CPU-compatible artifact/route or uses a policy without one.
 
+Temporal Gesture V1 is stricter: its typed loader requires exactly one preference, `onnxruntime/cpu`.
+
 ## Runtime loading
 
 ```cpp
@@ -139,7 +181,7 @@ const auto package = kfcore::runtime::ModelPackage::load("models/rtmw-l-384x288"
 auto pose = kfcore::pose::Rtmw::load(runtime, package, policy);
 ```
 
-The same logical model API is used regardless of which execution backend is selected.
+The same logical model API is used regardless of which execution backend is selected, except where a typed V1 contract deliberately constrains the route such as `gesture.temporal-gru`.
 
 ## Dynamic outputs
 
@@ -160,6 +202,8 @@ kfmodel validate <package-directory>
 
 `validate` checks manifest rules, package-relative path confinement, artifact SHA-256 values, derived-artifact source provenance, and the required TensorRT deployment metadata. Runtime selection additionally rejects `same-compute-capability` TensorRT artifacts whose declared runtime is older than 10.9.
 
+Typed tensor semantics such as the Temporal Gesture fixed GRU names/shapes are validated by the typed model loader rather than by the generic package parser.
+
 ## Typed model semantics
 
 The manifest is not a preprocessing DSL. Model-specific behavior stays in typed C++ model code:
@@ -167,7 +211,8 @@ The manifest is not a preprocessing DSL. Model-specific behavior stays in typed 
 - YOLO owns letterbox and detection decode semantics.
 - RTMW owns bbox padding/aspect correction, affine preprocessing, normalization, SimCC decoding, and coordinate restoration.
 - Face models own face-specific preprocessing/decoding contracts.
-- Hand owns Palm decode, per-hand landmark geometry, gesture feature construction, and stage composition.
+- Hand owns Palm decode, per-hand landmark geometry, static-pose feature construction, and stage composition.
+- Temporal Gesture owns the fixed 78-value canonical hand feature encoding, recurrent hidden-state semantics, softmax/event decoding, and per-track state transaction rules.
 - backend DLLs only execute tensors.
 
-This keeps ONNX Runtime and TensorRT interchangeable without moving model semantics into execution plugins.
+This keeps execution backends interchangeable without moving model semantics into plugins.
