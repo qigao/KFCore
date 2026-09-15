@@ -96,6 +96,12 @@ enum class GesturePhase : std::uint8_t {
     End,
 };
 
+struct GestureFrameMetadata {
+    std::uint64_t timestamp_ns = 0;
+    int image_width = 0;
+    int image_height = 0;
+};
+
 struct GestureEvent {
     int track_id = -1;
     GestureClass gesture = GestureClass::None;
@@ -136,10 +142,11 @@ For every valid hand observation:
 2. Normalize local landmark coordinates by palm scale.
 3. Mirror local x coordinates for left hands so local hand-shape geometry shares one canonical orientation.
 4. Preserve global motion direction separately; left/right swipe semantics must not be destroyed by local mirroring.
-5. Clamp `dt` to the accepted runtime range before encoding.
-6. Reject non-finite or invalid geometry rather than silently substituting zeros.
+5. Reject non-finite or invalid geometry rather than silently substituting zeros.
 
 Palm scale is derived from stable palm landmarks and must be strictly positive.
+
+The first accepted observation after track creation or reset is encoded with `dt=0` and global wrist velocity `(0,0)`. For subsequent observations the timestamp must strictly increase. If the gap exceeds `maximum_observation_gap_ns`, the track state is reset and the current sample is encoded as a new first observation. Otherwise `dt` is the exact positive elapsed time in seconds and global wrist velocity is computed from the previous accepted global wrist position. V1 does not clamp valid `dt` to an arbitrary gesture-specific interval.
 
 ### V1 feature vector: 78 FP32 values
 
@@ -153,7 +160,7 @@ Palm scale is derived from stable palm landmarks and must be strictly positive.
 | handedness | 1 | `-1=left, 0=unknown, +1=right` |
 | landmark confidence | 1 | `[0,1]` |
 | palm confidence | 1 | `[0,1]` |
-| delta time | 1 | seconds since previous accepted observation |
+| delta time | 1 | exact seconds since previous accepted observation, or zero after reset |
 | static pose one-hot | 4 | `Unknown, Open, Closed, Pointer` from `HandResult::gesture` |
 | **total** | **78** | |
 
@@ -174,10 +181,12 @@ active gesture decoder state
 
 State is reset when:
 
-- the caller explicitly calls `reset()`;
+- the caller explicitly calls `reset()` or `reset_track()`;
 - a track disappears longer than the configured maximum observation gap;
-- the same track id reappears with an invalid/non-monotonic timestamp;
+- the same track id receives a non-monotonic timestamp;
 - model execution or feature validation fails for that track.
+
+When a reset is caused by an excessive gap, the current valid sample may immediately seed a fresh state using the first-observation encoding. A non-monotonic timestamp is an invalid call and does not seed a new state.
 
 V1 does not carry GRU state across a ByteTrack identity change. Canonical long-gap hand re-identification can be designed separately.
 
@@ -234,16 +243,17 @@ The ONNX export may internally reshape/unsqueeze for the standard ONNX GRU opera
 For each accepted hand observation:
 
 ```text
-HandResult + frame/timestamp metadata
+HandResult + GestureFrameMetadata
     -> encode 78 features
     -> execute model(features, hidden_in)
     -> validate finite logits and hidden_out
     -> softmax heads
-    -> update hidden state
-    -> decode GestureEvent
+    -> decode class/phase
+    -> commit hidden state
+    -> emit zero or one GestureEvent for that track
 ```
 
-The recognizer is synchronous and causal. Hidden state is committed only after a successful complete model step.
+The recognizer is synchronous and causal. Hidden state and previous-frame metadata are committed only after a successful complete model step.
 
 A failed model step must not partially advance recurrent state.
 
@@ -275,13 +285,16 @@ V1 phases are exactly:
 
 The runtime decoder may enforce only structural validity:
 
-- `Start` opens an event;
-- `Active` continues the same event;
-- `End` closes the same event;
-- invalid phase/class combinations are rejected or normalized to no event according to the typed-model contract;
+- `None` always produces no public event and closes no gesture by itself;
+- a non-`None` class with `Idle` produces no public event;
+- `Start` opens or replaces the active event for that track;
+- `Active` continues only a matching active class;
+- `End` closes only a matching active class;
 - an explicit minimum confidence floor may suppress low-confidence output.
 
-It must not use gesture-specific dwell times, reversal windows, repeat counters, or duration thresholds.
+Mismatched `Active`/`End` predictions are treated as no public event, not as a reason to invent timing heuristics. They do not roll back a successfully computed hidden state.
+
+The decoder must not use gesture-specific dwell times, reversal windows, repeat counters, or duration thresholds.
 
 `confidence` is the selected gesture probability after softmax. Phase probability remains an internal diagnostic in V1 unless later promoted to the public event type.
 
@@ -313,7 +326,7 @@ V1 requires an explicit ONNX Runtime CPU execution policy for the temporal model
 
 ```cpp
 const auto gesture_policy = runtime::ExecutionPolicy::exact(
-    {"onnxruntime", "cpu"});
+    runtime::ExecutionPreference{"onnxruntime", "cpu"});
 ```
 
 The hand detector may independently execute on TensorRT CUDA, ORT CUDA, or ORT CPU. Gesture recognition is a separate logical model and therefore may choose its own backend/device.
@@ -352,13 +365,14 @@ public:
 } // namespace kfcore::hand_gesture
 ```
 
-The concrete API may use `std::span` only if the project language baseline is raised; V1 remains C++17-compatible.
+V1 remains C++17-compatible.
 
 ## Capacity and failure rules
 
 - `maximum_tracks` is a hard bound.
-- No unbounded per-track history is stored. Only the GRU hidden state and previous-frame feature metadata are retained.
+- No unbounded per-track history is stored. Only the GRU hidden state, previous-frame feature metadata, and active event state are retained.
 - Unknown or negative `track_id` values are not accepted for recurrent state.
+- `image_width` and `image_height` must be positive.
 - Timestamps must be monotonic per track.
 - Feature values, logits, probabilities, and hidden state must be finite.
 - A model tensor contract mismatch fails at load time.
