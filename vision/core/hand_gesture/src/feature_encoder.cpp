@@ -1,9 +1,10 @@
 #include "kfcore/hand_gesture/feature_encoder.hpp"
 
+#include "kfcore/hand_gesture/error.hpp"
+
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <stdexcept>
 #include <string>
 
 namespace kfcore::hand_gesture
@@ -21,7 +22,14 @@ constexpr double kNanosecondsPerSecond = 1'000'000'000.0;
 
 [[noreturn]] void throw_invalid(const std::string& detail)
 {
-    throw std::invalid_argument("temporal gesture feature encoding: " + detail);
+    throw HandGestureError(HandGestureErrorCode::InvalidArgument,
+                           "temporal gesture feature encoding: " + detail);
+}
+
+[[noreturn]] void throw_contract(const std::string& detail)
+{
+    throw HandGestureError(HandGestureErrorCode::ModelContractMismatch,
+                           "temporal gesture feature contract: " + detail);
 }
 
 void require_finite(float value, const char* name)
@@ -187,7 +195,7 @@ EncodedGestureFeatures GestureFeatureEncoder::encode(
 
     if (cursor != kTemporalGestureFeatureCount)
     {
-        throw std::logic_error("temporal gesture feature encoder produced wrong feature count");
+        throw_contract("encoder produced the wrong feature count");
     }
     for (float value : result.values)
     {
