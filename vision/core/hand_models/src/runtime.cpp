@@ -304,7 +304,7 @@ public:
     {
         if (flag_.test_and_set(std::memory_order_acquire))
             throw HandModelError(HandModelErrorCode::ConcurrentExecution,
-                                 "hand runtime backend is already in use");
+                                 "hand detector is already in use");
     }
     ~UseGuard() { flag_.clear(std::memory_order_release); }
 private:
@@ -346,7 +346,7 @@ std::string lower(std::string value)
 
 } // namespace
 
-struct HandBackend::Impl final
+struct HandDetector::Impl final
 {
     Impl(runtime::ResolvedModel palm_value,
          runtime::ResolvedModel landmark_value,
@@ -475,10 +475,10 @@ struct HandBackend::Impl final
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
 
-HandBackend::HandBackend(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
-HandBackend::~HandBackend() = default;
+HandDetector::HandDetector(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+HandDetector::~HandDetector() = default;
 
-std::unique_ptr<HandBackend> HandBackend::load(
+std::unique_ptr<HandDetector> HandDetector::load(
     runtime::Runtime& runtime,
     const runtime::ModelPackage& palm_package,
     const runtime::ExecutionPolicy& palm_policy,
@@ -495,20 +495,20 @@ std::unique_ptr<HandBackend> HandBackend::load(
         throw_contract("hand packages must use canonical hand.* model_type values");
     try
     {
-        return std::unique_ptr<HandBackend>(new HandBackend(std::make_unique<Impl>(
+        return std::unique_ptr<HandDetector>(new HandDetector(std::make_unique<Impl>(
             runtime.load_model(palm_package, palm_policy),
             runtime.load_model(landmark_package, landmark_policy),
             runtime.load_model(classifier_package, classifier_policy), options)));
     }
     catch (const HandModelError&) { throw; }
     catch (const runtime::RuntimeError& error) { throw_runtime(error.what()); }
-    catch (const std::bad_alloc&) { throw_resource("hand backend allocation failed"); }
+    catch (const std::bad_alloc&) { throw_resource("hand detector allocation failed"); }
 }
 
-HandFrame HandBackend::infer(const image::ImageView& source)
+HandFrame HandDetector::infer(const image::ImageView& source)
 {
     if (!impl_)
-        throw_invalid("hand backend state is unavailable");
+        throw_invalid("hand detector state is unavailable");
     UseGuard guard(impl_->in_use);
     validate_host_image(source);
     try
@@ -690,19 +690,19 @@ HandFrame HandBackend::infer(const image::ImageView& source)
     catch (const std::bad_alloc&) { throw_resource("hand inference allocation failed"); }
 }
 
-const runtime::ExecutionRoute& HandBackend::palm_execution_route() const noexcept
+const runtime::ExecutionRoute& HandDetector::palm_execution_route() const noexcept
 {
     static const runtime::ExecutionRoute empty{};
     return impl_ ? impl_->palm.route : empty;
 }
 
-const runtime::ExecutionRoute& HandBackend::landmark_execution_route() const noexcept
+const runtime::ExecutionRoute& HandDetector::landmark_execution_route() const noexcept
 {
     static const runtime::ExecutionRoute empty{};
     return impl_ ? impl_->landmark.route : empty;
 }
 
-const runtime::ExecutionRoute& HandBackend::classifier_execution_route() const noexcept
+const runtime::ExecutionRoute& HandDetector::classifier_execution_route() const noexcept
 {
     static const runtime::ExecutionRoute empty{};
     return impl_ ? impl_->classifier.route : empty;

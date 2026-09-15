@@ -1,11 +1,11 @@
 #pragma once
 
-#include "kfcore/hand_models/core.hpp"
+#include "kfcore/hand_models/error.hpp"
+#include "kfcore/hand_models/types.hpp"
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/resolver.hpp"
 #include "kfcore/runtime/runtime.hpp"
 
-#include <cctype>
 #include <cstddef>
 #include <memory>
 
@@ -23,15 +23,15 @@ struct HandRuntimeOptions
     float hand_score_threshold = 0.50F;
 };
 
-class HandBackend final : public HandInferenceBackend
+class HandDetector final
 {
 public:
-    ~HandBackend() override;
+    ~HandDetector();
 
-    HandBackend(const HandBackend&) = delete;
-    HandBackend& operator=(const HandBackend&) = delete;
+    HandDetector(const HandDetector&) = delete;
+    HandDetector& operator=(const HandDetector&) = delete;
 
-    [[nodiscard]] static std::unique_ptr<HandBackend> load(
+    [[nodiscard]] static std::unique_ptr<HandDetector> load(
         runtime::Runtime& runtime,
         const runtime::ModelPackage& palm_package,
         const runtime::ExecutionPolicy& palm_policy,
@@ -41,7 +41,7 @@ public:
         const runtime::ExecutionPolicy& classifier_policy,
         const HandRuntimeOptions& options = {});
 
-    HandFrame infer(const image::ImageView& image) override;
+    [[nodiscard]] HandFrame infer(const image::ImageView& image);
 
     [[nodiscard]] const runtime::ExecutionRoute& palm_execution_route() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& landmark_execution_route() const noexcept;
@@ -49,7 +49,7 @@ public:
 
 private:
     struct Impl;
-    explicit HandBackend(std::unique_ptr<Impl> impl);
+    explicit HandDetector(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 

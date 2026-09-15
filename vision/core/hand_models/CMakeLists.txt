@@ -3,7 +3,7 @@ add_library(kfcore_hand_model_core STATIC
   src/error.cpp
   src/geometry.cpp
   src/hand_appearance.cpp
-  src/pipeline.cpp)
+  src/tracker.cpp)
 target_include_directories(kfcore_hand_model_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

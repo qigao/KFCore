@@ -3,7 +3,6 @@ add_library(kfcore_face_model_core STATIC
   src/error.cpp
   src/facemesh_decode.cpp
   src/facemesh_geometry.cpp
-  src/facemesh_pipeline.cpp
   src/inswapper_embedding.cpp)
 target_include_directories(kfcore_face_model_core
   PUBLIC
@@ -26,6 +25,7 @@ cmake_config_target(kfcore_face_model_core
 
 add_library(kfcore_face_model_runtime STATIC
   src/runtime.cpp
+  src/face_mesh.cpp
   src/prepared_models.cpp)
 target_include_directories(kfcore_face_model_runtime
   PUBLIC

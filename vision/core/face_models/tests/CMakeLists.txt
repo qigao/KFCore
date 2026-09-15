@@ -16,16 +16,9 @@ cmake_add_test(
   FOLDER "${_face_model_core_test_folder}")
 
 cmake_add_test(
-  NAME test_face_pipeline_api
-  SOURCES test_face_pipeline_api.cpp
-  LIBS KFCore::face_model_core Salts::TinyTest
-  COMPILE_FEATURES cxx_std_17
-  FOLDER "${_face_model_core_test_folder}")
-
-cmake_add_test(
-  NAME test_face_pipeline
-  SOURCES test_face_pipeline.cpp
-  LIBS KFCore::face_model_core Salts::TinyTest
+  NAME test_face_runtime_api
+  SOURCES test_face_runtime_api.cpp
+  LIBS KFCore::face_model_runtime Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_face_model_core_test_folder}")
 

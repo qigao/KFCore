@@ -1,6 +1,8 @@
 #pragma once
 
-#include "kfcore/face_models/core.hpp"
+#include "kfcore/face_models/error.hpp"
+#include "kfcore/face_models/types.hpp"
+#include "kfcore/image_processor/types.hpp"
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/resolver.hpp"
 #include "kfcore/runtime/runtime.hpp"
@@ -37,10 +39,10 @@ struct PreparedTensorView
     std::size_t element_count = 0U;
 };
 
-class FaceDetector final : public FaceDetectorBackend
+class FaceDetector final
 {
 public:
-    ~FaceDetector() override;
+    ~FaceDetector();
     FaceDetector(const FaceDetector&) = delete;
     FaceDetector& operator=(const FaceDetector&) = delete;
 
@@ -51,7 +53,7 @@ public:
          const FaceRuntimeOptions& options = {});
 
     [[nodiscard]] FaceDetectionsResult infer_all(const image::ImageView& image);
-    FaceDetectionResult infer(const image::ImageView& image) override;
+    [[nodiscard]] FaceDetectionResult infer(const image::ImageView& image);
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
 
 private:
@@ -60,10 +62,10 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-class FaceLandmarker final : public FaceLandmarkBackend
+class FaceLandmarker final
 {
 public:
-    ~FaceLandmarker() override;
+    ~FaceLandmarker();
     FaceLandmarker(const FaceLandmarker&) = delete;
     FaceLandmarker& operator=(const FaceLandmarker&) = delete;
 
@@ -73,13 +75,40 @@ public:
          const runtime::ExecutionPolicy& policy,
          const FaceRuntimeOptions& options = {});
 
-    FaceLandmarkResult infer(const image::ImageView& image,
-                             const RectF& face_box) override;
+    [[nodiscard]] FaceLandmarkResult infer(const image::ImageView& image,
+                                           const RectF& face_box);
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
 
 private:
     struct Impl;
     explicit FaceLandmarker(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+class FaceMesh final
+{
+public:
+    ~FaceMesh();
+    FaceMesh(const FaceMesh&) = delete;
+    FaceMesh& operator=(const FaceMesh&) = delete;
+
+    [[nodiscard]] static std::unique_ptr<FaceMesh>
+    load(runtime::Runtime& runtime,
+         const runtime::ModelPackage& detector_package,
+         const runtime::ExecutionPolicy& detector_policy,
+         const runtime::ModelPackage& landmarker_package,
+         const runtime::ExecutionPolicy& landmarker_policy,
+         const FaceRuntimeOptions& runtime_options = {},
+         const FaceMeshOptions& options = {});
+
+    [[nodiscard]] FaceMeshFrame infer(const image::ImageView& image);
+    [[nodiscard]] FaceMeshFrame infer(const image::FrameView& frame);
+    [[nodiscard]] const runtime::ExecutionRoute& detector_execution_route() const noexcept;
+    [[nodiscard]] const runtime::ExecutionRoute& landmarker_execution_route() const noexcept;
+
+private:
+    struct Impl;
+    explicit FaceMesh(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 
