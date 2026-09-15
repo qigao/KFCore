@@ -71,6 +71,7 @@ add_subdirectory(vision/pipelines/whole_body)
 add_subdirectory(vision/core/face_models)
 add_subdirectory(vision/core/hand_models)
 add_subdirectory(vision/core/hand_gesture)
+add_subdirectory(tools/kfgesture)
 add_subdirectory(hand_interaction)
 
 if(KFCORE_ENABLE_TENSORRT)
