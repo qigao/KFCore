@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from features import EncodedFeatures, FeatureState, encode_record
 
@@ -13,6 +13,7 @@ class SequenceExample:
     sequence_id: str
     track_id: int
     subject_id: Optional[str]
+    timestamps_ns: List[int]
     features: List[List[float]]
     gesture_labels: List[int]
     phase_labels: List[int]
@@ -52,12 +53,14 @@ def load_sequences(path: Path) -> List[SequenceExample]:
         subject_id = next(iter(subject_values)) if subject_values else None
 
         previous: Optional[FeatureState] = None
+        timestamps: List[int] = []
         features: List[List[float]] = []
         gestures: List[int] = []
         phases: List[int] = []
         for record in records:
             encoded: EncodedFeatures = encode_record(record, previous)
             previous = encoded.next_state
+            timestamps.append(int(record["timestamp_ns"]))
             features.append(encoded.values)
             gestures.append(_label(record, "gesture_label", 8))
             phases.append(_label(record, "phase_label", 4))
@@ -69,6 +72,7 @@ def load_sequences(path: Path) -> List[SequenceExample]:
                 sequence_id=sequence_id,
                 track_id=track_id,
                 subject_id=subject_id,
+                timestamps_ns=timestamps,
                 features=features,
                 gesture_labels=gestures,
                 phase_labels=phases,
