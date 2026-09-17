@@ -3,6 +3,7 @@
 
 #include "esn.h"
 #include "esn_sparse.h"
+#define TINYTEST_NO_MAIN
 #include "tinytest.h"
 
 #define ESN_SPARSE_EPSILON 1.0e-5f
