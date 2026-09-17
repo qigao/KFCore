@@ -9,7 +9,7 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/esn-miniblas.yml'
   pull_request:
-    branches: [master, feature/esn-miniblas, feature/esn-reservoir-init]
+    branches: [master]
     paths:
       - 'esn/**'
       - 'vendor/miniblas/**'
