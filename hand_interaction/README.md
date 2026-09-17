@@ -1,42 +1,30 @@
 # Hand interaction
 
-`KFCore::hand_interaction` is the deterministic semantic layer above tracked hands and learned temporal gesture events.
-It no longer recognizes dynamic physical gestures such as Wave, Swipe, Grab, Release, or Click from THIG timing graphs.
-Those gestures are produced by `KFCore::hand_gesture::TemporalGestureRecognizer`.
+`KFCore::hand_interaction` converts tracked hands into bounded primitive
+observations and recognizes production gesture actions with THIG. The causal GRU
+implementation remains an independent experiment and is not a dependency of this
+module.
 
 ## Architecture
 
 ```text
 HandDetector
   -> HandTracker
-  -> TemporalGestureRecognizer (GRU)
-  -> GestureEvent
-  -> HandInteractionPipeline
-       |-> learned gesture -> semantic application action
-       `-> primitive/static/spatial THIG semantics
+  -> HandPrimitiveExtractor
+  -> TemporalGraphEngine (THIG)
+  -> ActionEvent
 ```
 
-The remaining THIG graph is deliberately limited to static or spatial semantics such as:
+The V5 graph recognizes:
 
-- `OK`;
-- `Single Hand V` / `Two Hand V`;
-- `Zoom In` / `Zoom Out`;
-- `Rotate Clockwise` / `Rotate CounterClockwise`.
+- `Swipe Left` / `Swipe Right` from open-hand sustained direction observations;
+- `Grasp` / `Release` from stationary Open/Fist transitions;
+- `Drag Start Left/Right`, `Drag Left/Right`, `Drag End`, and `Drag Cancelled`;
+- `OK`, `Single Hand V`, stationary `Two Hand V`, stationary `V Fist`;
+- `Zoom In`, `Zoom Out`, `Rotate Clockwise`, `Rotate CounterClockwise`.
 
-There is no THIG Wave graph, click state graph, grasp/release timing graph, direction dwell requirement, or gesture-specific reversal/duration rule.
-
-## Learned gesture mapping
-
-The interaction layer consumes `hand_gesture::GestureEvent` values and applies only deterministic application semantics:
-
-- `Wave/End` -> `Wave`;
-- `SwipeLeft/End` -> `Swipe Left`, or `Drag Start Left` / `Drag Left` while a hand is grabbed;
-- `SwipeRight/End` -> `Swipe Right`, or `Drag Start Right` / `Drag Right` while a hand is grabbed;
-- `Grab/Start` -> `Grasp` and binds the canonical hand;
-- `Release/Start` -> `Release` or `Drag End` and clears the grab binding;
-- `Click/End` -> `Click` or `Click Center/Left/Right/Top/Bottom` when the caller supplies a current Region observation.
-
-These rules do not decide whether the physical gesture occurred. They only map a learned event to application semantics.
+Wave, Point, Click, and Pinch are intentionally excluded. No GRU-to-THIG fallback
+or compatibility adapter is present.
 
 ## Usage
 
@@ -45,25 +33,77 @@ These rules do not decide whether the physical gesture occurred. They only map a
 
 kfcore::hand_interaction::HandInteractionOptions options;
 options.primitives.max_hands = 8;
-options.semantic.max_observations_per_frame = 128;
+options.temporal.max_observations_per_frame = 128;
+options.temporal.max_relation_events = 512;
+options.temporal.max_action_states = 5120;
 
 kfcore::hand_interaction::HandInteractionPipeline interaction(options);
-
 const auto result = interaction.process(
     tracked_hand_frame,
     {serial, std::chrono::steady_clock::now(), image_width, image_height},
-    learned_gesture_events,
     region_observations);
-
-for (const auto& action : result.actions) {
-    dispatch_application_command(action.action);
-}
 ```
 
-`learned_gesture_events` use raw `HandResult::track_id`; the pipeline maps each current raw track to the canonical hand identity produced by `HandPrimitiveExtractor`.
-An event referring to a hand absent from the current frame is rejected.
+`process()` synchronously borrows its inputs and returns owned observations and
+actions. Frame serials must strictly increase, timestamps must not decrease, and
+image dimensions must be positive. Invalid configuration, identity, observation,
+or capacity input fails immediately.
 
-External Region observations still use canonical hand IDs. Accepted relations are exactly:
+## Temporal settings
+
+`HandInteractionSettings` owns the configurable direction stabilization, Open/Fist
+transition timing, neutral rearm timing, static/spatial dwell values, shape
+stabilization, history, cooldown, and bounded THIG capacities. The default ten
+stateless actions and 512 relation states require `max_action_states >= 5120`;
+custom lower capacities are rejected by THIG configuration validation.
+
+Default Swipe confirmation retains up to five direction samples in 167 ms and
+requires at least two supporting samples plus 67 ms of winning evidence. The
+independent duration gate prevents high-frame-rate streams from confirming
+earlier merely because they provide more samples, while the two-sample floor
+lets sustained low-frame-rate input confirm without waiting for a third frame.
+All thresholds remain configurable.
+
+The direction window is shared by Swipe, Drag Start/Drag, direction switching,
+and post-drag `Direction Neutral` rearm. The two-sample default therefore applies
+to each consumer; Swipe and Drag still independently require 67 ms of direction
+duration, while the interaction state graph continues to enforce binding and
+phase order.
+
+One competing direction frame immediately ends the active direction relation
+but does not switch the stabilizer unless window support and the switch margin
+are satisfied. Returning to the retained stable direction can therefore recover
+without rebuilding its complete window.
+
+`Two Hand V` and `V Fist` require overlapping shape and `Motion Stationary`
+evidence observed in the current frame from both distinct hands. Same-source
+THIG patterns retain bounded `UNKNOWN` dropout behavior, but a disappeared hand
+cannot combine with a current second hand to create a new two-hand action.
+
+Gesture thresholds are production configuration until a trained GRU artifact and
+quality gate justify another explicit migration. They are not mirrored in the
+experimental GRU runtime.
+
+## Canonical identity
+
+ByteTrack raw IDs are not the identity fact source for temporal gestures.
+`HandPrimitiveExtractor` resolves each reliable hand to a canonical ID using raw
+continuity, geometry, motion, scale, hand shape, handedness, and optional
+appearance. THIG relations and state graphs use that canonical ID, so a raw-ID
+replacement does not by itself reset an unambiguous gesture. Ambiguous matches
+remain `canonical_id == 0` and emit no primitive observations instead of guessing.
+
+ByteTrack should be replaced only if recorded crossing, occlusion, fast-motion,
+and detector-dropout sequences establish a ByteTrack baseline and explicit
+acceptance thresholds for ID switches, fragmentation, canonical reacquisition,
+gesture cancellation, and false activation. That recorded corpus and numerical
+gate are not yet present in the repository. Appearance remains opt-in and must be
+evaluated with its extraction cost.
+
+## External Region context
+
+Optional external observations accept exactly one declared Region per current
+canonical hand and frame:
 
 ```text
 Region Center
@@ -74,60 +114,27 @@ Region Bottom
 Region Unclassified
 ```
 
-Each canonical hand may have at most one Region observation per frame. Region observations are used directly for learned Click semantics and are not fed into THIG temporal recognition.
-
-## Canonical hand identity
-
-Canonical identity remains owned by `HandPrimitiveExtractor`. It combines bounded raw-track continuity, geometry, shape, handedness, motion, scale, and optional appearance evidence.
-The identity registry is independent of the GRU hidden state: `TemporalGestureRecognizer` is keyed by the current raw track ID, while the interaction layer maps the emitted event to the current canonical ID before creating an action.
-
-Long-gap recurrent-state re-identification is intentionally outside Temporal Gesture V1.
-
-## Settings
-
-`HandInteractionSettings` now contains only deterministic static/spatial THIG settings and capacities:
-
-- OK / V / dual-hand / spatial dwell values;
-- shape observation-window stabilization;
-- THIG history and bounded capacities;
-- rotation cooldown.
-
-The following old dynamic-gesture recognition settings no longer exist and have no compatibility aliases:
-
-```text
-direction_dwell_ms
-direction_window_ms
-wave_reversal_max_ms
-wave_total_max_ms
-wave_require_horizontal_palm_axis
-grab_select_stable_ms
-grab_release_stable_ms
-grab_transition_max_ms
-click_ready_dwell_ms
-click_press_dwell_ms
-click_release_dwell_ms
-click_transition_max_ms
-neutral_rearm_ms
-```
-
-Dynamic gesture timing is learned by `gesture.temporal-gru` instead of configured here.
+Region observations are validated and copied into the returned primitive frame.
+They are not fed into THIG and do not produce Click actions.
 
 ## State and reset
 
-`HandInteractionPipeline` owns:
+Each `HandInteractionPipeline` is single-owner and not reentrant. It owns canonical
+identity/primitive history and one `TemporalGraphEngine`; callers must serialize
+access to one instance. `reset()` clears both owners. Primitive state is staged and
+committed only after THIG accepts the complete frame.
 
-- canonical hand primitive/identity state;
-- the remaining static/spatial THIG engine state;
-- one deterministic grab/drag binding.
-
-`reset()` clears all three. The pipeline is a single-owner stateful object; callers serialize access to one instance.
+The single interaction state graph supports one active Grasp/Drag lifecycle. An
+idle graph does not reserve a visible hand: the source becomes bound only after
+that source completes the stationary Open-to-Fist Grasp transition, and remains
+bound through Release or timeout.
 
 ## Build target
 
-`KFCore::hand_interaction` is a static SDK target and publicly depends on:
+`KFCore::hand_interaction` publicly depends only on:
 
 - `KFCore::hand_model_core`;
-- `KFCore::hand_gesture`;
-- `KFCore::thig` for the remaining static/spatial semantic graph.
+- `KFCore::thig`.
 
-Learned temporal model execution remains in `KFCore::hand_gesture` and uses the normal backend-neutral Runtime/Model Package path.
+`KFCore::hand_gesture` remains independently buildable for contract/runtime
+experiments, but production interaction callers neither include nor link it.

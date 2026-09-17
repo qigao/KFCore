@@ -467,6 +467,75 @@ spec("THIG temporal graph") {
     check_size(actions[0].evidence, 2);
   }
 
+  it("requires current evidence from both distinct sources") {
+    kfcore::thig::TemporalGraphEngine engine(BinaryPatternSpec(
+        kfcore::thig::PatternOperator::Both, 100,
+        kfcore::thig::PatternSourceJoin::Distinct));
+    const auto now = std::chrono::steady_clock::now();
+
+    check_empty(engine.ProcessFrame({Observe("first", 4, 1)}, now));
+    const auto actions = engine.ProcessFrame(
+        {Observe("second", 8, 2)}, now + std::chrono::milliseconds(20));
+
+    check_empty(actions);
+  }
+
+  it("does not revive ended distinct During intervals through current containers") {
+    kfcore::thig::EngineSpec spec;
+    spec.version = "distinct-during-recency-v1";
+    spec.observationMaxGapMs = 1000;
+    spec.relations = {{"first_contained", {}}, {"first_container", {}},
+                      {"second_contained", {}}, {"second_container", {}},
+                      {"unlock", {}}};
+
+    kfcore::thig::PatternGraph concurrent;
+    concurrent.nodes = {
+        {"first_contained", kfcore::thig::PatternOperator::Atom, {},
+         "first_contained"},
+        {"first_container", kfcore::thig::PatternOperator::Atom, {},
+         "first_container"},
+        {"first_during", kfcore::thig::PatternOperator::During, {0, 1}},
+        {"second_contained", kfcore::thig::PatternOperator::Atom, {},
+         "second_contained"},
+        {"second_container", kfcore::thig::PatternOperator::Atom, {},
+         "second_container"},
+        {"second_during", kfcore::thig::PatternOperator::During, {3, 4}},
+        {"both", kfcore::thig::PatternOperator::Both, {2, 5}, {}, 0, 0, 0,
+         kfcore::thig::PatternSourceJoin::Distinct},
+    };
+    concurrent.root = 6;
+
+    kfcore::thig::StateGraphSpec graph;
+    graph.id = "distinct_during_recency";
+    graph.initialState = "blocked";
+    graph.states = {"blocked", "ready", "done"};
+    graph.transitions = {
+        {"unlock", "blocked", "ready",
+         kfcore::thig::PatternGraph::Atom("unlock")},
+        {"consume", "ready", "done", std::move(concurrent),
+         kfcore::thig::SourceConstraint::Any, false, false,
+         "stale_distinct_during"},
+    };
+    spec.stateGraphs.push_back(std::move(graph));
+
+    kfcore::thig::TemporalGraphEngine engine(std::move(spec));
+    const auto now = std::chrono::steady_clock::now();
+    check_empty(engine.ProcessFrame(
+        {Observe("first_contained", 4, 1), Observe("first_container", 4, 2),
+         Observe("second_contained", 8, 3), Observe("second_container", 8, 4)},
+        now));
+    check_empty(engine.ProcessFrame(
+        {Reject("first_contained", 4, 5), Reject("second_contained", 8, 6),
+         Observe("unlock", 4, 7)},
+        now + std::chrono::milliseconds(10)));
+
+    const auto actions = engine.ProcessFrame(
+        {Observe("first_container", 4, 8), Observe("second_container", 8, 9)},
+        now + std::chrono::milliseconds(20));
+    check_empty(actions);
+    check(engine.StateOf("distinct_during_recency") == "ready");
+  }
+
   it("rejects distinct-source evidence outside the onset window") {
     kfcore::thig::TemporalGraphEngine engine(BinaryPatternSpec(
         kfcore::thig::PatternOperator::Both, 50,

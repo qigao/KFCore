@@ -14,7 +14,6 @@ target_compile_features(kfcore_hand_interaction PUBLIC cxx_std_17)
 target_link_libraries(kfcore_hand_interaction
   PUBLIC
     KFCore::hand_model_core
-    KFCore::hand_gesture
     KFCore::thig)
 set_target_properties(kfcore_hand_interaction PROPERTIES
   CXX_STANDARD 17

@@ -343,6 +343,10 @@ PatternMatch MergeDistinctMatches(const PatternMatch& left,
                                   bool concurrent) {
   PatternMatch merged = concurrent ? MergeConcurrentMatches(left, right)
                                    : MergeMatches(left, right);
+  if (concurrent) {
+    merged.latestObservedMs = std::min(
+        {merged.endMs, left.latestObservedMs, right.latestObservedMs});
+  }
   if (EntityKey(right.source) < EntityKey(left.source)) {
     merged.source = right.source;
     merged.target = left.source;

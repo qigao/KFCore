@@ -71,6 +71,28 @@ frame = tracker->update(source_image, std::move(frame));
 execution backend or model session. `reset()` clears temporal identity state.
 This separation lets inference and temporal tracking be used independently.
 
+A newly created track is intentionally unconfirmed and may return
+`track_id == -1`. With `minimum_consecutive_frames = 1`, the next matching frame
+confirms it and returns a stable non-negative ID. `reset()` restarts the same
+confirmation lifecycle.
+
+ByteTrack is the bounded short-term palm-box association layer. Its raw
+`track_id` is a continuity hint rather than the semantic identity consumed by
+THIG. A detection gap strictly shorter than `lost_track_buffer` may preserve a
+confirmed ID; at or beyond that boundary the next detection starts unconfirmed.
+Appearance extraction remains opt-in because it requires
+`update(source_image, frame)` and has additional image sampling cost.
+
+Replacing ByteTrack requires recorded-sequence evidence, including raw ID
+switches, track fragmentation, canonical reacquisition rate, ambiguous-frame
+duration, gesture cancellation, and false activation measurements. A different
+tracker must remain behind the existing `HandTracker` boundary rather than expose
+backend-specific state to callers.
+
+The repository does not yet contain a recorded tracking corpus, ByteTrack
+baseline, or accepted numerical thresholds for those measurements. They must be
+defined together before an alternative tracker can be approved.
+
 `HandAppearanceDescriptor` remains an owned 256-value descriptor split into
 Palm plus five finger regions. `valid_parts` and `quality` describe which parts
 were sampled reliably.
