@@ -1,4 +1,4 @@
-add_library(kfcore_esn STATIC esn.c esn.h)
+add_library(kfcore_esn STATIC esn.c esn_reservoir.c esn.h)
 
 target_include_directories(
   kfcore_esn
