@@ -1,4 +1,4 @@
-add_library(kfcore_esn STATIC esn.c esn_reservoir.c esn_rls.c esn_sparse.c esn_group.c esn_deep.c esn.h esn_sparse.h esn_group.h esn_deep.h)
+add_library(kfcore_esn STATIC esn.c esn_reservoir.c esn_rls.c esn_sparse.c esn_group.c esn_deep.c esn_group_deep.c esn.h esn_sparse.h esn_group.h esn_deep.h esn_group_deep.h)
 
 target_include_directories(
   kfcore_esn
@@ -24,7 +24,7 @@ cmake_config_target(
   EXPORT_SET KFCoreTargets
   FOLDER "esn")
 
-install(FILES esn.h esn_sparse.h esn_group.h esn_deep.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
+install(FILES esn.h esn_sparse.h esn_group.h esn_deep.h esn_group_deep.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
 
 if(BUILD_TESTS)
   add_subdirectory(tests)
