@@ -88,6 +88,7 @@ jobs:
             salts/tinytest/src/tinytest.c \
             esn/tests/test_esn.c \
             esn/tests/test_esn_rls.c \
+            esn/tests/test_esn_sparse.c \
             -lm \
             -o "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
             2>&1 | tee "$RUNNER_TEMP/esn-miniblas/build.log"
