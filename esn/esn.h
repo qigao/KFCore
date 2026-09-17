@@ -35,16 +35,24 @@ typedef struct kfcore_esn_model
  * @param model ESN model view. Reservoir fields must be valid.
  * @param input Input vector with model->input_size elements.
  * @param state In/out reservoir state with model->reservoir_size elements.
- * @param workspace Scratch vector with model->reservoir_size elements.
+ * @param workspace Scratch vector with model->reservoir_size elements. It must
+ *                  not overlap input, state, or model-owned weight/bias buffers.
  */
 kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* input,
                                   float* state, float* workspace);
 
-/** Apply the linear readout to a reservoir state. */
+/** Apply the linear readout to a reservoir state.
+ *
+ * output must not overlap state or the model's output weight/bias buffers.
+ */
 kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float* state,
                                      float* output);
 
-/** Advance the reservoir and then apply the readout. */
+/** Advance the reservoir and then apply the readout.
+ *
+ * The non-overlap requirements of kfcore_esn_step and kfcore_esn_predict both
+ * apply.
+ */
 kfcore_esn_status kfcore_esn_step_predict(const kfcore_esn_model* model, const float* input,
                                           float* state, float* workspace, float* output);
 
@@ -53,7 +61,8 @@ kfcore_esn_status kfcore_esn_step_predict(const kfcore_esn_model* model, const f
  * states is reservoir_size x sample_count, targets is output_size x
  * sample_count, and output_weights is output_size x reservoir_size. All are
  * column-major. gram_workspace must contain reservoir_size * reservoir_size
- * floats and must not overlap the other buffers.
+ * floats. states, targets, output_weights, and gram_workspace must be mutually
+ * non-overlapping.
  *
  * The implementation solves the regularized normal equations with Cholesky
  * factorization. It does not form an inverse and does not fall back to a
