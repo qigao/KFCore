@@ -38,6 +38,7 @@ find_package(SaltsUtils CONFIG REQUIRED
              PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 
 add_subdirectory(vendor)
+add_subdirectory(esn)
 add_subdirectory(trackers)
 
 enable_language(CXX)
