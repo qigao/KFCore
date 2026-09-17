@@ -108,6 +108,11 @@ kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float*
 kfcore_esn_status kfcore_esn_step_predict(const kfcore_esn_model* model, const float* input,
                                           float* state, float* workspace, float* output)
 {
+    if (kfcore_esn_validate_readout(model) != KFCORE_ESN_OK || !output)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
     const kfcore_esn_status step_status = kfcore_esn_step(model, input, state, workspace);
     if (step_status != KFCORE_ESN_OK)
     {
