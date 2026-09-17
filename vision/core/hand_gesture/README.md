@@ -4,6 +4,10 @@
 It is backend-neutral and uses the existing KFCore Runtime / Model Package path; backend
 plugins remain tensor executors only.
 
+The target is excluded from the default CMake graph. Configure with
+`KFCORE_ENABLE_TEMPORAL_GESTURE_GRU=ON` only when building this experimental
+library and its `kfgesture-smoke` tool.
+
 There is currently no trained deployment artifact. Production
 `KFCore::hand_interaction` continues to recognize SwipeLeft, SwipeRight, Grab, and
 Release from primitive observations with THIG and does not link this module.

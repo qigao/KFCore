@@ -140,7 +140,9 @@ python tools/temporal_gesture/export_onnx.py \
 
 This package is **not a gesture model**. It must not be used for quality claims.
 
-Validate and run it with an ONNX Runtime backend plugin:
+The C++ GRU library and smoke tool are excluded from the default CMake graph.
+Configure with `KFCORE_ENABLE_TEMPORAL_GESTURE_GRU=ON` before building them.
+Then validate and run the package with an ONNX Runtime backend plugin:
 
 ```text
 build/bin/kfmodel validate build/gesture/contract-smoke

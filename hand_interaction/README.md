@@ -137,4 +137,5 @@ bound through Release or timeout.
 - `KFCore::thig`.
 
 `KFCore::hand_gesture` remains independently buildable for contract/runtime
-experiments, but production interaction callers neither include nor link it.
+experiments when `KFCORE_ENABLE_TEMPORAL_GESTURE_GRU=ON`, but it is disabled by
+default and production interaction callers neither include nor link it.
