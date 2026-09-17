@@ -140,13 +140,13 @@ kfcore_esn_status kfcore_esn_deep_step(
 
 `workspace` contains at least the count returned by `kfcore_esn_deep_layout`.
 
-`input`, `state`, `workspace`, and all layer weight/bias buffers must obey explicit non-overlap requirements. Workspace is scratch and may be modified on failed calls.
+`input`, `state`, `workspace`, and all layer weight/bias buffers must obey explicit non-overlap requirements. Workspace is scratch and may be modified after staging begins.
 
 ## Execution algorithm
 
 Deep stepping reuses `kfcore_esn_step` rather than duplicating reservoir recurrence math.
 
-1. Validate the complete deep model and checked layout before caller-state mutation.
+1. Validate the complete deep model and checked layout before caller-state mutation or workspace staging.
 2. Copy caller `state` into the first `state_size` floats of `workspace`; this is the staged candidate state.
 3. Use the remaining `max_reservoir_size` floats as one reusable per-layer scratch buffer.
 4. Initialize `layer_input = input`.
@@ -163,7 +163,7 @@ The staged state therefore provides transaction-like caller-state semantics whil
 
 Deep execution is failure-atomic with respect to caller state.
 
-The following are rejected with `KFCORE_ESN_INVALID_ARGUMENT` before caller state is committed:
+The following are rejected with `KFCORE_ESN_INVALID_ARGUMENT` before workspace staging and before caller-state mutation:
 
 - NULL deep model, layer array, input, state, or workspace;
 - non-positive `layer_count`;
@@ -176,7 +176,7 @@ Any delegated non-OK status from `kfcore_esn_step` is returned unchanged and cal
 
 There is no retry, layer skip, rollback heuristic, alternate recurrence, sparse fallback, or partial caller-state commit.
 
-Workspace is scratch and may be modified on any call, including validation/runtime failures after workspace staging begins.
+Validation failures do not require workspace mutation because validation completes before staging. Once staging begins, workspace is scratch and may be modified even if a delegated runtime step later fails.
 
 ## Readout and training boundary
 
