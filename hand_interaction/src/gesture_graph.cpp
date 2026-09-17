@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace kfcore::hand_interaction
@@ -12,140 +13,98 @@ namespace kfcore::hand_interaction
 namespace
 {
 
-    constexpr char kOkPoseGroup[]                 = "ok_pose";
-    constexpr char kHandDirectionGroup[]          = "hand_direction";
-    constexpr char kHandShapeGroup[]              = "hand_shape";
-    constexpr char kHandRegionGroup[]             = "hand_region";
-    constexpr char kIndexPressGroup[]             = "index_press";
-    constexpr char kHandInteractionGraph[]        = "hand_interaction_cycle";
-    constexpr char kWaveGraph[]                   = "wave_cycle";
-    constexpr char kScreenClickGraph[]            = "screen_click_cycle";
-    constexpr char kArmedState[]                  = "armed";
-    constexpr char kAwaitReleaseState[]           = "await_release";
-    constexpr char kDraggingState[]               = "dragging";
-    constexpr char kAwaitNeutralState[]           = "await_neutral";
-    constexpr char kBindingTimeoutRelation[]      = "thig.binding.timeout";
-    constexpr char kClickBindingTimeoutRelation[] = "thig.screen_click.binding.timeout";
-    constexpr char kWaveBindingTimeoutRelation[]  = "thig.wave.binding.timeout";
+    constexpr char kOkPoseGroup[]            = "ok_pose";
+    constexpr char kHandDirectionGroup[]     = "hand_direction";
+    constexpr char kHandShapeGroup[]         = "hand_shape";
+    constexpr char kIndexPressGroup[]        = "index_press";
+    constexpr char kInteractionGraph[]       = "hand_interaction_cycle";
+    constexpr char kArmedState[]             = "armed";
+    constexpr char kAwaitReleaseState[]      = "await_release";
+    constexpr char kDraggingState[]          = "dragging";
+    constexpr char kAwaitNeutralState[]      = "await_neutral";
+    constexpr char kBindingTimeoutRelation[] = "thig.binding.timeout";
 
-    thig::StateTransitionSpec Transition(std::string id, std::string from, std::string to,
-                                         std::string relation, int dwellMs,
-                                         thig::SourceConstraint sourceConstraint, bool bindSource,
-                                         bool unbindSource, std::string action = {},
-                                         int priority = 0)
+    void validate_non_negative(int value, const char* name)
     {
-        thig::StateTransitionSpec transition;
-        transition.id               = std::move(id);
-        transition.fromState        = std::move(from);
-        transition.toState          = std::move(to);
-        transition.trigger          = thig::PatternGraph::Atom(std::move(relation), dwellMs);
-        transition.sourceConstraint = sourceConstraint;
-        transition.bindSource       = bindSource;
-        transition.unbindSource     = unbindSource;
-        transition.action           = std::move(action);
-        transition.priority         = priority;
-        return transition;
+        if (value < 0)
+        {
+            throw std::invalid_argument(std::string(name) + " cannot be negative");
+        }
     }
 
-    thig::PatternGraph BothRelations(std::string first, std::string second, int dwellMs)
+    void validate_ratio(float value, const char* name)
+    {
+        if (!std::isfinite(value) || value < 0.0F || value > 1.0F)
+        {
+            throw std::invalid_argument(std::string(name) + " must be finite within [0,1]");
+        }
+    }
+
+    thig::PatternGraph BothRelations(std::string first, std::string second, int dwell_ms)
     {
         thig::PatternGraph pattern;
         pattern.nodes = {
-            { "first", thig::PatternOperator::Atom, {}, std::move(first), dwellMs },
-            { "second", thig::PatternOperator::Atom, {}, std::move(second), dwellMs },
+            { "first", thig::PatternOperator::Atom, {}, std::move(first), dwell_ms },
+            { "second", thig::PatternOperator::Atom, {}, std::move(second), dwell_ms },
             { "both", thig::PatternOperator::Both, { 0, 1 } },
         };
-        pattern.root                             = 2;
-        pattern.nodes[pattern.root].minOverlapMs = dwellMs;
+        pattern.root                             = 2U;
+        pattern.nodes[pattern.root].minOverlapMs = dwell_ms;
         return pattern;
     }
 
-    thig::PatternGraph ThreeStrokeWavePattern(std::string firstDirection,
-                                              std::string secondDirection, int strokeDwellMs,
-                                              int reversalMaxMs, int totalMaxMs,
-                                              bool requireHorizontalPalmAxis)
+    thig::PatternGraph DistinctStationaryShapes(std::string first_shape, std::string second_shape,
+                                                int dwell_ms, int onset_window_ms)
     {
         thig::PatternGraph pattern;
         pattern.nodes = {
-            { "first_stroke", thig::PatternOperator::Atom, {}, firstDirection, strokeDwellMs },
-            { "return_stroke", thig::PatternOperator::Atom, {}, secondDirection, strokeDwellMs },
-            { "final_stroke", thig::PatternOperator::Atom, {}, firstDirection, strokeDwellMs },
-            { "first_reversal", thig::PatternOperator::Seq, { 0, 1 }, {}, 0, reversalMaxMs },
-            { "second_reversal", thig::PatternOperator::Seq, { 3, 2 }, {}, 0, reversalMaxMs },
-            { "bounded_wave", thig::PatternOperator::Within, { 4, 4 }, {}, 0, totalMaxMs },
-            { "open_palm", thig::PatternOperator::Atom, {}, "Shape Open", 0 },
-            { "open_palm_wave", thig::PatternOperator::During, { 5, 6 } },
+            { "first_shape", thig::PatternOperator::Atom, {}, std::move(first_shape), dwell_ms },
+            { "first_stationary", thig::PatternOperator::Atom, {}, "Motion Stationary", dwell_ms },
+            { "first_hand", thig::PatternOperator::Both, { 0, 1 } },
+            { "second_shape", thig::PatternOperator::Atom, {}, std::move(second_shape), dwell_ms },
+            { "second_stationary", thig::PatternOperator::Atom, {}, "Motion Stationary", dwell_ms },
+            { "second_hand", thig::PatternOperator::Both, { 3, 4 } },
+            { "both_hands", thig::PatternOperator::Both, { 2, 5 } },
         };
-        if (requireHorizontalPalmAxis)
-        {
-            pattern.nodes.push_back(
-                { "horizontal_palm_axis", thig::PatternOperator::Atom, {},
-                  "Palm Axis Horizontal", 0 });
-            pattern.nodes.push_back(
-                { "open_horizontal_palm", thig::PatternOperator::Both, { 6, 8 } });
-            pattern.nodes[7].inputs = { 5, 9 };
-        }
-        pattern.root               = 7;
-        pattern.forbiddenRelations = { "Direction Up", "Direction Down", "Shape Fist",
-                                       "Shape Pointer", "Shape V" };
+        pattern.root                             = 6U;
+        pattern.nodes[2].minOverlapMs            = dwell_ms;
+        pattern.nodes[5].minOverlapMs            = dwell_ms;
+        pattern.nodes[pattern.root].windowMs     = onset_window_ms;
+        pattern.nodes[pattern.root].sourceJoin   = thig::PatternSourceJoin::Distinct;
+        pattern.nodes[pattern.root].minOverlapMs = dwell_ms;
         return pattern;
     }
 
-    thig::PatternGraph PointerClickPattern(std::string region, int readyDwellMs, int pressDwellMs,
-                                           int transitionMaxMs)
+    thig::PatternGraph ShapeTransitionWithStationarity(std::string first_shape,
+                                                       std::string second_shape, int first_dwell_ms,
+                                                       int second_dwell_ms, int transition_max_ms)
     {
         thig::PatternGraph pattern;
         pattern.nodes = {
-            { "ready", thig::PatternOperator::Atom, {}, "Index Extended", readyDwellMs },
-            { "pressed", thig::PatternOperator::Atom, {}, "Index Pressed", pressDwellMs },
-            { "stationary", thig::PatternOperator::Atom, {}, "Motion Stationary", pressDwellMs },
-            { "press_terminal", thig::PatternOperator::Both, { 1, 2 } },
-            { "region", thig::PatternOperator::Atom, {}, std::move(region), 0 },
-            { "press_in_region", thig::PatternOperator::Both, { 3, 4 } },
-            { "click", thig::PatternOperator::Seq, { 0, 5 }, {}, 0, transitionMaxMs },
-        };
-        pattern.root                  = 6;
-        pattern.nodes[3].minOverlapMs = pressDwellMs;
-        pattern.nodes[5].minOverlapMs = pressDwellMs;
-        return pattern;
-    }
-
-    thig::PatternGraph DistinctSourceBothRelations(std::string first, std::string second,
-                                                   int dwellMs, int onsetWindowMs)
-    {
-        thig::PatternGraph pattern = BothRelations(std::move(first), std::move(second), dwellMs);
-        auto&              root    = pattern.nodes[pattern.root];
-        root.windowMs              = onsetWindowMs;
-        root.sourceJoin            = thig::PatternSourceJoin::Distinct;
-        return pattern;
-    }
-
-    thig::PatternGraph ShapeTransitionWithStationarity(std::string firstShape,
-                                                       std::string secondShape, int firstDwellMs,
-                                                       int secondDwellMs, int transitionMaxMs)
-    {
-        thig::PatternGraph pattern;
-        pattern.nodes = {
-            { "first_shape", thig::PatternOperator::Atom, {}, std::move(firstShape), firstDwellMs },
+            { "first_shape",
+              thig::PatternOperator::Atom,
+              {},
+              std::move(first_shape),
+              first_dwell_ms },
             { "second_shape",
               thig::PatternOperator::Atom,
               {},
-              std::move(secondShape),
-              secondDwellMs },
-            { "stationary", thig::PatternOperator::Atom, {}, "Motion Stationary", secondDwellMs },
+              std::move(second_shape),
+              second_dwell_ms },
+            { "stationary", thig::PatternOperator::Atom, {}, "Motion Stationary", second_dwell_ms },
             { "terminal", thig::PatternOperator::Both, { 1, 2 } },
-            { "confirmed", thig::PatternOperator::Seq, { 0, 3 }, {}, 0, transitionMaxMs },
+            { "confirmed", thig::PatternOperator::Seq, { 0, 3 }, {}, 0, transition_max_ms },
         };
-        pattern.root                  = 4;
-        pattern.nodes[3].minOverlapMs = std::max(1, secondDwellMs);
+        pattern.root                  = 4U;
+        pattern.nodes[3].minOverlapMs = std::max(1, second_dwell_ms);
         pattern.forbiddenRelations    = { "Shape Pointer", "Shape V" };
         return pattern;
     }
 
     thig::StateTransitionSpec PatternTransition(std::string id, std::string from, std::string to,
                                                 thig::PatternGraph     trigger,
-                                                thig::SourceConstraint sourceConstraint,
-                                                bool bindSource, bool unbindSource,
+                                                thig::SourceConstraint source_constraint,
+                                                bool bind_source, bool unbind_source,
                                                 std::string action = {}, int priority = 0)
     {
         thig::StateTransitionSpec transition;
@@ -153,39 +112,79 @@ namespace
         transition.fromState        = std::move(from);
         transition.toState          = std::move(to);
         transition.trigger          = std::move(trigger);
-        transition.sourceConstraint = sourceConstraint;
-        transition.bindSource       = bindSource;
-        transition.unbindSource     = unbindSource;
+        transition.sourceConstraint = source_constraint;
+        transition.bindSource       = bind_source;
+        transition.unbindSource     = unbind_source;
         transition.action           = std::move(action);
         transition.priority         = priority;
         return transition;
+    }
+
+    thig::StateTransitionSpec Transition(std::string id, std::string from, std::string to,
+                                         std::string relation, int dwell_ms,
+                                         thig::SourceConstraint source_constraint, bool bind_source,
+                                         bool unbind_source, std::string action = {},
+                                         int priority = 0)
+    {
+        return PatternTransition(std::move(id), std::move(from), std::move(to),
+                                 thig::PatternGraph::Atom(std::move(relation), dwell_ms),
+                                 source_constraint, bind_source, unbind_source, std::move(action),
+                                 priority);
     }
 
 } // namespace
 
 thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& settings)
 {
-    if (settings.neutral_rearm_ms < 0)
+    validate_non_negative(settings.direction_dwell_ms, "direction dwell");
+    validate_non_negative(settings.direction_window_ms, "direction window");
+    validate_non_negative(settings.grab_select_stable_ms, "grab select stable duration");
+    validate_non_negative(settings.grab_release_stable_ms, "grab release stable duration");
+    validate_non_negative(settings.grab_transition_max_ms, "grab transition maximum");
+    validate_non_negative(settings.ok_dwell_ms, "OK dwell");
+    validate_non_negative(settings.observation_max_gap_ms, "observation max gap");
+    validate_non_negative(settings.neutral_rearm_ms, "neutral rearm duration");
+    validate_non_negative(settings.single_hand_v_dwell_ms, "single-hand V dwell");
+    validate_non_negative(settings.dual_hand_dwell_ms, "dual-hand dwell");
+    validate_non_negative(settings.dual_hand_onset_window_ms, "dual-hand onset window");
+    validate_non_negative(settings.spatial_dwell_ms, "spatial dwell");
+    validate_non_negative(settings.shape_window_ms, "shape window");
+    validate_non_negative(settings.history_ms, "history");
+    validate_non_negative(settings.rotation_cooldown_ms, "rotation cooldown");
+    validate_ratio(settings.direction_minimum_support_ratio, "direction minimum support ratio");
+    validate_ratio(settings.direction_switch_margin, "direction switch margin");
+    validate_ratio(settings.shape_minimum_support_ratio, "shape minimum support ratio");
+    validate_ratio(settings.shape_switch_margin, "shape switch margin");
+    if (settings.direction_minimum_supporting_observations <= 0 ||
+        settings.direction_maximum_samples_per_source == 0U ||
+        settings.shape_minimum_supporting_observations <= 0 ||
+        settings.shape_maximum_samples_per_source == 0U ||
+        settings.max_observations_per_frame == 0U || settings.max_relation_events == 0U ||
+        settings.max_observation_window_states == 0U || settings.max_action_states == 0U)
     {
-        throw std::invalid_argument("neutral rearm duration cannot be negative");
+        throw std::invalid_argument("hand interaction capacities must be positive");
     }
     const auto doubled_neutral = static_cast<std::int64_t>(settings.neutral_rearm_ms) * 2;
     if (doubled_neutral > (std::numeric_limits<int>::max)())
     {
         throw std::invalid_argument("neutral rearm duration exceeds the THIG time range");
     }
-    const int sourceBindingTimeoutMs =
+    const int source_binding_timeout_ms =
         std::max(settings.neutral_rearm_ms, settings.observation_max_gap_ms);
+
     thig::EngineSpec spec;
-    spec.version                 = kHandInteractionSpecVersion;
-    spec.historyMs = std::max({ settings.history_ms, static_cast<int>(doubled_neutral),
-                                settings.rotation_cooldown_ms });
-    spec.maxObservationsPerFrame = settings.max_observations_per_frame;
-    spec.maxRelationEvents       = settings.max_relation_events;
+    spec.version                    = kHandInteractionSpecVersion;
+    spec.historyMs                  = std::max({ settings.history_ms, settings.rotation_cooldown_ms,
+                                                 settings.dual_hand_onset_window_ms, settings.shape_window_ms,
+                                                 settings.direction_window_ms, settings.grab_transition_max_ms,
+                                                 static_cast<int>(doubled_neutral) });
+    spec.observationMaxGapMs        = settings.observation_max_gap_ms;
+    spec.maxObservationsPerFrame    = settings.max_observations_per_frame;
+    spec.maxRelationEvents          = settings.max_relation_events;
     spec.maxObservationWindowStates = settings.max_observation_window_states;
     spec.maxActionStates            = settings.max_action_states;
-    spec.observationMaxGapMs        = settings.observation_max_gap_ms;
-    spec.relations                  = {
+
+    spec.relations = {
         { "Pose OK", kOkPoseGroup },
         { "Pose Not OK", kOkPoseGroup },
         { "Direction Right", kHandDirectionGroup },
@@ -220,127 +219,121 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
         { "Hands Distance Contracting", "hands_distance" },
         { "Hands Distance Stable", "hands_distance" },
         { "Hands Distance Unclassified", "hands_distance" },
-        { "Region Center", kHandRegionGroup },
-        { "Region Left", kHandRegionGroup },
-        { "Region Right", kHandRegionGroup },
-        { "Region Top", kHandRegionGroup },
-        { "Region Bottom", kHandRegionGroup },
-        { "Region Unclassified", kHandRegionGroup },
         { kBindingTimeoutRelation, {} },
-        { kWaveBindingTimeoutRelation, {} },
-        { kClickBindingTimeoutRelation, {} },
     };
-    thig::ObservationWindowSpec shapeWindow;
-    shapeWindow.exclusiveGroup                = kHandShapeGroup;
-    shapeWindow.windowMs                      = settings.shape_window_ms;
-    shapeWindow.minimumSupportingObservations = settings.shape_minimum_supporting_observations;
-    shapeWindow.minimumSupportRatio           = settings.shape_minimum_support_ratio;
-    shapeWindow.switchMargin                  = settings.shape_switch_margin;
-    shapeWindow.maxSamplesPerSource           = settings.shape_maximum_samples_per_source;
-    shapeWindow.ignoredRelations              = { "Shape Unclassified" };
-    spec.observationWindows.push_back(std::move(shapeWindow));
 
-    thig::ObservationWindowSpec directionWindow;
-    directionWindow.exclusiveGroup = kHandDirectionGroup;
-    directionWindow.windowMs       = settings.direction_window_ms;
-    directionWindow.minimumSupportingObservations =
+    thig::ObservationWindowSpec shape_window;
+    shape_window.exclusiveGroup                = kHandShapeGroup;
+    shape_window.windowMs                      = settings.shape_window_ms;
+    shape_window.minimumSupportingObservations = settings.shape_minimum_supporting_observations;
+    shape_window.minimumSupportRatio           = settings.shape_minimum_support_ratio;
+    shape_window.switchMargin                  = settings.shape_switch_margin;
+    shape_window.maxSamplesPerSource           = settings.shape_maximum_samples_per_source;
+    shape_window.ignoredRelations              = { "Shape Unclassified" };
+    spec.observationWindows.push_back(std::move(shape_window));
+
+    thig::ObservationWindowSpec direction_window;
+    direction_window.exclusiveGroup = kHandDirectionGroup;
+    direction_window.windowMs       = settings.direction_window_ms;
+    direction_window.minimumSupportingObservations =
         settings.direction_minimum_supporting_observations;
-    directionWindow.minimumSupportRatio    = settings.direction_minimum_support_ratio;
-    directionWindow.switchMargin           = settings.direction_switch_margin;
-    directionWindow.maxSamplesPerSource    = settings.direction_maximum_samples_per_source;
-    directionWindow.rejectStableOnConflict = true;
-    spec.observationWindows.push_back(std::move(directionWindow));
+    direction_window.minimumSupportRatio    = settings.direction_minimum_support_ratio;
+    direction_window.switchMargin           = settings.direction_switch_margin;
+    direction_window.maxSamplesPerSource    = settings.direction_maximum_samples_per_source;
+    direction_window.rejectStableOnConflict = true;
+    spec.observationWindows.push_back(std::move(direction_window));
 
-    thig::ObservationWindowSpec regionWindow;
-    regionWindow.exclusiveGroup                = kHandRegionGroup;
-    regionWindow.windowMs                      = settings.region_window_ms;
-    regionWindow.minimumSupportingObservations = settings.region_minimum_supporting_observations;
-    regionWindow.minimumSupportRatio           = settings.region_minimum_support_ratio;
-    regionWindow.switchMargin                  = settings.region_switch_margin;
-    regionWindow.maxSamplesPerSource           = settings.region_maximum_samples_per_source;
-    regionWindow.ignoredRelations              = { "Region Unclassified" };
-    spec.observationWindows.push_back(std::move(regionWindow));
+    thig::ActionSpec ok;
+    ok.action   = "OK";
+    ok.pattern  = BothRelations("Pose OK", "Motion Stationary", settings.ok_dwell_ms);
+    ok.priority = 100;
+    spec.actions.push_back(std::move(ok));
 
-    thig::ActionSpec checkout;
-    checkout.action   = "OK";
-    checkout.pattern  = BothRelations("Pose OK", "Motion Stationary", settings.ok_dwell_ms);
-    checkout.priority = 100;
-    spec.actions.push_back(std::move(checkout));
-
-    thig::ActionSpec singleHandV;
-    singleHandV.action = "Single Hand V";
-    singleHandV.pattern =
+    thig::ActionSpec single_hand_v;
+    single_hand_v.action = "Single Hand V";
+    single_hand_v.pattern =
         BothRelations("Shape V", "Motion Stationary", settings.single_hand_v_dwell_ms);
-    singleHandV.priority = 75;
-    spec.actions.push_back(std::move(singleHandV));
+    single_hand_v.priority = 75;
+    spec.actions.push_back(std::move(single_hand_v));
 
-    const auto addSpatialAction =
-        [&](std::string action, thig::PatternGraph pattern, std::string exclusiveGroup,
-            int cooldownMs)
+    const auto add_spatial_action = [&](std::string action, thig::PatternGraph pattern,
+                                        std::string exclusive_group, int cooldown_ms)
     {
-        thig::ActionSpec specAction;
-        specAction.action         = std::move(action);
-        specAction.pattern        = std::move(pattern);
-        specAction.exclusiveGroup = std::move(exclusiveGroup);
-        specAction.priority       = 70;
-        specAction.cooldownMs     = cooldownMs;
-        spec.actions.push_back(std::move(specAction));
+        thig::ActionSpec item;
+        item.action         = std::move(action);
+        item.pattern        = std::move(pattern);
+        item.exclusiveGroup = std::move(exclusive_group);
+        item.priority       = 70;
+        item.cooldownMs     = cooldown_ms;
+        spec.actions.push_back(std::move(item));
     };
-    addSpatialAction(
+
+    add_spatial_action(
         "Zoom In", thig::PatternGraph::Atom("Hands Distance Expanding", settings.spatial_dwell_ms),
         "zoom_transform", 0);
-    addSpatialAction(
+    add_spatial_action(
         "Zoom Out",
         thig::PatternGraph::Atom("Hands Distance Contracting", settings.spatial_dwell_ms),
         "zoom_transform", 0);
-    addSpatialAction(
+    add_spatial_action(
         "Rotate Clockwise",
         BothRelations("Rotation Clockwise", "Motion Stationary", settings.spatial_dwell_ms),
         "rotation_transform", settings.rotation_cooldown_ms);
-    addSpatialAction(
+    add_spatial_action(
         "Rotate CounterClockwise",
         BothRelations("Rotation CounterClockwise", "Motion Stationary", settings.spatial_dwell_ms),
         "rotation_transform", settings.rotation_cooldown_ms);
 
-    const auto addDualHandAction =
-        [&](std::string action, std::string first, std::string second, int priority)
-    {
-        thig::ActionSpec pattern;
-        pattern.action         = std::move(action);
-        pattern.pattern        = DistinctSourceBothRelations(std::move(first), std::move(second),
-                                                             settings.dual_hand_dwell_ms,
-                                                             settings.dual_hand_onset_window_ms);
-        pattern.exclusiveGroup = "dual_hand_shape";
-        pattern.priority       = priority;
-        spec.actions.push_back(std::move(pattern));
-    };
-    addDualHandAction("Two Hand V", "Shape V", "Shape V", 80);
+    thig::ActionSpec dual_hand_v;
+    dual_hand_v.action  = "Two Hand V";
+    dual_hand_v.pattern = DistinctStationaryShapes(
+        "Shape V", "Shape V", settings.dual_hand_dwell_ms, settings.dual_hand_onset_window_ms);
+    dual_hand_v.exclusiveGroup = "dual_hand_shape";
+    dual_hand_v.priority       = 80;
+    spec.actions.push_back(std::move(dual_hand_v));
 
+    thig::ActionSpec v_fist;
+    v_fist.action  = "V Fist";
+    v_fist.pattern = DistinctStationaryShapes("Shape V", "Shape Fist", settings.dual_hand_dwell_ms,
+                                              settings.dual_hand_onset_window_ms);
+    v_fist.exclusiveGroup = "dual_hand_shape";
+    v_fist.priority       = 80;
+    spec.actions.push_back(std::move(v_fist));
+
+    const auto add_swipe_action = [&](std::string action, std::string direction)
+    {
+        thig::ActionSpec swipe;
+        swipe.action = std::move(action);
+        swipe.pattern =
+            BothRelations(std::move(direction), "Shape Open", settings.direction_dwell_ms);
+        swipe.exclusiveGroup = "swipe_direction";
+        swipe.priority       = 85;
+        spec.actions.push_back(std::move(swipe));
+    };
+    add_swipe_action("Swipe Left", "Direction Left");
+    add_swipe_action("Swipe Right", "Direction Right");
+
+    const auto           bound_if_present = thig::SourceConstraint::BoundIfPresent;
+    const auto           bound            = thig::SourceConstraint::Bound;
     thig::StateGraphSpec interaction;
-    interaction.id           = kHandInteractionGraph;
+    interaction.id           = kInteractionGraph;
     interaction.initialState = kArmedState;
     interaction.states = { kArmedState, kAwaitReleaseState, kDraggingState, kAwaitNeutralState };
-    interaction.bindOnRelations        = { "Direction Right", "Direction Left", "Shape Fist",
-                                           "Shape Open" };
-    interaction.bindingTimeoutMs       = sourceBindingTimeoutMs;
+    interaction.bindingTimeoutMs       = source_binding_timeout_ms;
     interaction.bindingTimeoutRelation = kBindingTimeoutRelation;
-
-    const auto boundIfPresent = thig::SourceConstraint::BoundIfPresent;
-    const auto bound          = thig::SourceConstraint::Bound;
-    interaction.transitions   = {
+    interaction.transitions            = {
         PatternTransition("grasp_from_primitives", kArmedState, kAwaitReleaseState,
-                            ShapeTransitionWithStationarity(
+                                     ShapeTransitionWithStationarity(
                               "Shape Open", "Shape Fist", settings.grab_release_stable_ms,
                               settings.grab_select_stable_ms, settings.grab_transition_max_ms),
-                            boundIfPresent, true, false, "Grasp", 95),
+                                     bound_if_present, true, false, "Grasp", 95),
         Transition("timeout_armed", kArmedState, kArmedState, kBindingTimeoutRelation, 0, bound,
-                     false, true, {}, 110),
-
+                              false, true, {}, 110),
         PatternTransition("release_from_primitives", kAwaitReleaseState, kArmedState,
-                            ShapeTransitionWithStationarity(
+                                     ShapeTransitionWithStationarity(
                               "Shape Fist", "Shape Open", settings.grab_select_stable_ms,
                               settings.grab_release_stable_ms, settings.grab_transition_max_ms),
-                            bound, false, true, "Release", 120),
+                                     bound, false, true, "Release", 120),
         PatternTransition(
             "drag_start_right", kAwaitReleaseState, kDraggingState,
             BothRelations("Direction Right", "Shape Fist", settings.direction_dwell_ms), bound,
@@ -349,16 +342,8 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
             "drag_start_left", kAwaitReleaseState, kDraggingState,
             BothRelations("Direction Left", "Shape Fist", settings.direction_dwell_ms), bound,
             false, false, "Drag Start Left", 100),
-        PatternTransition("drag_start_up", kAwaitReleaseState, kDraggingState,
-                            BothRelations("Direction Up", "Shape Fist", settings.direction_dwell_ms),
-                            bound, false, false, "Drag Start Up", 100),
-        PatternTransition(
-            "drag_start_down", kAwaitReleaseState, kDraggingState,
-            BothRelations("Direction Down", "Shape Fist", settings.direction_dwell_ms), bound,
-            false, false, "Drag Start Down", 100),
         Transition("timeout_wait_release", kAwaitReleaseState, kAwaitNeutralState,
-                     kBindingTimeoutRelation, 0, bound, false, true, {}, 110),
-
+                              kBindingTimeoutRelation, 0, bound, false, true, {}, 110),
         PatternTransition(
             "drag_right", kDraggingState, kDraggingState,
             BothRelations("Direction Right", "Shape Fist", settings.direction_dwell_ms), bound,
@@ -367,25 +352,17 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
             "drag_left", kDraggingState, kDraggingState,
             BothRelations("Direction Left", "Shape Fist", settings.direction_dwell_ms), bound,
             false, false, "Drag Left", 90),
-        PatternTransition("drag_up", kDraggingState, kDraggingState,
-                            BothRelations("Direction Up", "Shape Fist", settings.direction_dwell_ms),
-                            bound, false, false, "Drag Up", 90),
-        PatternTransition(
-            "drag_down", kDraggingState, kDraggingState,
-            BothRelations("Direction Down", "Shape Fist", settings.direction_dwell_ms), bound,
-            false, false, "Drag Down", 90),
         PatternTransition("drag_end", kDraggingState, kAwaitNeutralState,
-                            ShapeTransitionWithStationarity(
+                                     ShapeTransitionWithStationarity(
                               "Shape Fist", "Shape Open", settings.grab_select_stable_ms,
                               settings.grab_release_stable_ms, settings.grab_transition_max_ms),
-                            bound, false, true, "Drag End", 120),
+                                     bound, false, true, "Drag End", 120),
         Transition("timeout_dragging", kDraggingState, kAwaitNeutralState, kBindingTimeoutRelation,
-                     0, bound, false, true, "Drag Cancelled", 110),
-
+                              0, bound, false, true, "Drag Cancelled", 110),
         Transition("rearm", kAwaitNeutralState, kArmedState, "Direction Neutral",
-                     settings.neutral_rearm_ms, boundIfPresent, false, true, {}, 100),
+                              settings.neutral_rearm_ms, bound_if_present, false, true, {}, 100),
         Transition("timeout_wait_neutral", kAwaitNeutralState, kArmedState, kBindingTimeoutRelation,
-                     0, bound, false, true, {}, 110),
+                              0, bound, false, true, {}, 110),
     };
     for (auto& transition : interaction.transitions)
     {
@@ -397,68 +374,6 @@ thig::EngineSpec build_hand_interaction_graph(const HandInteractionSettings& set
     }
     spec.stateGraphs.push_back(std::move(interaction));
 
-    thig::StateGraphSpec wave;
-    wave.id                     = kWaveGraph;
-    wave.initialState           = kArmedState;
-    wave.states                 = { kArmedState, kAwaitNeutralState };
-    wave.bindOnRelations        = { "Direction Left", "Direction Right" };
-    wave.bindingTimeoutMs       = sourceBindingTimeoutMs;
-    wave.bindingTimeoutRelation = kWaveBindingTimeoutRelation;
-    wave.transitions            = {
-        PatternTransition(
-            "wave_left_right_left", kArmedState, kAwaitNeutralState,
-            ThreeStrokeWavePattern("Direction Left", "Direction Right", settings.direction_dwell_ms,
-                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
-                                   settings.wave_require_horizontal_palm_axis),
-            boundIfPresent, true, false, "Wave", 100),
-        PatternTransition(
-            "wave_right_left_right", kArmedState, kAwaitNeutralState,
-            ThreeStrokeWavePattern("Direction Right", "Direction Left", settings.direction_dwell_ms,
-                                   settings.wave_reversal_max_ms, settings.wave_total_max_ms,
-                                   settings.wave_require_horizontal_palm_axis),
-            boundIfPresent, true, false, "Wave", 100),
-        Transition("wave_rearm", kAwaitNeutralState, kArmedState, "Direction Neutral",
-                              settings.neutral_rearm_ms, bound, false, true, {}, 100),
-        Transition("wave_timeout_armed", kArmedState, kArmedState, kWaveBindingTimeoutRelation, 0,
-                              bound, false, true, {}, 110),
-        Transition("wave_timeout_wait_neutral", kAwaitNeutralState, kArmedState,
-                              kWaveBindingTimeoutRelation, 0, bound, false, true, {}, 110),
-    };
-    for (auto& transition : wave.transitions)
-    {
-        if (transition.action == "Wave")
-        {
-            transition.stateLocalRelations = { "Direction Left", "Direction Right" };
-        }
-    }
-    spec.stateGraphs.push_back(std::move(wave));
-
-    thig::StateGraphSpec click;
-    click.id                     = kScreenClickGraph;
-    click.initialState           = "ready";
-    click.states                 = { "ready", "pressed" };
-    click.bindOnRelations        = { "Index Extended" };
-    click.bindingTimeoutMs       = sourceBindingTimeoutMs;
-    click.bindingTimeoutRelation = kClickBindingTimeoutRelation;
-    for (const char* region : { "Center", "Left", "Right", "Top", "Bottom" })
-    {
-        std::string regionName(region);
-        click.transitions.push_back(PatternTransition(
-            "press_" + regionName, "ready", "pressed",
-            PointerClickPattern("Region " + regionName, settings.click_ready_dwell_ms,
-                                settings.click_press_dwell_ms, settings.click_transition_max_ms),
-            boundIfPresent, true, false, "Click " + regionName, 100));
-    }
-    click.transitions.push_back(Transition("release", "pressed", "ready", "Index Extended",
-                                           settings.click_release_dwell_ms, bound, false, true, {},
-                                           100));
-    click.transitions.push_back(Transition("timeout_ready", "ready", "ready",
-                                           kClickBindingTimeoutRelation, 0, bound, false, true, {},
-                                           110));
-    click.transitions.push_back(Transition("timeout_pressed", "pressed", "ready",
-                                           kClickBindingTimeoutRelation, 0, bound, false, true, {},
-                                           110));
-    spec.stateGraphs.push_back(std::move(click));
     return spec;
 }
 

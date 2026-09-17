@@ -25,7 +25,7 @@ constexpr char kManifestSchema[] =
     "optional string runtime_version; optional string platform; "
     "optional string hardware_compatibility; optional string device_name; "
     "optional string compute_capability; optional string precision; optional string profile; } "
-    "message Package { string schema; string id; string version; string model_type; "
+    "message Package { [name(\"schema\")] string schema_id; string id; string version; string model_type; "
     "optional string variant; group<Artifact> artifacts; }";
 
 struct DataBindDeleter
@@ -400,7 +400,7 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
     }
     std::unique_ptr<DataBindRecord, RecordDeleter> record(raw_record);
 
-    if (required_string(record.get(), "schema") != "kfcore.model/1")
+    if (required_string(record.get(), "schema_id") != "kfcore.model/1")
     {
         invalid_package("model.json schema must be 'kfcore.model/1'");
     }

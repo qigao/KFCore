@@ -32,3 +32,7 @@ cmake_install_headers(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERNS "*.hpp")
+
+if(BUILD_TESTS)
+  add_subdirectory(tests)
+endif()

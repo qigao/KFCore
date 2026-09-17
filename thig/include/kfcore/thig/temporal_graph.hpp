@@ -94,8 +94,9 @@ enum class PatternOperator {
 };
 
 // Declares how a binary pattern joins entity-bound evidence. Same preserves
-// the historic single-entity behavior; Distinct requires two different
-// sources and exposes the second participant as ActionEvent::target.
+// the historic single-entity behavior; Distinct uses two different sources and
+// exposes the second participant as ActionEvent::target. A concurrent Both
+// requires current evidence from both distinct sources.
 enum class PatternSourceJoin { Same, Distinct };
 
 struct PatternNode {
