@@ -83,6 +83,7 @@ jobs:
             vendor/miniblas/miniblas.c \
             vendor/miniblas/linalg.c \
             esn/esn.c \
+            esn/esn_reservoir.c \
             salts/tinytest/src/tinytest.c \
             esn/tests/test_esn.c \
             -lm \

@@ -1,6 +1,8 @@
 #ifndef KFCORE_ESN_H
 #define KFCORE_ESN_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -72,6 +74,41 @@ kfcore_esn_status kfcore_esn_fit_ridge(const float* states, const float* targets
                                        int reservoir_size, int output_size, int sample_count,
                                        float lambda, float* output_weights,
                                        float* gram_workspace);
+
+/** Deterministically initialize dense reservoir weights with Bernoulli sparsity.
+ *
+ * reservoir_weights is a column-major reservoir_size x reservoir_size matrix.
+ * Active candidate weights are generated from a stable SplitMix64-derived
+ * sequence in [-1, 1); masked entries are exactly zero. density must be finite
+ * and in (0, 1]. The function has no hidden allocation or global RNG state.
+ */
+kfcore_esn_status kfcore_esn_init_reservoir_weights(float* reservoir_weights,
+                                                     int reservoir_size, uint64_t seed,
+                                                     float density);
+
+/** Estimate spectral radius magnitude with bounded deterministic power growth.
+ *
+ * The estimate uses repeated matrix-vector products and the geometric mean of
+ * per-iteration growth factors. This is an iterative estimate, not a full
+ * eigendecomposition. workspace must contain 2 * reservoir_size floats and
+ * must not overlap reservoir_weights or spectral_radius.
+ */
+kfcore_esn_status kfcore_esn_estimate_spectral_radius(const float* reservoir_weights,
+                                                       int reservoir_size, int iterations,
+                                                       float* workspace,
+                                                       float* spectral_radius);
+
+/** Scale a dense reservoir in place to a requested spectral-radius estimate.
+ *
+ * target_radius must be finite and positive. The same bounded estimator used by
+ * kfcore_esn_estimate_spectral_radius is applied before scaling. workspace must
+ * contain 2 * reservoir_size floats and must not overlap reservoir_weights.
+ * Zero or non-finite estimated radius returns KFCORE_ESN_NUMERICAL_FAILURE; no
+ * seed/density change or fallback eigensolver is attempted.
+ */
+kfcore_esn_status kfcore_esn_scale_spectral_radius(float* reservoir_weights,
+                                                    int reservoir_size, float target_radius,
+                                                    int iterations, float* workspace);
 
 #ifdef __cplusplus
 }
