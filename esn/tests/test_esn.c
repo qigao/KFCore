@@ -67,6 +67,25 @@ spec("kfcore esn")
         check_within(output[0], 1.5f, ESN_TEST_EPSILON);
     }
 
+    it("does not advance state when step-predict readout validation fails")
+    {
+        static const float input_weights[1] = { 1.0f };
+        static const float reservoir_weights[1] = { 0.0f };
+        static const float reservoir_bias[1] = { 0.0f };
+        static const float output_bias[1] = { 0.0f };
+        const kfcore_esn_model model = {
+            1, 1, 1, 1.0f, input_weights, reservoir_weights, reservoir_bias, NULL, output_bias
+        };
+        const float input[1] = { 1.0f };
+        float state[1] = { 0.0f };
+        float workspace[1] = { 0.0f };
+        float output[1] = { 0.0f };
+
+        check_equal(kfcore_esn_step_predict(&model, input, state, workspace, output),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_within(state[0], 0.0f, ESN_TEST_EPSILON);
+    }
+
     it("fits a ridge readout without an explicit inverse")
     {
         const float states[3] = { 1.0f, 2.0f, 3.0f };
