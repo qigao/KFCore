@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "linalg.h"
@@ -11,14 +12,32 @@ static int kfcore_esn_positive_dimensions(int first, int second, int third)
     return first > 0 && second > 0 && third > 0;
 }
 
-static int kfcore_esn_finite_array(const float* values, int count)
+static int kfcore_esn_checked_product(int first, int second, size_t* product)
 {
-    if (!values || count <= 0)
+    if (first <= 0 || second <= 0 || !product)
     {
         return 0;
     }
 
-    for (int i = 0; i < count; ++i)
+    const size_t left = (size_t)first;
+    const size_t right = (size_t)second;
+    if (left > SIZE_MAX / right)
+    {
+        return 0;
+    }
+
+    *product = left * right;
+    return 1;
+}
+
+static int kfcore_esn_finite_array(const float* values, size_t count)
+{
+    if (!values || count == 0U)
+    {
+        return 0;
+    }
+
+    for (size_t i = 0; i < count; ++i)
     {
         if (!isfinite(values[i]))
         {
@@ -101,15 +120,22 @@ kfcore_esn_status kfcore_esn_fit_ridge(const float* states, const float* targets
                                        int reservoir_size, int output_size, int sample_count,
                                        float lambda, float* output_weights, float* gram_workspace)
 {
+    size_t state_count = 0U;
+    size_t target_count = 0U;
+    size_t weight_count = 0U;
+
     if (!states || !targets || !output_weights || !gram_workspace ||
         !kfcore_esn_positive_dimensions(reservoir_size, output_size, sample_count) ||
-        !isfinite(lambda) || lambda <= 0.0f)
+        !isfinite(lambda) || lambda <= 0.0f ||
+        !kfcore_esn_checked_product(reservoir_size, sample_count, &state_count) ||
+        !kfcore_esn_checked_product(output_size, sample_count, &target_count) ||
+        !kfcore_esn_checked_product(output_size, reservoir_size, &weight_count))
     {
         return KFCORE_ESN_INVALID_ARGUMENT;
     }
 
-    if (!kfcore_esn_finite_array(states, reservoir_size * sample_count) ||
-        !kfcore_esn_finite_array(targets, output_size * sample_count))
+    if (!kfcore_esn_finite_array(states, state_count) ||
+        !kfcore_esn_finite_array(targets, target_count))
     {
         return KFCORE_ESN_INVALID_ARGUMENT;
     }
@@ -132,7 +158,7 @@ kfcore_esn_status kfcore_esn_fit_ridge(const float* states, const float* targets
     trisolveright(gram_workspace, output_weights, reservoir_size, output_size, "T");
     trisolveright(gram_workspace, output_weights, reservoir_size, output_size, "N");
 
-    for (int i = 0; i < output_size * reservoir_size; ++i)
+    for (size_t i = 0; i < weight_count; ++i)
     {
         if (!isfinite(output_weights[i]))
         {
