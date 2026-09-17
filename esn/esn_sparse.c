@@ -1,5 +1,6 @@
 #include "esn_sparse.h"
 
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
