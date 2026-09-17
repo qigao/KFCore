@@ -109,7 +109,7 @@ Grouped stepping uses the existing dense single-reservoir implementation instead
 5. For each group in order:
    - locate that group's candidate state slice;
    - invoke `kfcore_esn_step(group, input, candidate_slice, scratch)`;
-   - if it fails, return the same status and leave caller state untouched.
+   - if it returns any non-OK status, propagate that status and leave caller state untouched.
 6. Only after all groups succeed, copy the complete candidate state back to caller state.
 
 The caller-visible grouped state therefore has transaction-like step semantics even though individual `kfcore_esn_step` calls mutate staged candidate state in place.
@@ -127,9 +127,9 @@ The following return `KFCORE_ESN_INVALID_ARGUMENT` before caller-state mutation:
 - invalid or overflowing state/workspace layout;
 - required output pointers missing from the layout query.
 
-If an individual staged group step returns `KFCORE_ESN_NUMERICAL_FAILURE`, grouped stepping returns that status and leaves caller state unchanged. There is no retry, group skip, state rollback heuristic, alternate solver, sparse fallback, or partial commit.
+Any non-OK status returned by a staged `kfcore_esn_step` is propagated and caller state remains unchanged. The current dense step implementation has no stable public input that intentionally produces `KFCORE_ESN_NUMERICAL_FAILURE`, so #36 does not modify that implementation merely to manufacture such a test case.
 
-Workspace is scratch and may be modified on any call, including failures.
+There is no retry, group skip, state rollback heuristic, alternate solver, sparse fallback, or partial commit. Workspace is scratch and may be modified on any call, including failures.
 
 ## Readout and training boundary
 
@@ -166,10 +166,9 @@ The RED test slice must establish these requirements before production symbols a
 3. **Heterogeneous sizes:** groups with different reservoir sizes occupy the documented concatenated offsets in declaration order.
 4. **Layout query:** total state and workspace sizes match `sum + max`, including one-group behavior.
 5. **Input agreement:** mismatched group input dimensions fail before state mutation.
-6. **Later-group failure atomicity:** a valid first group followed by a numerically failing second group leaves the entire caller state unchanged.
-7. **Invalid group atomicity:** malformed later-group metadata also leaves all state unchanged.
-8. **Overflow/NULL handling:** invalid counts, required NULL output pointers, and checked-size overflow are rejected.
-9. **Existing regression gate:** the full focused ESN C11 ASan+UBSan suite remains GREEN.
+6. **Later-group invalidity is atomic:** a valid first group followed by malformed second-group metadata is rejected before any caller-state commit.
+7. **Overflow/NULL handling:** invalid counts, required NULL output pointers, and checked-size overflow are rejected.
+8. **Existing regression gate:** the full focused ESN C11 ASan+UBSan suite remains GREEN.
 
 The clean RED must fail only because grouped production symbols are absent. Test harness or unrelated compile failures do not count as the algorithm RED.
 
