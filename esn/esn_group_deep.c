@@ -92,3 +92,63 @@ kfcore_esn_status kfcore_esn_grouped_deep_layout(
     *workspace_size = total + max_group_workspace;
     return KFCORE_ESN_OK;
 }
+
+kfcore_esn_status kfcore_esn_grouped_deep_step(
+    const kfcore_esn_grouped_deep_model* grouped_deep,
+    const float* input,
+    float* state,
+    float* workspace)
+{
+    if (!input || !state || !workspace)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    int input_size = 0;
+    int total_state_size = 0;
+    int max_group_workspace = 0;
+    const kfcore_esn_status measure_status =
+        kfcore_esn_grouped_deep_measure(grouped_deep, &input_size,
+                                        &total_state_size, &max_group_workspace);
+    if (measure_status != KFCORE_ESN_OK)
+    {
+        return measure_status;
+    }
+
+    if (total_state_size > INT_MAX - max_group_workspace)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    float* candidate = workspace;
+    float* inner_workspace = workspace + total_state_size;
+    memcpy(candidate, state, sizeof(float) * (size_t)total_state_size);
+
+    int offset = 0;
+    for (int i = 0; i < grouped_deep->group_count; ++i)
+    {
+        int group_state_size = 0;
+        int group_workspace_size = 0;
+        const kfcore_esn_status layout_status =
+            kfcore_esn_deep_layout(&grouped_deep->groups[i],
+                                   &group_state_size,
+                                   &group_workspace_size);
+        if (layout_status != KFCORE_ESN_OK)
+        {
+            return layout_status;
+        }
+
+        const kfcore_esn_status step_status =
+            kfcore_esn_deep_step(&grouped_deep->groups[i], input,
+                                 candidate + offset, inner_workspace);
+        if (step_status != KFCORE_ESN_OK)
+        {
+            return step_status;
+        }
+
+        offset += group_state_size;
+    }
+
+    memcpy(state, candidate, sizeof(float) * (size_t)total_state_size);
+    return KFCORE_ESN_OK;
+}
