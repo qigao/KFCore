@@ -84,8 +84,10 @@ jobs:
             vendor/miniblas/linalg.c \
             esn/esn.c \
             esn/esn_reservoir.c \
+            esn/esn_rls.c \
             salts/tinytest/src/tinytest.c \
             esn/tests/test_esn.c \
+            esn/tests/test_esn_rls.c \
             -lm \
             -o "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
             2>&1 | tee "$RUNNER_TEMP/esn-miniblas/build.log"
