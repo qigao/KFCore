@@ -110,6 +110,35 @@ kfcore_esn_status kfcore_esn_scale_spectral_radius(float* reservoir_weights,
                                                     int reservoir_size, float target_radius,
                                                     int iterations, float* workspace);
 
+/** Initialize inverse-correlation state for online recursive least squares.
+ *
+ * inverse_correlation is a caller-owned reservoir_size x reservoir_size
+ * column-major matrix. On success it is replaced with (1 / delta) * I.
+ * delta must be finite and strictly positive.
+ */
+kfcore_esn_status kfcore_esn_rls_init(float* inverse_correlation, int reservoir_size,
+                                      float delta);
+
+/** Perform one allocation-free forgetting-factor RLS readout update.
+ *
+ * state has reservoir_size elements, target has output_size elements,
+ * output_weights is an output_size x reservoir_size column-major matrix, and
+ * inverse_correlation is a reservoir_size x reservoir_size column-major matrix.
+ * forgetting_factor must be finite and in (0, 1]. workspace must contain
+ * reservoir_size + output_size floats and must not overlap any input or state
+ * buffer.
+ *
+ * The function computes k = P*x/(lambda + x'*P*x), e = y - W*x,
+ * W <- W + e*k' and P <- (P - d*k*k')/lambda. The complete update is validated
+ * before output_weights or inverse_correlation is mutated. Invalid/non-finite
+ * or non-positive denominator/update state returns an error without partial
+ * mutation. No automatic reset, retry, or fallback is attempted.
+ */
+kfcore_esn_status kfcore_esn_rls_update(const float* state, const float* target,
+                                        int reservoir_size, int output_size,
+                                        float forgetting_factor, float* output_weights,
+                                        float* inverse_correlation, float* workspace);
+
 #ifdef __cplusplus
 }
 #endif
