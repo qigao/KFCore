@@ -85,6 +85,7 @@ jobs:
             esn/esn.c \
             esn/esn_reservoir.c \
             esn/esn_rls.c \
+            esn/esn_sparse.c \
             salts/tinytest/src/tinytest.c \
             esn/tests/test_esn.c \
             esn/tests/test_esn_rls.c \
