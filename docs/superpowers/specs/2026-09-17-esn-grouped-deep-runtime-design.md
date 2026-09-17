@@ -163,7 +163,7 @@ kfcore_esn_status kfcore_esn_grouped_deep_step(
 
 `workspace` contains at least the count returned by `kfcore_esn_grouped_deep_layout`.
 
-`input`, `state`, `workspace`, all group layer arrays, and every layer weight/bias buffer follow the existing non-owning contracts. In particular, the writable `state` and `workspace` regions must not overlap each other, the external input, or any model weight/bias storage. The group/deep descriptor structs themselves are metadata views and are not mutated.
+`input`, `state`, `workspace`, and every layer weight/bias buffer follow the existing non-owning contracts. The grouped-deep descriptor array and each group's layer descriptor array must remain valid and stable for the duration of the call and must not reside inside writable `state` or `workspace` storage. The writable `state` and `workspace` regions must not overlap each other, the external input, or model weight/bias storage. Descriptor structs are metadata views and are never mutated.
 
 ## Nested staging and workspace policy
 
@@ -201,13 +201,14 @@ Grouped-deep stepping composes `kfcore_esn_deep_step` rather than duplicating de
 3. Copy caller `state` into the first `state_size` floats of `workspace`; this becomes the outer candidate state.
 4. Set `inner_workspace = workspace + state_size`.
 5. Iterate groups in declaration order. For each group:
-   - identify the group's candidate-state slice using its previously validated deep state size;
+   - obtain that group's deep state size through the same public layout contract;
+   - identify the group's candidate-state slice;
    - call `kfcore_esn_deep_step(group, input, candidate_slice, inner_workspace)`;
    - if the delegated deep step returns non-OK, return that status immediately without modifying caller state;
    - advance the candidate offset by that group's deep state size.
 6. After every group succeeds, copy the complete outer candidate state back into caller `state` once.
 
-Earlier groups may have advanced inside the outer candidate if a later group fails. That is allowed: workspace is scratch. Caller state remains unchanged until the final commit.
+With the current dense dESN runtime, complete pre-validation means malformed group metadata is rejected before outer staging. The delegated non-OK branch is nevertheless preserved as part of the composition contract so a future dESN runtime failure cannot cause partial caller-state commit.
 
 ## Validation strategy
 
@@ -221,7 +222,7 @@ The helper records only scalar measurements required by the current operation:
 
 It does not allocate or persist a per-group layout table.
 
-Because the execution loop later needs each group's state offset, it calls `kfcore_esn_deep_layout` again for the current group before its `kfcore_esn_deep_step`, or otherwise recomputes that scalar through the same public API. This duplicate validation is acceptable in v1 and keeps the implementation allocation-free without storing variable-length metadata.
+Because the execution loop later needs each group's state offset, it may call `kfcore_esn_deep_layout` again for the current group before `kfcore_esn_deep_step`. This duplicate validation is acceptable in v1 and keeps the implementation allocation-free without storing variable-length metadata.
 
 No private dESN implementation helper is exposed or shared in #40.
 
@@ -229,7 +230,7 @@ No private dESN implementation helper is exposed or shared in #40.
 
 Grouped-deep execution is failure-atomic with respect to caller state.
 
-The following are rejected with `KFCORE_ESN_INVALID_ARGUMENT` before caller state is staged:
+The following are rejected with `KFCORE_ESN_INVALID_ARGUMENT` before caller state or workspace candidate storage is staged:
 
 - NULL grouped-deep model, group array, input, state, or workspace;
 - non-positive `group_count`;
@@ -238,9 +239,9 @@ The following are rejected with `KFCORE_ESN_INVALID_ARGUMENT` before caller stat
 - grouped state-size overflow;
 - grouped workspace-size overflow.
 
-If an underlying `kfcore_esn_deep_layout` or `kfcore_esn_deep_step` returns another non-OK status, grouped-deep returns that status unchanged.
+If an underlying `kfcore_esn_deep_layout` or `kfcore_esn_deep_step` returns another non-OK status, grouped-deep returns that status unchanged. The current dense `kfcore_esn_deep_step` has no stable post-layout failure path, so this forwarding semantic is not forced through an artificial runtime-failure test in #40.
 
-After staging begins, workspace may be modified on failure. Caller state remains unchanged unless all groups succeed.
+After staging begins, workspace may be modified. Caller state remains unchanged unless all groups succeed.
 
 There is no retry, group skip, rollback heuristic, sparse fallback, alternate topology, or partial caller-state commit.
 
@@ -305,20 +306,29 @@ The implementation must preserve a clean RED -> GREEN sequence.
 
 1. **Layout contract:** heterogeneous deep groups return exact total state size and `total + max(group deep workspace)` workspace size.
 2. **One-group equivalence:** one-group grouped-deep execution matches ordinary `kfcore_esn_deep_step` for the same deep model, input, initial state, and sufficient workspace.
-3. **Common external input:** two groups with different first-layer input sizes are rejected by layout and step before caller-state commit.
+3. **Common external input:** two groups with different first-layer input sizes are rejected by layout and step before staging or caller-state mutation.
 4. **Group-major/depth-minor ordering:** heterogeneous groups with different depths and reservoir sizes occupy exactly the documented offsets.
 5. **Nested same-timestep propagation:** an analytical multi-group case proves each group's deeper layer consumes that group's freshly computed upstream state from the same timestep.
-6. **Later-group invalidity atomicity:** a valid earlier group followed by an invalid later deep group leaves complete caller state byte-for-byte unchanged.
-7. **Delegated failure atomicity:** any non-OK delegated group step leaves caller state unchanged even if earlier candidate groups advanced.
-8. **NULL handling:** all required public pointers are rejected; supplied caller state remains unchanged.
-9. **Checked state overflow:** valid individual group layouts whose summed state sizes exceed `INT_MAX` are rejected without partial outputs.
-10. **Checked workspace overflow:** a representable grouped total state plus maximum group workspace that exceeds `INT_MAX` is rejected without partial outputs.
-11. **No readout requirement:** all layer output fields may be NULL and do not prevent grouped-deep layout/step execution.
-12. **Existing regression gate:** the complete focused C11 ASan+UBSan ESN suite remains GREEN.
+6. **Later-group invalidity preflight:** a valid earlier group followed by an invalid later deep group is rejected during complete pre-validation; caller state is unchanged and no test depends on earlier candidate execution.
+7. **NULL handling:** all required public pointers are rejected; supplied caller state remains unchanged.
+8. **Checked state overflow:** valid individual group layouts whose summed state sizes exceed `INT_MAX` are rejected without partial outputs.
+9. **Checked workspace overflow:** a representable grouped total state plus maximum group workspace that exceeds `INT_MAX` is rejected without partial outputs.
+10. **No readout requirement:** all layer output fields may be NULL and do not prevent grouped-deep layout/step execution.
+11. **Existing regression gate:** the complete focused C11 ASan+UBSan ESN suite remains GREEN.
 
 The first layout RED must fail only because `kfcore_esn_grouped_deep_layout` is absent. Compiler, TinyTest harness, or unrelated linker failures do not count.
 
 After layout GREEN, the step RED must fail only because `kfcore_esn_grouped_deep_step` is absent.
+
+The implementation must preserve the delegated non-OK forwarding branch, but #40 does not manufacture an otherwise unreachable dESN runtime failure solely to exercise it.
+
+## Overflow test construction
+
+Overflow tests must reach the grouped-deep arithmetic boundary rather than fail inside an individual deep group first.
+
+- For **grouped state-sum overflow**, use individually valid deep groups whose own `state + max_layer` workspace sizes remain representable, while the sum of their deep state sizes exceeds `INT_MAX`.
+- For **grouped workspace overflow**, use individually valid deep groups whose summed state remains representable but `total_grouped_state + max(group_deep_workspace)` exceeds `INT_MAX`.
+- Required weight/bias pointers may use non-NULL placeholder storage because `kfcore_esn_deep_layout` validates metadata and arithmetic without dereferencing matrices by their declared huge dimensions.
 
 ## Scope exclusions
 
