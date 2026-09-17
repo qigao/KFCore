@@ -61,6 +61,11 @@ kfcore_esn_status kfcore_esn_sparse_count_nonzero(const float* reservoir_weights
                                                   int reservoir_size,
                                                   int* nonzero_count)
 {
+    if (!nonzero_count)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
     int count = 0;
     const kfcore_esn_status status =
         kfcore_esn_sparse_count_dense(reservoir_weights, reservoir_size, &count);
