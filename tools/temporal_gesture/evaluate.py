@@ -9,7 +9,13 @@ from typing import List, Sequence, Tuple
 import torch
 
 from dataset import SequenceExample, load_sequences
-from model import GESTURE_CLASSES, HIDDEN_SIZE, NUM_LAYERS, TemporalGestureGru
+from model import (
+    GESTURE_CLASSES,
+    HIDDEN_SIZE,
+    NUM_LAYERS,
+    TemporalGestureGru,
+    validate_checkpoint_contract,
+)
 
 
 @dataclass(frozen=True)
@@ -87,15 +93,7 @@ def match_events(predicted: Sequence[Event], truth: Sequence[Event], minimum_iou
 
 def load_model(checkpoint: Path) -> TemporalGestureGru:
     payload = torch.load(checkpoint, map_location="cpu")
-    expected = {
-        "feature_count": 78,
-        "hidden_size": 64,
-        "num_layers": 2,
-        "gesture_count": 8,
-        "phase_count": 4,
-    }
-    if payload.get("config") != expected:
-        raise ValueError("checkpoint does not match Temporal Gesture GRU V1")
+    validate_checkpoint_contract(payload)
     model = TemporalGestureGru()
     model.load_state_dict(payload["model_state"], strict=True)
     model.eval()

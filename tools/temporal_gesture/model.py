@@ -1,28 +1,48 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 import torch
 from torch import nn
 
+from label_contract import (
+    GESTURE_CLASSES,
+    GESTURE_LABEL_CONTRACT,
+    PHASE_CLASSES,
+)
+
 FEATURE_COUNT = 78
 HIDDEN_SIZE = 64
 NUM_LAYERS = 2
-GESTURE_COUNT = 8
-PHASE_COUNT = 4
 
-GESTURE_CLASSES = (
-    "none",
-    "wave",
-    "swipe_left",
-    "swipe_right",
-    "grab",
-    "release",
-    "point",
-    "click",
-)
-PHASE_CLASSES = ("idle", "start", "active", "end")
+GESTURE_COUNT = len(GESTURE_CLASSES)
+PHASE_COUNT = len(PHASE_CLASSES)
+
+
+def checkpoint_config() -> Dict[str, int]:
+    return {
+        "feature_count": FEATURE_COUNT,
+        "hidden_size": HIDDEN_SIZE,
+        "num_layers": NUM_LAYERS,
+        "gesture_count": GESTURE_COUNT,
+        "phase_count": PHASE_COUNT,
+    }
+
+
+def validate_checkpoint_contract(payload: Mapping[str, Any]) -> None:
+    if payload.get("config") != checkpoint_config():
+        raise ValueError(
+            "checkpoint does not match Temporal Gesture GRU V1 dimensions"
+        )
+    if payload.get("gesture_classes") != list(GESTURE_CLASSES):
+        raise ValueError(
+            "checkpoint does not match Temporal Gesture GRU V1 label contract"
+        )
+    if payload.get("phase_classes") != list(PHASE_CLASSES):
+        raise ValueError(
+            "checkpoint does not match Temporal Gesture GRU V1 label contract"
+        )
 
 
 class TemporalGestureGru(nn.Module):

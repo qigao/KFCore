@@ -1,10 +1,16 @@
 # Temporal Gesture GRU V1 Implementation Plan
 
+> **Status (2026-09-15):** The GRU runtime and tooling remain available as an
+> experimental capability, but the production `hand_interaction` migration in
+> Tasks 4-5 is superseded by
+> `docs/superpowers/specs/2026-09-15-hand-interaction-thig-restoration.md`.
+> Production gesture recognition currently uses THIG.
+
 > **Execution note:** This project does not use a RED/GREEN/TDD workflow for this branch. Implement directly, then verify by source-level contract review, focused build configuration checks, and the user's manual Windows build/runtime smoke.
 
-**Goal:** Add a causal GRU-based hand gesture recognizer that replaces hand-specific THIG timing/threshold recognition while reusing KFCore Model Package V1 and the backend-neutral runtime.
+**Goal:** Add a causal GRU-based hand gesture recognizer as an experimental capability while reusing KFCore Model Package V1 and the backend-neutral runtime. The former production replacement goal is cancelled until a trained deployment model exists.
 
-**Architecture:** Add a new static `vision/core/hand_gesture` module with deterministic 78-value feature encoding and a stateful typed runtime model. The model uses fixed Host tensors (`features`, `hidden_in`, `gesture_logits`, `phase_logits`, `hidden_out`) so no plugin ABI extension is needed. `hand_interaction` consumes learned `GestureEvent` values for semantic application mapping; hand-specific THIG gesture pattern recognition and its timing settings are removed without compatibility aliases.
+**Architecture:** Add a new static `vision/core/hand_gesture` module with deterministic 78-value feature encoding and a stateful typed runtime model. The model uses fixed Host tensors (`features`, `hidden_in`, `gesture_logits`, `phase_logits`, `hidden_out`) so no plugin ABI extension is needed. Production `hand_interaction` remains independent and consumes primitive observations through THIG; Tasks 4-5 below are retained only as superseded implementation history.
 
 **Tech Stack:** C++17, KFCore runtime/ModelPackage V1, ONNX Runtime backend via existing plugin ABI, static KFCore CMake targets.
 
@@ -15,7 +21,7 @@
 - Canonical model type is exactly `gesture.temporal-gru`.
 - V1 feature vector is exactly 78 FP32 values.
 - V1 hidden state is exactly FP32 `[2,1,64]`.
-- V1 outputs are exactly `gesture_logits [1,8]`, `phase_logits [1,4]`, `hidden_out [2,1,64]`.
+- V1 outputs are exactly `gesture_logits [1,5]`, `phase_logits [1,4]`, `hidden_out [2,1,64]`.
 - V1 execution route is explicit ONNX Runtime CPU; no implicit fallback.
 - No execution-plugin ABI extension.
 - No legacy THIG hand-gesture adapter or compatibility aliases.
@@ -78,7 +84,7 @@
 **Implementation steps:**
 - [ ] Validate `package.model_type() == "gesture.temporal-gru"`.
 - [ ] Validate exactly two input tensors named `features` and `hidden_in` with FP32 fixed shapes `[1,78]` and `[2,1,64]`.
-- [ ] Validate exactly three output tensors named `gesture_logits`, `phase_logits`, and `hidden_out` with FP32 fixed shapes `[1,8]`, `[1,4]`, `[2,1,64]`.
+- [ ] Validate exactly three output tensors named `gesture_logits`, `phase_logits`, and `hidden_out` with FP32 fixed shapes `[1,5]`, `[1,4]`, `[2,1,64]`.
 - [ ] Keep one bounded track-state record per non-negative `track_id`: encoder previous state, hidden state, and structural event decoder state.
 - [ ] Reset a track on non-monotonic timestamp or observation gap above the configured maximum, then process current observation as first frame.
 - [ ] Execute each live track synchronously using existing `ExecutionContext::run()` fixed Host tensors.
@@ -115,7 +121,7 @@
 
 ---
 
-### Task 4: Move `hand_interaction` to learned `GestureEvent`
+### Task 4 (superseded): Move `hand_interaction` to learned `GestureEvent`
 
 **Files:**
 - Modify: `hand_interaction/include/kfcore/hand_interaction/hand_interaction.hpp`
@@ -134,15 +140,15 @@
 - [ ] Remove recognition decisions based on primitive temporal windows/reversals/repeats.
 - [ ] Map learned gesture phases to semantic actions/state transitions only.
 - [ ] Keep legality, exclusivity, target binding, and product cooldowns only where they are application semantics rather than physical-gesture recognition.
-- [ ] Ensure wave recognition itself is never reconstructed from left/right primitive history.
+- [ ] Ensure swipe recognition itself is never reconstructed from direction primitive history.
 - [ ] Keep `HandPrimitiveExtractor` only for non-learned spatial/context features that still have a consumer; otherwise schedule it for removal in Task 5.
 
 **Verification:**
-- `hand_interaction` source must no longer decide `wave`, `swipe`, `grab`, `release`, or `click` from THIG pattern timing.
+- `hand_interaction` source must no longer decide `swipe`, `grab`, or `release` from THIG pattern timing.
 
 ---
 
-### Task 5: Remove hand-specific THIG recognition configuration and dead paths
+### Task 5 (superseded): Remove hand-specific THIG recognition configuration and dead paths
 
 **Files:**
 - Modify: `hand_interaction/include/kfcore/hand_interaction/hand_interaction.hpp`
@@ -154,7 +160,7 @@
 - Leave `thig/` generic library unchanged unless the repository has no remaining consumer; deletion of generic THIG is out of V1 scope.
 
 **Implementation steps:**
-- [ ] Remove gesture-recognition settings such as direction dwell/window, wave reversal/total duration, grab timing, click timing, and similar action-pattern thresholds without aliases.
+- [ ] Remove gesture-recognition settings such as direction dwell/window, grab timing, and similar action-pattern thresholds without aliases.
 - [ ] Remove THIG observation-window/state-graph capacity settings that existed solely for hand gesture recognition.
 - [ ] Remove `KFCore::thig` link dependency from `hand_interaction` if no remaining deterministic state semantics require it.
 - [ ] Keep data-quality/runtime bounds (`minimum_confidence`, max observation gap, max tracks) in `hand_gesture`, not `hand_interaction`.

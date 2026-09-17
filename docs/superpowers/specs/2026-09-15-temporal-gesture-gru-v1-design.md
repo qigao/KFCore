@@ -2,13 +2,17 @@
 
 ## Status
 
-Proposed architecture for replacing hand-specific threshold/timing gesture recognition with a learned causal temporal model while preserving deterministic application-state semantics.
+Experimental architecture retained for future training and evaluation. It is not
+the current production `hand_interaction` architecture; the production restoration
+is specified in `docs/superpowers/specs/2026-09-15-hand-interaction-thig-restoration.md`.
 
-This phase changes the hand gesture-recognition architecture. It does not change the execution-plugin ABI and does not add a new backend.
+The implemented runtime/tooling does not change the execution-plugin ABI and does
+not add a new backend. Activation requires a trained artifact and a separate public
+API decision.
 
 ## Goals
 
-1. Recognize dynamic gestures such as wave, swipe, grab/release and click from tracked hand motion without encoding each gesture as a collection of hand-authored dwell, reversal, duration, or action thresholds.
+1. Recognize left/right swipe and grab/release from tracked hand motion without encoding each gesture as a collection of hand-authored dwell, duration, or action thresholds.
 2. Keep recognition causal and streaming: one frame enters, one hidden state is updated, and no future frame is required.
 3. Reuse KFCore Model Package V1 and the backend-neutral runtime. ONNX Runtime CPU is the required V1 execution route; TensorRT is an optional derived artifact later.
 4. Separate learned gesture recognition from deterministic application state/action mapping.
@@ -26,7 +30,7 @@ This phase changes the hand gesture-recognition architecture. It does not change
 - Encoding application navigation/business rules in the GRU.
 - Keeping compatibility aliases for the old THIG hand-gesture contract.
 
-## Architectural decision
+## Experimental architecture
 
 Hand gesture recognition becomes:
 
@@ -48,9 +52,12 @@ InteractionStateMachine
 ActionEvent
 ```
 
-The GRU replaces the hand-specific temporal-pattern recognition currently expressed through THIG windows, dwell times, sequence/repeat nodes, wave reversal limits, gesture cooldowns, and related thresholds.
+If activated in a future migration, the GRU would replace the hand-specific
+temporal-pattern recognition currently expressed through THIG windows, dwell times,
+sequence/repeat nodes, gesture cooldowns, and related thresholds.
 
-THIG is not deleted as part of V1. It remains a generic temporal graph library until its remaining consumers are evaluated separately. After V1 migration, `hand_interaction` must not depend on THIG for recognizing wave/swipe/grab/click patterns.
+That migration is deferred. Production `hand_interaction` currently depends on THIG
+for swipe/grab/release recognition and does not consume `GestureEvent`.
 
 The deterministic layer after recognition is intentionally thin. It may enforce legal state transitions and application context, but it must not reconstruct gesture recognition through new duration/dwell/reversal thresholds.
 
@@ -58,7 +65,7 @@ The deterministic layer after recognition is intentionally thin. It may enforce 
 
 Dynamic hand gestures are trajectory patterns rather than isolated categorical states. A causal GRU can learn:
 
-- motion reversal sequences such as left-right-left wave;
+- directional trajectories such as left and right swipes;
 - amplitude and velocity jointly;
 - variable execution speed;
 - incomplete versus completed gestures;
@@ -80,13 +87,10 @@ namespace kfcore::hand_gesture {
 
 enum class GestureClass : std::uint8_t {
     None = 0,
-    Wave,
     SwipeLeft,
     SwipeRight,
     Grab,
     Release,
-    Point,
-    Click,
 };
 
 enum class GesturePhase : std::uint8_t {
@@ -120,15 +124,17 @@ class TemporalGestureRecognizer final;
 
 `TemporalGestureRecognizer` owns one recurrent state per live hand track and executes one model step per observation.
 
-### `hand_interaction`
+### Future `hand_interaction` integration
 
-`hand_interaction` consumes `GestureEvent` plus application/external context and maps recognized gestures to semantic actions or application states.
+An activated migration would make `hand_interaction` consume `GestureEvent` plus
+application/external context. The current production interface does not.
 
 It may retain deterministic state such as "menu open", "drag active", or "selected object", but not gesture-specific dwell/reversal windows.
 
 ### `thig`
 
-No new hand-gesture functionality is added to THIG. Existing generic THIG APIs remain unchanged in V1. Removal, retention, or independent reuse is a later decision.
+THIG remains the production owner of selected hand-gesture timing. Existing generic
+THIG APIs remain unchanged by the experimental GRU implementation.
 
 ## Per-frame feature contract
 
@@ -211,7 +217,7 @@ input size: 78
 GRU layers: 2
 hidden size: 64
 unidirectional: true
-gesture head: 64 -> 8
+gesture head: 64 -> 5
 phase head: 64 -> 4
 ```
 
@@ -229,7 +235,7 @@ hidden_in  FP32 [2,1,64]
 Outputs:
 
 ```text
-gesture_logits FP32 [1,8]
+gesture_logits FP32 [1,5]
 phase_logits   FP32 [1,4]
 hidden_out     FP32 [2,1,64]
 ```
@@ -265,13 +271,10 @@ V1 gesture classes are exactly:
 
 ```text
 0 none
-1 wave
-2 swipe_left
-3 swipe_right
-4 grab
-5 release
-6 point
-7 click
+1 swipe_left
+2 swipe_right
+3 grab
+4 release
 ```
 
 V1 phases are exactly:
@@ -387,6 +390,7 @@ Each frame record contains at least:
 
 ```text
 sequence_id
+gesture_label_contract = kfcore-temporal-gesture-classes/1
 track_id
 timestamp_ns
 image_width
@@ -421,18 +425,18 @@ Augmentation must not change the semantic direction label for global left/right 
 
 A dynamic gesture is labeled with both class and phase.
 
-Example wave:
+Example left swipe:
 
 ```text
 none/idle
-wave/start
-wave/active
-wave/active
-wave/end
+swipe_left/start
+swipe_left/active
+swipe_left/active
+swipe_left/end
 none/idle
 ```
 
-Incomplete wave attempts should remain `none` or terminate without a valid `end`, depending on the dataset annotation policy. The policy must be consistent across training and evaluation sets.
+Incomplete swipe attempts should remain `none` or terminate without a valid `end`, depending on the dataset annotation policy. The policy must be consistent across training and evaluation sets.
 
 The train/validation/test split must be subject-separated where user identity data is available. Frame-random splitting is not acceptable because adjacent frames leak nearly identical trajectories.
 
@@ -446,7 +450,7 @@ Required evaluation includes:
 - false activations per minute on non-gesture motion;
 - event completion latency;
 - incomplete-gesture rejection;
-- confusion matrix, especially wave versus swipe and grab versus click;
+- 5x5 confusion matrix, especially left versus right swipe and grab versus release;
 - results across multiple frame rates or irregular frame spacing;
 - subject-separated validation/test performance.
 
@@ -459,17 +463,16 @@ The deterministic state layer consumes `GestureEvent`, not raw landmark primitiv
 Examples:
 
 ```text
-wave/end       + menu state -> next item
 swipe_left/end + gallery     -> previous page
 grab/start     + object hit  -> begin drag
-release/end    + dragging    -> drop
+release/start  + dragging    -> drop
 ```
 
-This layer may include application legality, exclusivity, target binding, and cooldown required by product semantics. It must not decide whether a physical wave occurred by re-checking motion duration or reversals.
+This layer may include application legality, exclusivity, target binding, and cooldown required by product semantics. It must not decide whether a physical swipe occurred by re-checking motion duration.
 
-## THIG migration
+## Deferred THIG migration
 
-V1 migration is deliberately one-way:
+The following migration is deferred until a trained model passes its quality gate:
 
 1. Add `vision/core/hand_gesture` and `gesture.temporal-gru`.
 2. Feed GRU `GestureEvent` output into `hand_interaction`.
@@ -477,7 +480,7 @@ V1 migration is deliberately one-way:
 4. Keep generic THIG library code untouched unless no remaining consumer exists.
 5. Do not provide a legacy adapter that synthesizes THIG `Observation` events from GRU output.
 
-Settings expected to disappear from the hand gesture-recognition path include the hand-authored timing controls for direction dwell/windows, wave reversal/total duration, grab transition timing, click timing, and similar gesture-specific temporal thresholds.
+Settings expected to disappear from the hand gesture-recognition path include the hand-authored timing controls for direction dwell/windows, grab transition timing, and similar gesture-specific temporal thresholds.
 
 Basic data-quality bounds such as model confidence, maximum observation gap, maximum tracks, and invalid-tensor rejection remain explicit runtime controls.
 
@@ -505,15 +508,20 @@ stateful C++:
 
 The GRU is expected to be small enough that CPU execution avoids unnecessary GPU synchronization. Performance must still be measured rather than assumed.
 
-## Compatibility
+## Experimental migration compatibility
 
-No old THIG hand-gesture configuration compatibility is required.
+No compatibility promise is made for a future activation of this experimental path.
 
 No old `HandInteractionSettings` gesture-timing fields are preserved as aliases when their recognition responsibility moves into the model.
 
+The five-class contract is intentionally incompatible with the former eight-class
+experiment. Wave, Point, and Click are removed, labels are compactly renumbered, and
+old datasets/checkpoints/packages must be relabeled or retrained rather than mapped at
+runtime.
+
 Generic THIG public API compatibility is outside this spec because THIG itself is not being redesigned here.
 
-## Acceptance criteria
+## Experimental acceptance criteria
 
 Temporal Gesture V1 is complete when:
 
@@ -521,8 +529,8 @@ Temporal Gesture V1 is complete when:
 2. C++ feature encoding matches the frozen 78-value contract and a training/reference encoder on golden inputs.
 3. A fixed-shape causal GRU step accepts `[1,78] + [2,1,64]` and returns gesture logits, phase logits, and next hidden state.
 4. Per-track recurrent state is bounded, resettable, and transactionally updated only after successful inference.
-5. `wave` is recognized from learned sequence behavior without THIG wave reversal/duration rules.
-6. `hand_interaction` consumes `GestureEvent` rather than hand-specific THIG temporal patterns for the migrated gesture set.
+5. A trained candidate recognizes `swipe`, `grab`, and `release` from learned sequence behavior without THIG gesture timing rules.
+6. Any future `hand_interaction` integration is an explicit migration rather than the current production behavior.
 7. There is no implicit backend/device fallback and no runtime ABI extension.
 8. Documentation and Model Package canonical model type tables reflect `HandDetector` and `gesture.temporal-gru`.
 9. Manual build remains the project acceptance path; model-quality claims require the evaluation protocol above rather than compile success alone.

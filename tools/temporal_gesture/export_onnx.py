@@ -15,6 +15,7 @@ from model import (
     PHASE_COUNT,
     StreamingExportWrapper,
     TemporalGestureGru,
+    validate_checkpoint_contract,
 )
 
 EXPECTED_INPUTS = {
@@ -70,16 +71,7 @@ def _load_model(checkpoint: Path | None, contract_smoke: bool) -> TemporalGestur
     if checkpoint is None:
         raise ValueError("checkpoint is required unless --contract-smoke is used")
     payload = torch.load(checkpoint, map_location="cpu")
-    config = payload.get("config", {})
-    expected = {
-        "feature_count": FEATURE_COUNT,
-        "hidden_size": HIDDEN_SIZE,
-        "num_layers": NUM_LAYERS,
-        "gesture_count": GESTURE_COUNT,
-        "phase_count": PHASE_COUNT,
-    }
-    if config != expected:
-        raise ValueError(f"checkpoint contract mismatch: {config}")
+    validate_checkpoint_contract(payload)
     model.load_state_dict(payload["model_state"], strict=True)
     return model
 

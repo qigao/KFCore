@@ -1,5 +1,7 @@
 #include "kfcore/hand_gesture/runtime.hpp"
 
+#include "runtime_contract.hpp"
+
 #include "kfcore/runtime/error.hpp"
 
 #include <algorithm>
@@ -240,6 +242,40 @@ std::optional<GestureEvent> decode_event(
 
 } // namespace
 
+namespace detail
+{
+
+TemporalGestureTensorContract require_temporal_gesture_tensor_contract(
+    const std::vector<runtime::TensorDescriptor>& tensors)
+{
+    if (tensors.size() != 5U)
+    {
+        throw_contract("model must expose exactly two inputs and three outputs");
+    }
+
+    return {
+        require_tensor(
+            tensors, "features", true,
+            {1, static_cast<std::int64_t>(kTemporalGestureFeatureCount)}),
+        require_tensor(
+            tensors, "hidden_in", true,
+            {static_cast<std::int64_t>(kTemporalGestureHiddenLayers), 1,
+             static_cast<std::int64_t>(kTemporalGestureHiddenSize)}),
+        require_tensor(
+            tensors, "gesture_logits", false,
+            {1, static_cast<std::int64_t>(kTemporalGestureClassCount)}),
+        require_tensor(
+            tensors, "phase_logits", false,
+            {1, static_cast<std::int64_t>(kTemporalGesturePhaseCount)}),
+        require_tensor(
+            tensors, "hidden_out", false,
+            {static_cast<std::int64_t>(kTemporalGestureHiddenLayers), 1,
+             static_cast<std::int64_t>(kTemporalGestureHiddenSize)}),
+    };
+}
+
+} // namespace detail
+
 struct TemporalGestureRecognizer::Impl final
 {
     Impl(runtime::ResolvedModel resolved_value, TemporalGestureOptions options_value)
@@ -258,15 +294,12 @@ struct TemporalGestureRecognizer::Impl final
         }
 
         tensors = resolved.model->tensors();
-        if (tensors.size() != 5U)
-        {
-            throw_contract("model must expose exactly two inputs and three outputs");
-        }
-        features = require_tensor(tensors, "features", true, {1, 78});
-        hidden_in = require_tensor(tensors, "hidden_in", true, {2, 1, 64});
-        gesture_logits = require_tensor(tensors, "gesture_logits", false, {1, 8});
-        phase_logits = require_tensor(tensors, "phase_logits", false, {1, 4});
-        hidden_out = require_tensor(tensors, "hidden_out", false, {2, 1, 64});
+        auto contract = detail::require_temporal_gesture_tensor_contract(tensors);
+        features = std::move(contract.features);
+        hidden_in = std::move(contract.hidden_in);
+        gesture_logits = std::move(contract.gesture_logits);
+        phase_logits = std::move(contract.phase_logits);
+        hidden_out = std::move(contract.hidden_out);
     }
 
     runtime::ResolvedModel resolved;

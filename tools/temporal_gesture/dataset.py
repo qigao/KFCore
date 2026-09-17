@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from features import EncodedFeatures, FeatureState, encode_record
+from model import GESTURE_COUNT, GESTURE_LABEL_CONTRACT, PHASE_COUNT
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,11 @@ def load_sequences(path: Path) -> List[SequenceExample]:
             if not stripped:
                 continue
             record = json.loads(stripped)
+            if record.get("gesture_label_contract") != GESTURE_LABEL_CONTRACT:
+                raise ValueError(
+                    f"{path}:{line_number}: gesture_label_contract must equal "
+                    f"'{GESTURE_LABEL_CONTRACT}'"
+                )
             try:
                 sequence_id = str(record["sequence_id"])
                 track_id = int(record["track_id"])
@@ -62,8 +68,8 @@ def load_sequences(path: Path) -> List[SequenceExample]:
             previous = encoded.next_state
             timestamps.append(int(record["timestamp_ns"]))
             features.append(encoded.values)
-            gestures.append(_label(record, "gesture_label", 8))
-            phases.append(_label(record, "phase_label", 4))
+            gestures.append(_label(record, "gesture_label", GESTURE_COUNT))
+            phases.append(_label(record, "phase_label", PHASE_COUNT))
 
         if not features:
             continue

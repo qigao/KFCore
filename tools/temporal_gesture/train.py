@@ -15,6 +15,7 @@ from model import (
     NUM_LAYERS,
     PHASE_CLASSES,
     TemporalGestureGru,
+    checkpoint_config,
 )
 
 
@@ -129,13 +130,7 @@ def main() -> int:
             torch.save(
                 {
                     "model_state": model.state_dict(),
-                    "config": {
-                        "feature_count": 78,
-                        "hidden_size": 64,
-                        "num_layers": 2,
-                        "gesture_count": 8,
-                        "phase_count": 4,
-                    },
+                    "config": checkpoint_config(),
                     "gesture_classes": list(GESTURE_CLASSES),
                     "phase_classes": list(PHASE_CLASSES),
                     "feature_contract": "kfcore-temporal-gesture-features-v1",

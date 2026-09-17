@@ -1,8 +1,12 @@
-# Temporal hand gesture recognition
+# Experimental temporal hand gesture recognition
 
-`KFCore::hand_gesture` is the learned causal temporal-recognition layer for tracked hands.
+`KFCore::hand_gesture` is an experimental learned causal temporal-recognition layer for tracked hands.
 It is backend-neutral and uses the existing KFCore Runtime / Model Package path; backend
 plugins remain tensor executors only.
+
+There is currently no trained deployment artifact. Production
+`KFCore::hand_interaction` continues to recognize SwipeLeft, SwipeRight, Grab, and
+Release from primitive observations with THIG and does not link this module.
 
 ## Data flow
 
@@ -12,7 +16,6 @@ HandDetector
   -> GestureFeatureEncoder
   -> TemporalGestureRecognizer
   -> GestureEvent
-  -> HandInteractionPipeline
 ```
 
 `GestureFeatureEncoder` consumes one tracked `HandResult` and emits exactly 78 FP32 values.
@@ -64,7 +67,7 @@ inputs
   hidden_in         FP32 [2,1,64]
 
 outputs
-  gesture_logits    FP32 [1,8]
+  gesture_logits    FP32 [1,5]
   phase_logits      FP32 [1,4]
   hidden_out        FP32 [2,1,64]
 ```
@@ -95,13 +98,10 @@ Gesture classes are frozen as:
 
 ```text
 0 None
-1 Wave
-2 SwipeLeft
-3 SwipeRight
-4 Grab
-5 Release
-6 Point
-7 Click
+1 SwipeLeft
+2 SwipeRight
+3 Grab
+4 Release
 ```
 
 Phases are:
@@ -117,8 +117,9 @@ The runtime decoder enforces only structural phase continuity and the global
 `minimum_confidence` floor. It contains no gesture-specific dwell, duration, reversal, repeat, or
 speed threshold.
 
-`HandInteractionPipeline` decides application semantics such as whether a completed swipe while
-grabbing means `Drag Left`; it does not re-evaluate whether the physical swipe or wave occurred.
+`GestureEvent` is currently an experimental output contract. Connecting it to an
+application requires a future explicit migration after model-quality validation;
+there is no production adapter or implicit fallback.
 
 ## Training boundary
 

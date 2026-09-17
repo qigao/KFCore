@@ -123,7 +123,7 @@ inputs
   hidden_in         [2,1,64]
 
 outputs
-  gesture_logits    [1,8]
+  gesture_logits    [1,5]
   phase_logits      [1,4]
   hidden_out        [2,1,64]
 ```

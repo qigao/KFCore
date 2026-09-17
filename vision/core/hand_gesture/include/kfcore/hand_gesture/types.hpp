@@ -13,19 +13,16 @@ inline constexpr std::size_t kTemporalGestureHiddenLayers = 2U;
 inline constexpr std::size_t kTemporalGestureHiddenSize = 64U;
 inline constexpr std::size_t kTemporalGestureHiddenElementCount =
     kTemporalGestureHiddenLayers * kTemporalGestureHiddenSize;
-inline constexpr std::size_t kTemporalGestureClassCount = 8U;
+inline constexpr std::size_t kTemporalGestureClassCount = 5U;
 inline constexpr std::size_t kTemporalGesturePhaseCount = 4U;
 
 enum class GestureClass : std::uint8_t
 {
     None = 0,
-    Wave = 1,
-    SwipeLeft = 2,
-    SwipeRight = 3,
-    Grab = 4,
-    Release = 5,
-    Point = 6,
-    Click = 7,
+    SwipeLeft = 1,
+    SwipeRight = 2,
+    Grab = 3,
+    Release = 4,
 };
 
 enum class GesturePhase : std::uint8_t

@@ -14,7 +14,8 @@ Each line is one tracked-hand frame:
 
 ```json
 {
-  "sequence_id": "subject-001-wave-03",
+  "sequence_id": "subject-001-swipe-left-03",
+  "gesture_label_contract": "kfcore-temporal-gesture-classes/1",
   "subject_id": "subject-001",
   "track_id": 7,
   "timestamp_ns": 1000000000,
@@ -30,14 +31,62 @@ Each line is one tracked-hand frame:
 }
 ```
 
-Gesture labels are fixed: `0 none, 1 wave, 2 swipe_left, 3 swipe_right,
-4 grab, 5 release, 6 point, 7 click`.
+`gesture_label_contract` is required on every record and must exactly equal the
+value shown above. Gesture labels are fixed: `0 none, 1 swipe_left, 2 swipe_right, 3 grab,
+4 release`.
 Phase labels are fixed: `0 idle, 1 start, 2 active, 3 end`.
+
+Old datasets without this contract marker and labels `5..7` from the former
+eight-class experiment are invalid. Old datasets, checkpoints, and model packages
+must be relabeled/retrained; no compatibility map is applied.
 
 `features.py` is the Python reference implementation of the same frozen 78-value
 encoder used by C++. Training sequences are grouped by `(sequence_id, track_id)` and
 sorted by timestamp. Train/validation subject IDs must not overlap when `subject_id`
 is present.
+
+Capture data through the production `HandDetector -> HandTracker` path so the records
+match the deployed landmark, handedness, confidence, static-pose, timestamp, and track
+semantics. A generic RGB gesture dataset is useful only if it can be converted through
+that same path and relabeled with the class/phase contract above; it is not a drop-in
+replacement for these JSONL sequences.
+
+Record all four dynamic classes on left and right hands, with swipes in both
+directions and at different speeds, amplitudes, distances, backgrounds, and frame
+rates. Record more `none` time than
+gesture time, including ordinary reaching, hand entry/exit, incomplete swipes,
+open/close fidgeting, tracker reacquisition, and object manipulation as hard negatives.
+Split train/validation/test by subject before extracting clips; never split adjacent
+frames from one recording across sets.
+
+## Prepare a public-dataset source manifest
+
+The [Qualcomm Jester dataset](https://www.qualcomm.com/developer/software/jester-dataset)
+can contribute `swipe_left`, `swipe_right`, and hard-negative `none` clips.
+It does not contain equivalent `grab`/`release` labels, and its public split metadata
+does not expose subject identities. Treat its output as `pretrain_only`: it cannot be
+used for leakage-safe final validation or test results.
+
+After accepting the terms on the
+[official download page](https://www.qualcomm.com/developer/software/jester-dataset/downloads)
+yourself and placing the decoded frames on `F:`, run:
+
+```text
+python tools/temporal_gesture/prepare_dataset.py --labels F:\KFCoreDatasets\temporal_gesture\raw\jester\jester-v1-train.csv --frames-root F:\KFCoreDatasets\temporal_gesture\raw\jester\20bn-jester-v1 --source-split train
+```
+
+The command writes
+`F:\KFCoreDatasets\temporal_gesture\manifests\jester-train.jsonl` by default. It
+selects only the exact Jester labels `Swiping Left`, `Swiping Right`, `No gesture`,
+and `Doing other things`, records all skipped-label counts, validates each selected
+frame directory, and refuses to overwrite an existing manifest.
+
+This source manifest is intentionally not accepted by `train.py`. It contains no
+landmarks or phase labels. Run the selected RGB clips through the production
+`HandDetector -> HandTracker` path, preserve timestamps and tracking semantics, then
+annotate phases consistently to produce the frame JSONL contract above. Collect
+subject-identified KFCore recordings for `grab`, `release`, fine-tuning, validation,
+and final testing.
 
 ## Train
 
@@ -62,7 +111,7 @@ python tools/temporal_gesture/evaluate.py \
 ```
 
 Evaluation reports event precision/recall/F1, false activations per minute,
-completion latency and an 8x8 frame confusion matrix. Use a subject-separated test
+completion latency and a 5x5 frame confusion matrix. Use a subject-separated test
 set; do not tune runtime thresholds on the test set.
 
 ## Export a trained Model Package
@@ -101,5 +150,5 @@ build/bin/kfgesture-smoke \
 ```
 
 A successful smoke proves Model Package loading, ORT plugin execution, fixed tensor
-binding, and recurrent hidden-state progression. It does not prove wave/swipe/etc.
+binding, and recurrent hidden-state progression. It does not prove recognition
 accuracy.
