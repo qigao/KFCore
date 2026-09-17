@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 static kfcore_esn_status kfcore_esn_grouped_measure(
     const kfcore_esn_grouped_model* grouped,
@@ -78,5 +79,51 @@ kfcore_esn_status kfcore_esn_grouped_layout(const kfcore_esn_grouped_model* grou
 
     *state_size = total;
     *workspace_size = total + max_group;
+    return KFCORE_ESN_OK;
+}
+
+kfcore_esn_status kfcore_esn_grouped_step(const kfcore_esn_grouped_model* grouped,
+                                          const float* input, float* state,
+                                          float* workspace)
+{
+    if (!input || !state || !workspace)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    int common_input_size = 0;
+    int total_state_size = 0;
+    int max_reservoir_size = 0;
+    const kfcore_esn_status measure_status =
+        kfcore_esn_grouped_measure(grouped, &common_input_size, &total_state_size,
+                                   &max_reservoir_size);
+    if (measure_status != KFCORE_ESN_OK)
+    {
+        return measure_status;
+    }
+
+    if (total_state_size > INT_MAX - max_reservoir_size)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    float* candidate = workspace;
+    float* scratch = workspace + total_state_size;
+    memcpy(candidate, state, sizeof(float) * (size_t)total_state_size);
+
+    int offset = 0;
+    for (int i = 0; i < grouped->group_count; ++i)
+    {
+        const kfcore_esn_model* group = &grouped->groups[i];
+        const kfcore_esn_status step_status =
+            kfcore_esn_step(group, input, candidate + offset, scratch);
+        if (step_status != KFCORE_ESN_OK)
+        {
+            return step_status;
+        }
+        offset += group->reservoir_size;
+    }
+
+    memcpy(state, candidate, sizeof(float) * (size_t)total_state_size);
     return KFCORE_ESN_OK;
 }
