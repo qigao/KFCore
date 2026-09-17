@@ -9,7 +9,7 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/esn-miniblas.yml'
   pull_request:
-    branches: [master, feature/esn-miniblas]
+    branches: [master, feature/esn-miniblas, feature/esn-reservoir-init]
     paths:
       - 'esn/**'
       - 'vendor/miniblas/**'
@@ -86,6 +86,7 @@ jobs:
             esn/esn_reservoir.c \
             salts/tinytest/src/tinytest.c \
             esn/tests/test_esn.c \
+            esn/tests/test_esn_rls.c \
             -lm \
             -o "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
             2>&1 | tee "$RUNNER_TEMP/esn-miniblas/build.log"
