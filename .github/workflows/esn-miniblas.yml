@@ -2,7 +2,7 @@ name: ESN miniblas contract
 
 on:
   push:
-    branches: [feature/esn-miniblas]
+    branches: [master]
     paths:
       - 'esn/**'
       - 'vendor/miniblas/**'
