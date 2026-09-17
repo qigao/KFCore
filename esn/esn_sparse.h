@@ -32,9 +32,11 @@ kfcore_esn_status kfcore_esn_sparse_count_nonzero(const float* reservoir_weights
 /** Convert a dense column-major reservoir matrix to canonical CSR.
  *
  * row_offsets must hold reservoir_size + 1 integers. column_indices and values
- * must each hold capacity entries when capacity > 0. The function first
- * validates/counts the complete source matrix; insufficient capacity or any
- * invalid input returns an error without partially modifying caller outputs.
+ * must each hold capacity entries when capacity > 0. reservoir_weights,
+ * row_offsets, column_indices, values, and nonzero_count must be mutually
+ * non-overlapping. The function first validates/counts the complete source
+ * matrix; insufficient capacity or any invalid input returns an error without
+ * partially modifying caller outputs.
  */
 kfcore_esn_status kfcore_esn_sparse_from_dense(const float* reservoir_weights,
                                                int reservoir_size, int capacity,
@@ -46,7 +48,9 @@ kfcore_esn_status kfcore_esn_sparse_from_dense(const float* reservoir_weights,
  * The model supplies input weights, reservoir bias, dimensions, and leak rate;
  * model->reservoir_weights is not read and may be NULL. sparse->reservoir_size
  * must equal model->reservoir_size. input/state/workspace follow the same
- * ownership and non-overlap rules as kfcore_esn_step.
+ * ownership and non-overlap rules as kfcore_esn_step. In addition, state and
+ * workspace must not overlap sparse->row_offsets, sparse->column_indices, or
+ * sparse->values.
  *
  * No dense fallback is attempted. Rejected sparse input or numerical failure
  * leaves state unchanged; workspace is scratch and may be modified.
