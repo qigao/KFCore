@@ -1,3 +1,4 @@
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -74,6 +75,23 @@ spec("kfcore esn rls")
                     KFCORE_ESN_OK);
         check_within(output_weights[0], 0.0f, ESN_RLS_EPSILON);
         check_within(inverse_correlation[0], 2.0f / 3.0f, ESN_RLS_EPSILON);
+    }
+
+    it("keeps a mathematically zero correlation finite for tiny forgetting")
+    {
+        const float state[1] = { 1.0f };
+        const float target[1] = { 0.0f };
+        float output_weights[1] = { 0.0f };
+        float inverse_correlation[1] = { 0.0f };
+        float workspace[2] = { 0.0f, 0.0f };
+        const float tiny_forgetting = nextafterf(0.0f, 1.0f);
+
+        check(tiny_forgetting > 0.0f, "test requires a positive subnormal float");
+        check_equal(kfcore_esn_rls_update(state, target, 1, 1, tiny_forgetting,
+                                          output_weights, inverse_correlation, workspace),
+                    KFCORE_ESN_OK);
+        check(isfinite(inverse_correlation[0]), "tiny forgetting must not create NaN/Inf");
+        check_within(inverse_correlation[0], 0.0f, ESN_RLS_EPSILON);
     }
 
     it("converges online toward a known scalar mapping")
