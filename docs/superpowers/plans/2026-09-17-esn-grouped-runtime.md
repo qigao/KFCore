@@ -29,14 +29,14 @@
 
 - Create `esn/esn_group.h` — public non-owning grouped model view and layout/step declarations.
 - Create `esn/esn_group.c` — grouped validation, checked layout calculation, staged grouped step, and final commit.
-- Create `esn/tests/test_esn_group.c` — grouped layout, equivalence, ordering, heterogeneous-size, and failure-atomic tests.
+- Create `esn/tests/test_esn_group.c` — grouped layout, equivalence, ordering, heterogeneous-size, overflow, and failure-atomic tests.
 - Modify `esn/CMakeLists.txt` — build `esn_group.c`, expose/install `esn_group.h`.
 - Modify `esn/tests/CMakeLists.txt` — add grouped tests to the existing ESN TinyTest target.
 - Modify `.github/workflows/esn-miniblas.yml` — compile `esn_group.c` and `test_esn_group.c` in the focused C11 sanitizer contract.
 
 ---
 
-### Task 1: Define the grouped public contract and record a clean layout RED
+### Task 1: Define the public contract and record a clean layout RED
 
 **Files:**
 - Create: `esn/esn_group.h`
@@ -45,15 +45,15 @@
 - Modify: `.github/workflows/esn-miniblas.yml`
 
 **Interfaces:**
-- Consumes: existing `kfcore_esn_model` and `kfcore_esn_status` from `esn/esn.h`.
+- Consumes: `kfcore_esn_model` and `kfcore_esn_status` from `esn/esn.h`.
 - Produces:
   - `typedef struct kfcore_esn_grouped_model { int group_count; const kfcore_esn_model* groups; } kfcore_esn_grouped_model;`
   - `kfcore_esn_status kfcore_esn_grouped_layout(const kfcore_esn_grouped_model*, int* state_size, int* workspace_size);`
   - `kfcore_esn_status kfcore_esn_grouped_step(const kfcore_esn_grouped_model*, const float* input, float* state, float* workspace);`
 
-- [ ] **Step 1: Add the public grouped header**
+- [ ] **Step 1: Add `esn/esn_group.h`**
 
-Create `esn/esn_group.h` with this contract:
+Use this public shape:
 
 ```c
 #ifndef KFCORE_ESN_GROUP_H
@@ -89,94 +89,78 @@ kfcore_esn_status kfcore_esn_grouped_step(
 #endif
 ```
 
-Document in the header that all groups must share `input_size`, grouped state is concatenated in declaration order, layout outputs are required, and grouped step requires `input`, `state`, and `workspace` to be mutually non-overlapping and not overlap group weight/bias storage.
+Document that all groups share one positive `input_size`; concatenated state follows declaration order; `state_size` and `workspace_size` are required outputs; grouped step workspace contains at least the layout-reported count; and `input`, `state`, `workspace`, and group weight/bias buffers must obey the documented non-overlap contract.
 
 - [ ] **Step 2: Add layout-only RED tests**
 
-Create `esn/tests/test_esn_group.c` with `#define TINYTEST_NO_MAIN` before including TinyTest. Start with tests that only call `kfcore_esn_grouped_layout`:
+Create `esn/tests/test_esn_group.c` with `#define TINYTEST_NO_MAIN` before TinyTest. Include `<limits.h>` for overflow coverage.
+
+Cover exact layout for reservoir sizes `2, 3, 1`:
 
 ```c
-#include "esn.h"
-#include "esn_group.h"
-#define TINYTEST_NO_MAIN
-#include "tinytest.h"
-
-spec("kfcore esn grouped")
-{
-    it("reports concatenated state and staged workspace sizes")
-    {
-        const kfcore_esn_model groups[3] = {
-            { .input_size = 2, .reservoir_size = 2, .leak_rate = 1.0f,
-              .input_weights = (const float[]){1,0,0,1},
-              .reservoir_weights = (const float[]){0,0,0,0},
-              .reservoir_bias = (const float[]){0,0} },
-            { .input_size = 2, .reservoir_size = 3, .leak_rate = 1.0f,
-              .input_weights = (const float[]){1,0,0,1,1,1},
-              .reservoir_weights = (const float[]){0,0,0,0,0,0,0,0,0},
-              .reservoir_bias = (const float[]){0,0,0} },
-            { .input_size = 2, .reservoir_size = 1, .leak_rate = 1.0f,
-              .input_weights = (const float[]){1,1},
-              .reservoir_weights = (const float[]){0},
-              .reservoir_bias = (const float[]){0} }
-        };
-        const kfcore_esn_grouped_model grouped = { 3, groups };
-        int state_size = -1;
-        int workspace_size = -1;
-
-        check_equal(kfcore_esn_grouped_layout(&grouped, &state_size, &workspace_size),
-                    KFCORE_ESN_OK);
-        check_equal(state_size, 6);
-        check_equal(workspace_size, 9);
-    }
-
-    it("rejects mismatched group input sizes")
-    {
-        const float w1[1] = {0};
-        const float win1[1] = {1};
-        const float b1[1] = {0};
-        const float win2[2] = {1, 1};
-        const kfcore_esn_model groups[2] = {
-            {1, 1, 0, 1.0f, win1, w1, b1, NULL, NULL},
-            {2, 1, 0, 1.0f, win2, w1, b1, NULL, NULL}
-        };
-        const kfcore_esn_grouped_model grouped = {2, groups};
-        int state_size = -1;
-        int workspace_size = -1;
-
-        check_equal(kfcore_esn_grouped_layout(&grouped, &state_size, &workspace_size),
-                    KFCORE_ESN_INVALID_ARGUMENT);
-    }
-
-    it("rejects required null layout outputs")
-    {
-        const float w[1] = {0};
-        const float win[1] = {1};
-        const float b[1] = {0};
-        const kfcore_esn_model group = {1, 1, 0, 1.0f, win, w, b, NULL, NULL};
-        const kfcore_esn_grouped_model grouped = {1, &group};
-        int size = 0;
-
-        check_equal(kfcore_esn_grouped_layout(&grouped, NULL, &size),
-                    KFCORE_ESN_INVALID_ARGUMENT);
-        check_equal(kfcore_esn_grouped_layout(&grouped, &size, NULL),
-                    KFCORE_ESN_INVALID_ARGUMENT);
-    }
-}
+int state_size = -1;
+int workspace_size = -1;
+check_equal(kfcore_esn_grouped_layout(&grouped, &state_size, &workspace_size),
+            KFCORE_ESN_OK);
+check_equal(state_size, 6);
+check_equal(workspace_size, 9);
 ```
 
-- [ ] **Step 3: Register grouped tests in CMake and focused CI without production source**
+Cover mismatched input sizes:
 
-Append `test_esn_group.c` to `esn/tests/CMakeLists.txt` and append it to the focused compiler command in `.github/workflows/esn-miniblas.yml`. Do not add `esn_group.c` yet.
+```c
+check_equal(kfcore_esn_grouped_layout(&mismatched, &state_size, &workspace_size),
+            KFCORE_ESN_INVALID_ARGUMENT);
+```
 
-- [ ] **Step 4: Push and verify a clean RED**
+Cover required NULL outputs:
 
-Run the existing GitHub Actions `ESN miniblas contract` on the exact head.
+```c
+check_equal(kfcore_esn_grouped_layout(&one_group, NULL, &workspace_size),
+            KFCORE_ESN_INVALID_ARGUMENT);
+check_equal(kfcore_esn_grouped_layout(&one_group, &state_size, NULL),
+            KFCORE_ESN_INVALID_ARGUMENT);
+```
 
-Expected: C11 compilation succeeds and link fails only with undefined reference to `kfcore_esn_grouped_layout`. A TinyTest duplicate-main error, compiler error, or unrelated linker error does not count as the RED.
+Cover invalid group count / group array:
 
-- [ ] **Step 5: Commit/checkpoint the clean RED**
+```c
+const kfcore_esn_grouped_model zero_groups = {0, &valid_group};
+const kfcore_esn_grouped_model null_groups = {1, NULL};
+check_equal(kfcore_esn_grouped_layout(&zero_groups, &state_size, &workspace_size),
+            KFCORE_ESN_INVALID_ARGUMENT);
+check_equal(kfcore_esn_grouped_layout(&null_groups, &state_size, &workspace_size),
+            KFCORE_ESN_INVALID_ARGUMENT);
+```
 
-Record the exact RED SHA and Actions run ID in PR/issue notes before adding production symbols.
+Cover checked-size overflow without dereferencing large matrices. Use non-NULL one-element buffers for required pointers and two groups with `reservoir_size = INT_MAX`; layout validation must reject the sum before any runtime stepping:
+
+```c
+const float scalar = 0.0f;
+const kfcore_esn_model huge_groups[2] = {
+    { .input_size = 1, .reservoir_size = INT_MAX, .leak_rate = 1.0f,
+      .input_weights = &scalar, .reservoir_weights = &scalar, .reservoir_bias = &scalar },
+    { .input_size = 1, .reservoir_size = INT_MAX, .leak_rate = 1.0f,
+      .input_weights = &scalar, .reservoir_weights = &scalar, .reservoir_bias = &scalar }
+};
+const kfcore_esn_grouped_model huge = {2, huge_groups};
+check_equal(kfcore_esn_grouped_layout(&huge, &state_size, &workspace_size),
+            KFCORE_ESN_INVALID_ARGUMENT);
+```
+
+- [ ] **Step 3: Register the test source without production grouped code**
+
+Append `test_esn_group.c` to `esn/tests/CMakeLists.txt` and the focused compile command in `.github/workflows/esn-miniblas.yml`. Do not add `esn_group.c` yet.
+
+- [ ] **Step 4: Verify a clean layout RED**
+
+Push the exact head and inspect `ESN miniblas contract`.
+
+Expected: C11 compilation succeeds and the first real failure is undefined reference to `kfcore_esn_grouped_layout`. TinyTest duplicate-main, source compile errors, or unrelated link failures do not count.
+
+- [ ] **Step 5: Record checkpoint**
+
+Record exact RED SHA and Actions run/job evidence in #36 / the Draft PR before production symbols are added.
 
 ---
 
@@ -188,30 +172,33 @@ Record the exact RED SHA and Actions run ID in PR/issue notes before adding prod
 - Modify: `.github/workflows/esn-miniblas.yml`
 
 **Interfaces:**
-- Consumes: `kfcore_esn_grouped_model`, existing dense reservoir field semantics from `kfcore_esn_model`.
-- Produces: working `kfcore_esn_grouped_layout` and an internal reusable grouped validation/layout helper for Task 3.
+- Consumes: `kfcore_esn_grouped_model` and existing dense reservoir-side `kfcore_esn_model` fields.
+- Produces: working `kfcore_esn_grouped_layout` and an internal validation/measurement helper reused by grouped stepping.
 
-- [ ] **Step 1: Add checked grouped validation helper**
+- [ ] **Step 1: Add headers and internal measurement helper**
 
-In `esn/esn_group.c`, validate all reservoir-side fields without requiring readout fields:
+Start `esn/esn_group.c` with:
+
+```c
+#include "esn_group.h"
+
+#include <limits.h>
+#include <math.h>
+#include <stddef.h>
+#include <string.h>
+```
+
+Define:
 
 ```c
 static kfcore_esn_status kfcore_esn_grouped_measure(
     const kfcore_esn_grouped_model* grouped,
     int* common_input_size,
     int* total_state_size,
-    int* max_reservoir_size)
+    int* max_reservoir_size);
 ```
 
-Requirements:
-
-```c
-if (!grouped || grouped->group_count <= 0 || !grouped->groups ||
-    !common_input_size || !total_state_size || !max_reservoir_size)
-    return KFCORE_ESN_INVALID_ARGUMENT;
-```
-
-For every group require:
+Reject NULL helper outputs, NULL grouped view, `group_count <= 0`, or NULL group array. For every group require:
 
 ```c
 group->input_size > 0
@@ -224,9 +211,9 @@ group->reservoir_bias != NULL
 group->input_size == first_group_input_size
 ```
 
-Accumulate reservoir sizes in `size_t`, reject any sum above `INT_MAX`, and return the largest group reservoir size.
+Accumulate reservoir sizes in `size_t`; reject the sum if it exceeds `INT_MAX`; track the maximum group reservoir size. Write helper outputs only after the complete model validates.
 
-- [ ] **Step 2: Implement `kfcore_esn_grouped_layout`**
+- [ ] **Step 2: Implement layout with no partial outputs**
 
 ```c
 kfcore_esn_status kfcore_esn_grouped_layout(
@@ -240,7 +227,7 @@ kfcore_esn_status kfcore_esn_grouped_layout(
     int input_size = 0;
     int total = 0;
     int max_group = 0;
-    kfcore_esn_status status =
+    const kfcore_esn_status status =
         kfcore_esn_grouped_measure(grouped, &input_size, &total, &max_group);
     if (status != KFCORE_ESN_OK)
         return status;
@@ -254,19 +241,17 @@ kfcore_esn_status kfcore_esn_grouped_layout(
 }
 ```
 
-Do not partially write either output on failure; assign both only after all validation and overflow checks succeed.
+Do not modify either caller output on failure.
 
-- [ ] **Step 3: Wire the production file into build/install inputs**
+- [ ] **Step 3: Wire production source/header into build and install**
 
-Add `esn_group.c` and `esn_group.h` to `kfcore_esn` in `esn/CMakeLists.txt`. Install `esn_group.h` beside `esn.h` and `esn_sparse.h`. Add `esn/esn_group.c` to the focused GitHub Actions compile command.
+In `esn/CMakeLists.txt`, add `esn_group.c` and `esn_group.h` to `kfcore_esn`, and install `esn_group.h` beside `esn.h` / `esn_sparse.h`. Add `esn/esn_group.c` to the focused workflow compile command.
 
-- [ ] **Step 4: Run the focused gate**
+- [ ] **Step 4: Run focused sanitizer gate**
 
-Expected: grouped layout tests pass and all pre-existing ESN tests remain GREEN under ASan+UBSan. At this checkpoint `kfcore_esn_grouped_step` may still be declared but must not be referenced by tests yet.
+Expected: all layout tests and all pre-existing ESN tests pass under ASan+UBSan. `kfcore_esn_grouped_step` is declared but is not referenced by tests yet.
 
 - [ ] **Step 5: Commit**
-
-Commit message:
 
 ```text
 feat: add grouped ESN layout contract
@@ -274,18 +259,18 @@ feat: add grouped ESN layout contract
 
 ---
 
-### Task 3: Record grouped-step RED and failure-atomic behavior requirements
+### Task 3: Record grouped-step RED
 
 **Files:**
 - Modify: `esn/tests/test_esn_group.c`
 
 **Interfaces:**
-- Consumes: working `kfcore_esn_grouped_layout` and public `kfcore_esn_grouped_step` declaration.
-- Produces: RED runtime expectations for state equivalence, concatenation order, heterogeneous sizes, and validation atomicity.
+- Consumes: GREEN `kfcore_esn_grouped_layout`.
+- Produces: RED requirements for `kfcore_esn_grouped_step`.
 
-- [ ] **Step 1: Add one-group equivalence test**
+- [ ] **Step 1: Add single-group equivalence test**
 
-Use one 2-state model, clone the same initial state into `dense_state` and `grouped_state`, call ordinary `kfcore_esn_step` on the first and grouped step on the second, then compare both state elements within `1e-5f`.
+Use identical initial state for ordinary and grouped execution:
 
 ```c
 float dense_state[2] = {0.25f, -0.5f};
@@ -300,44 +285,63 @@ check_close(grouped_state[0], dense_state[0], 1.0e-5f);
 check_close(grouped_state[1], dense_state[1], 1.0e-5f);
 ```
 
-- [ ] **Step 2: Add same-input concatenation and heterogeneous-size test**
+- [ ] **Step 2: Add same-input heterogeneous concatenation test**
 
-Create two zero-recurrence groups with sizes 1 and 2 and leak 1.0 so expected states are direct `tanh` results from the same scalar input. Assert output state layout is `[group0_state, group1_state0, group1_state1]` in that exact order.
+Create group 0 with one state and group 1 with two states; use zero recurrent matrices and leak `1.0f`. Both consume one scalar input. Assert the resulting caller state is exactly ordered as group 0 state, then group 1 state 0, then group 1 state 1, comparing against direct `tanhf(input_weight * input + bias)` expectations.
 
-- [ ] **Step 3: Add later-group invalidity atomicity test**
+- [ ] **Step 3: Add validation failure atomicity test**
 
-Create a valid first group and a second group with `reservoir_bias = NULL`. Initialize caller state with sentinel values, copy them to `before`, call grouped step, expect `KFCORE_ESN_INVALID_ARGUMENT`, then assert `memcmp(state, before, sizeof(state)) == 0`.
+Use a valid first group and a later group with `reservoir_bias = NULL`. Preserve a byte-for-byte copy of caller state:
 
-- [ ] **Step 4: Add null runtime-argument tests**
+```c
+float before[3];
+memcpy(before, state, sizeof(state));
+check_equal(kfcore_esn_grouped_step(&grouped, input, state, workspace),
+            KFCORE_ESN_INVALID_ARGUMENT);
+check_equal(memcmp(state, before, sizeof(state)), 0);
+```
 
-Verify NULL `grouped`, `input`, `state`, and `workspace` each return `KFCORE_ESN_INVALID_ARGUMENT` without mutation when a caller state exists.
+- [ ] **Step 4: Add NULL runtime argument tests**
 
-- [ ] **Step 5: Push and verify grouped-step RED**
+Verify NULL grouped model, input, state, and workspace return `KFCORE_ESN_INVALID_ARGUMENT`; where caller state is present, verify it remains unchanged.
 
-Expected: build reaches the linker and fails only because `kfcore_esn_grouped_step` is undefined. Existing layout tests must still compile.
+- [ ] **Step 5: Verify clean step RED**
 
-- [ ] **Step 6: Commit/checkpoint the step RED**
+Push and inspect the exact-head workflow.
 
-Record exact head and workflow evidence before implementing grouped stepping.
+Expected: existing layout implementation builds; linker fails only because `kfcore_esn_grouped_step` is undefined.
+
+- [ ] **Step 6: Record checkpoint**
+
+Record exact step-RED head and run/job evidence before production implementation.
 
 ---
 
-### Task 4: Implement failure-atomic grouped stepping
+### Task 4: Implement failure-atomic grouped stepping and final integration
 
 **Files:**
 - Modify: `esn/esn_group.c`
+- Review: `esn/esn_group.h`
+- Review: `esn/CMakeLists.txt`
+- Review: `esn/tests/CMakeLists.txt`
+- Review: `.github/workflows/esn-miniblas.yml`
 
 **Interfaces:**
-- Consumes: `kfcore_esn_grouped_measure`, `kfcore_esn_step`, workspace formula from grouped layout.
-- Produces: `kfcore_esn_grouped_step` with atomic caller-state commit.
+- Consumes: `kfcore_esn_grouped_measure`, `kfcore_esn_step`, and the layout contract.
+- Produces: `kfcore_esn_grouped_step` and merge-ready grouped runtime.
 
-- [ ] **Step 1: Validate complete grouped runtime before mutation**
+- [ ] **Step 1: Validate runtime arguments and layout bounds**
 
-At function entry reject NULL input/state/workspace, then call the grouped measurement helper. Compute `workspace_size = total + max_group` with the same checked arithmetic used by layout.
+Reject NULL `input`, `state`, or `workspace`. Call `kfcore_esn_grouped_measure`. Then reject if:
 
-- [ ] **Step 2: Stage the complete candidate state**
+```c
+if (total_state_size > INT_MAX - max_reservoir_size)
+    return KFCORE_ESN_INVALID_ARGUMENT;
+```
 
-Use:
+This mirrors layout overflow validation without introducing an unused local variable.
+
+- [ ] **Step 2: Stage caller state**
 
 ```c
 float* candidate = workspace;
@@ -345,80 +349,44 @@ float* scratch = workspace + total_state_size;
 memcpy(candidate, state, sizeof(float) * (size_t)total_state_size);
 ```
 
-The public header must state that workspace contains at least the size returned by `kfcore_esn_grouped_layout` and does not overlap input/state/model buffers.
+No caller-state write occurs before all groups succeed.
 
-- [ ] **Step 3: Advance each candidate group in declaration order**
-
-Maintain `int offset = 0;`. For every group:
+- [ ] **Step 3: Advance staged groups in declaration order**
 
 ```c
-kfcore_esn_status status =
-    kfcore_esn_step(&grouped->groups[i], input, candidate + offset, scratch);
-if (status != KFCORE_ESN_OK)
-    return status;
-offset += grouped->groups[i].reservoir_size;
+int offset = 0;
+for (int i = 0; i < grouped->group_count; ++i)
+{
+    const kfcore_esn_model* group = &grouped->groups[i];
+    const kfcore_esn_status status =
+        kfcore_esn_step(group, input, candidate + offset, scratch);
+    if (status != KFCORE_ESN_OK)
+        return status;
+    offset += group->reservoir_size;
+}
 ```
 
-Do not write caller state inside the loop.
+Do not retry, skip, dispatch to sparse runtime, or partially commit.
 
-- [ ] **Step 4: Commit caller state once**
-
-After every group succeeds:
+- [ ] **Step 4: Commit staged state once**
 
 ```c
 memcpy(state, candidate, sizeof(float) * (size_t)total_state_size);
 return KFCORE_ESN_OK;
 ```
 
-No retry, skip, alternate backend, or partial commit.
+- [ ] **Step 5: Run full focused ASan+UBSan gate**
 
-- [ ] **Step 5: Run the focused sanitizer gate**
+Require grouped tests plus every existing ESN test to pass. Also require exact-source verification, tracked-source cleanliness, and artifact upload.
 
-Expected: all grouped tests and all existing ESN tests pass with ASan+UBSan; source cleanliness and artifact upload succeed.
+- [ ] **Step 6: Review public contract and scope**
 
-- [ ] **Step 6: Commit**
+Verify `esn_group.h` explicitly documents common input size, declaration-order state concatenation, workspace formula, caller ownership, dense-only behavior, and non-overlap requirements. Confirm the diff contains no sparse dispatch, grouped readout/training, deep/gdESN, serialization, topology generation, or changes to existing single-reservoir recurrence math.
 
-Commit message:
+- [ ] **Step 7: Record final exact-head evidence**
 
-```text
-feat: add failure-atomic grouped ESN step
-```
+Record final head SHA, workflow run/job ID, test count, assertion count, ASan+UBSan result, source-cleanliness result, and artifact result in #36 / PR body. Do not reuse a GREEN result from an older head after documentation/build changes.
 
----
+- [ ] **Step 8: Ready, merge, and verify master**
 
-### Task 5: Final public-contract and integration review
-
-**Files:**
-- Review: `esn/esn_group.h`
-- Review: `esn/esn_group.c`
-- Review: `esn/tests/test_esn_group.c`
-- Review: `esn/CMakeLists.txt`
-- Review: `.github/workflows/esn-miniblas.yml`
-
-**Interfaces:**
-- Consumes: complete grouped runtime.
-- Produces: merge-ready #36 evidence without changing grouped math unless a real review regression is found.
-
-- [ ] **Step 1: Verify public contract against spec**
-
-Confirm the header explicitly states common input size, declaration-order concatenation, required layout outputs, caller-owned buffers, workspace formula, dense-only execution, and non-overlap requirements.
-
-- [ ] **Step 2: Review failure atomicity**
-
-Confirm no write to caller `state` occurs before every delegated group step has returned `KFCORE_ESN_OK`.
-
-- [ ] **Step 3: Review scope containment**
-
-Confirm the diff does not introduce sparse backend dispatch, grouped readout/training, deep/gdESN, serialization, topology construction, or changes to existing single-reservoir math.
-
-- [ ] **Step 4: Run final exact-head GitHub Actions gate**
-
-Require a fresh `ESN miniblas contract` result on the final exact PR head after all documentation/build changes. Record run ID, head SHA, test count, assertion count, ASan+UBSan result, source-cleanliness result, and artifact upload result.
-
-- [ ] **Step 5: Update PR/issue checkpoint**
-
-Document the clean layout RED, grouped-step RED, final exact-head GREEN, and any review-discovered regressions with their exact SHAs/run IDs.
-
-- [ ] **Step 6: Mark Ready only after exact-head GREEN**
-
-Do not merge or claim completion from an older head. After Ready/merge, verify the resulting `master` push gate before closing #36 as completed.
+Mark Ready only after final exact-head GREEN. Merge with expected head SHA. Then require the resulting `master` push gate to pass before closing #36 as completed.
