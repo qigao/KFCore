@@ -86,3 +86,52 @@ kfcore_esn_status kfcore_esn_deep_layout(const kfcore_esn_deep_model* deep,
     *workspace_size = total + max_layer;
     return KFCORE_ESN_OK;
 }
+
+kfcore_esn_status kfcore_esn_deep_step(const kfcore_esn_deep_model* deep,
+                                       const float* input, float* state,
+                                       float* workspace)
+{
+    if (!input || !state || !workspace)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    int input_size = 0;
+    int total_state_size = 0;
+    int max_layer = 0;
+    const kfcore_esn_status measure_status =
+        kfcore_esn_deep_measure(deep, &input_size, &total_state_size, &max_layer);
+    if (measure_status != KFCORE_ESN_OK)
+    {
+        return measure_status;
+    }
+
+    if (total_state_size > INT_MAX - max_layer)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    float* candidate = workspace;
+    float* scratch = workspace + total_state_size;
+    memcpy(candidate, state, sizeof(float) * (size_t)total_state_size);
+
+    const float* layer_input = input;
+    int offset = 0;
+    for (int i = 0; i < deep->layer_count; ++i)
+    {
+        const kfcore_esn_model* layer = &deep->layers[i];
+        float* layer_state = candidate + offset;
+        const kfcore_esn_status status =
+            kfcore_esn_step(layer, layer_input, layer_state, scratch);
+        if (status != KFCORE_ESN_OK)
+        {
+            return status;
+        }
+
+        layer_input = layer_state;
+        offset += layer->reservoir_size;
+    }
+
+    memcpy(state, candidate, sizeof(float) * (size_t)total_state_size);
+    return KFCORE_ESN_OK;
+}
