@@ -164,10 +164,10 @@ kfcore_esn_status kfcore_esn_rls_update(const float* state, const float* target,
 
     if (forgetting_factor != 1.0f)
     {
-        const float inverse_forgetting = 1.0f / forgetting_factor;
         for (size_t i = 0; i < correlation_count; ++i)
         {
-            inverse_correlation[i] *= inverse_forgetting;
+            inverse_correlation[i] =
+                (float)((double)inverse_correlation[i] / (double)forgetting_factor);
         }
     }
 
