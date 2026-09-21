@@ -39,6 +39,9 @@ typedef struct kfcore_esn_model
  * @param state In/out reservoir state with model->reservoir_size elements.
  * @param workspace Scratch vector with model->reservoir_size elements. It must
  *                  not overlap input, state, or model-owned weight/bias buffers.
+ * @return INVALID_ARGUMENT for non-finite input/state/weights/bias or invalid
+ *         metadata; NUMERICAL_FAILURE for non-finite arithmetic. On failure,
+ *         state is unchanged; workspace may change.
  */
 kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* input,
                                   float* state, float* workspace);
@@ -46,6 +49,9 @@ kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* in
 /** Apply the linear readout to a reservoir state.
  *
  * output must not overlap state or the model's output weight/bias buffers.
+ * Non-finite operands return INVALID_ARGUMENT; non-finite arithmetic returns
+ * NUMERICAL_FAILURE. Output is unchanged on failure. Two readout passes use
+ * O(output_size * reservoir_size) time and O(1) additional storage.
  */
 kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float* state,
                                      float* output);
@@ -54,6 +60,10 @@ kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float*
  *
  * The non-overlap requirements of kfcore_esn_step and kfcore_esn_predict both
  * apply.
+ * State and output are unchanged on failure, except that output overlapping
+ * workspace shares its scratch semantics and may change. Numerical errors
+ * follow step and predict. Buffers must not be concurrently modified during
+ * an operation.
  */
 kfcore_esn_status kfcore_esn_step_predict(const kfcore_esn_model* model, const float* input,
                                           float* state, float* workspace, float* output);
@@ -127,6 +137,7 @@ kfcore_esn_status kfcore_esn_rls_init(float* inverse_correlation, int reservoir_
  * forgetting_factor must be finite and in (0, 1]. workspace must contain
  * reservoir_size + output_size floats and must not overlap any input or state
  * buffer.
+ * output_weights and inverse_correlation must not overlap each other.
  *
  * The function computes k = P*x/(lambda + x'*P*x), e = y - W*x,
  * W <- W + e*k' and P <- (P - d*k*k')/lambda. The complete update is validated

@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "esn.h"
+#include "esn_group.h"
+#include "esn_group_deep.h"
 #include "tinytest.h"
 
 #define ESN_TEST_EPSILON 1.0e-5f
@@ -23,6 +25,129 @@ static kfcore_esn_model make_test_model(void)
 
 spec("kfcore esn")
 {
+    it("allows step-predict output to reuse workspace")
+    {
+        const kfcore_esn_model model = make_test_model();
+        const float input = 1.0f;
+        float state[2] = { 0.0f, 0.0f };
+        float workspace[2];
+        check_equal(kfcore_esn_step_predict(&model, &input, state, workspace, workspace),
+                    KFCORE_ESN_OK);
+        check_within(workspace[0], 1.5f * tanhf(input) + 0.25f, ESN_TEST_EPSILON);
+        check_within(state[0], 0.5f * tanhf(input), ESN_TEST_EPSILON);
+        check_within(state[1], -0.5f * tanhf(input), ESN_TEST_EPSILON);
+    }
+
+    it("rejects non-finite readout operands without changing output")
+    {
+        kfcore_esn_model model = make_test_model();
+        const float state[2] = { 0.0f, 0.0f };
+        const float weights[2] = { 1.0f, NAN };
+        float output = 7.0f;
+        model.output_weights = weights;
+        check_equal(kfcore_esn_predict(&model, state, &output), KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(output, 7.0f);
+    }
+
+    it("rejects non-finite dense inputs and weights without changing state")
+    {
+        kfcore_esn_model model = make_test_model();
+        const float invalid_inputs[] = { NAN, INFINITY, -INFINITY };
+        const float original[2] = { 0.25f, -0.5f };
+        float state[2];
+        float workspace[2];
+        memcpy(state, original, sizeof(state));
+        for (size_t i = 0; i < sizeof(invalid_inputs) / sizeof(invalid_inputs[0]); ++i)
+        {
+            check_equal(kfcore_esn_step(&model, &invalid_inputs[i], state, workspace),
+                        KFCORE_ESN_INVALID_ARGUMENT);
+            check_equal(memcmp(state, original, sizeof(state)), 0);
+        }
+        const float zero = 0.0f;
+        const float invalid_weights[2] = { 1.0f, NAN };
+        model.input_weights = invalid_weights;
+        check_equal(kfcore_esn_step(&model, &zero, state, workspace),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+    }
+
+    it("preserves all state when a later dense neuron overflows")
+    {
+        kfcore_esn_model model = make_test_model();
+        const float weights[2] = { 1.0f, FLT_MAX };
+        const float input = 2.0f;
+        const float original[2] = { 0.25f, -0.5f };
+        float state[2];
+        float workspace[2];
+        memcpy(state, original, sizeof(state));
+        model.input_weights = weights;
+        check_equal(kfcore_esn_step(&model, &input, state, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+    }
+
+    it("preserves readout output when a later row overflows")
+    {
+        kfcore_esn_model model = make_test_model();
+        const float weights[4] = { 1.0f, FLT_MAX, 0.0f, FLT_MAX };
+        const float bias[2] = { 0.0f, 0.0f };
+        const float state[2] = { 1.0f, 1.0f };
+        const float original[2] = { 7.0f, 8.0f };
+        float output[2];
+        memcpy(output, original, sizeof(output));
+        model.output_size = 2;
+        model.output_weights = weights;
+        model.output_bias = bias;
+        check_equal(kfcore_esn_predict(&model, state, output), KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(output, original, sizeof(output)), 0);
+    }
+
+    it("preserves state and output when step-predict readout overflows")
+    {
+        kfcore_esn_model model = make_test_model();
+        const float weights[2] = { FLT_MAX, -FLT_MAX };
+        const float input = 2.0f;
+        float state[2] = { 0.0f, 0.0f };
+        const float original[2] = { 0.0f, 0.0f };
+        float workspace[2];
+        float output = 7.0f;
+        model.leak_rate = 1.0f;
+        model.output_weights = weights;
+        check_equal(kfcore_esn_step_predict(&model, &input, state, workspace, &output),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+        check_equal(output, 7.0f);
+    }
+
+    it("preserves composed states when a later reservoir overflows")
+    {
+        const float one = 1.0f;
+        const float zero = 0.0f;
+        const float large = FLT_MAX;
+        const float input = 2.0f;
+        const kfcore_esn_model models[2] = {
+            { 1, 1, 0, 1.0f, &one, &zero, &zero, NULL, NULL },
+            { 1, 1, 0, 1.0f, &large, &large, &zero, NULL, NULL }
+        };
+        const kfcore_esn_grouped_model grouped = { 2, models };
+        const kfcore_esn_deep_model deep = { 2, models };
+        const kfcore_esn_deep_model groups[2] = { { 1, &models[0] }, { 1, &models[1] } };
+        const kfcore_esn_grouped_deep_model grouped_deep = { 2, groups };
+        const float original[2] = { 0.0f, 1.0f };
+        float state[2];
+        float workspace[4];
+        memcpy(state, original, sizeof(state));
+        check_equal(kfcore_esn_grouped_step(&grouped, &input, state, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+        check_equal(kfcore_esn_deep_step(&deep, &input, state, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+        check_equal(kfcore_esn_grouped_deep_step(&grouped_deep, &input, state, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original, sizeof(state)), 0);
+    }
+
     it("advances a leaky reservoir deterministically")
     {
         const kfcore_esn_model model = make_test_model();

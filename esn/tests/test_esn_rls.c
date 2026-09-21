@@ -10,6 +10,35 @@
 
 spec("kfcore esn rls")
 {
+    it("commits finite weights when the float rank-one product would overflow")
+    {
+        const float state = 0.25f;
+        const float target = 1.5e38f;
+        float weight = -2.0e38f;
+        float correlation = 16.0f;
+        float workspace[2] = { 0.0f, 0.0f };
+        check_equal(kfcore_esn_rls_update(&state, &target, 1, 1, 1.0f,
+                                          &weight, &correlation, workspace), KFCORE_ESN_OK);
+        check(isfinite(weight));
+        check_within(weight / 2.0e38f, 1.0f, ESN_RLS_EPSILON);
+        check_equal(correlation, 8.0f);
+    }
+
+    it("preserves both matrices when a later weight update overflows")
+    {
+        const float state = 0.25f;
+        const float target[2] = { 1.0f, 2.0e38f };
+        float weights[2] = { 0.0f, 0.0f };
+        const float original[2] = { 0.0f, 0.0f };
+        float correlation = 16.0f;
+        float workspace[3] = { 0.0f };
+        check_equal(kfcore_esn_rls_update(&state, target, 1, 2, 1.0f,
+                                          weights, &correlation, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(weights, original, sizeof(weights)), 0);
+        check_equal(correlation, 16.0f);
+    }
+
     it("initializes inverse correlation from delta")
     {
         float inverse_correlation[4] = { 7.0f, 7.0f, 7.0f, 7.0f };

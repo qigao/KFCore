@@ -58,6 +58,13 @@ static kfcore_esn_status kfcore_esn_validate_reservoir(const kfcore_esn_model* m
     return KFCORE_ESN_OK;
 }
 
+static int kfcore_esn_finite_matrix(const float* values, int rows, int columns)
+{
+    size_t count = 0U;
+    return kfcore_esn_checked_product(rows, columns, &count) &&
+           count <= SIZE_MAX / sizeof(float) && kfcore_esn_finite_array(values, count);
+}
+
 static kfcore_esn_status kfcore_esn_validate_readout(const kfcore_esn_model* model)
 {
     if (!model || model->reservoir_size <= 0 || model->output_size <= 0 || !model->output_weights ||
@@ -68,10 +75,21 @@ static kfcore_esn_status kfcore_esn_validate_readout(const kfcore_esn_model* mod
     return KFCORE_ESN_OK;
 }
 
-kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* input, float* state,
-                                  float* workspace)
+static kfcore_esn_status kfcore_esn_candidate(const kfcore_esn_model* model,
+                                            const float* input, const float* state,
+                                            float* workspace)
 {
     if (kfcore_esn_validate_reservoir(model) != KFCORE_ESN_OK || !input || !state || !workspace)
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+
+    if (!kfcore_esn_finite_array(input, (size_t)model->input_size) ||
+        !kfcore_esn_finite_array(state, (size_t)model->reservoir_size) ||
+        !kfcore_esn_finite_array(model->reservoir_bias, (size_t)model->reservoir_size) ||
+        !kfcore_esn_finite_matrix(model->input_weights, model->reservoir_size, model->input_size) ||
+        !kfcore_esn_finite_matrix(model->reservoir_weights, model->reservoir_size,
+                                  model->reservoir_size))
     {
         return KFCORE_ESN_INVALID_ARGUMENT;
     }
@@ -84,24 +102,88 @@ kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* in
     const float keep = 1.0f - model->leak_rate;
     for (int i = 0; i < model->reservoir_size; ++i)
     {
-        const float activated = tanhf(workspace[i] + model->reservoir_bias[i]);
-        state[i] = keep * state[i] + model->leak_rate * activated;
+        const float activation_input = workspace[i] + model->reservoir_bias[i];
+        if (!isfinite(activation_input))
+        {
+            return KFCORE_ESN_NUMERICAL_FAILURE;
+        }
+        workspace[i] = keep * state[i] + model->leak_rate * tanhf(activation_input);
+        if (!isfinite(workspace[i]))
+        {
+            return KFCORE_ESN_NUMERICAL_FAILURE;
+        }
     }
 
     return KFCORE_ESN_OK;
 }
 
-kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float* state,
-                                     float* output)
+kfcore_esn_status kfcore_esn_step(const kfcore_esn_model* model, const float* input,
+                                  float* state, float* workspace)
+{
+    const kfcore_esn_status status = kfcore_esn_candidate(model, input, state, workspace);
+    if (status != KFCORE_ESN_OK)
+    {
+        return status;
+    }
+    memcpy(state, workspace, sizeof(float) * (size_t)model->reservoir_size);
+    return KFCORE_ESN_OK;
+}
+
+static float kfcore_esn_readout_value(const kfcore_esn_model* model,
+                                      const float* state, int row)
+{
+    float value = model->output_bias[row];
+    for (int col = 0; col < model->reservoir_size; ++col)
+    {
+        value += model->output_weights[(size_t)row + (size_t)col * (size_t)model->output_size] *
+                 state[col];
+    }
+    return value;
+}
+
+static kfcore_esn_status kfcore_esn_validate_prediction(const kfcore_esn_model* model,
+                                                       const float* state, float* output)
 {
     if (kfcore_esn_validate_readout(model) != KFCORE_ESN_OK || !state || !output)
     {
         return KFCORE_ESN_INVALID_ARGUMENT;
     }
 
-    memcpy(output, model->output_bias, sizeof(float) * (size_t)model->output_size);
-    matvec("N", model->output_size, model->reservoir_size, 1.0f, model->output_weights, state,
-           1.0f, output);
+    if (!kfcore_esn_finite_array(state, (size_t)model->reservoir_size) ||
+        !kfcore_esn_finite_array(model->output_bias, (size_t)model->output_size) ||
+        !kfcore_esn_finite_matrix(model->output_weights, model->output_size, model->reservoir_size))
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
+    }
+    /* Two O(output_size * reservoir_size) passes preserve output without extra storage. */
+    for (int row = 0; row < model->output_size; ++row)
+    {
+        if (!isfinite(kfcore_esn_readout_value(model, state, row)))
+        {
+            return KFCORE_ESN_NUMERICAL_FAILURE;
+        }
+    }
+    return KFCORE_ESN_OK;
+}
+
+static void kfcore_esn_commit_prediction(const kfcore_esn_model* model,
+                                         const float* state, float* output)
+{
+    for (int row = 0; row < model->output_size; ++row)
+    {
+        output[row] = kfcore_esn_readout_value(model, state, row);
+    }
+}
+
+kfcore_esn_status kfcore_esn_predict(const kfcore_esn_model* model, const float* state,
+                                     float* output)
+{
+    const kfcore_esn_status status = kfcore_esn_validate_prediction(model, state, output);
+    if (status != KFCORE_ESN_OK)
+    {
+        return status;
+    }
+    kfcore_esn_commit_prediction(model, state, output);
     return KFCORE_ESN_OK;
 }
 
@@ -113,12 +195,21 @@ kfcore_esn_status kfcore_esn_step_predict(const kfcore_esn_model* model, const f
         return KFCORE_ESN_INVALID_ARGUMENT;
     }
 
-    const kfcore_esn_status step_status = kfcore_esn_step(model, input, state, workspace);
+    const kfcore_esn_status step_status = kfcore_esn_candidate(model, input, state, workspace);
     if (step_status != KFCORE_ESN_OK)
     {
         return step_status;
     }
-    return kfcore_esn_predict(model, state, output);
+    const kfcore_esn_status predict_status =
+        kfcore_esn_validate_prediction(model, workspace, output);
+    if (predict_status != KFCORE_ESN_OK)
+    {
+        return predict_status;
+    }
+    memcpy(state, workspace, sizeof(float) * (size_t)model->reservoir_size);
+    /* Reading the committed state also permits output to reuse workspace. */
+    kfcore_esn_commit_prediction(model, state, output);
+    return KFCORE_ESN_OK;
 }
 
 kfcore_esn_status kfcore_esn_fit_ridge(const float* states, const float* targets,

@@ -158,16 +158,21 @@ kfcore_esn_status kfcore_esn_rls_update(const float* state, const float* target,
         }
     }
 
-    rank1update(output_weights, error, gain, output_size, reservoir_size, 1.0f);
-    rank1update(inverse_correlation, gain, gain, reservoir_size, reservoir_size,
-                -(float)denominator);
-
-    if (forgetting_factor != 1.0f)
+    /* Commit with the same precision and operation order as the preflight. */
+    for (int col = 0; col < reservoir_size; ++col)
     {
-        for (size_t i = 0; i < correlation_count; ++i)
+        for (int row = 0; row < output_size; ++row)
         {
-            inverse_correlation[i] =
-                (float)((double)inverse_correlation[i] / (double)forgetting_factor);
+            const size_t index = (size_t)row + (size_t)col * (size_t)output_size;
+            output_weights[index] = (float)((double)output_weights[index] +
+                                            (double)error[row] * (double)gain[col]);
+        }
+        for (int row = 0; row < reservoir_size; ++row)
+        {
+            const size_t index = (size_t)row + (size_t)col * (size_t)reservoir_size;
+            const double numerator = (double)inverse_correlation[index] -
+                                     denominator * (double)gain[row] * (double)gain[col];
+            inverse_correlation[index] = (float)(numerator / (double)forgetting_factor);
         }
     }
 

@@ -80,6 +80,7 @@ jobs:
             -Ivendor/miniblas \
             -Iesn \
             -Isalts/tinytest/include \
+            -DKFCORE_ESN_SEQUENCE_EMBEDDED \
             vendor/miniblas/miniblas.c \
             vendor/miniblas/linalg.c \
             esn/esn.c \
@@ -97,6 +98,7 @@ jobs:
             esn/tests/test_esn_group.c \
             esn/tests/test_esn_deep.c \
             esn/tests/test_esn_group_deep.c \
+            esn/tests/test_esn_sequence.c \
             -lm \
             -o "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
             2>&1 | tee "$RUNNER_TEMP/esn-miniblas/build.log"
