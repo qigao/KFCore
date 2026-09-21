@@ -1,0 +1,126 @@
+name: ESN miniblas contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'esn/**'
+      - 'vendor/miniblas/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/esn-miniblas.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'esn/**'
+      - 'vendor/miniblas/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/esn-miniblas.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esn-miniblas-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-sanitized:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/esn-miniblas"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/esn-miniblas/head.txt"
+
+      - name: Install focused build dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
+      - name: Checkout pinned TinyTest source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: salts
+          persist-credentials: false
+
+      - name: Verify TinyTest source pin
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C salts rev-parse HEAD)" = "$SALTS_SHA"
+          git -C salts rev-parse HEAD | tee "$RUNNER_TEMP/esn-miniblas/salts-head.txt"
+
+      - name: Build focused ESN contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cc \
+            -std=c11 \
+            -O1 -g \
+            -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Ivendor/miniblas \
+            -Iesn \
+            -Isalts/tinytest/include \
+            vendor/miniblas/miniblas.c \
+            vendor/miniblas/linalg.c \
+            esn/esn.c \
+            esn/esn_reservoir.c \
+            esn/esn_rls.c \
+            esn/esn_sparse.c \
+            esn/esn_group.c \
+            esn/esn_deep.c \
+            esn/esn_group_deep.c \
+            salts/tinytest/src/tinytest.c \
+            esn/tests/test_esn.c \
+            esn/tests/test_esn_rls.c \
+            esn/tests/test_esn_sparse.c \
+            esn/tests/test_esn_sparse_errors.c \
+            esn/tests/test_esn_group.c \
+            esn/tests/test_esn_deep.c \
+            esn/tests/test_esn_group_deep.c \
+            -lm \
+            -o "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
+            2>&1 | tee "$RUNNER_TEMP/esn-miniblas/build.log"
+
+      - name: Run focused ESN contract
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/esn-miniblas/kfcore_esn_tests" \
+            2>&1 | tee "$RUNNER_TEMP/esn-miniblas/test.log"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: esn-miniblas-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: ${{ runner.temp }}/esn-miniblas/
