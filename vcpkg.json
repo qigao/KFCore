@@ -3,6 +3,9 @@
   "version-semver": "0.1.0",
   "dependencies": [
     {
+      "name": "boringssl"
+    },
+    {
       "name": "xxhash",
       "version>=": "0.8.3"
     },

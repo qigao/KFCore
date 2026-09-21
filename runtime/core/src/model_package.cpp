@@ -25,8 +25,8 @@ constexpr char kManifestSchema[] =
     "optional string runtime_version; optional string platform; "
     "optional string hardware_compatibility; optional string device_name; "
     "optional string compute_capability; optional string precision; optional string profile; } "
-    "message Package { [name(\"schema\")] string schema_id; string id; string version; string model_type; "
-    "optional string variant; group<Artifact> artifacts; }";
+    "message Package { group<Artifact> artifacts; [name(\"schema\")] string schema_id; "
+    "string id; string version; string model_type; optional string variant; }";
 
 struct DataBindDeleter
 {
@@ -372,17 +372,42 @@ void validate_artifact(const ModelArtifact& artifact)
 
 } // namespace
 
+std::string compute_model_artifact_sha256(
+    const std::filesystem::path& artifact_path)
+{
+    return sha256_file(artifact_path);
+}
+
 ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
 {
     std::error_code filesystem_error;
-    const auto root = std::filesystem::weakly_canonical(package_directory, filesystem_error);
-    if (filesystem_error || !std::filesystem::is_directory(root, filesystem_error) || filesystem_error)
+    const auto input = std::filesystem::weakly_canonical(package_directory, filesystem_error);
+    if (filesystem_error)
     {
         throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
-                           "invalid model package directory: " + package_directory.u8string());
+                           "invalid model package path: " + package_directory.u8string());
     }
 
-    const std::string json = read_manifest(root / "model.json");
+    std::filesystem::path root;
+    std::filesystem::path manifest_path;
+    if (std::filesystem::is_directory(input, filesystem_error))
+    {
+        root = input;
+        manifest_path = root / "model.json";
+    }
+    else if (std::filesystem::is_regular_file(input, filesystem_error) &&
+             input.extension() == ".json")
+    {
+        manifest_path = input;
+        root = input.parent_path();
+    }
+    else
+    {
+        throw RuntimeError(RuntimeErrorCode::InvalidModelPackage,
+                           "invalid model package path: " + package_directory.u8string());
+    }
+
+    const std::string json = read_manifest(manifest_path);
     DataBind* raw_codec = nullptr;
     DataBindError error = DATA_BIND_ERROR_INIT;
     if (data_bind_create_from_text(kManifestSchema, sizeof(kManifestSchema) - 1U,

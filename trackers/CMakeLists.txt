@@ -17,7 +17,7 @@ set_target_properties(
 cmake_config_target(trackers
   ALIAS KFCore::trackers
   EXPORT_NAME trackers
-  EXPORT_SET trackersTargets
+  EXPORT_SET KFCoreTargets
   FOLDER "trackers")
 
 if(BUILD_EXAMPLES)
@@ -48,11 +48,6 @@ write_basic_package_version_file(
   "${trackers_version_config}"
   VERSION ${PROJECT_VERSION}
   COMPATIBILITY SameMajorVersion)
-
-install(
-  EXPORT trackersTargets
-  NAMESPACE KFCore::
-  DESTINATION "${trackers_config_install_dir}")
 
 install(
   FILES "${trackers_config}" "${trackers_version_config}"

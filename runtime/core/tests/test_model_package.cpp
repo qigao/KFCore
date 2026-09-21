@@ -36,6 +36,19 @@ struct TempPackage final
 
 spec("runtime model package")
 {
+    it("computes the lowercase SHA-256 used by package manifests")
+    {
+        TempPackage package;
+        const std::filesystem::path artifact =
+            std::filesystem::path(package.directory) / "payload.bin";
+        static constexpr char kPayload[] = "abc";
+        check_true(tt_write_file(artifact.string().c_str(), kPayload,
+                                 sizeof(kPayload) - 1U) == 0);
+
+        check_true(kfcore::runtime::compute_model_artifact_sha256(artifact) ==
+                   "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
     it("loads the public schema field through the internal DataBind schema")
     {
         TempPackage package;
@@ -60,5 +73,30 @@ spec("runtime model package")
         check_true(loaded.artifacts().size() == 1U);
         check_nothrow(kfcore::runtime::verify_model_artifact(
             loaded, loaded.artifacts().front()));
+    }
+
+    it("loads a flat manifest and sibling ONNX artifact")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "2dfan4.onnx";
+        const std::filesystem::path manifest = root / "2dfan4.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"face68\","
+            "\"version\":\"1.0.0\",\"model_type\":\"face.face68\","
+            "\"artifacts\":[{\"id\":\"runtime\",\"format\":\"onnx\","
+            "\"path\":\"2dfan4.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"any\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        const auto loaded = kfcore::runtime::ModelPackage::load(manifest);
+        check_true(loaded.root() == std::filesystem::weakly_canonical(root));
+        check_true(loaded.id() == "face68");
+        check_true(loaded.model_type() == "face.face68");
+        check_true(loaded.artifact_path(loaded.artifacts().front()) == artifact);
     }
 }

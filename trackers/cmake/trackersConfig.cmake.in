@@ -1,8 +1,14 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(NOT TARGET KFCore::kfcore)
+if(NOT TARGET KFCore::trackers)
   find_dependency(KFCore)
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/trackersTargets.cmake")
+if(NOT TARGET KFCore::trackers)
+  set(trackers_FOUND FALSE)
+  set(trackers_NOT_FOUND_MESSAGE
+      "KFCore package did not provide the required KFCore::trackers target")
+endif()
+
+check_required_components(trackers)

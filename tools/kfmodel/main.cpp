@@ -3,7 +3,9 @@
 #include "kfcore/runtime/runtime.hpp"
 
 #include <cstddef>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -14,10 +16,11 @@ namespace
 void usage(std::ostream& stream)
 {
     stream << "usage:\n"
-              "  kfmodel inspect <model-package-directory>\n"
-              "  kfmodel validate <model-package-directory>\n"
+              "  kfmodel inspect <model-manifest.json>\n"
+              "  kfmodel validate <model-manifest.json>\n"
+              "  kfmodel create-onnx <source.onnx> <model-root> <id> <model-type> [flavor]\n"
               "  kfmodel backend <backend-plugin>\n"
-              "  kfmodel probe <model-package-directory> <backend-plugin> <device-id>\n";
+              "  kfmodel probe <model-manifest.json> <backend-plugin> <device-id>\n";
 }
 
 void print_artifact(const kfcore::runtime::ModelArtifact& artifact)
@@ -70,6 +73,125 @@ int validate(const kfcore::runtime::ModelPackage& package)
         std::cout << "verified " << artifact.id << '\n';
     }
     std::cout << "model package valid: " << package.id() << '\n';
+    return 0;
+}
+
+bool valid_manifest_token(std::string_view value) noexcept
+{
+    if (value.empty()) return false;
+    for (const unsigned char character : value)
+    {
+        if (!std::isalnum(character) && character != '.' &&
+            character != '_' && character != '-')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+int create_onnx_package(const std::filesystem::path& source,
+                        const std::filesystem::path& destination,
+                        const std::string& id,
+                        const std::string& model_type,
+                        const std::string& flavor)
+{
+    if (!valid_manifest_token(id) || !valid_manifest_token(model_type) ||
+        (!flavor.empty() && !valid_manifest_token(flavor)))
+    {
+        throw std::invalid_argument(
+            "id, model-type, and flavor may contain only letters, digits, '.', '_', and '-'");
+    }
+
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(source, error) || error)
+    {
+        throw std::runtime_error("ONNX source is not a regular file: " +
+                                 source.u8string());
+    }
+    error.clear();
+    if (!std::filesystem::is_directory(destination, error) || error)
+    {
+        throw std::runtime_error("model destination is not a directory: " +
+                                 destination.u8string());
+    }
+
+    const std::filesystem::path artifact = destination / source.filename();
+    const std::filesystem::path manifest_path =
+        destination / (source.stem().string() + ".json");
+    if (std::filesystem::exists(artifact, error) ||
+        std::filesystem::exists(manifest_path, error) || error)
+    {
+        throw std::runtime_error("flat model files already exist for source: " +
+                                 source.u8string());
+    }
+
+    const std::filesystem::path temporary_artifact = artifact.string() + ".kfmodel-tmp";
+    const std::filesystem::path temporary_manifest = manifest_path.string() + ".kfmodel-tmp";
+    bool temporary_created = false;
+    try
+    {
+        temporary_created = true;
+        if (!std::filesystem::copy_file(source, temporary_artifact,
+                                        std::filesystem::copy_options::none))
+        {
+            throw std::runtime_error("cannot copy ONNX artifact into model root");
+        }
+
+        const std::string digest =
+            kfcore::runtime::compute_model_artifact_sha256(temporary_artifact);
+        std::ofstream manifest(temporary_manifest, std::ios::binary);
+        if (!manifest)
+        {
+            throw std::runtime_error("cannot create flat model manifest");
+        }
+        manifest << "{\n"
+                    "  \"schema\": \"kfcore.model/1\",\n"
+                    "  \"id\": \"" << id << "\",\n"
+                    "  \"version\": \"1.0.0\",\n"
+                    "  \"model_type\": \"" << model_type << "\",\n"
+                    "  \"artifacts\": [\n"
+                    "    {\n"
+                    "      \"id\": \"onnx\",\n"
+                    "      \"format\": \"onnx\",\n"
+                    "      \"path\": \"" << source.filename().generic_u8string() << "\",\n";
+        if (!flavor.empty())
+        {
+            manifest << "      \"flavor\": \"" << flavor << "\",\n";
+        }
+        manifest << "      \"sha256\": \"" << digest << "\",\n"
+                    "      \"backend\": \"onnxruntime\",\n"
+                    "      \"device\": \"any\"\n"
+                    "    }\n"
+                    "  ]\n"
+                    "}\n";
+        manifest.close();
+        if (!manifest)
+        {
+            throw std::runtime_error("cannot write complete flat model manifest");
+        }
+
+        std::filesystem::rename(temporary_artifact, artifact);
+        std::filesystem::rename(temporary_manifest, manifest_path);
+        const auto package = kfcore::runtime::ModelPackage::load(manifest_path);
+        (void)validate(package);
+        temporary_created = false;
+    }
+    catch (...)
+    {
+        if (temporary_created)
+        {
+            error.clear();
+            (void)std::filesystem::remove(temporary_artifact, error);
+            (void)std::filesystem::remove(temporary_manifest, error);
+            (void)std::filesystem::remove(artifact, error);
+            (void)std::filesystem::remove(manifest_path, error);
+        }
+        throw;
+    }
+
+    std::cout << "created flat ONNX model pair: " << artifact.generic_u8string()
+              << " + " << manifest_path.generic_u8string() << '\n';
     return 0;
 }
 
@@ -230,10 +352,12 @@ int main(int argc, char** argv)
 
     const std::string command(argv[1]);
     const bool package_only = command == "inspect" || command == "validate";
+    const bool create_onnx_command = command == "create-onnx";
     const bool backend_command = command == "backend";
     const bool probe_command = command == "probe";
-    if ((!package_only && !backend_command && !probe_command) ||
+    if ((!package_only && !create_onnx_command && !backend_command && !probe_command) ||
         (package_only && argc != 3) ||
+        (create_onnx_command && argc != 6 && argc != 7) ||
         (backend_command && argc != 3) ||
         (probe_command && argc != 5) ||
         (probe_command && (argv[3] == nullptr || argv[4] == nullptr)))
@@ -244,6 +368,13 @@ int main(int argc, char** argv)
 
     try
     {
+        if (create_onnx_command)
+        {
+            return create_onnx_package(
+                std::filesystem::path(argv[2]), std::filesystem::path(argv[3]),
+                std::string(argv[4]), std::string(argv[5]),
+                argc == 7 ? std::string(argv[6]) : std::string{});
+        }
         if (backend_command)
             return inspect_backend(std::filesystem::path(argv[2]));
 

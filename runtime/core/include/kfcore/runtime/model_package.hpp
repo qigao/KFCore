@@ -39,7 +39,8 @@ struct ModelArtifact
 class ModelPackage final
 {
 public:
-    [[nodiscard]] static ModelPackage load(const std::filesystem::path& package_directory);
+    /** Load a flat <name>.json manifest or a legacy package directory. */
+    [[nodiscard]] static ModelPackage load(const std::filesystem::path& package_path);
 
     [[nodiscard]] const std::filesystem::path& root() const noexcept;
     [[nodiscard]] const std::string& id() const noexcept;
@@ -60,5 +61,7 @@ private:
 };
 
 void verify_model_artifact(const ModelPackage& package, const ModelArtifact& artifact);
+[[nodiscard]] std::string compute_model_artifact_sha256(
+    const std::filesystem::path& artifact_path);
 
 } // namespace kfcore::runtime
