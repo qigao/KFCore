@@ -125,6 +125,9 @@ struct HandResult
     Gesture                                  gesture    = Gesture::Unknown;
     int                                      track_id   = -1;
     std::optional<HandAppearanceDescriptor>  appearance;
+    // Available only for a world-landmark model; meters, rotated into source axes.
+    std::optional<std::array<HandLandmark, kHandLandmarkCount>> world_landmarks;
+    std::optional<float> right_hand_probability;
 };
 
 struct StageTimings

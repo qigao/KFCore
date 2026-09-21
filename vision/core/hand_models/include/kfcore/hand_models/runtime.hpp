@@ -43,6 +43,18 @@ public:
 
     [[nodiscard]] HandFrame infer(const image::ImageView& image);
 
+    /** Explicit two-model mode. Does not load or execute a gesture classifier.
+     * Results retain Gesture::Unknown and classifier timing is zero. This is
+     * never selected as recovery from a failed three-model load.
+     */
+    [[nodiscard]] static std::unique_ptr<HandDetector> load_landmarks(
+        runtime::Runtime& runtime,
+        const runtime::ModelPackage& palm_package,
+        const runtime::ExecutionPolicy& palm_policy,
+        const runtime::ModelPackage& landmark_package,
+        const runtime::ExecutionPolicy& landmark_policy,
+        const HandRuntimeOptions& options = {});
+
     [[nodiscard]] const runtime::ExecutionRoute& palm_execution_route() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& landmark_execution_route() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& classifier_execution_route() const noexcept;

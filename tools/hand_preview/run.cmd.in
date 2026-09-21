@@ -1,0 +1,5 @@
+@echo off
+setlocal
+set "PATH=@PREVIEW_RUNTIME_PATH@"
+"%~dp0kfhand_preview.exe" %*
+exit /b %errorlevel%

@@ -350,6 +350,17 @@ struct HandDetector::Impl final
 {
     Impl(runtime::ResolvedModel palm_value,
          runtime::ResolvedModel landmark_value,
+         HandRuntimeOptions options_value)
+        : palm(std::move(palm_value)), landmark(std::move(landmark_value)),
+          options(options_value), palm_context(palm.model->create_context()),
+          landmark_context(landmark.model->create_context())
+    {
+        configure_palm();
+        configure_landmark();
+    }
+
+    Impl(runtime::ResolvedModel palm_value,
+         runtime::ResolvedModel landmark_value,
          runtime::ResolvedModel classifier_value,
          HandRuntimeOptions options_value)
         : palm(std::move(palm_value)), landmark(std::move(landmark_value)),
@@ -397,15 +408,19 @@ struct HandDetector::Impl final
         landmark_input_shape = resolve_image_input(
             landmark_input, kHandLandmarkInputExtent, true, "hand landmarker");
         const auto out = outputs(tensors);
-        if (out.size() != 3U)
-            throw_contract("hand landmarker requires three outputs");
+        if (out.size() != 3U && out.size() != 4U)
+            throw_contract("hand landmarker requires three outputs or four including world landmarks");
+        if (out.size() == 4U && landmark.route.artifact.flavor != "mediapipe-hand-world-v1")
+            throw_contract("four-output landmark geometry requires mediapipe-hand-world-v1");
         for (const auto& descriptor : out)
         {
             const std::string name = lower(descriptor.name);
             if (descriptor.shape.size() != 2U)
                 throw_contract("hand landmark outputs must have rank 2");
             const std::int64_t width = descriptor.shape[1];
-            if ((width == -1 || width == static_cast<std::int64_t>(kHandOutputWidth)) &&
+            if (width == static_cast<std::int64_t>(kHandOutputWidth) && name == "world_landmarks")
+                landmark_world.descriptor = descriptor;
+            else if ((width == -1 || width == static_cast<std::int64_t>(kHandOutputWidth)) &&
                 (name.find("xyz") != std::string::npos ||
                  name.find("landmark") != std::string::npos))
                 landmark_xyz.descriptor = descriptor;
@@ -432,6 +447,11 @@ struct HandDetector::Impl final
         landmark_xyz.allocate(kHandOutputWidth, options.max_output_bytes);
         landmark_score.allocate(1U, options.max_output_bytes);
         handedness.allocate(1U, options.max_output_bytes);
+        if (out.size() == 4U) {
+            if (landmark_world.descriptor.name.empty() || landmark_world.descriptor.data_type != runtime::DataType::Float32)
+                throw_contract("four-output model requires FP32 world_landmarks [1,63]");
+            landmark_world.allocate(kHandOutputWidth, options.max_output_bytes);
+        }
     }
 
     void configure_classifier()
@@ -470,6 +490,7 @@ struct HandDetector::Impl final
     HostBuffer landmark_xyz;
     HostBuffer landmark_score;
     HostBuffer handedness;
+    HostBuffer landmark_world;
     runtime::TensorDescriptor classifier_input;
     HostBuffer classifier_output;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
@@ -477,6 +498,29 @@ struct HandDetector::Impl final
 
 HandDetector::HandDetector(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 HandDetector::~HandDetector() = default;
+
+std::unique_ptr<HandDetector> HandDetector::load_landmarks(
+    runtime::Runtime& runtime,
+    const runtime::ModelPackage& palm_package,
+    const runtime::ExecutionPolicy& palm_policy,
+    const runtime::ModelPackage& landmark_package,
+    const runtime::ExecutionPolicy& landmark_policy,
+    const HandRuntimeOptions& options)
+{
+    validate_options(options);
+    if (palm_package.model_type() != "hand.palm-detector" ||
+        landmark_package.model_type() != "hand.landmarker")
+        throw_contract("landmark packages must use canonical hand.* model_type values");
+    try
+    {
+        return std::unique_ptr<HandDetector>(new HandDetector(std::make_unique<Impl>(
+            runtime.load_model(palm_package, palm_policy),
+            runtime.load_model(landmark_package, landmark_policy), options)));
+    }
+    catch (const HandModelError&) { throw; }
+    catch (const runtime::RuntimeError& error) { throw_runtime(error.what()); }
+    catch (const std::bad_alloc&) { throw_resource("hand landmark allocation failed"); }
+}
 
 std::unique_ptr<HandDetector> HandDetector::load(
     runtime::Runtime& runtime,
@@ -578,7 +622,7 @@ HandFrame HandDetector::infer(const image::ImageView& source)
         const image::BgrImage packed = image::CpuImageProcessor::copy_bgr(
             source, impl_->options.max_source_bytes);
         std::vector<std::array<float, kClassifierFeatureWidth>> classifier_features;
-        classifier_features.reserve(palms.size());
+        if (impl_->classifier_context) classifier_features.reserve(palms.size());
         result.hands.reserve(palms.size());
 
         for (const PalmDetection& palm : palms)
@@ -614,8 +658,11 @@ HandFrame HandDetector::infer(const image::ImageView& source)
             auto score_view = impl_->landmark_score.view(score_shape);
             auto handed_view = impl_->handedness.view(handed_shape);
             const Clock::time_point inference_started = Clock::now();
-            impl_->landmark_context->run({landmark_input_view},
-                                         {xyz_view, score_view, handed_view});
+            std::vector<runtime::MutableTensorView> landmark_outputs{xyz_view, score_view, handed_view};
+            if (!impl_->landmark_world.descriptor.name.empty())
+                landmark_outputs.push_back(impl_->landmark_world.view(batch_shape(
+                    impl_->landmark_world.descriptor, 1U, kHandOutputWidth, "world landmarks")));
+            impl_->landmark_context->run({landmark_input_view}, landmark_outputs);
             result.timings.landmark_inference_ms += elapsed_ms(inference_started);
 
             const std::vector<float> xyz_values = impl_->landmark_xyz.floats(kHandOutputWidth);
@@ -631,14 +678,33 @@ HandFrame HandDetector::infer(const image::ImageView& source)
             hand_result.palm = palm;
             hand_result.landmark_confidence = score;
             hand_result.handedness = detail::decode_handedness(handed_values[0]);
+            if (!impl_->landmark_world.descriptor.name.empty()) {
+                hand_result.right_hand_probability = handed_values[0];
+                const auto world = impl_->landmark_world.floats(kHandOutputWidth);
+                hand_result.world_landmarks.emplace();
+                const float cosine = std::cos(palm.roi.rotation_radians);
+                const float sine = std::sin(palm.roi.rotation_radians);
+                for (std::size_t i = 0; i < kHandLandmarkCount; ++i) {
+                    const float x = world[i*3], y = world[i*3+1], z = world[i*3+2];
+                    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+                        throw_contract("non-finite world landmark");
+                    (*hand_result.world_landmarks)[i] = {cosine*x-sine*y, sine*x+cosine*y, z};
+                }
+            }
             hand_result.landmarks = detail::decode_hand_landmarks(
                 xyz_values.data(), xyz_values.size(), palm.roi,
                 kHandLandmarkInputExtent);
-            classifier_features.push_back(detail::make_keypoint_features(hand_result.landmarks));
+            if (hand_result.world_landmarks) {
+                // Official HandLandmarksDetectorGraph normalizes image z by 0.4.
+                constexpr float kMediaPipeNormalizeZ = 0.4F;
+                for (auto& point : hand_result.landmarks) point.z /= kMediaPipeNormalizeZ;
+            }
+            if (impl_->classifier_context)
+                classifier_features.push_back(detail::make_keypoint_features(hand_result.landmarks));
             result.hands.push_back(std::move(hand_result));
         }
 
-        if (!result.hands.empty())
+        if (impl_->classifier_context && !result.hands.empty())
         {
             const Clock::time_point classifier_preprocess_started = Clock::now();
             std::vector<float> classifier_values;

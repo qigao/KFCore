@@ -6,7 +6,7 @@
 
 ## Public model boundary
 
-`HandDetector` owns three logical models, each with its own Model Package and
+`HandDetector::load` owns three logical models, each with its own Model Package and
 execution policy:
 
 ```text
@@ -19,6 +19,13 @@ Palm detector
 The three routes are independent. A caller may, for example, select TensorRT
 for Palm/landmark and ONNX Runtime CPU for the classifier by providing explicit
 policies for each package. No implicit fallback is performed.
+
+`HandDetector::load_landmarks` is an explicit two-model entry point accepting
+only Palm/landmark packages and their policies. It does not load a classifier,
+returns `Gesture::Unknown`, leaves classifier timing at zero, and exposes an
+empty classifier execution route. A failed three-model load never selects this
+mode automatically. The MediaPipe-specific contract adapter is documented in
+[`vision/mediapipe`](../../mediapipe/README.md).
 
 ```cpp
 #include <kfcore/hand_models/runtime.hpp>
@@ -77,8 +84,8 @@ confirms it and returns a stable non-negative ID. `reset()` restarts the same
 confirmation lifecycle.
 
 ByteTrack is the bounded short-term palm-box association layer. Its raw
-`track_id` is a continuity hint rather than the semantic identity consumed by
-THIG. A detection gap strictly shorter than `lost_track_buffer` may preserve a
+`track_id` is a continuity hint, not proof of physical hand identity.
+A detection gap strictly shorter than `lost_track_buffer` may preserve a
 confirmed ID; at or beyond that boundary the next detection starts unconfirmed.
 Appearance extraction remains opt-in because it requires
 `update(source_image, frame)` and has additional image sampling cost.
@@ -108,8 +115,16 @@ tracker.
 
 - `KFCore::hand_model_core` — types, geometry, decoding, appearance, tracking.
 - `KFCore::hand_model_runtime` — `HandDetector` and Model Package/runtime execution.
-- `KFCore::hand_interaction` — higher-level gesture/temporal semantics consuming
-  tracked `HandFrame` values.
+- `KFCore::gesture_interaction` — basic and learned gesture events consuming
+  MediaPipe `GestureFrame` values; optional stable identity is supplied by the caller.
 
 The SDK targets are static archives. TensorRT and ONNX Runtime remain runtime-loaded
 execution plugins and are not model-specific hand libraries.
+
+## 可选官方 world landmarks
+
+四输出关键点包须声明 `mediapipe-hand-world-v1`，增加 FP32 `world_landmarks [1,63]`。
+HandResult 新增可选 world_landmarks（米、旋转至源图像轴）和 right_hand_probability。
+该格式的图像 z 按官方 0.4 比例还原；旧三输出路径不改变，两个可选字段为空。
+新增字段改变 C++ 二进制布局，调用方须重新编译。官方分类入口见
+`vision/mediapipe/include/kfcore/mediapipe/gesture_recognizer.hpp`。

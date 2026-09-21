@@ -12,3 +12,25 @@ Bundled third-party components retain their upstream license terms.
 Dependencies supplied through Salts, SaltsUtils, vcpkg, or another package
 manager are not relicensed by KFCore and remain governed by their respective
 upstream licenses.
+
+## Optional browser annotation tool
+
+`tools/gesture_annotator/` downloads (does not bundle) MediaPipe Tasks Vision
+`@mediapipe/tasks-vision@0.10.21` from jsDelivr at runtime. MediaPipe code is
+licensed under Apache-2.0; see the [upstream license](https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE)
+and [package distribution](https://www.npmjs.com/package/@mediapipe/tasks-vision/v/0.10.21).
+The tool separately downloads Google's `hand_landmarker/float16/1` task model;
+refer to the [official model documentation](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/index#models)
+for its source and applicable terms. These network resources are not relicensed
+or redistributed by this repository.
+
+## Optional native gesture conversion
+
+`tools/mediapipe_gesture/` converts Google's official
+[`gesture_recognizer/float16/1` model](https://ai.google.dev/edge/mediapipe/solutions/vision/gesture_recognizer/index#models)
+to ONNX locally; neither the task bundle nor converted weights are distributed here.
+Consult upstream model documentation for applicable model terms.
+Offline tools include [TensorFlow (Apache-2.0)](https://github.com/tensorflow/tensorflow/blob/master/LICENSE)
+and [tf2onnx (Apache-2.0)](https://github.com/onnx/tensorflow-onnx/blob/main/LICENSE).
+They are not additional native runtime dependencies. Pinned versions and model
+provenance are recorded in `tools/mediapipe_gesture/`.

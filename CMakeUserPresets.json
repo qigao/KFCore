@@ -2,6 +2,7 @@
   "version": 6,
   "include": ["CMakePresets.json"],
   "configurePresets": [
+    {"name":"win-hand-preview-user","inherits":"win-cpu-release-user","binaryDir":"${sourceDir}/build/hand-preview/Release","cacheVariables":{"KFCORE_BUILD_HAND_PREVIEW":"ON","CMAKE_INSTALL_PREFIX":"$env{PKG_ROOT}/kfcore/release/hand-preview"},"environment":{"PATH":"${sourceDir}/build/hand-preview/Release/bin${pathListSep}$env{ONNXRUNTIME_ROOT}/lib${pathListSep}$env{OPENCV_LITE_ROOT}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"}},
     {"name":"runtime-ort-cpu","hidden":true,"cacheVariables":{"KFCORE_ENABLE_CUDA":"OFF","KFCORE_ENABLE_TENSORRT":"OFF","KFCORE_ENABLE_ONNXRUNTIME":"ON","KFCORE_ONNXRUNTIME_ENABLE_CUDA":"OFF","KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES":"OFF"}},
     {"name":"runtime-ort-cuda","hidden":true,"cacheVariables":{"KFCORE_ENABLE_CUDA":"OFF","KFCORE_ENABLE_TENSORRT":"OFF","KFCORE_ENABLE_ONNXRUNTIME":"ON","KFCORE_ONNXRUNTIME_ENABLE_CUDA":"ON","KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES":"ON"}},
     {"name":"runtime-tensorrt-ort-cpu","hidden":true,"cacheVariables":{"KFCORE_ENABLE_CUDA":"ON","KFCORE_ENABLE_TENSORRT":"ON","KFCORE_ENABLE_ONNXRUNTIME":"ON","KFCORE_ONNXRUNTIME_ENABLE_CUDA":"OFF","KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES":"OFF"}},
@@ -22,6 +23,8 @@
     {"name":"linux-release-user","displayName":"Release Build (Linux, User)","binaryDir":"${sourceDir}/build/cuda/linux-gcc-release","cacheVariables":{"BUILD_TESTS":"ON","CMAKE_PREFIX_PATH":"$env{VCPKG_INSTALLED_DIR}/x64-linux","CMAKE_INSTALL_PREFIX":"$env{PKG_ROOT}/kfcore/release/cuda"},"environment":{"SALTS_ROOT":"$env{PKG_ROOT}/salts/release","SALTS_UTILS_ROOT":"$env{PKG_ROOT}/salts-utils/release","PATH":"${sourceDir}/build/cuda/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}","LD_LIBRARY_PATH":"${sourceDir}/build/cuda/linux-gcc-release/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"},"inherits":["release-linux-ninja","linux-paths","runtime-tensorrt-ort-cpu"]}
   ],
   "buildPresets": [
+    {"name":"win-hand-preview-user","configurePreset":"win-hand-preview-user"},
+    {"name":"install-win-hand-preview-user","configurePreset":"win-hand-preview-user","targets":["install"]},
     {"name":"win-onnx-cuda-release-user","configurePreset":"win-onnx-cuda-release-user"},
     {"name":"win-dev-user","configurePreset":"win-dev-user"},
     {"name":"win-cpu-dev-user","configurePreset":"win-cpu-dev-user"},
@@ -42,6 +45,7 @@
     {"name":"install-linux-release-user","configurePreset":"linux-release-user","targets":["install"]}
   ],
   "testPresets": [
+    {"name":"win-hand-preview-user","inherits":"base-test","configurePreset":"win-hand-preview-user"},
     {"name":"win-onnx-cuda-release-user","inherits":"base-test","configurePreset":"win-onnx-cuda-release-user"},
     {"name":"win-dev-user","inherits":"base-test","configurePreset":"win-dev-user"},
     {"name":"win-cpu-dev-user","inherits":"base-test","configurePreset":"win-cpu-dev-user"},

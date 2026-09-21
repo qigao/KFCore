@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KFCore · 动作标注台</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip" href="#workspace">跳到标注工作区</a>
+  <header>
+    <div><span class="eyebrow">KFCORE / MOTION LAB</span><h1>动作标注台 <span class="badge">LOCAL</span></h1></div>
+    <div class="actions"><label class="file-button">打开视频<input id="videoFile" type="file" accept="video/*"></label>
+      <label class="file-button secondary">导入 JSON<input id="jsonFile" type="file" accept=".json,application/json" disabled></label>
+      <button id="export" disabled>导出项目 ↗</button></div>
+  </header>
+  <main id="workspace" tabindex="-1">
+    <div class="workspace">
+      <section class="viewer" aria-label="视频与时间轴">
+        <div class="section-heading"><h2 id="videoName">01 / 视频预览</h2><span id="dimensions" class="muted">未加载视频</span></div>
+        <div class="stage">
+          <div id="empty"><span class="empty-mark">[ + ]</span><h2>从一段动作开始</h2><p>打开本地视频，采样关键点，再标注动作区间。</p><p class="muted">视频不上传 · 最大 256 MiB · 最长 1 小时</p></div>
+          <div id="media" hidden><video id="video" playsinline muted preload="auto" aria-label="待标注视频"></video><canvas id="overlay" aria-hidden="true"></canvas></div>
+        </div>
+        <fieldset id="transport" disabled>
+          <legend class="sr-only">播放与采样控制</legend>
+          <div class="transport"><button id="play" type="button">播放</button><button id="back" type="button" aria-label="后退一个采样间隔">−1 步</button><button id="forward" type="button" aria-label="前进一个采样间隔">+1 步</button><output id="clock">0.000 / 0.000 s</output></div>
+          <label class="sr-only" for="seek">视频播放位置（秒）</label><input id="seek" type="range" min="0" max="1" step="0.001" value="0">
+          <div id="timeline" aria-label="标注区间概览"></div>
+          <div class="inference-controls"><label>采样率<select id="hz"><option>5</option><option selected>10</option><option>15</option><option>30</option></select> Hz</label>
+            <button id="detect" type="button">检测当前画面</button><button id="analyze" type="button">采样整段视频</button></div>
+        </fieldset>
+        <div class="progress-row"><progress id="progress" max="1" value="0" aria-label="采样进度" hidden></progress><button id="cancel" hidden>取消采样</button></div>
+        <p id="status" role="status" aria-live="polite">等待视频。首次检测需要联网下载 MediaPipe 模型。</p>
+        <section class="binding"><div class="section-heading"><h2>当前采样 · 身份校对</h2><span id="frameTime" class="muted">—</span></div><div id="hands"><p class="muted">检测结果的顺序和左右手分类均不代表稳定身份。</p></div></section>
+        <details><summary>操作说明与数据边界</summary><p>空格播放/暂停，← / → 按采样间隔移动，I / O 设置区间起止。输入框中不会触发快捷键。</p><p>叠加显示最近的采样，不是逐解码帧检测。身份绑定仅作用于该采样；未校对的身份保持为空。Hand A / B 是你定义的稳定身份，不自动等同于左 / 右手。</p><p>模型在本机浏览器运行；脚本和模型从外部 CDN 下载。原始关键点与人工标注分别保存。导出格式不是现有 THIG / ESN 训练格式。</p></details>
+      </section>
+      <aside aria-label="标注编辑器">
+        <section class="panel"><div class="section-heading"><h2>02 / 动作区间</h2><span id="editMode" class="badge">新建</span></div>
+          <form id="annotationForm"><fieldset id="editor" disabled><legend class="sr-only">编辑动作区间</legend>
+            <label>动作名称<input id="label" maxlength="80" required placeholder="例如：swipe_left" list="labels"></label>
+            <datalist id="labels"><option value="swipe_left"><option value="swipe_right"><option value="grab"><option value="release"><option value="rotate"><option value="none"></datalist>
+            <div class="pair"><label>起点 / 秒<input id="start" type="number" min="0" step="any" value="0" required></label><label>终点 / 秒<input id="end" type="number" min="0" step="any" value="0" required></label></div>
+            <div class="pair"><button id="markStart" type="button">设为当前 · I</button><button id="markEnd" type="button">设为当前 · O</button></div>
+            <div class="pair"><label>阶段<select id="phase"><option value="whole">完整动作</option><option value="start">开始</option><option value="active">进行</option><option value="end">结束</option><option value="idle">空闲</option></select></label><label>动作主体<select id="entities"><option value="hand-A">Hand A</option><option value="hand-B">Hand B</option><option value="both">双手 A + B</option></select></label></div>
+            <div class="checks"><label><input id="occluded" type="checkbox">遮挡</label><label><input id="incomplete" type="checkbox">未完成</label><label><input id="negative" type="checkbox">负样本</label></div>
+            <label>备注<textarea id="note" rows="2" maxlength="2000" placeholder="动作意图、遮挡原因…"></textarea></label>
+            <div class="pair"><button id="saveAnnotation" type="submit" class="primary">添加区间</button><button id="resetAnnotation" type="button">清空表单</button></div>
+          </fieldset></form>
+        </section>
+        <section class="panel"><div class="section-heading"><h2>03 / 标注列表 <span id="count">0</span></h2><div class="actions"><button id="undo" disabled aria-label="撤销区间修改">撤销</button><button id="redo" disabled aria-label="重做区间修改">重做</button></div></div><ol id="annotations"><li class="muted">尚无标注。设置起止时间后添加。</li></ol></section>
+        <section class="panel"><h2>项目元数据</h2><fieldset id="metadata" disabled><legend class="sr-only">被试与会话</legend><div class="pair"><label>被试 ID<input id="subject" maxlength="120" placeholder="subject-001"></label><label>会话 ID<input id="session" maxlength="120" placeholder="session-001"></label></div></fieldset><p id="storageStatus" role="status" class="muted">自动保存到此浏览器；请导出 JSON 备份。</p><p id="stats" class="muted">0 个采样 · 0 个已绑定检测</p></section>
+      </aside>
+    </div>
+  </main>
+  <footer><span>人工标注是事实源，检测结果是辅助。</span><span>MediaPipe Hands · 21 landmarks / hand</span></footer>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

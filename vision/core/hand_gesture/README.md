@@ -8,9 +8,9 @@ The target is excluded from the default CMake graph. Configure with
 `KFCORE_ENABLE_TEMPORAL_GESTURE_GRU=ON` only when building this experimental
 library and its `kfgesture-smoke` tool.
 
-There is currently no trained deployment artifact. Production
-`KFCore::hand_interaction` continues to recognize SwipeLeft, SwipeRight, Grab, and
-Release from primitive observations with THIG and does not link this module.
+There is currently no trained deployment artifact. `KFCore::gesture_interaction`
+provides MediaPipe basic gesture events and optional ESN Grasp/Release/Wave events.
+It does not link this experimental GRU module.
 
 ## Data flow
 
@@ -23,7 +23,7 @@ HandDetector
 ```
 
 `GestureFeatureEncoder` consumes one tracked `HandResult` and emits exactly 78 FP32 values.
-It does not consume THIG observations or hand-authored gesture primitives.
+It does not consume interaction events or hand-authored gesture primitives.
 
 The fixed V1 feature layout is:
 
