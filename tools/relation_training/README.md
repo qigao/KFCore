@@ -578,6 +578,49 @@ identity matrix. Its purpose is to establish a reproducible optimization and
 sampling anchor before introducing a semantic text embedding bank or backbone
 fine-tuning.
 
+## Seen vs train-zero-support predicate recall
+
+Canonical benchmark reports can optionally stratify predicate mRecall by
+whether each predicate had positive support in the training split.
+
+For a validation-supported predicate `i`:
+
+```text
+seen               train_count[i] > 0
+train_zero_support train_count[i] == 0
+```
+
+When `train_baseline.py` produces `benchmark.json`, it passes the canonical
+training predicate counts automatically. The report therefore includes:
+
+```json
+{
+  "predicate_groups": {
+    "seen": {
+      "predicate_indices": [],
+      "predicate_count": 0,
+      "validation_triplet_support": 0,
+      "mean_recall_at_k": {}
+    },
+    "train_zero_support": {
+      "predicate_indices": [],
+      "predicate_count": 0,
+      "validation_triplet_support": 0,
+      "mean_recall_at_k": {}
+    }
+  }
+}
+```
+
+Predicates without validation support are excluded from both group means. A
+group with no validation-supported predicates reports `null` mRecall rather
+than zero. Existing overall R@K, mR@K and per-predicate metrics remain
+unchanged.
+
+This separation is important for semantic/open-vocabulary experiments: class
+reweighting can improve seen long-tail predicates, while train-zero-support
+recall measures transfer that no positive training label can directly teach.
+
 ## Frozen DINOv3 baseline runner
 
 The first reproducible training recipe keeps the DINOv3 backbone frozen and
