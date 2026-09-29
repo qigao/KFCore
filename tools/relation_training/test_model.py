@@ -402,6 +402,107 @@ class RelationModelTest(unittest.TestCase):
                 ),
             )
 
+    def test_predicate_supervision_mask_zeroes_masked_gradients(self):
+        torch.manual_seed(19)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+
+        pred_logits, _, sub_idx, obj_idx, valid_mask = output.runtime
+        pred_logits.retain_grad()
+        valid_slots = torch.nonzero(valid_mask[0], as_tuple=False)
+        slot = int(valid_slots[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        losses = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+        )
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, slot, :2],
+            torch.tensor([1.0, 0.0]),
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(pred_logits.grad)
+        self.assertEqual(
+            float(pred_logits.grad[..., 2].abs().sum()),
+            0.0,
+        )
+        self.assertGreater(
+            float(pred_logits.grad[..., :2].abs().sum()),
+            0.0,
+        )
+
+    def test_predicate_supervision_mask_fails_fast_on_invalid_contract(self):
+        torch.manual_seed(23)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        _, _, sub_idx, obj_idx, valid_mask = output.runtime
+        valid_slots = torch.nonzero(valid_mask[0], as_tuple=False)
+        slot = int(valid_slots[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 2] = 1.0
+
+        invalid_masks = (
+            torch.tensor([True, False]),
+            torch.tensor([1.0, 1.0, 0.0]),
+            torch.tensor([False, False, False]),
+        )
+        for supervision in invalid_masks:
+            with self.assertRaises(ValueError):
+                supervised_relation_loss(
+                    output,
+                    pair_targets,
+                    predicate_targets,
+                    predicate_supervision_mask=supervision,
+                )
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                pair_targets,
+                predicate_targets,
+                predicate_supervision_mask=torch.tensor(
+                    [True, True, False]
+                ),
+            )
+
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
         model = KFRelationModel(
             ToyBackbone(), torch.randn(3, 6), config()
