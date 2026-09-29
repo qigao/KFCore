@@ -91,10 +91,21 @@ class OpenImagesRelation:
 
 
 @dataclass(frozen=True)
+class SkippedOpenImagesRelation:
+    image_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in {"attribute", "self_relation"}:
+            raise ValueError("unsupported Open Images skip reason")
+
+
+@dataclass(frozen=True)
 class ScanSummary:
     relationships: int
     object_relationships: int
     skipped_attributes: int
+    skipped_self_relations: int
     images: tuple[str, ...]
     predicates: tuple[str, ...]
     object_mids: tuple[str, ...]
@@ -167,7 +178,7 @@ def _endpoint(
 
 def iter_relationship_rows(
     path: str | Path,
-) -> Iterator[OpenImagesRelation | None]:
+) -> Iterator[OpenImagesRelation | SkippedOpenImagesRelation]:
     with Path(path).open(
         "r", encoding="utf-8-sig", newline=""
     ) as stream:
@@ -193,12 +204,17 @@ def iter_relationship_rows(
             object_ = _endpoint(row, "2", line_number)
 
             if predicate == "is":
-                yield None
+                yield SkippedOpenImagesRelation(
+                    image_id=image_id,
+                    reason="attribute",
+                )
                 continue
             if subject == object_:
-                raise ValueError(
-                    f"Open Images line {line_number} is a self-relation"
+                yield SkippedOpenImagesRelation(
+                    image_id=image_id,
+                    reason="self_relation",
                 )
+                continue
 
             yield OpenImagesRelation(
                 image_id=image_id,
@@ -217,6 +233,7 @@ def scan_relationship_files(
     total = 0
     object_relationships = 0
     skipped_attributes = 0
+    skipped_self_relations = 0
     images: set[str] = set()
     predicates: set[str] = set()
     object_mids: set[str] = set()
@@ -224,8 +241,13 @@ def scan_relationship_files(
     for path in paths:
         for relation in iter_relationship_rows(path):
             total += 1
-            if relation is None:
-                skipped_attributes += 1
+            if isinstance(relation, SkippedOpenImagesRelation):
+                if relation.reason == "attribute":
+                    skipped_attributes += 1
+                elif relation.reason == "self_relation":
+                    skipped_self_relations += 1
+                else:
+                    raise AssertionError("unreachable Open Images skip reason")
                 continue
             object_relationships += 1
             images.add(relation.image_id)
@@ -240,6 +262,7 @@ def scan_relationship_files(
         relationships=total,
         object_relationships=object_relationships,
         skipped_attributes=skipped_attributes,
+        skipped_self_relations=skipped_self_relations,
         images=tuple(sorted(images)),
         predicates=tuple(sorted(predicates)),
         object_mids=tuple(sorted(object_mids)),
@@ -327,10 +350,16 @@ def convert_relationship_file(
     grouped: dict[str, list[OpenImagesRelation]] = {}
     total = 0
     skipped_attributes = 0
+    skipped_self_relations = 0
     for relation in iter_relationship_rows(relationship_csv):
         total += 1
-        if relation is None:
-            skipped_attributes += 1
+        if isinstance(relation, SkippedOpenImagesRelation):
+            if relation.reason == "attribute":
+                skipped_attributes += 1
+            elif relation.reason == "self_relation":
+                skipped_self_relations += 1
+            else:
+                raise AssertionError("unreachable Open Images skip reason")
             continue
         if relation.predicate not in predicate_index:
             raise ValueError(
@@ -437,6 +466,7 @@ def convert_relationship_file(
         "vocabulary_sha256": vocabulary.sha256(),
         "source_rows": total,
         "skipped_attribute_rows": skipped_attributes,
+        "skipped_self_relation_rows": skipped_self_relations,
         "images": len(validated.examples),
         "object_instances": object_instances,
         "relations": converted_relations,
@@ -458,7 +488,7 @@ def select_subset_image_ids(
     endpoints: dict[str, set[NormalizedEndpoint]] = {}
     relation_counts: dict[str, int] = {}
     for relation in iter_relationship_rows(relationship_csv):
-        if relation is None:
+        if isinstance(relation, SkippedOpenImagesRelation):
             continue
         endpoints.setdefault(relation.image_id, set()).update(
             (relation.subject, relation.object)
@@ -504,15 +534,20 @@ def subset_relationship_csv(
                 f"Open Images relationship CSV is missing columns: {sorted(missing)}"
             )
         relation_column = _relation_column(reader.fieldnames)
-        for row in reader:
-            if (
-                row["ImageID"] in selected
-                and row[relation_column] != "is"
-            ):
-                rows.append(
-                    tuple(row[column] for column in BASE_COLUMNS)
-                    + (row[relation_column],)
-                )
+        for line_number, row in enumerate(reader, start=2):
+            if row["ImageID"] not in selected:
+                continue
+            predicate = row[relation_column]
+            if predicate == "is":
+                continue
+            subject = _endpoint(row, "1", line_number)
+            object_ = _endpoint(row, "2", line_number)
+            if subject == object_:
+                continue
+            rows.append(
+                tuple(row[column] for column in BASE_COLUMNS)
+                + (predicate,)
+            )
 
     present = {row[0] for row in rows}
     missing_ids = sorted(selected - present)

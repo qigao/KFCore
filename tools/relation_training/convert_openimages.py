@@ -76,6 +76,7 @@ def scan(args: argparse.Namespace) -> None:
                 "rows": summary.relationships,
                 "object_relationships": summary.object_relationships,
                 "skipped_attribute_rows": summary.skipped_attributes,
+                "skipped_self_relation_rows": summary.skipped_self_relations,
                 "images": len(summary.images),
                 "predicates": len(summary.predicates),
                 "object_mids": len(summary.object_mids),
@@ -124,12 +125,14 @@ def convert(args: argparse.Namespace) -> None:
         "images": manifest["images"],
         "relations": manifest["relations"],
         "skipped_attribute_rows": manifest["skipped_attribute_rows"],
+        "skipped_self_relation_rows": manifest["skipped_self_relation_rows"],
         "output_sha256": manifest["output_sha256"],
     }
     print(json.dumps(summary, sort_keys=True))
 
 
 def subset(args: argparse.Namespace) -> None:
+    source_summary = scan_relationship_files([args.relationships])
     selected = select_subset_image_ids(
         args.relationships,
         max_images=args.max_images,
@@ -143,18 +146,29 @@ def subset(args: argparse.Namespace) -> None:
         subset_relationship_csv(args.relationships, selected),
         encoding="utf-8",
     )
-    print(
-        json.dumps(
-            {
-                "split": args.split,
-                "images": len(selected),
-                "max_boxes": args.max_boxes,
-                "output_csv": str(output_path),
-                "output_sha256": sha256_file(output_path),
-            },
-            sort_keys=True,
-        )
+
+    manifest = {
+        "schema": "kfcore.openimages-v7-subset/1",
+        "split": args.split,
+        "source_csv": Path(args.relationships).name,
+        "source_sha256": sha256_file(args.relationships),
+        "source_rows": source_summary.relationships,
+        "source_object_relationships": source_summary.object_relationships,
+        "skipped_attribute_rows": source_summary.skipped_attributes,
+        "skipped_self_relation_rows": source_summary.skipped_self_relations,
+        "selected_images": len(selected),
+        "max_boxes": args.max_boxes,
+        "output_csv": output_path.name,
+        "output_sha256": sha256_file(output_path),
+    }
+    manifest_path = output_path.with_suffix(".manifest.json")
+    if manifest_path.exists():
+        raise FileExistsError(f"subset manifest already exists: {manifest_path}")
+    manifest_path.write_text(
+        stable_manifest_json(manifest),
+        encoding="utf-8",
     )
+    print(json.dumps(manifest, sort_keys=True))
 
 
 def main() -> None:

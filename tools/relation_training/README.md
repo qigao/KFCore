@@ -287,6 +287,13 @@ pixel dimensions, converts boxes to pixel XYXY, preserves multiple predicate
 labels on the same ordered pair, and validates the emitted bytes through
 `DatasetManifest.load`.
 
+Two source annotations are deliberately unrepresentable in the current
+canonical binary object graph and are skipped **with explicit counters**:
+`RelationLabel=is` attribute rows and exact endpoint self-relations.
+Malformed coordinates, missing labels/images and other schema errors still
+fail fast. Subset manifests record both skip counts so real-data evidence never
+silently drops such rows.
+
 Rows may be reordered without changing the canonical JSONL bytes. Missing
 images, malformed/out-of-range boxes, missing class descriptions and
 self-relations fail fast. The conversion manifest records source/output and
