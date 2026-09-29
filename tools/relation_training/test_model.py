@@ -1089,6 +1089,132 @@ class RelationModelTest(unittest.TestCase):
         self.assertIsNotNone(query.grad)
         self.assertGreater(float(query.grad.abs().sum()), 0.0)
 
+    def test_batch_local_infonce_adds_bounded_hard_negatives(self):
+        pred_logits = torch.zeros(1, 1, 4)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor(
+                [[[1.0, 0.0]]], requires_grad=True
+            ),
+            predicate_query_raw=torch.tensor(
+                [[[1.0, 0.0]]], requires_grad=True
+            ),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.8, 0.6],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 4)
+        predicate_targets[0, 0, 1, 0] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_contrastive_hard_negative_count=1,
+            ),
+            predicate_contrastive_negative_mask=torch.tensor(
+                [False, True, True, False]
+            ),
+        )
+        expected = torch.logsumexp(
+            torch.tensor([1.0, 0.8]), dim=0
+        ) - 1.0
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_hard_negative_count"]),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_unobserved_column_fraction"]),
+            0.5,
+            places=6,
+        )
+
+    def test_batch_local_infonce_hard_negatives_respect_supervision_mask(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor([[[1.0, 0.0]]]),
+            predicate_query_raw=torch.tensor([[[1.0, 0.0]]]),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.9, 0.1],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, False, True])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_contrastive_hard_negative_count=1,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [False, True, False]
+            ),
+        )
+        self.assertEqual(
+            float(losses["predicate_hard_negative_count"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            1.0,
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+
     def test_batch_local_infonce_preserves_multilabel_positives(self):
         pred_logits = torch.zeros(1, 1, 3)
         pair_logits = torch.zeros(1, 1)

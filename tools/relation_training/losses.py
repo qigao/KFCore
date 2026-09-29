@@ -17,6 +17,7 @@ class RelationLossConfig:
     negative_pair_weight: float = 0.25
     predicate_objective: str = "bce"
     predicate_contrastive_temperature: float = 0.07
+    predicate_contrastive_hard_negative_count: int = 0
 
     def __post_init__(self) -> None:
         if (
@@ -42,6 +43,17 @@ class RelationLossConfig:
         ):
             raise ValueError(
                 "predicate_contrastive_temperature must be finite and positive"
+            )
+        if (
+            isinstance(self.predicate_contrastive_hard_negative_count, bool)
+            or not isinstance(
+                self.predicate_contrastive_hard_negative_count, int
+            )
+            or self.predicate_contrastive_hard_negative_count < 0
+        ):
+            raise ValueError(
+                "predicate_contrastive_hard_negative_count must be "
+                "a non-negative integer"
             )
 
 
@@ -121,6 +133,8 @@ def _batch_local_predicate_infonce(
     *,
     supervision_mask: Tensor | None,
     positive_weights: Tensor | None,
+    negative_candidate_mask: Tensor | None,
+    hard_negative_count: int,
     temperature: float,
 ) -> dict[str, Tensor]:
     if query.ndim != 2 or raw_query.shape != query.shape:
@@ -153,6 +167,7 @@ def _batch_local_predicate_infonce(
             "hard_negative_margin": zero,
             "query_raw_norm": zero,
             "unobserved_column_fraction": query.new_tensor(1.0),
+            "hard_negative_count": zero,
         }
 
     query = query[keep_rows]
@@ -160,12 +175,63 @@ def _batch_local_predicate_infonce(
     visible = visible[keep_rows]
 
     contrast_mask = visible.any(dim=0)
-    contrast_indices = torch.nonzero(
+    positive_indices = torch.nonzero(
         contrast_mask, as_tuple=False
     ).flatten()
-    if contrast_indices.numel() <= 0:
+    if positive_indices.numel() <= 0:
         raise RuntimeError("contrastive predicate set unexpectedly empty")
 
+    hard_negative_indices = positive_indices.new_empty((0,))
+    if hard_negative_count > 0:
+        if negative_candidate_mask is None:
+            raise ValueError(
+                "hard contrastive negatives require "
+                "predicate_contrastive_negative_mask"
+            )
+        if (
+            negative_candidate_mask.ndim != 1
+            or negative_candidate_mask.shape[0] != predicate_bank.shape[0]
+            or negative_candidate_mask.dtype != torch.bool
+        ):
+            raise ValueError(
+                "predicate_contrastive_negative_mask must be bool [V]"
+            )
+        candidates = negative_candidate_mask.to(
+            device=query.device
+        ) & ~contrast_mask
+        if supervision_mask is not None:
+            candidates = candidates & supervision_mask.to(
+                device=query.device
+            )
+        candidate_indices = torch.nonzero(
+            candidates, as_tuple=False
+        ).flatten()
+        if candidate_indices.numel() > 0:
+            count = min(
+                hard_negative_count,
+                int(candidate_indices.numel()),
+            )
+            with torch.no_grad():
+                candidate_cosine = torch.matmul(
+                    query.detach(),
+                    predicate_bank[
+                        candidate_indices
+                    ].detach().transpose(0, 1),
+                )
+                hardness = candidate_cosine.max(dim=0).values
+                selected = torch.topk(
+                    hardness,
+                    k=count,
+                    largest=True,
+                    sorted=True,
+                ).indices
+                hard_negative_indices = candidate_indices[
+                    selected
+                ]
+
+    contrast_indices = torch.cat(
+        (positive_indices, hard_negative_indices)
+    ).unique(sorted=True)
     bank = predicate_bank[contrast_indices]
     cosine = torch.matmul(query, bank.transpose(0, 1))
     logits = cosine / float(temperature)
@@ -229,6 +295,9 @@ def _batch_local_predicate_infonce(
         "hard_negative_margin": hard_negative_margin,
         "query_raw_norm": raw_query.norm(dim=-1).mean(),
         "unobserved_column_fraction": unobserved_fraction,
+        "hard_negative_count": query.new_tensor(
+            float(hard_negative_indices.numel())
+        ),
     }
 
 
@@ -243,6 +312,7 @@ def supervised_relation_loss(
     predicate_negative_weights: Tensor | None = None,
     explicit_holdout_mask: Tensor | None = None,
     explicit_holdout_row_policy: str = "dimension-only",
+    predicate_contrastive_negative_mask: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -420,6 +490,7 @@ def supervised_relation_loss(
     predicate_hard_negative_margin = pred_logits.new_zeros(())
     predicate_query_raw_norm = pred_logits.new_zeros(())
     predicate_unobserved_column_fraction = pred_logits.new_zeros(())
+    predicate_hard_negative_count = pred_logits.new_zeros(())
 
     if positive.any():
         positive_logits = pred_logits[positive]
@@ -460,6 +531,12 @@ def supervised_relation_loss(
                 positive_targets,
                 supervision_mask=supervision_mask,
                 positive_weights=pos_weight,
+                negative_candidate_mask=(
+                    predicate_contrastive_negative_mask
+                ),
+                hard_negative_count=(
+                    config.predicate_contrastive_hard_negative_count
+                ),
                 temperature=config.predicate_contrastive_temperature,
             )
             predicate_loss = contrastive["loss"]
@@ -478,6 +555,9 @@ def supervised_relation_loss(
             ]
             predicate_unobserved_column_fraction = contrastive[
                 "unobserved_column_fraction"
+            ]
+            predicate_hard_negative_count = contrastive[
+                "hard_negative_count"
             ]
         else:
             if explicit_holdout_row_policy == "skip-holdout-only":
@@ -574,4 +654,5 @@ def supervised_relation_loss(
         "predicate_unobserved_column_fraction": (
             predicate_unobserved_column_fraction
         ),
+        "predicate_hard_negative_count": predicate_hard_negative_count,
     }
