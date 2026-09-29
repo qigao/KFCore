@@ -12,6 +12,8 @@ from model import HFDinoV3Backbone, KFRelationModel, RelationModelConfig
 
 
 DEFAULT_MODEL = "facebook/dinov3-vits16-pretrain-lvd1689m"
+# Qualification intentionally uses real pretrained backbone weights but a random
+# relation head; accuracy is not part of this smoke.
 
 
 def file_sha256(path: Path) -> str:
