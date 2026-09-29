@@ -761,10 +761,11 @@ Safety invariants:
 - runtime / ONNX outputs are unchanged.
 
 Training evidence records the held-out names/indices plus both original and
-effective train predicate support. For benchmark grouping, held-out predicate
-support is set to zero in the effective training vector, and
-`predicate_groups.explicit_holdout` reports validation support and
-mRecall@K for exactly the requested predicates.
+effective train predicate support. Benchmark grouping keeps the original train
+support semantics: `train_zero_support` contains only predicates that truly had
+zero positive support in the source train split, `seen` excludes explicit
+holdouts, and `predicate_groups.explicit_holdout` reports validation support
+and mRecall@K for exactly the requested predicates.
 
 The first controlled holdout set is `contain / holds / ride`, which have
 non-trivial support in both train and validation on the canonical 256/64 Open
