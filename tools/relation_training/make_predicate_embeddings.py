@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 import torch
 import torch.nn.functional as F
