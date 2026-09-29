@@ -60,7 +60,7 @@ class _PredicateTextBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(model_dim)
-        self.attention = nn.MultiheadAttention(
+        self.attn = nn.MultiheadAttention(
             model_dim,
             heads,
             batch_first=True,
@@ -78,7 +78,7 @@ class _PredicateTextBlock(nn.Module):
         padding_mask: Tensor,
     ) -> Tensor:
         normalized = self.norm1(value)
-        attended, _ = self.attention(
+        attended, _ = self.attn(
             normalized,
             normalized,
             normalized,
@@ -112,13 +112,13 @@ class PredicateTextStudent(nn.Module):
             config.token_dim,
         )
         if config.token_dim < config.model_dim:
-            self.token_projection: nn.Module = nn.Linear(
+            self.tok_proj: nn.Module = nn.Linear(
                 config.token_dim,
                 config.model_dim,
                 bias=False,
             )
         else:
-            self.token_projection = nn.Identity()
+            self.tok_proj = nn.Identity()
 
         self.positional = nn.Parameter(
             torch.zeros(
@@ -134,8 +134,8 @@ class PredicateTextStudent(nn.Module):
             )
             for _ in range(config.depth)
         )
-        self.final_norm = nn.LayerNorm(config.model_dim)
-        self.output_projection = nn.Linear(
+        self.ln_final = nn.LayerNorm(config.model_dim)
+        self.head = nn.Linear(
             config.model_dim,
             config.output_dim,
             bias=False,
@@ -174,7 +174,7 @@ class PredicateTextStudent(nn.Module):
             )
 
         length = input_ids.shape[1]
-        value = self.token_projection(
+        value = self.tok_proj(
             self.token_embedding(input_ids)
         )
         value = (
@@ -186,7 +186,7 @@ class PredicateTextStudent(nn.Module):
                 value,
                 padding_mask,
             )
-        value = self.final_norm(value)
+        value = self.ln_final(value)
 
         keep = (
             ~padding_mask
@@ -196,7 +196,7 @@ class PredicateTextStudent(nn.Module):
             / keep.sum(dim=1).clamp_min(1.0)
         )
         return F.normalize(
-            self.output_projection(pooled),
+            self.head(pooled),
             dim=-1,
         )
 
