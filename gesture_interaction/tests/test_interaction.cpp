@@ -25,10 +25,9 @@ void start_basic(GestureInteraction& runtime, Gesture gesture = Gesture::OpenPal
     check_true(has(runtime.process(frame(gesture), {0.2,640,480}), EventKind::GestureStarted));
 }
 // Fixed finite weights isolate event lifecycle tests from classifier accuracy.
-// Real trained gesture discrimination is covered by test_composition_esn.
-CompositionEsn fixed_model(Composition label, std::size_t capacity = 32) {
+CompositionEsn fixed_model(CompositionTask task, Composition label, std::size_t capacity = 32) {
     CompositionOptions options;
-    options.task = label == Composition::Wave ? CompositionTask::Motion : CompositionTask::Interaction;
+    options.task = task;
     options.duration_seconds = 0.2; options.live_stride_seconds = 0.05;
     options.minimum_clips_per_class = 1; options.maximum_samples = capacity;
     CompositionEsn model(options);
@@ -44,11 +43,11 @@ CompositionEsn fixed_model(Composition label, std::size_t capacity = 32) {
     return model;
 }
 void start_grasp(GestureInteraction& runtime) {
-    auto model = fixed_model(Composition::Grasp);
+    auto model = fixed_model(CompositionTask::Interaction, Composition::Grasp);
     (void)runtime.configure_sequences({&model}, 0);
     int grasps = 0;
     for (int i = 0; i <= 12; ++i)
-        for (const auto& event : runtime.process(frame(), {i*0.05,640,480}))
+        for (const auto& event : runtime.process(frame(Gesture::ClosedFist), {i*0.05,640,480}))
             if (event.kind == EventKind::Grasp) ++grasps;
     check_true(grasps == 1); check_true(runtime.grasping());
 }
@@ -158,27 +157,91 @@ spec("Gesture interaction events") {
         check_throws(runtime.process(frame(), {0.5,640,480}));
         check_throws(runtime.process(frame(), {0.7,0,480}));
         check_throws(runtime.process(frame(), {0.7,640,480,0}));
-        CompositionEsn untrained;
-        check_throws(runtime.configure_sequences({&untrained}, 0.7));
+        CompositionOptions options; options.task = CompositionTask::Motion;
+        CompositionEsn untrained(options);
+        check_throws(runtime.configure_sequences({nullptr,&untrained}, 0.7));
         check_true(runtime.grasping());
         check_true(runtime.process(frame(), {0.7,640,480}).empty());
     }
-    it("suppresses orphan releases and permits independent wave and basic gesture events") {
-        auto release = fixed_model(Composition::Release), wave = fixed_model(Composition::Wave);
+    it("releases after a short fist without a prior grasp and keeps wave independent") {
+        auto release = fixed_model(CompositionTask::Interaction, Composition::Release);
+        auto wave = fixed_model(CompositionTask::Motion, Composition::Wave);
         GestureInteraction runtime;
         (void)runtime.configure_sequences({&release,&wave}, 0);
-        int waves = 0, basics = 0;
-        for (int i = 0; i <= 16; ++i) for (const auto& event : runtime.process(frame(), {i*0.05,640,480})) {
-            check_false(event.kind == EventKind::Release);
+        int releases = 0, waves = 0, basics = 0;
+        for (int i = 0; i <= 16; ++i) for (const auto& event : runtime.process(
+                frame(i <= 4 ? Gesture::ClosedFist : Gesture::OpenPalm), {i*0.05,640,480})) {
+            if (event.kind == EventKind::Release) ++releases;
             if (event.kind == EventKind::Wave) ++waves;
             if (event.kind == EventKind::GestureStarted) ++basics;
         }
-        check_true(waves == 1 && basics == 1); check_false(runtime.grasping());
+        check_true(releases == 1 && waves == 1 && basics == 2); check_false(runtime.grasping());
+        check_false(has(runtime.reset(0.8), EventKind::GraspCancelled));
     }
-    it("owns model snapshots and bounds history without continuing partial evidence") {
-        auto model = fixed_model(Composition::Grasp, 2);
+    it("requires a trained interaction model and confirmed held fist before grasp") {
+        GestureInteraction runtime;
+        for (int i = 0; i <= 12; ++i)
+            check_false(has(runtime.process(frame(Gesture::ClosedFist), {i*0.05,640,480}), EventKind::Grasp));
+        check_false(runtime.grasping());
+        auto model = fixed_model(CompositionTask::Interaction, Composition::Grasp);
+        (void)runtime.configure_sequences({&model}, 0.65);
+        int grasps = 0;
+        for (int i = 13; i <= 30; ++i)
+            for (const auto& event : runtime.process(frame(Gesture::ClosedFist), {i*0.05,640,480}))
+                if (event.kind == EventKind::Grasp) ++grasps;
+        check_true(grasps == 1 && runtime.grasping());
+    }
+    it("does not turn a constant release classifier into an isolated palm event") {
+        auto model = fixed_model(CompositionTask::Interaction, Composition::Release);
         GestureInteraction runtime;
         (void)runtime.configure_sequences({&model}, 0);
+        for (int i = 0; i <= 20; ++i)
+            check_false(has(runtime.process(frame(Gesture::OpenPalm), {i*0.05,640,480}), EventKind::Release));
+    }
+    it("does not continue fist hold through an opening transition") {
+        GestureInteraction runtime;
+        auto model = fixed_model(CompositionTask::Interaction, Composition::Grasp);
+        (void)runtime.configure_sequences({&model}, 0);
+        for (int i = 0; i <= 4; ++i)
+            check_false(has(runtime.process(frame(Gesture::ClosedFist), {i*0.05,640,480}), EventKind::Grasp));
+        for (int i = 5; i <= 8; ++i)
+            check_false(has(runtime.process(frame(Gesture::OpenPalm), {i*0.05,640,480}), EventKind::Grasp));
+        check_false(runtime.grasping());
+    }
+    it("cancels a held grasp when opening evidence expires") {
+        GestureInteraction runtime;
+        start_grasp(runtime);
+        int cancellations = 0, releases = 0;
+        for (int i = 13; i <= 40; ++i)
+            for (const auto& event : runtime.process(frame(Gesture::Victory), {i*0.05,640,480})) {
+                if (event.kind == EventKind::GraspCancelled) ++cancellations;
+                if (event.kind == EventKind::Release) ++releases;
+            }
+        for (int i = 41; i <= 45; ++i)
+            for (const auto& event : runtime.process(frame(Gesture::OpenPalm), {i*0.05,640,480})) {
+                if (event.kind == EventKind::GraspCancelled) ++cancellations;
+                if (event.kind == EventKind::Release) ++releases;
+            }
+        check_true(cancellations == 1 && releases == 0);
+        check_false(runtime.grasping());
+    }
+    it("cancels a held grasp if opening follows a missing hand frame") {
+        GestureInteraction runtime;
+        start_grasp(runtime);
+        (void)runtime.process({}, {0.65,640,480});
+        int cancellations = 0, releases = 0;
+        for (int i = 14; i <= 18; ++i)
+            for (const auto& event : runtime.process(frame(Gesture::OpenPalm), {i*0.05,640,480})) {
+                if (event.kind == EventKind::GraspCancelled) ++cancellations;
+                if (event.kind == EventKind::Release) ++releases;
+            }
+        check_true(cancellations == 1 && releases == 0);
+        check_false(runtime.grasping());
+    }
+    it("owns Wave model snapshots and bounds history without continuing partial evidence") {
+        auto model = fixed_model(CompositionTask::Motion, Composition::Wave, 2);
+        GestureInteraction runtime;
+        (void)runtime.configure_sequences({nullptr,&model}, 0);
         model = CompositionEsn{};
         (void)runtime.process(frame(), {0,640,480});
         (void)runtime.process(frame(), {0.05,640,480});

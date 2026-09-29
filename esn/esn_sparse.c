@@ -180,6 +180,42 @@ static kfcore_esn_status kfcore_esn_validate_sparse_model(const kfcore_esn_model
     return KFCORE_ESN_OK;
 }
 
+static int kfcore_esn_sparse_finite_operands(const kfcore_esn_model* model,
+                                             const float* input, const float* state)
+{
+    const size_t reservoir_size = (size_t)model->reservoir_size;
+    const size_t input_size = (size_t)model->input_size;
+    if (reservoir_size > SIZE_MAX / input_size ||
+        reservoir_size * input_size > SIZE_MAX / sizeof(float))
+    {
+        return 0;
+    }
+    const size_t input_weight_count = reservoir_size * input_size;
+
+    for (size_t i = 0; i < input_size; ++i)
+    {
+        if (!isfinite(input[i]))
+        {
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < reservoir_size; ++i)
+    {
+        if (!isfinite(state[i]) || !isfinite(model->reservoir_bias[i]))
+        {
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < input_weight_count; ++i)
+    {
+        if (!isfinite(model->input_weights[i]))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 kfcore_esn_status kfcore_esn_step_sparse(const kfcore_esn_model* model,
                                          const kfcore_esn_sparse_reservoir* sparse,
                                          const float* input, float* state,
@@ -196,6 +232,10 @@ kfcore_esn_status kfcore_esn_step_sparse(const kfcore_esn_model* model,
     if (sparse_status != KFCORE_ESN_OK)
     {
         return sparse_status;
+    }
+    if (!kfcore_esn_sparse_finite_operands(model, input, state))
+    {
+        return KFCORE_ESN_INVALID_ARGUMENT;
     }
 
     matvec("N", model->reservoir_size, model->input_size, 1.0f, model->input_weights, input,
@@ -223,7 +263,13 @@ kfcore_esn_status kfcore_esn_step_sparse(const kfcore_esn_model* model,
     const float keep = 1.0f - model->leak_rate;
     for (int row = 0; row < model->reservoir_size; ++row)
     {
-        const float activated = tanhf(workspace[row] + model->reservoir_bias[row]);
+        const float activation_input = workspace[row] + model->reservoir_bias[row];
+        if (!isfinite(activation_input))
+        {
+            return KFCORE_ESN_NUMERICAL_FAILURE;
+        }
+        workspace[row] = activation_input;
+        const float activated = tanhf(activation_input);
         const float next_state = keep * state[row] + model->leak_rate * activated;
         if (!isfinite(next_state))
         {
@@ -233,7 +279,7 @@ kfcore_esn_status kfcore_esn_step_sparse(const kfcore_esn_model* model,
 
     for (int row = 0; row < model->reservoir_size; ++row)
     {
-        const float activated = tanhf(workspace[row] + model->reservoir_bias[row]);
+        const float activated = tanhf(workspace[row]);
         state[row] = keep * state[row] + model->leak_rate * activated;
     }
 

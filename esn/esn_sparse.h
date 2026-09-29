@@ -52,8 +52,10 @@ kfcore_esn_status kfcore_esn_sparse_from_dense(const float* reservoir_weights,
  * workspace must not overlap sparse->row_offsets, sparse->column_indices, or
  * sparse->values.
  *
- * No dense fallback is attempted. Rejected sparse input or numerical failure
- * leaves state unchanged; workspace is scratch and may be modified.
+ * Non-finite input, state, input weights, or bias returns INVALID_ARGUMENT;
+ * non-finite arithmetic returns NUMERICAL_FAILURE. No dense fallback is
+ * attempted. Any failure leaves state unchanged; workspace is scratch and
+ * may be modified.
  */
 kfcore_esn_status kfcore_esn_step_sparse(const kfcore_esn_model* model,
                                          const kfcore_esn_sparse_reservoir* sparse,

@@ -1,3 +1,4 @@
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -181,5 +182,57 @@ spec("kfcore esn sparse")
         check_equal(kfcore_esn_step_sparse(&model, &sparse, input, state, workspace),
                     KFCORE_ESN_INVALID_ARGUMENT);
         check_within(state[0], 0.25f, ESN_SPARSE_EPSILON);
+    }
+
+    it("rejects non-finite sparse operands without advancing state")
+    {
+        const float zero = 0.0f;
+        const float finite_input = 1.0f;
+        const float invalid_input = NAN;
+        const float invalid_weight = NAN;
+        const float invalid_bias = INFINITY;
+        const int row_offsets[2] = { 0, 0 };
+        const kfcore_esn_sparse_reservoir sparse = { 1, 0, row_offsets, NULL, NULL };
+        kfcore_esn_model model = { 1, 1, 0, 1.0f, &zero, NULL, &zero, NULL, NULL };
+        float state = 0.25f;
+        float workspace = 0.0f;
+
+        check_equal(kfcore_esn_step_sparse(&model, &sparse, &invalid_input, &state, &workspace),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(state, 0.25f);
+        model.input_weights = &invalid_weight;
+        check_equal(kfcore_esn_step_sparse(&model, &sparse, &finite_input, &state, &workspace),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(state, 0.25f);
+        model.input_weights = &zero;
+        model.reservoir_bias = &invalid_bias;
+        check_equal(kfcore_esn_step_sparse(&model, &sparse, &finite_input, &state, &workspace),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(state, 0.25f);
+        model.reservoir_bias = &zero;
+        const float invalid_state = INFINITY;
+        state = invalid_state;
+        check_equal(kfcore_esn_step_sparse(&model, &sparse, &finite_input, &state, &workspace),
+                    KFCORE_ESN_INVALID_ARGUMENT);
+        check_equal(memcmp(&state, &invalid_state, sizeof(state)), 0);
+    }
+
+    it("preserves all sparse state when a later activation overflows")
+    {
+        const float input_weights[2] = { 0.0f, FLT_MAX };
+        const float bias[2] = { 0.0f, FLT_MAX };
+        const int row_offsets[3] = { 0, 0, 0 };
+        const kfcore_esn_model model = {
+            1, 2, 0, 1.0f, input_weights, NULL, bias, NULL, NULL
+        };
+        const kfcore_esn_sparse_reservoir sparse = { 2, 0, row_offsets, NULL, NULL };
+        const float input = 1.0f;
+        const float original_state[2] = { 0.25f, -0.5f };
+        float state[2] = { 0.25f, -0.5f };
+        float workspace[2] = { 0.0f, 0.0f };
+
+        check_equal(kfcore_esn_step_sparse(&model, &sparse, &input, state, workspace),
+                    KFCORE_ESN_NUMERICAL_FAILURE);
+        check_equal(memcmp(state, original_state, sizeof(state)), 0);
     }
 }

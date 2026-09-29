@@ -1,7 +1,7 @@
 # Gesture Interaction
 
 `KFCore::gesture_interaction` / `kfcore::gesture_interaction` 将 MediaPipe 基础观察和衍生动作转换为类型化事件。
-静态手势不需要训练；可选 ESN 分支识别抓取/放开和 Wave。库不操作鼠标、UI 或物体。
+静态手势不需要训练；抓取/放开与 Wave 使用分别训练的 ESN 分支。库不操作鼠标、UI 或物体。
 
 ## 输入与事件契约
 
@@ -14,18 +14,21 @@
 | `GestureStarted` | 一个基础手势持续满足分数和领先幅度条件 |
 | `GestureEnded` | 基础手势被另一确认手势替换，或持续未识别 |
 | `GestureCancelled` | 丢手、输入中断、来源改变、暂停/重置、模型替换等中断基础手势 |
-| `Grasp` | ESN 确认抓取且此前没有活动抓取 |
-| `Release` | ESN 确认放开且此前存在活动抓取 |
+| `Grasp` | 抓放 ESN 确认整段序列，末端确认握拳并持续保持 |
+| `Release` | 抓放 ESN 确认整段序列，末端由确认握拳转为张掌 |
 | `Wave` | ESN 确认挥手，门控负责去重 |
 | `GraspCancelled` | 活动抓取被中断，不伪装成自然放开 |
 
 基础手势包括 ClosedFist、OpenPalm、PointingUp、ThumbDown、ThumbUp、Victory、ILoveYou。
-`GestureStarted(ClosedFist)` 只是静态握拳，不能当成 `Grasp`；没有活动抓取时抑制孤立 Release。
+抓放模型按“非动作/抓取/放开”三类整段训练：抓取为任意手型→握拳→持续握拳，放开为任意手型→握拳→张掌。起始手型可为握拳；因此持续握拳属于抓取训练样本。静止张掌或其他没有完整动作的片段可作为非动作样本。
+`GestureStarted(ClosedFist)` 只确认基础姿态；抓取事件还需模型确认及默认 300ms 的握拳保持。
+确认握拳后默认 1 秒内确认张掌，将放开候选保留到整窗模型确认；即使此前没有 `Grasp` 事件也可发 `Release`。
+没有抓放模型不产生 Grasp/Release。单独张掌不产生 `Release`；短暂丢手清空动作候选。活动抓取失去末端证据且未及时确认张掌时发 `GraspCancelled`。
 基础事件与复杂事件可同时产生。保持同一基础姿态不连续发送 Started；切换时先 Ended，再 Started。
 `Event.reason` 描述正常确认、未识别、丢手、帧间隔、多手、来源变化、重置、模型替换或历史容量耗尽。
 
 默认基础阈值：分数 >= 0.7、领先第二名 >= 0.15、持续 150ms 确认、持续 200ms 不支持后结束。
-ESN 使用存档内的各分支门控参数，线性分数不是概率。`InteractionOptions` 可调整基础阈值、丢手边界和左右手变化确认。
+两条 ESN 使用各自存档内的门控参数，线性分数不是概率。`InteractionOptions` 可调整基础阈值、丢手边界、握拳保持时间、放开转换时间和左右手变化确认。
 基础参数目前由调用方配置，**不写入 V1 `.kfesn`**；该文件仍保存原有训练参数、分支门控、样本及权重。
 
 ## 身份、时间和错误
@@ -73,27 +76,25 @@ int main() {
 
 输出为 `GestureStarted`、`GestureCancelled`。真正推理时以 `GestureRecognizer::infer()` 的输出替换示例帧。
 
-ESN：先用 `CompositionEsn` 录入带标签片段并训练，或通过 `experiment.hpp` 中的 `load_experiment(path, expected_pipeline)`
-读取 V1 文件（Windows 文件适配器），再用 `restore_model(archive.sessions[i])` 恢复各分支，然后调用
-`configure_sequences({&interaction_model, &wave_model, interaction_gate, wave_gate}, now)`。
-可只提供其中一个模型，另一个为 nullptr；已提供模型必须 trained 且 task 匹配，否则拒绝整个配置。
+分别用 `CompositionEsn` 训练 `CompositionTask::Interaction` 与 `CompositionTask::Motion`，或通过 `experiment.hpp` 中的 `load_experiment(path, expected_pipeline)` 读取 V1 文件（Windows 文件适配器），再用 `restore_model(archive.sessions[0/1])` 恢复两条分支，调用
+`configure_sequences({&grasp_release_model, &wave_model, grasp_gate, wave_gate}, now)`。未训练分支可传空指针；其动作事件不会产生。
 模型在调用期间复制为库拥有的不可变快照，后续修改训练对象不影响运行模型。成功替换先返回原生命周期的取消事件，
 再从新历史开始；失败保留原模型及状态。该操作不重新训练。
 
 `encode_experiment` / `decode_experiment` 是跨平台内存编码接口；`save_experiment` / `load_experiment` 仅在 Windows 提供文件适配，
 其余平台由调用方提供文件字节。必须以当前管线指纹作为 expected_pipeline，不能直接信任文件里的自报指纹。
-当前 demo 指纹算法按后端 DLL、palm/landmark/embedder/classifier 清单及各包 artifact 的顺序拼接 SHA-256；
+当前 demo 指纹算法按后端 DLL、palm/landmark/embedder/classifier 清单及各包 artifact 的顺序拼接 SHA-256；`--actions` 另附动作标签规则标识，以拒绝旧语义实验；
 它不包含新库 DLL、UI 参数或源图尺寸。文件上限、损坏校验、不覆盖语义见 [demo 存档说明](../tools/hand_preview/README.md)。
 
 ## 架构决策与迁移
 
 背景：旧 hand_interaction 将身份、基础原语和 THIG 图耦合，公开接口泄漏 THIG 类型；demo 则另外维护 ESN 事件。
 候选方案是保留图并添加 ESN 适配器，或共享特征/分类核心并以统一事件生命周期替换旧链路。
-采用后者：MediaPipe → 基础确认 / ESN 历史分类 → 事件；ESN 编码、门控及存档适配从 demo 下沉，录制交互和文件对话框留在工具层。
+采用后者：MediaPipe → 基础确认 / 抓放 ESN / Wave ESN → 事件；ESN 编码、门控及存档适配从 demo 下沉，录制交互和文件对话框留在工具层。
 采用组合与私有实现，不引入事件总线、后台线程、订阅者生命周期或新的第三方库。业务同步消费返回值，外部区域映射属于业务。
 
-状态主事实源是 `GestureInteraction` 内的活动基础手势、抓取状态与连续段。模型不可变；每帧先在有界候选状态中计算，再提交。
-两个分支不会在失败时各自推进。复杂度为 O(历史采样数 + 60 × 48²)，至多两个 ESN 分支；每窗采样受模型容量约束，
+状态主事实源是 `GestureInteraction` 内的活动基础手势、抓取生命周期与连续段。两条模型不可变；每帧先在有界候选状态中计算，再提交。
+单分支复杂度为 O(历史采样数 + 60 × 48²)，最多两个 ESN 分支；每窗采样受模型容量约束，
 每帧事务复制历史的成本需要后续实测，本实现不声称已完成性能基准或低延迟优化。
 
 HIGH：这是旧 SDK 的破坏性迁移：`KFCore::hand_interaction`、`KFCore::thig`、旧公开头及图接口已移除，不提供伪兼容别名。
@@ -102,7 +103,8 @@ HIGH：这是旧 SDK 的破坏性迁移：`KFCore::hand_interaction`、`KFCore::
 回滚须从 Git 历史恢复旧模块、构建入口和调用方一起回滚；不是在运行时遇错退回 THIG。
 
 demo 的 S/L 和 V1 文件编码、标签数值、ESN 初始化/特征维度不变，已有文件不迁移、不覆盖。
-模型配置变化会清空运行历史并取消活动事件；新增样本只使对应训练模型失效，另一个模型仍可使用，但运行配置重新绑定会重启两条历史。
+旧抓放样本标签与新定义不兼容；demo 使用新的动作规则指纹拒绝旧 `--actions` 实验，文件本身不迁移、不覆盖。
+模型配置变化会清空运行历史并取消活动事件；新增任一分支训练样本使该分支已训练模型失效，运行配置重新绑定会重启两条历史。
 MED：合成测试和单元测试不能代替真实摄像头验证；尚无跨用户、跨天误触发/漏检率和事件延迟基准。
 
 ```powershell

@@ -28,6 +28,8 @@ struct InteractionOptions {
     StaticGestureOptions basic;
     double maximum_gap_seconds = 0.25;
     double side_change_seconds = 0.15;
+    double fist_hold_seconds = 0.3;
+    double release_transition_seconds = 1.0;
     float side_confidence = 0.85F;
 };
 // Borrowed only for configure_sequences(); trained classifiers are copied into owned snapshots.
@@ -37,14 +39,14 @@ struct SequenceModels {
     ActionGateOptions interaction_gate, motion_gate;
 };
 // Single-owner synchronous API. Returned events own their data. No UI, I/O or callbacks.
-// Static gestures work with no ESN. Sequence classifiers must be trained and task-matched.
+// Basic gestures work with no ESN. Grasp/Release and Wave require their separately trained models.
 class GestureInteraction final {
 public:
     explicit GestureInteraction(InteractionOptions options = {});
     ~GestureInteraction();
     GestureInteraction(const GestureInteraction&) = delete;
     GestureInteraction& operator=(const GestureInteraction&) = delete;
-    // Validate first, then atomically replace models and return cancellation events.
+    // Validate first, then atomically replace sequence models and return cancellations.
     [[nodiscard]] std::vector<Event> configure_sequences(const SequenceModels& models, double seconds);
     // Exactly one visible hand is supported; multi-hand input cancels active lifecycles.
     // Invalid observations/timestamps throw without committing state; caller may reset on a fatal stream error.
@@ -53,6 +55,7 @@ public:
     [[nodiscard]] std::vector<Event> advance(double seconds);
     // Call before pause, shutdown or changing input. Consume cancellations before destroying this object.
     [[nodiscard]] std::vector<Event> reset(double seconds);
+    // True only after a confirmed Grasp event; false also covers an unknown initial state.
     [[nodiscard]] bool grasping() const noexcept;
 private:
     struct Impl;

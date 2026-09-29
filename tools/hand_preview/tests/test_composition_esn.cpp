@@ -61,10 +61,13 @@ kfcore::gesture_interaction::CompositionClip action_sequence(kfcore::gesture_int
         auto& s = result[i];
         const float phase = float(s.seconds/3.0);
         if (label == kfcore::gesture_interaction::Composition::Grasp || label == kfcore::gesture_interaction::Composition::Release) {
-            const bool after = phase > 0.5F+variation;
-            const bool closed = label == kfcore::gesture_interaction::Composition::Grasp ? after : !after;
-            s.values[std::size_t(Gesture::OpenPalm)] = closed ? 0 : 1;
-            s.values[std::size_t(Gesture::ClosedFist)] = closed ? 1 : 0;
+            const auto initial = direction < 0 ? Gesture::Victory : direction == 0 ? Gesture::ClosedFist : Gesture::OpenPalm;
+            const bool fist = label == kfcore::gesture_interaction::Composition::Grasp ?
+                phase > 0.35F+variation : phase > 0.25F+variation && phase < 0.65F+variation;
+            const auto gesture = fist ? Gesture::ClosedFist :
+                label == kfcore::gesture_interaction::Composition::Release && phase >= 0.65F+variation ? Gesture::OpenPalm : initial;
+            for (std::size_t index = 0; index < kfcore::mediapipe::kGestureCount; ++index) s.values[index] = 0;
+            s.values[std::size_t(gesture)] = 1;
         }
         float x = 0.5F, y = 0.5F;
         if (label == kfcore::gesture_interaction::Composition::Wave) x += direction*(0.18F+variation)*std::sin(4*kPi*phase);
@@ -78,6 +81,26 @@ kfcore::gesture_interaction::CompositionClip single_sweep(float direction = 1, f
     for (auto& sample : clip)
         (*sample.wrist)[0] += direction*amplitude*(float(sample.seconds/3.0)-0.5F);
     return clip;
+}
+kfcore::gesture_interaction::CompositionEsn trained_interaction_model() {
+    using namespace kfcore::gesture_interaction;
+    CompositionOptions options; options.task = CompositionTask::Interaction;
+    CompositionEsn model(options);
+    for (float variation : {-0.08F, 0.0F, 0.08F}) {
+        for (float direction : {-1.0F, 0.0F, 1.0F}) {
+            model.add_training(action_sequence(Composition::Grasp, variation, direction), Composition::Grasp);
+            model.add_training(action_sequence(Composition::Release, variation, direction), Composition::Release);
+        }
+        model.add_training(action_sequence(Composition::None, variation), Composition::None);
+        auto victory = action_sequence(Composition::None, variation);
+        for (auto& sample : victory) {
+            sample.values[std::size_t(Gesture::OpenPalm)] = 0;
+            sample.values[std::size_t(Gesture::Victory)] = 1;
+        }
+        model.add_training(victory, Composition::None);
+    }
+    model.train_readout();
+    return model;
 }
 }
 spec("ESN gesture composition") {
@@ -133,15 +156,50 @@ spec("ESN gesture composition") {
         session.key('1');
         session.update(frame(sequence(1)[0]), 0);
         session.update({}, 0.1);
-        check_true(session.status.find("short gap") != std::string::npos);
+        check_true(session.status.find("短暂丢失") != std::string::npos);
         session.update({}, 0.2);
         session.update({}, 0.3);
-        check_true(session.feedback.find("Not saved: hand lost") == 0);
-        check_true(session.feedback.find("press 1 to retry") != std::string::npos);
+        check_true(session.feedback.find("录制未保存：手部丢失") == 0);
+        check_true(session.feedback.find("按 1 重试") != std::string::npos);
         const auto message = session.feedback;
         session.update(frame(sequence(1)[0]), 0.4);
-        check_true(session.status.find("Open_Palm") != std::string::npos);
+        check_true(session.status.find("张掌") != std::string::npos);
         check_true(session.feedback == message);
+    }
+    it("allows a different hand in a new recording") {
+        kfcore::gesture_interaction::CompositionOptions options;
+        options.task = kfcore::gesture_interaction::CompositionTask::Interaction;
+        options.record_countdown_seconds = 0;
+        preview::CompositionSession session(options);
+        session.key('0');
+        for (const auto& sample : sequence(0)) session.update(frame(sample), sample.seconds);
+        check_false(session.recording());
+
+        session.key('0');
+        for (const auto& sample : sequence(0)) {
+            auto left = frame(sample);
+            left.landmarks.hands.front().handedness = kfcore::hand_models::Handedness::Left;
+            left.landmarks.hands.front().right_hand_probability = 0.1F;
+            session.update(left, sample.seconds + 4.0);
+        }
+        check_false(session.recording());
+        check_true(session.summary().find("非动作/抓取/放开 2/0/0") != std::string::npos);
+        check_true(session.feedback.find("训练片段已暂存") == 0);
+    }
+    it("cancels a recording when the hand changes within the clip") {
+        kfcore::gesture_interaction::CompositionOptions options;
+        options.task = kfcore::gesture_interaction::CompositionTask::Interaction;
+        options.record_countdown_seconds = 0;
+        preview::CompositionSession session(options);
+        session.key('0');
+        session.update(frame(sequence(0).front()), 0.0);
+        auto left = frame(sequence(0)[1]);
+        left.landmarks.hands.front().handedness = kfcore::hand_models::Handedness::Left;
+        left.landmarks.hands.front().right_hand_probability = 0.1F;
+        session.update(left, 0.05);
+        check_false(session.recording());
+        check_true(session.feedback.find("录制未保存：左右手发生切换") == 0);
+        check_true(session.summary().find("非动作/抓取/放开 0/0/0") != std::string::npos);
     }
     it("displays unrecognized gestures separately from missing hands and no combination") {
         preview::CompositionSession session({});
@@ -150,14 +208,14 @@ spec("ESN gesture composition") {
         observation.gestures.front().scores.fill(0);
         observation.gestures.front().scores[std::size_t(Gesture::None)] = 1;
         session.update(observation, 0);
-        check_true(session.status.find("1 hand Right | Unrecognized (None)") == 0);
+        check_true(session.status.find("检测到 1 只右手｜未识别") == 0);
         check_true(session.status.find(preview::kNoHandStatus) == std::string::npos);
         session.update({}, 0.1);
         check_true(session.status.find(preview::kNoHandStatus) == 0);
-        check_true(session.status.find("Unrecognized") == std::string::npos);
+        check_true(session.status.find("未识别") == std::string::npos);
         check_true(std::string(kfcore::gesture_interaction::composition_name(kfcore::gesture_interaction::Composition::None)) == "No-combo");
         check_true(std::string(kfcore::mediapipe::gesture_name(Gesture::None)) == "None");
-        check_true(std::string(preview::gesture_display_name(Gesture::OpenPalm)) == "Open_Palm");
+        check_true(std::string(preview::gesture_display_name(Gesture::OpenPalm)) == "张掌");
     }
     it("preserves the complete score vector for a detected None transition") {
         constexpr int kBoundary = 20, kRadius = 4;
@@ -178,13 +236,13 @@ spec("ESN gesture composition") {
             const auto observation = frame(sample);
             session.update(observation, sample.seconds);
             if (observation.gestures.front().label == Gesture::None) {
-                check_true(session.status.find("None") != std::string::npos);
-                check_true(session.status.find("REC") != std::string::npos);
+                check_true(session.status.find("未识别") != std::string::npos);
+                check_true(session.status.find("录制") != std::string::npos);
             }
-            check_true(session.feedback.find("Not saved") == std::string::npos);
+            check_true(session.feedback.find("录制未保存") == std::string::npos);
         }
-        check_true(session.summary().find("No-combo/OCO/COC 0/1/0") != std::string::npos);
-        check_true(session.feedback.find("Training clip saved") == 0);
+        check_true(session.summary().find("无组合/张握张/握张握 0/1/0") != std::string::npos);
+        check_true(session.feedback.find("训练片段已暂存") == 0);
     }
     it("learns combinations with None transitions at an unseen transition duration") {
         kfcore::gesture_interaction::CompositionEsn model;
@@ -203,12 +261,12 @@ spec("ESN gesture composition") {
         session.key('T');
         check_true(session.feedback.find("training clips per class") != std::string::npos);
         for (int label = 0; label < kfcore::gesture_interaction::kCompositionClasses; ++label) record(session,'0'+label,label*4.0);
-        check_true(session.summary().find("No-combo/OCO/COC 1/1/1") != std::string::npos);
+        check_true(session.summary().find("无组合/张握张/握张握 1/1/1") != std::string::npos);
         session.key('T');
-        check_true(session.summary().find("TRAINED |") == 0);
+        check_true(session.summary().find("已训练｜") == 0);
         for (int label = 0; label < kfcore::gesture_interaction::kCompositionClasses; ++label) record(session,'3'+label,16+label*4.0);
         session.key('V');
-        check_true(session.feedback.find("Held-out correct=3/3") == 0);
+        check_true(session.feedback.find("测试正确 3/3") == 0);
     }
 }
 
@@ -220,89 +278,86 @@ spec("Parallel gesture actions") {
         const auto clip = action_sequence(kfcore::gesture_interaction::Composition::Grasp);
         session.update(frame(clip.front()), 0);
         session.update(frame(clip.front()), 1);
-        check_true(session.status.find("READY Grasp") != std::string::npos);
+        check_true(session.status.find("准备 抓取") != std::string::npos);
         check_true(session.summary().find("0/0/0") != std::string::npos);
         for (const auto& s : clip) session.update(frame(s), s.seconds+2);
-        check_true(session.summary().find("Neutral/Grasp/Release 0/1/0") != std::string::npos);
+        check_true(session.summary().find("非动作/抓取/放开 0/1/0") != std::string::npos);
     }
-    it("produces one live grasp event and does not repeat while holding the fist") {
-        kfcore::gesture_interaction::CompositionOptions options; options.task = kfcore::gesture_interaction::CompositionTask::Interaction;
-        options.record_countdown_seconds = 0;
-        preview::CompositionSession session(options);
-        double start = 0;
-        for (auto label : kfcore::gesture_interaction::composition_labels(options.task))
-            for (float variation : {-0.1F, 0.0F, 0.1F}) {
-                session.key('0'+kfcore::gesture_interaction::composition_index(options.task, label));
-                for (const auto& s : action_sequence(label, variation)) session.update(frame(s), start+s.seconds);
-                start += 4;
-            }
+    it("produces one live grasp event with a newly trained sequence model") {
+        auto model = trained_interaction_model();
         const auto closed = action_sequence(kfcore::gesture_interaction::Composition::Grasp).back();
-        session.key('0');
-        for (const auto& s : sequence(0)) session.update(frame(closed), start+s.seconds);
-        session.key('t');
-        start += 4;
         kfcore::gesture_interaction::GestureInteraction runtime;
-        (void)runtime.configure_sequences({&session.model()}, start);
+        (void)runtime.configure_sequences({&model}, 0);
         std::size_t grasp_events = 0;
         const auto observe = [&](const auto& sample, double seconds) {
             for (const auto& event : runtime.process(frame(sample), {seconds, 640, 480}))
                 if (event.kind == kfcore::gesture_interaction::EventKind::Grasp) ++grasp_events;
         };
-        for (const auto& s : action_sequence(kfcore::gesture_interaction::Composition::Grasp, 0.04F)) observe(s, start+s.seconds);
-        for (int i = 1; i <= 120; ++i) observe(closed, start+3+i*0.05);
+        for (const auto& s : action_sequence(kfcore::gesture_interaction::Composition::Grasp, 0.04F)) observe(s, s.seconds);
+        for (int i = 1; i <= 120; ++i) observe(closed, 3+i*0.05);
         check_true(grasp_events == 1);
         check_true(runtime.grasping());
-        const auto cancelled = runtime.advance(start+10);
+        const auto cancelled = runtime.advance(10);
         check_true(std::any_of(cancelled.begin(), cancelled.end(), [](const auto& event) {
             return event.kind == kfcore::gesture_interaction::EventKind::GraspCancelled;
         }));
         check_false(runtime.grasping());
     }
-    it("routes a trained open fist open sequence into matched grasp and release events") {
+    it("learns arbitrary-start fist endings and rejects static poses") {
         using namespace kfcore::gesture_interaction;
-        CompositionOptions options; options.task = CompositionTask::Interaction;
-        CompositionEsn model(options);
-        for (auto label : composition_labels(options.task))
-            for (float variation : {-0.1F, 0.0F, 0.1F}) model.add_training(action_sequence(label, variation), label);
-        auto fist = action_sequence(Composition::Grasp);
+        auto model = trained_interaction_model();
+        for (auto label : {Composition::Grasp, Composition::Release})
+            for (float direction : {-1.0F, 0.0F, 1.0F})
+                check_true(model.predict(action_sequence(label, 0.04F, direction)).label == label);
+        auto fist = action_sequence(Composition::None);
         for (auto& sample : fist) {
             sample.values[std::size_t(Gesture::OpenPalm)] = 0;
             sample.values[std::size_t(Gesture::ClosedFist)] = 1;
         }
-        model.add_training(fist, Composition::None); model.train_readout();
-        GestureInteraction runtime; (void)runtime.configure_sequences({&model}, 0);
-        std::vector<EventKind> actions;
-        const auto feed = [&](const CompositionSample& sample, double time) {
-            for (const auto& event : runtime.process(frame(sample), {time,640,480}))
-                if (event.kind == EventKind::Grasp || event.kind == EventKind::Release || event.kind == EventKind::GraspCancelled)
-                    actions.push_back(event.kind);
-        };
-        for (const auto& sample : action_sequence(Composition::Grasp)) feed(sample, sample.seconds);
-        for (int i = 1; i <= 40; ++i) feed(fist.back(), 3+i*0.05);
-        for (const auto& sample : action_sequence(Composition::Release)) feed(sample, 5.05+sample.seconds);
-        const auto open = action_sequence(Composition::Release).back();
-        for (int i = 1; i <= 40; ++i) feed(open, 8.05+i*0.05);
-        check_true(actions.size() == 2);
-        check_true(actions.front() == EventKind::Grasp && actions.back() == EventKind::Release);
+        check_true(model.predict(fist).label == Composition::Grasp);
+        check_true(model.predict(action_sequence(Composition::None)).label == Composition::None);
+        check_throws_with(model.add_training(action_sequence(Composition::Wave), Composition::Wave), "different task");
+    }
+    it("emits release from a trained full sequence without requiring an earlier grasp event") {
+        using namespace kfcore::gesture_interaction;
+        auto model = trained_interaction_model();
+        GestureInteraction runtime;
+        (void)runtime.configure_sequences({&model}, 0);
+        int releases = 0, grasps = 0;
+        for (const auto& sample : action_sequence(Composition::Release, 0.04F, -1.0F))
+            for (const auto& event : runtime.process(frame(sample), {sample.seconds,640,480})) {
+                if (event.kind == EventKind::Release) ++releases;
+                if (event.kind == EventKind::Grasp) ++grasps;
+            }
+        const auto open = action_sequence(Composition::Release, 0.04F, -1.0F).back();
+        for (int i = 1; i <= 12; ++i)
+            for (const auto& event : runtime.process(frame(open), {3+i*0.05,640,480})) {
+                if (event.kind == EventKind::Release) ++releases;
+                if (event.kind == EventKind::Grasp) ++grasps;
+            }
+        check_true(releases == 1 && grasps == 0);
         check_false(runtime.grasping());
     }
-    it("learns grasp and release separately from static poses") {
-        kfcore::gesture_interaction::CompositionOptions options; options.task = kfcore::gesture_interaction::CompositionTask::Interaction;
-        kfcore::gesture_interaction::CompositionEsn model(options);
-        for (auto label : kfcore::gesture_interaction::composition_labels(options.task))
-            for (float variation : {-0.1F, 0.0F, 0.1F})
-                model.add_training(action_sequence(label, variation), label);
-        auto fist = action_sequence(kfcore::gesture_interaction::Composition::None);
-        for (auto& s : fist) {
-            s.values[std::size_t(Gesture::OpenPalm)] = 0;
-            s.values[std::size_t(Gesture::ClosedFist)] = 1;
-        }
-        model.add_training(fist, kfcore::gesture_interaction::Composition::None);
-        model.train_readout();
-        check_true(model.predict(fist).label == kfcore::gesture_interaction::Composition::None);
-        for (auto label : kfcore::gesture_interaction::composition_labels(options.task))
-            check_true(model.predict(action_sequence(label, 0.04F)).label == label);
-        check_throws_with(model.add_training(action_sequence(kfcore::gesture_interaction::Composition::Wave), kfcore::gesture_interaction::Composition::Wave), "different task");
+    it("emits one grasp followed by one release from trained sequences") {
+        using namespace kfcore::gesture_interaction;
+        auto model = trained_interaction_model();
+        GestureInteraction runtime;
+        (void)runtime.configure_sequences({&model}, 0);
+        std::vector<EventKind> actions;
+        const auto feed = [&](const CompositionSample& sample, double seconds) {
+            for (const auto& event : runtime.process(frame(sample), {seconds,640,480}))
+                if (event.kind == EventKind::Grasp || event.kind == EventKind::Release ||
+                    event.kind == EventKind::GraspCancelled) actions.push_back(event.kind);
+        };
+        const auto grasp = action_sequence(Composition::Grasp, 0.04F);
+        for (const auto& sample : grasp) feed(sample, sample.seconds);
+        for (int i = 1; i <= 10; ++i) feed(grasp.back(), 3+i*0.05);
+        const auto release = action_sequence(Composition::Release, 0.04F, 0.0F);
+        for (const auto& sample : release) feed(sample, 3.55+sample.seconds);
+        for (int i = 1; i <= 12; ++i) feed(release.back(), 6.55+i*0.05);
+        check_true(actions.size() == 2);
+        check_true(actions[0] == EventKind::Grasp && actions[1] == EventKind::Release);
+        check_false(runtime.grasping());
     }
     it("learns binary wave recognition and treats single sweeps as neutral") {
         kfcore::gesture_interaction::CompositionOptions options; options.task = kfcore::gesture_interaction::CompositionTask::Motion;
@@ -389,8 +444,8 @@ spec("Parallel gesture actions") {
             if (i == 20) interaction.key('1');
             interaction.update(frame(clip[i]), clip[i].seconds, 640, 480);
         }
-        check_true(interaction.summary().find("Neutral/Grasp/Release 0/1/0") != std::string::npos);
-        check_true(motion.summary().find("Neutral/Wave 0/0 (need 3 each) | test 0/0") != std::string::npos);
+        check_true(interaction.summary().find("非动作/抓取/放开 0/1/0") != std::string::npos);
+        check_true(motion.summary().find("非挥手/挥手 0/0（每类需 3 段）｜测试 0/0") != std::string::npos);
         check_false(interaction.recording());
     }
     it("trains and evaluates wave with only two classes and rejects removed keys") {
@@ -401,7 +456,7 @@ spec("Parallel gesture actions") {
         preview::CompositionSession session(options);
         session.key('2');
         check_false(session.recording());
-        check_true(session.feedback.find("2/5 unused") != std::string::npos);
+        check_true(session.feedback.find("2/5 不使用") != std::string::npos);
         session.key('5');
         check_false(session.recording());
         double start = 0;
@@ -417,9 +472,10 @@ spec("Parallel gesture actions") {
             start += 4;
             if (key == '1') session.key('t');
         }
-        check_true(session.summary().find("TRAINED | train Neutral/Wave 1/1 (need 1 each) | test 1/1") == 0);
+        check_true(session.label_name(0) == std::string("非挥手"));
+        check_true(session.summary().find("已训练｜训练 非挥手/挥手 1/1（每类需 1 段）｜测试 1/1") == 0);
         session.key('v');
-        check_true(session.feedback.find("Held-out correct=2/2") == 0);
+        check_true(session.feedback.find("测试正确 2/2") == 0);
     }
     it("ignores inactive score storage when gating binary wave predictions") {
         kfcore::gesture_interaction::ActionGate gate;

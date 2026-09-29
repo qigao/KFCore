@@ -15,7 +15,7 @@ struct Branch {
     ActionGate gate;
     CompositionClip history;
     void clear() { history.clear(); gate.reset(); }
-    std::optional<Composition> update(const CompositionSample& sample) {
+    std::optional<Composition> update(const CompositionSample& sample, Composition allowed_action) {
         if (!model) return std::nullopt;
         const auto& options = model->options();
         if (!history.empty() && sample.seconds-history.back().seconds > options.maximum_gap_seconds) clear();
@@ -24,7 +24,12 @@ struct Branch {
         if (!sample.values.back()) gate.interrupt();
         if (sample.seconds-history.front().seconds < options.duration_seconds) return std::nullopt;
         const auto prediction = model->predict(history);
-        const auto event = sample.values.back() ? gate.update(prediction, sample.seconds) : std::nullopt;
+        std::optional<Composition> event;
+        if (sample.values.back()) {
+            if (prediction.label == Composition::None || prediction.label == allowed_action)
+                event = gate.update(prediction, sample.seconds);
+            else gate.interrupt();
+        }
         const double cutoff = history.front().seconds + options.live_stride_seconds;
         history.erase(history.begin(), std::lower_bound(history.begin(), history.end(), cutoff,
             [](const CompositionSample& value, double time) { return value.seconds < time; }));
@@ -43,10 +48,12 @@ Branch make_branch(const CompositionEsn* model, CompositionTask task, ActionGate
 }
 }
 struct GestureInteraction::Impl {
+    enum class GraspState { Unknown, Open, Closed };
     explicit Impl(InteractionOptions value) : options(value) {
         if (!ratio(options.basic.minimum_score) || !ratio(options.basic.minimum_margin) ||
             !positive(options.basic.confirmation_seconds) || !positive(options.basic.end_seconds) ||
             !positive(options.maximum_gap_seconds) || !positive(options.side_change_seconds) ||
+            !positive(options.fist_hold_seconds) || !positive(options.release_transition_seconds) ||
             !ratio(options.side_confidence) || options.side_confidence <= 0.5F)
             throw std::invalid_argument("invalid gesture interaction options");
     }
@@ -55,7 +62,9 @@ struct GestureInteraction::Impl {
     std::optional<double> clock, last_frame, last_seen;
     std::optional<std::uint64_t> source;
     std::uint64_t epoch = 0;
-    bool connected = false, held = false;
+    bool connected = false;
+    GraspState grasp_state = GraspState::Unknown;
+    std::optional<double> fist_since, last_fist, release_until;
     std::optional<bool> side, pending_side;
     double side_since = 0;
     std::optional<Gesture> active, candidate;
@@ -77,8 +86,9 @@ struct GestureInteraction::Impl {
     }
     void cancel(std::vector<Event>& output, double seconds, EventReason reason) {
         if (active) emit(output, EventKind::GestureCancelled, seconds, reason, *active);
-        if (held) emit(output, EventKind::GraspCancelled, seconds, reason);
-        active.reset(); candidate.reset(); held = false; connected = false;
+        if (grasp_state == GraspState::Closed) emit(output, EventKind::GraspCancelled, seconds, reason);
+        active.reset(); candidate.reset(); grasp_state = GraspState::Unknown; connected = false;
+        fist_since.reset(); last_fist.reset(); release_until.reset();
         pending_side.reset(); side.reset(); source.reset(); last_seen.reset();
         interaction.clear(); motion.clear();
     }
@@ -86,7 +96,7 @@ struct GestureInteraction::Impl {
         if (connected && last_seen && seconds-*last_seen > maximum_gap())
             cancel(output, seconds, EventReason::HandLost);
     }
-    void basic(const mediapipe::GesturePrediction& prediction, double seconds, std::vector<Event>& output) {
+    std::optional<Gesture> basic(const mediapipe::GesturePrediction& prediction, double seconds, std::vector<Event>& output) {
         auto scores = prediction.scores;
         const auto index = std::max_element(scores.begin(), scores.end())-scores.begin();
         std::sort(scores.begin(), scores.end(), std::greater<float>());
@@ -103,11 +113,37 @@ struct GestureInteraction::Impl {
             emit(output, EventKind::GestureEnded, seconds, EventReason::Unrecognized, *active);
             active.reset();
         }
+        return recognized;
+    }
+    Composition hand_action(std::optional<Gesture> pose, double seconds, std::vector<Event>& output) {
+        if (pose == Gesture::ClosedFist) {
+            release_until.reset();
+            if (!fist_since) fist_since = seconds;
+            last_fist = seconds;
+            return seconds-*fist_since >= options.fist_hold_seconds ? Composition::Grasp : Composition::None;
+        }
+        fist_since.reset();
+        if (pose == Gesture::OpenPalm && !release_until && last_fist &&
+            seconds-*last_fist <= options.release_transition_seconds) {
+            const double model_window = interaction.model ? interaction.model->options().duration_seconds +
+                interaction.gate.options().confirmation_seconds : options.release_transition_seconds;
+            release_until = seconds + model_window;
+        }
+        if (release_until && seconds > *release_until) release_until.reset();
+        if (grasp_state == GraspState::Closed &&
+            !release_until && (!last_fist || seconds-*last_fist > options.release_transition_seconds)) {
+            grasp_state = GraspState::Unknown;
+            emit(output, EventKind::GraspCancelled, seconds, EventReason::Unrecognized);
+        }
+        if (last_fist && seconds-*last_fist > options.release_transition_seconds) last_fist.reset();
+        return pose == Gesture::OpenPalm && release_until ? Composition::Release : Composition::None;
     }
     void sequence_event(std::optional<Composition> event, double seconds, std::vector<Event>& output) {
-        if (event == Composition::Grasp && !held) { held = true; emit(output, EventKind::Grasp, seconds); }
-        else if (event == Composition::Release && held) { held = false; emit(output, EventKind::Release, seconds); }
-        else if (event == Composition::Wave) emit(output, EventKind::Wave, seconds);
+        if (event == Composition::Grasp && grasp_state != GraspState::Closed) {
+            grasp_state = GraspState::Closed; emit(output, EventKind::Grasp, seconds);
+        } else if (event == Composition::Release && grasp_state != GraspState::Open) {
+            grasp_state = GraspState::Open; last_fist.reset(); release_until.reset(); emit(output, EventKind::Release, seconds);
+        } else if (event == Composition::Wave) emit(output, EventKind::Wave, seconds);
     }
     void process(const mediapipe::GestureFrame& frame, const FrameContext& context, std::vector<Event>& output) {
         const auto sample = composition_sample(frame, context.seconds, context.width, context.height);
@@ -121,9 +157,10 @@ struct GestureInteraction::Impl {
         }
         if (frame.gestures.empty()) {
             candidate.reset(); pending_side.reset();
+            fist_since.reset(); last_fist.reset(); release_until.reset();
+            interaction.clear();
             if (connected) {
-                sequence_event(interaction.update(*sample), context.seconds, output);
-                sequence_event(motion.update(*sample), context.seconds, output);
+                sequence_event(motion.update(*sample, Composition::Wave), context.seconds, output);
             }
             return;
         }
@@ -134,6 +171,7 @@ struct GestureInteraction::Impl {
         else if (probability <= 1-options.side_confidence) observed_side = false;
         if (connected && side && observed_side && side != observed_side) {
             candidate.reset(); interaction.clear(); motion.clear();
+            fist_since.reset(); last_fist.reset(); release_until.reset();
             if (pending_side != observed_side) { pending_side = observed_side; side_since = context.seconds; }
             if (context.seconds-side_since >= options.side_change_seconds)
                 cancel(output, context.seconds, EventReason::SourceChanged);
@@ -145,9 +183,11 @@ struct GestureInteraction::Impl {
         }
         if (!side) side = observed_side;
         last_seen = context.seconds;
-        basic(frame.gestures.front(), context.seconds, output);
-        sequence_event(interaction.update(*sample), context.seconds, output);
-        sequence_event(motion.update(*sample), context.seconds, output);
+        const auto observed = basic(frame.gestures.front(), context.seconds, output);
+        const auto terminal_pose = observed == active ? active : std::nullopt;
+        const auto allowed_action = hand_action(terminal_pose, context.seconds, output);
+        sequence_event(interaction.update(*sample, allowed_action), context.seconds, output);
+        sequence_event(motion.update(*sample, Composition::Wave), context.seconds, output);
     }
 };
 GestureInteraction::GestureInteraction(InteractionOptions options) : impl_(std::make_unique<Impl>(options)) {}
@@ -197,7 +237,7 @@ std::vector<Event> GestureInteraction::reset(double seconds) {
     impl_->cancel(events, seconds, EventReason::Reset); impl_->clock = seconds;
     return events;
 }
-bool GestureInteraction::grasping() const noexcept { return impl_->held; }
+bool GestureInteraction::grasping() const noexcept { return impl_->grasp_state == Impl::GraspState::Closed; }
 const char* event_name(EventKind kind) {
     switch (kind) {
     case EventKind::GestureStarted: return "GestureStarted";

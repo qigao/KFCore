@@ -110,9 +110,9 @@ spec("ESN experiment persistence") {
         const auto loaded = kfcore::gesture_interaction::decode_experiment(kfcore::gesture_interaction::encode_experiment(original),kPipeline);
         for (const auto& saved : loaded.sessions) {
             auto restored = preview::CompositionSession::restore(saved);
-            check_true(restored->summary().find("TRAINED |") == 0);
+            check_true(restored->summary().find("已训练｜") == 0);
             check_false(restored->dirty()); check_false(restored->recording());
-            check_true(restored->prediction == "ESN: collecting history");
+            check_true(restored->prediction == "ESN：正在积累帧历史");
             kfcore::gesture_interaction::CompositionEsn model(saved.options);
             model.restore_weights(saved.weights);
             for (const auto& row : saved.training) model.add_training(row.samples,row.label);
@@ -125,9 +125,9 @@ spec("ESN experiment persistence") {
         auto original = experiment(false);
         original.sessions[0].heldout.clear();
         auto restored = preview::CompositionSession::restore(kfcore::gesture_interaction::decode_experiment(kfcore::gesture_interaction::encode_experiment(original),kPipeline).sessions[0]);
-        check_true(restored->summary().find("UNTRAINED |") == 0);
+        check_true(restored->summary().find("未训练｜") == 0);
         restored->key('t');
-        check_true(restored->summary().find("TRAINED |") == 0);
+        check_true(restored->summary().find("已训练｜") == 0);
         check_true(restored->dirty());
         restored->mark_saved(); check_false(restored->dirty());
     }
@@ -183,7 +183,7 @@ spec("ESN experiment persistence") {
     it("does not archive an unfinished recording") {
         auto current = preview::CompositionSession::restore(session(kfcore::gesture_interaction::CompositionTask::Motion,false));
         current->key('1');
-        check_throws_with(current->archive(),"recording");
+        check_throws_with(current->archive(),"录制");
         current->key('c');
         check_nothrow(current->archive());
     }
