@@ -1,10 +1,51 @@
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
+from typing import Sequence
 
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
+
+
+SPATIAL_FLAGS_SCHEMA = "kfcore.predicate-spatial-flags/1"
+
+
+def load_predicate_spatial_flags(
+    path: str | Path,
+    predicates: Sequence[str],
+) -> Tensor:
+    """Load an exact-order spatial/semantic routing warm-start sidecar."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != SPATIAL_FLAGS_SCHEMA
+    ):
+        raise ValueError("unsupported predicate spatial-flags schema")
+    names = payload.get("predicates")
+    flags = payload.get("is_spatial")
+    if not isinstance(names, list) or not isinstance(flags, list):
+        raise ValueError(
+            "predicate spatial flags require predicates/is_spatial arrays"
+        )
+    if names != list(predicates):
+        raise ValueError(
+            "predicate spatial flags order does not match vocabulary"
+        )
+    if len(flags) != len(names):
+        raise ValueError(
+            "predicate spatial flags length does not match vocabulary"
+        )
+    if any(not isinstance(value, bool) for value in flags):
+        raise ValueError("predicate spatial flags must be booleans")
+    result = torch.tensor(flags, dtype=torch.bool)
+    if not bool(result.any()) or bool(result.all()):
+        raise ValueError(
+            "predicate spatial flags require both spatial and semantic rows"
+        )
+    return result
 
 
 class ApacheVocabHead(nn.Module):
