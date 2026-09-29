@@ -486,6 +486,20 @@ float equality.
 The whitened output still has a separate strict geometry requirement:
 `max_abs_off_diagonal < 1e-5`.
 
+## Experiment comparison recovery
+
+Long-running real-data matrix workflows keep their per-arm JSON evidence as
+short-lived GitHub Actions artifacts. If all training arms succeed but only the
+comparison job fails, the zero-support sweep can recover without retraining:
+
+- manual `workflow_dispatch` may provide `recompare_run_id`;
+- a maintenance push whose commit message contains `[recompare-only]` skips
+  prototype/data/training jobs, finds the latest failed completed sweep on
+  `master`, downloads its arm artifacts and reruns only the comparator.
+
+Normal experiment pushes still execute the complete controlled sweep. Recovery
+never changes arm metrics; it only revalidates and packages existing evidence.
+
 ## Predicate prototype semantic A/B
 
 After the sampler ablation, K=48 is the practical baseline for the next
