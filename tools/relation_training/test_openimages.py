@@ -131,6 +131,7 @@ class OpenImagesConversionTest(unittest.TestCase):
         self.assertEqual(summary.relationships, 4)
         self.assertEqual(summary.object_relationships, 3)
         self.assertEqual(summary.skipped_attributes, 1)
+        self.assertEqual(summary.skipped_self_relations, 0)
         self.assertEqual(summary.images, ("abc123", "def456"))
         self.assertEqual(
             summary.predicates, ("behind", "near", "on")
@@ -219,6 +220,7 @@ class OpenImagesConversionTest(unittest.TestCase):
         )
         self.assertEqual(manifest["source_rows"], 4)
         self.assertEqual(manifest["skipped_attribute_rows"], 1)
+        self.assertEqual(manifest["skipped_self_relation_rows"], 0)
         self.assertEqual(manifest["relations"], 3)
 
         validation_path = self.root / "converted.jsonl"
@@ -325,7 +327,7 @@ class OpenImagesConversionTest(unittest.TestCase):
         self.assertEqual(selected, second_selected)
         self.assertEqual(subset, second_subset)
 
-    def test_missing_image_invalid_box_and_self_relation_fail(self):
+    def test_missing_image_and_invalid_box_fail_fast(self):
         classes = load_class_descriptions(self.classes)
         vocabulary = RelationVocabulary(
             predicates=("on",),
@@ -362,22 +364,62 @@ class OpenImagesConversionTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             scan_relationship_files([invalid])
 
-        self_relation = self.root / "self.csv"
-        write_csv(
-            self_relation,
-            [
-                relationship(
-                    "abc123",
-                    "/m/person",
-                    "/m/person",
-                    "on",
-                    subject_box=(0.0, 0.4, 0.0, 1.0),
-                    object_box=(0.0, 0.4, 0.0, 1.0),
-                )
-            ],
+    def test_self_relations_are_explicitly_skipped_and_counted(self):
+        classes = load_class_descriptions(self.classes)
+        source = self.root / "self-with-valid.csv"
+        rows = [
+            relationship(
+                "abc123",
+                "/m/person",
+                "/m/person",
+                "on",
+                subject_box=(0.0, 0.4, 0.0, 1.0),
+                object_box=(0.0, 0.4, 0.0, 1.0),
+            ),
+            relationship(
+                "abc123",
+                "/m/person",
+                "/m/bike",
+                "on",
+            ),
+        ]
+        write_csv(source, rows)
+
+        summary = scan_relationship_files([source])
+        self.assertEqual(summary.relationships, 2)
+        self.assertEqual(summary.object_relationships, 1)
+        self.assertEqual(summary.skipped_attributes, 0)
+        self.assertEqual(summary.skipped_self_relations, 1)
+        self.assertEqual(summary.images, ("abc123",))
+
+        vocabulary = build_vocabulary([summary], classes)
+        output, manifest = convert_relationship_file(
+            source,
+            split="train",
+            image_root=self.root,
+            class_descriptions=classes,
+            vocabulary=vocabulary,
         )
-        with self.assertRaises(ValueError):
-            scan_relationship_files([self_relation])
+        record = json.loads(output.strip())
+        self.assertEqual(len(record["relations"]), 1)
+        self.assertNotEqual(
+            record["relations"][0][0],
+            record["relations"][0][2],
+        )
+        self.assertEqual(manifest["skipped_self_relation_rows"], 1)
+
+        selected = select_subset_image_ids(
+            source,
+            max_images=1,
+            max_boxes=2,
+        )
+        subset = subset_relationship_csv(source, selected)
+        self.assertEqual(subset.count("\n"), 2)
+        subset_path = self.root / "self-normalized.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        normalized = scan_relationship_files([subset_path])
+        self.assertEqual(normalized.object_relationships, 1)
+        self.assertEqual(normalized.skipped_self_relations, 0)
 
 
 if __name__ == "__main__":
