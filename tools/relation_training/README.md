@@ -731,6 +731,45 @@ identity matrix. Its purpose is to establish a reproducible optimization and
 sampling anchor before introducing a semantic text embedding bank or backbone
 fine-tuning.
 
+## Explicit predicate holdout
+
+Incidental train-zero-support predicates in a small deterministic slice are
+useful diagnostics, but they are not a stable open-vocabulary evaluation.
+`train_baseline.py` therefore supports an explicit predicate holdout:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  ... ^
+  --holdout-predicate contain ^
+  --holdout-predicate holds ^
+  --holdout-predicate ride
+```
+
+An explicit holdout keeps the original annotations and pair-existence targets
+unchanged, but excludes the selected predicate dimensions from predicate BCE.
+Unlike the ordinary supervision-mask path, this mode is allowed to hide positive
+predicate labels by design.
+
+Safety invariants:
+
+- holdout names must be unique and present in the vocabulary;
+- every held-out predicate must have positive support in both train and
+  validation;
+- `--holdout-predicate` cannot be combined with
+  `--mask-zero-support-predicates`;
+- ordinary predicate masks still fail fast if they hide a positive label;
+- runtime / ONNX outputs are unchanged.
+
+Training evidence records the held-out names/indices plus both original and
+effective train predicate support. For benchmark grouping, held-out predicate
+support is set to zero in the effective training vector, and
+`predicate_groups.explicit_holdout` reports validation support and
+mRecall@K for exactly the requested predicates.
+
+The first controlled holdout set is `contain / holds / ride`, which have
+non-trivial support in both train and validation on the canonical 256/64 Open
+Images slice.
+
 ## Seen vs train-zero-support predicate recall
 
 Canonical benchmark reports can optionally stratify predicate mRecall by
