@@ -378,6 +378,7 @@ class RelationBenchmark:
         *,
         annotations_sha256: str = "",
         vocabulary_sha256: str = "",
+        train_predicate_support: Sequence[int] | None = None,
     ) -> dict[str, object]:
         if self.example_count <= 0:
             raise ValueError("benchmark contains no evaluated examples")
@@ -433,7 +434,66 @@ class RelationBenchmark:
                 )
             per_predicate.append(item)
 
-        return {
+        predicate_groups: dict[str, object] | None = None
+        if train_predicate_support is not None:
+            if len(train_predicate_support) != self.predicate_count:
+                raise ValueError(
+                    "train predicate support length does not match vocabulary"
+                )
+            train_support: list[int] = []
+            for value in train_predicate_support:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(
+                        "train predicate support must contain integers"
+                    )
+                if value < 0:
+                    raise ValueError(
+                        "train predicate support must be non-negative"
+                    )
+                train_support.append(value)
+
+            def group_payload(indices: list[int]) -> dict[str, object]:
+                validation_support = sum(
+                    self.predicate_support[index]
+                    for index in indices
+                )
+                group_mean: dict[str, float | None] = {}
+                for k in self.config.top_ks:
+                    recalls = [
+                        self.predicate_hits[k][index]
+                        / self.predicate_support[index]
+                        for index in indices
+                    ]
+                    group_mean[str(k)] = (
+                        sum(recalls) / len(recalls)
+                        if recalls
+                        else None
+                    )
+                return {
+                    "predicate_indices": indices,
+                    "predicate_count": len(indices),
+                    "validation_triplet_support": validation_support,
+                    "mean_recall_at_k": group_mean,
+                }
+
+            seen_indices = [
+                index
+                for index in supported_predicates
+                if train_support[index] > 0
+            ]
+            zero_shot_indices = [
+                index
+                for index in supported_predicates
+                if train_support[index] == 0
+            ]
+            predicate_groups = {
+                "seen": group_payload(seen_indices),
+                "train_zero_support": group_payload(
+                    zero_shot_indices
+                ),
+            }
+
+        report = {
             "schema": "kfcore.relation-benchmark/1",
             "examples": self.example_count,
             "annotations_sha256": annotations_sha256,
@@ -450,6 +510,9 @@ class RelationBenchmark:
             "mean_recall_at_k": mean_recall_at_k,
             "per_predicate": per_predicate,
         }
+        if predicate_groups is not None:
+            report["predicate_groups"] = predicate_groups
+        return report
 
 
 def stable_report_json(report: dict[str, object]) -> str:
