@@ -804,6 +804,33 @@ class RelationModelTest(unittest.TestCase):
                 ),
             )
 
+        supervision = torch.tensor([True, True, False])
+        invalid_holdouts = (
+            torch.tensor([False, True, False]),
+            torch.tensor([False, False]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([False, False, False]),
+        )
+        for holdout in invalid_holdouts:
+            with self.assertRaises(ValueError):
+                supervised_relation_loss(
+                    output,
+                    pair_targets,
+                    predicate_targets,
+                    predicate_supervision_mask=supervision,
+                    explicit_holdout_mask=holdout,
+                )
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                pair_targets,
+                predicate_targets,
+                explicit_holdout_mask=torch.tensor(
+                    [False, False, True]
+                ),
+            )
+
     def test_explicit_holdout_can_hide_positive_predicate_targets(self):
         torch.manual_seed(24)
         model = KFRelationModel(
@@ -847,7 +874,7 @@ class RelationModelTest(unittest.TestCase):
                 predicate_loss_weight=1.0,
             ),
             predicate_supervision_mask=supervision,
-            allow_masked_positive_targets=True,
+            explicit_holdout_mask=~supervision,
         )
         expected = torch.nn.functional.binary_cross_entropy_with_logits(
             pred_logits[0, slot, :2],
