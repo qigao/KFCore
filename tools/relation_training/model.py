@@ -10,6 +10,7 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_pair_sampler import ApacheRelatednessPairSampler
 from apache_pair_evidence import (
     BoxPromptEncoder as ApacheBoxPromptEncoder,
     RelGeomEncoder as ApacheRelGeomEncoder,
@@ -35,6 +36,7 @@ class RelationModelConfig:
     pair_visual_evidence: str = "endpoint"
     pair_geometry_evidence: str = "basic"
     pair_evidence_contract: str = "legacy"
+    pair_sampler_contract: str = "legacy"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -95,6 +97,20 @@ class RelationModelConfig:
             raise ValueError(
                 "apache pair evidence supersedes legacy visual/geometry knobs"
             )
+        if self.pair_sampler_contract not in {
+            "legacy",
+            "apache",
+        }:
+            raise ValueError(
+                "pair_sampler_contract must be legacy/apache"
+            )
+        if (
+            self.pair_sampler_contract == "apache"
+            and self.pair_evidence_contract != "apache"
+        ):
+            raise ValueError(
+                "apache pair sampler requires apache pair evidence"
+            )
 
 
 @dataclass(frozen=True)
@@ -105,6 +121,8 @@ class RelationTrainingOutputs:
     predicate_query: Tensor
     predicate_query_raw: Tensor
     predicate_bank: Tensor
+    sampler_geo_loss: Tensor | None = None
+    sampler_relatedness_loss: Tensor | None = None
 
 
 class BackboneAdapter(nn.Module):
@@ -874,6 +892,23 @@ class KFRelationModel(nn.Module):
             self.geometry_encoder.requires_grad_(False)
             self.pair_projection.requires_grad_(False)
             self.apache_box_prompt_encoder.requires_grad_(False)
+
+        self.apache_pair_sampler: ApacheRelatednessPairSampler | None = None
+        if config.pair_sampler_contract == "apache":
+            self.apache_pair_sampler = ApacheRelatednessPairSampler(
+                feature_dim=backbone.hidden_size,
+                geo_budget=400,
+                final_budget=config.pair_budget,
+                rel_dim=256,
+                negative_weight=0.3,
+                swap_include=True,
+            )
+            # Apache stage-1 geometry scoring and stage-2 relatedness replace
+            # the historical single-stage sampler and post-transformer pair
+            # head. Keep those tensors for legacy checkpoint compatibility,
+            # but remove them from the active optimizer.
+            self.geometry_sampler.requires_grad_(False)
+            self.pair_head.requires_grad_(False)
 
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
