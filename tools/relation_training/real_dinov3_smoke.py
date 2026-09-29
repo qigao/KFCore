@@ -40,6 +40,11 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--opset", type=int, default=18)
+    parser.add_argument(
+        "--pair-evidence-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+    )
     args = parser.parse_args()
 
     if args.image_size <= 0:
@@ -93,6 +98,7 @@ def main() -> None:
         num_layers=1,
         dropout=0.0,
         tap_indices=(-6, -3, -1),
+        pair_evidence_contract=args.pair_evidence_contract,
     )
     predicate_names = ["beside", "holding", "riding"]
     predicate_embeddings = torch.randn(len(predicate_names), 32)
@@ -206,7 +212,8 @@ def main() -> None:
     )
 
     report = {
-        "schema": "kfcore.real-dinov3-relation-smoke/6",
+        "schema": "kfcore.real-dinov3-relation-smoke/7",
+        "pair_evidence_contract": args.pair_evidence_contract,
         "weights_repo": args.repo,
         "weights_filename": args.filename,
         "weights_sha256": weights_sha256,

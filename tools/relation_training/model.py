@@ -10,6 +10,15 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_pair_evidence import (
+    BoxPromptEncoder as ApacheBoxPromptEncoder,
+    RelGeomEncoder as ApacheRelGeomEncoder,
+    SoftSpatialPool as ApacheSoftSpatialPool,
+    contact_box as apache_contact_box,
+    cxcywh_to_xyxy as apache_cxcywh_to_xyxy,
+    union_box as apache_union_box,
+)
+
 
 @dataclass(frozen=True)
 class RelationModelConfig:
@@ -25,6 +34,7 @@ class RelationModelConfig:
     predicate_adapter_rank: int = 0
     pair_visual_evidence: str = "endpoint"
     pair_geometry_evidence: str = "basic"
+    pair_evidence_contract: str = "legacy"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -67,6 +77,23 @@ class RelationModelConfig:
         }:
             raise ValueError(
                 "pair_geometry_evidence must be basic/rich"
+            )
+        if self.pair_evidence_contract not in {
+            "legacy",
+            "apache",
+        }:
+            raise ValueError(
+                "pair_evidence_contract must be legacy/apache"
+            )
+        if (
+            self.pair_evidence_contract == "apache"
+            and (
+                self.pair_visual_evidence != "endpoint"
+                or self.pair_geometry_evidence != "basic"
+            )
+        ):
+            raise ValueError(
+                "apache pair evidence supersedes legacy visual/geometry knobs"
             )
 
 
@@ -806,6 +833,48 @@ class KFRelationModel(nn.Module):
             self.rich_geometry_projection = None
             self.rich_geometry_sampler = None
 
+        # Apache-reference pair evidence is initialized last so enabling the
+        # alternative pair construction cannot perturb any existing common
+        # parameter initialization under the same global RNG seed.
+        self.apache_spatial_pool: ApacheSoftSpatialPool | None = None
+        self.apache_box_prompt_encoder: ApacheBoxPromptEncoder | None = None
+        self.apache_geometry_encoder: ApacheRelGeomEncoder | None = None
+        self.apache_pair_projection: nn.Linear | None = None
+        if config.pair_evidence_contract == "apache":
+            self.apache_spatial_pool = ApacheSoftSpatialPool(
+                backbone.hidden_size,
+                n_heads=8,
+                num_freqs=16,
+                max_octave=7.0,
+            )
+            self.apache_box_prompt_encoder = ApacheBoxPromptEncoder(
+                config.hidden_dim,
+                num_freqs=16,
+                max_octave=7.0,
+            )
+            self.apache_geometry_encoder = ApacheRelGeomEncoder(
+                config.hidden_dim
+            )
+            self.apache_pair_projection = nn.Linear(
+                backbone.hidden_size * 4 + config.hidden_dim,
+                config.hidden_dim,
+            )
+            nn.init.xavier_uniform_(
+                self.apache_pair_projection.weight
+            )
+            nn.init.zeros_(
+                self.apache_pair_projection.bias
+            )
+
+            # #98 replaces pair evidence while #118 still owns the legacy
+            # sampler. Freeze legacy representation modules that are no longer
+            # on the Apache forward path. Box prompts are produced as the
+            # #119 context contract but remain frozen until that context stack
+            # consumes them.
+            self.geometry_encoder.requires_grad_(False)
+            self.pair_projection.requires_grad_(False)
+            self.apache_box_prompt_encoder.requires_grad_(False)
+
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
         if (
@@ -1017,6 +1086,136 @@ class KFRelationModel(nn.Module):
             dim=-1,
         )
 
+    def _apache_pair_evidence(
+        self,
+        patch_features: Tensor,
+        boxes: Tensor,
+        valid_boxes: Tensor,
+        subject_index: Tensor,
+        object_index: Tensor,
+        selected_valid: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        if (
+            self.apache_spatial_pool is None
+            or self.apache_box_prompt_encoder is None
+            or self.apache_geometry_encoder is None
+            or self.apache_pair_projection is None
+        ):
+            raise RuntimeError(
+                "Apache pair evidence modules are not configured"
+            )
+
+        region_features = self.apache_spatial_pool(
+            patch_features,
+            boxes,
+        )
+        region_features = (
+            region_features
+            * valid_boxes.to(region_features.dtype).unsqueeze(-1)
+        )
+
+        subject_features = _batch_gather(
+            region_features,
+            subject_index,
+        )
+        object_features = _batch_gather(
+            region_features,
+            object_index,
+        )
+        subject_boxes = _batch_gather(
+            boxes,
+            subject_index,
+        )
+        object_boxes = _batch_gather(
+            boxes,
+            object_index,
+        )
+        union_boxes = apache_union_box(
+            subject_boxes,
+            object_boxes,
+        )
+        contact_boxes = apache_contact_box(
+            subject_boxes,
+            object_boxes,
+        )
+
+        pooled = self.apache_spatial_pool(
+            patch_features,
+            torch.cat(
+                (union_boxes, contact_boxes),
+                dim=1,
+            ),
+        )
+        pair_count = subject_index.shape[1]
+        union_features = pooled[:, :pair_count]
+        contact_features = pooled[:, pair_count:]
+
+        geometry_features = self.apache_geometry_encoder(
+            subject_boxes,
+            object_boxes,
+        )
+
+        valid_float = selected_valid.to(
+            subject_features.dtype
+        ).unsqueeze(-1)
+        subject_features = subject_features * valid_float
+        object_features = object_features * valid_float
+        union_features = union_features * valid_float
+        contact_features = contact_features * valid_float
+        geometry_features = geometry_features * valid_float
+
+        pair_input = torch.cat(
+            (
+                subject_features,
+                object_features,
+                union_features,
+                contact_features,
+                geometry_features,
+            ),
+            dim=-1,
+        )
+        pair_tokens = self.apache_pair_projection(
+            pair_input
+        ) * valid_float
+
+        subject_xyxy = apache_cxcywh_to_xyxy(
+            subject_boxes
+        )
+        object_xyxy = apache_cxcywh_to_xyxy(
+            object_boxes
+        )
+        box_tokens = self.apache_box_prompt_encoder.encode_pairs(
+            subject_xyxy,
+            object_xyxy,
+        )
+        box_tokens = (
+            box_tokens
+            * selected_valid.to(box_tokens.dtype)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+        )
+        anchors = torch.stack(
+            (
+                subject_boxes,
+                object_boxes,
+                union_boxes,
+                contact_boxes,
+            ),
+            dim=2,
+        )
+        anchors = (
+            anchors
+            * selected_valid.to(anchors.dtype)
+            .unsqueeze(-1)
+            .unsqueeze(-1)
+        )
+        return (
+            pair_tokens,
+            box_tokens,
+            anchors,
+            geometry_features,
+        )
+
     def _forward_impl(
         self,
         image: Tensor,
@@ -1047,7 +1246,15 @@ class KFRelationModel(nn.Module):
         valid_pairs = subject_valid & object_valid & not_self
 
         patch_features = self._fused_patch_features(image)
-        region_features = self._pool_regions(patch_features, boxes, valid_boxes)
+        region_features = (
+            self._pool_regions(
+                patch_features,
+                boxes,
+                valid_boxes,
+            )
+            if self.config.pair_evidence_contract == "legacy"
+            else None
+        )
         geometry = self._pair_geometry(boxes)
         rich_geometry = (
             self._rich_pair_geometry(boxes)
@@ -1092,49 +1299,76 @@ class KFRelationModel(nn.Module):
         object_index = all_object[pair_slot]
         selected_valid = torch.gather(flat_valid, 1, pair_slot)
 
-        subject_features = _batch_gather(region_features, subject_index)
-        object_features = _batch_gather(region_features, object_index)
-        selected_geometry = torch.gather(
-            flat_geometry,
-            1,
-            pair_slot.unsqueeze(-1).expand(
-                -1, -1, self.geometry_feature_count
-            ),
-        )
-        geometry_features = self.geometry_encoder(selected_geometry)
-        if flat_rich_geometry is not None:
-            selected_rich_geometry = torch.gather(
-                flat_rich_geometry,
+        if self.config.pair_evidence_contract == "apache":
+            (
+                tokens,
+                _reference_box_tokens,
+                _reference_anchors,
+                _reference_geometry_features,
+            ) = self._apache_pair_evidence(
+                patch_features,
+                boxes,
+                valid_boxes,
+                subject_index,
+                object_index,
+                selected_valid,
+            )
+        else:
+            assert region_features is not None
+            subject_features = _batch_gather(
+                region_features,
+                subject_index,
+            )
+            object_features = _batch_gather(
+                region_features,
+                object_index,
+            )
+            selected_geometry = torch.gather(
+                flat_geometry,
                 1,
                 pair_slot.unsqueeze(-1).expand(
-                    -1,
-                    -1,
-                    self.rich_geometry_feature_count,
+                    -1, -1, self.geometry_feature_count
                 ),
             )
-            assert self.rich_geometry_projection is not None
-            geometry_features = (
-                geometry_features
-                + self.rich_geometry_projection(
-                    selected_rich_geometry
-                )
+            geometry_features = self.geometry_encoder(
+                selected_geometry
             )
+            if flat_rich_geometry is not None:
+                selected_rich_geometry = torch.gather(
+                    flat_rich_geometry,
+                    1,
+                    pair_slot.unsqueeze(-1).expand(
+                        -1,
+                        -1,
+                        self.rich_geometry_feature_count,
+                    ),
+                )
+                assert self.rich_geometry_projection is not None
+                geometry_features = (
+                    geometry_features
+                    + self.rich_geometry_projection(
+                        selected_rich_geometry
+                    )
+                )
 
-        pair_features = torch.cat(
-            (
-                subject_features,
-                object_features,
-                subject_features - object_features,
-                subject_features * object_features,
-                geometry_features,
-            ),
-            dim=-1,
-        )
-        tokens = self.pair_projection(pair_features)
+            pair_features = torch.cat(
+                (
+                    subject_features,
+                    object_features,
+                    subject_features - object_features,
+                    subject_features * object_features,
+                    geometry_features,
+                ),
+                dim=-1,
+            )
+            tokens = self.pair_projection(pair_features)
 
         if (
-            self.union_projection is not None
-            or self.contact_projection is not None
+            self.config.pair_evidence_contract == "legacy"
+            and (
+                self.union_projection is not None
+                or self.contact_projection is not None
+            )
         ):
             subject_boxes = _batch_gather(boxes, subject_index)
             object_boxes = _batch_gather(boxes, object_index)
