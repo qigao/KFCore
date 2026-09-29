@@ -479,11 +479,14 @@ def select_subset_image_ids(
     *,
     max_images: int,
     max_boxes: int,
+    min_boxes: int = 2,
 ) -> tuple[str, ...]:
     if max_images <= 0:
         raise ValueError("max_images must be positive")
-    if max_boxes < 2:
-        raise ValueError("max_boxes must be at least 2")
+    if min_boxes < 2:
+        raise ValueError("min_boxes must be at least 2")
+    if max_boxes < min_boxes:
+        raise ValueError("max_boxes must be >= min_boxes")
 
     endpoints: dict[str, set[NormalizedEndpoint]] = {}
     relation_counts: dict[str, int] = {}
@@ -500,7 +503,7 @@ def select_subset_image_ids(
     eligible = [
         image_id
         for image_id in sorted(endpoints)
-        if 2 <= len(endpoints[image_id]) <= max_boxes
+        if min_boxes <= len(endpoints[image_id]) <= max_boxes
         and relation_counts.get(image_id, 0) > 0
     ]
     if len(eligible) < max_images:
