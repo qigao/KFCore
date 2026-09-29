@@ -321,10 +321,20 @@ def main() -> None:
         ),
     )
     parser.add_argument("--clip-model", default=DEFAULT_CLIP_MODEL)
+    parser.add_argument(
+        "--source-out",
+        default="",
+        help=(
+            "For clip-whitened mode only, also write the raw normalized "
+            "CLIP predicate tensor used as the whitening source."
+        ),
+    )
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
     vocabulary = RelationVocabulary.load(args.vocabulary)
+    if args.source_out and args.mode != "clip-whitened":
+        raise ValueError("--source-out is clip-whitened-only")
     source_embeddings: torch.Tensor | None = None
     if args.mode == "identity":
         embeddings = identity_predicate_embeddings(
@@ -345,6 +355,15 @@ def main() -> None:
         )
         if args.mode == "clip-whitened":
             source_embeddings = raw_clip
+            if args.source_out:
+                write_outputs(
+                    Path(args.source_out),
+                    raw_clip,
+                    vocabulary=vocabulary,
+                    mode="clip",
+                    model_id=args.clip_model,
+                    templates=templates,
+                )
             embeddings = symmetric_whiten_predicates(raw_clip)
         else:
             embeddings = raw_clip
