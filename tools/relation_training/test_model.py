@@ -25,6 +25,7 @@ from model import (
     MetaDinoV3Backbone,
     OfficialDinoV3Backbone,
     RelationModelConfig,
+    RelationTrainingOutputs,
     TimmDinoV3Backbone,
 )
 
@@ -1014,6 +1015,238 @@ class RelationModelTest(unittest.TestCase):
                 predicate_targets,
                 loss_config,
                 explicit_holdout_row_policy="unsupported",
+            )
+
+    def test_batch_local_infonce_uses_only_observed_predicate_columns(self):
+        pred_logits = torch.zeros(1, 2, 3, requires_grad=True)
+        pair_logits = torch.zeros(1, 2, requires_grad=True)
+        sub_idx = torch.tensor([[0, 1]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1, 0]], dtype=torch.int64)
+        valid = torch.tensor([[True, True]])
+        query = torch.tensor(
+            [[[1.0, 0.0], [0.0, 1.0]]],
+            requires_grad=True,
+        )
+        raw_query = query.clone()
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ],
+            requires_grad=True,
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=raw_query,
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 1, 0] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 1, 0, 1] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+        )
+        expected = torch.logsumexp(
+            torch.tensor([1.0, 0.0]), dim=0
+        ) - 1.0
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_unobserved_column_fraction"]),
+            1.0 / 3.0,
+            places=6,
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(query.grad)
+        self.assertGreater(float(query.grad.abs().sum()), 0.0)
+
+    def test_batch_local_infonce_preserves_multilabel_positives(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        sub_idx = torch.tensor([[0]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1]], dtype=torch.int64)
+        valid = torch.tensor([[True]])
+        query = torch.tensor([[[1.0, 0.0]]], requires_grad=True)
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ]
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 0, 1, 1] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+        )
+        denominator = torch.logsumexp(
+            torch.tensor([1.0, 0.0]), dim=0
+        )
+        expected = (
+            (denominator - 1.0)
+            + (denominator - 0.0)
+        ) * 0.5
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+
+    def test_batch_local_infonce_skips_explicit_holdout_only_rows(self):
+        pred_logits = torch.zeros(1, 2, 3)
+        pair_logits = torch.zeros(1, 2)
+        sub_idx = torch.tensor([[0, 1]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1, 0]], dtype=torch.int64)
+        valid = torch.tensor([[True, True]])
+        query = torch.tensor(
+            [[[1.0, 0.0], [0.0, 1.0]]],
+            requires_grad=True,
+        )
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ]
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 1, 0] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 1, 0, 1] = 1.0
+        supervision = torch.tensor([True, False, True])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+        )
+        self.assertEqual(
+            float(losses["predicate_rows_skipped"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            1.0,
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+
+    def test_batch_local_infonce_rejects_bce_negative_reweighting(self):
+        pred_logits = torch.zeros(1, 1, 2)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor([[[1.0, 0.0]]]),
+            predicate_query_raw=torch.tensor([[[1.0, 0.0]]]),
+            predicate_bank=torch.eye(2),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 2)
+        predicate_targets[0, 0, 1, 0] = 1.0
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                outputs,
+                pair_targets,
+                predicate_targets,
+                RelationLossConfig(
+                    sampler_loss_weight=0.0,
+                    pair_loss_weight=0.0,
+                    predicate_loss_weight=1.0,
+                    predicate_objective="batch-local-infonce",
+                ),
+                predicate_negative_weights=torch.tensor([1.0, 0.1]),
             )
 
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
