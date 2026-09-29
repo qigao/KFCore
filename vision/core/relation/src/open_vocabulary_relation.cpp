@@ -221,34 +221,32 @@ void validate_pair_tensor(const runtime::TensorDescriptor& tensor,
     require_dimension(tensor.shape[1], options.max_pairs, name);
 }
 
-void validate_contract(
+enum class ScoringMode
+{
+    HostQueries,
+    BackendLogits,
+};
+
+void require_dynamic_dimension(
+    std::int64_t declared,
+    const char* subject)
+{
+    if (declared != -1)
+    {
+        throw_contract(
+            std::string(subject) +
+            " must use a dynamic vocabulary extent");
+    }
+}
+
+void validate_common_inputs(
     const std::vector<runtime::TensorDescriptor>& tensors,
     const OpenVocabularyRelationOptions& options,
     std::int32_t& input_size)
 {
-    std::size_t input_count = 0U;
-    std::size_t output_count = 0U;
-    for (const auto& tensor : tensors)
-    {
-        tensor.is_input ? ++input_count : ++output_count;
-    }
-    if (input_count != 3U || output_count != 6U)
-    {
-        throw_contract(
-            "encoder requires exactly 3 inputs and 6 outputs");
-    }
-
     const auto& image = require_tensor(tensors, "image", true);
     const auto& boxes = require_tensor(tensors, "boxes", true);
     const auto& box_counts = require_tensor(tensors, "box_counts", true);
-    const auto& semantic =
-        require_tensor(tensors, "semantic_query", false);
-    const auto& spatial =
-        require_tensor(tensors, "spatial_query", false);
-    const auto& pair = require_tensor(tensors, "pair_logits", false);
-    const auto& sub = require_tensor(tensors, "sub_idx", false);
-    const auto& obj = require_tensor(tensors, "obj_idx", false);
-    const auto& valid = require_tensor(tensors, "valid_mask", false);
 
     input_size = resolve_image_size(image, options.input_size);
 
@@ -267,6 +265,35 @@ void validate_contract(
         throw_contract("box_counts must be INT64 [1]");
     }
     require_dimension(box_counts.shape[0], 1U, "box_counts");
+}
+
+void validate_encoder_contract(
+    const std::vector<runtime::TensorDescriptor>& tensors,
+    const OpenVocabularyRelationOptions& options,
+    std::int32_t& input_size)
+{
+    std::size_t input_count = 0U;
+    std::size_t output_count = 0U;
+    for (const auto& tensor : tensors)
+    {
+        tensor.is_input ? ++input_count : ++output_count;
+    }
+    if (input_count != 3U || output_count != 6U)
+    {
+        throw_contract(
+            "encoder requires exactly 3 inputs and 6 outputs");
+    }
+
+    validate_common_inputs(tensors, options, input_size);
+
+    const auto& semantic =
+        require_tensor(tensors, "semantic_query", false);
+    const auto& spatial =
+        require_tensor(tensors, "spatial_query", false);
+    const auto& pair = require_tensor(tensors, "pair_logits", false);
+    const auto& sub = require_tensor(tensors, "sub_idx", false);
+    const auto& obj = require_tensor(tensors, "obj_idx", false);
+    const auto& valid = require_tensor(tensors, "valid_mask", false);
 
     validate_query_tensor(semantic, options, "semantic_query");
     validate_query_tensor(spatial, options, "spatial_query");
@@ -279,6 +306,68 @@ void validate_contract(
     validate_pair_tensor(
         valid, options, runtime::DataType::Bool, "valid_mask");
 }
+
+void validate_backend_contract(
+    const std::vector<runtime::TensorDescriptor>& tensors,
+    const OpenVocabularyRelationOptions& options,
+    std::int32_t& input_size)
+{
+    std::size_t input_count = 0U;
+    std::size_t output_count = 0U;
+    for (const auto& tensor : tensors)
+    {
+        tensor.is_input ? ++input_count : ++output_count;
+    }
+    if (input_count != 5U || output_count != 5U)
+    {
+        throw_contract(
+            "backend-scoring graph requires exactly 5 inputs and 5 outputs");
+    }
+
+    validate_common_inputs(tensors, options, input_size);
+
+    const auto& bank = require_tensor(tensors, "W", true);
+    const auto& alpha = require_tensor(tensors, "alpha", true);
+    const auto& pred = require_tensor(tensors, "pred_logits", false);
+    const auto& pair = require_tensor(tensors, "pair_logits", false);
+    const auto& sub = require_tensor(tensors, "sub_idx", false);
+    const auto& obj = require_tensor(tensors, "obj_idx", false);
+    const auto& valid = require_tensor(tensors, "valid_mask", false);
+
+    if (bank.data_type != runtime::DataType::Float32 ||
+        bank.shape.size() != 2U)
+    {
+        throw_contract("W must be FP32 [V,D]");
+    }
+    require_dynamic_dimension(bank.shape[0], "W vocabulary axis");
+    require_dimension(bank.shape[1], options.query_dim, "W embedding axis");
+
+    if (alpha.data_type != runtime::DataType::Float32 ||
+        alpha.shape.size() != 1U)
+    {
+        throw_contract("alpha must be FP32 [V]");
+    }
+    require_dynamic_dimension(alpha.shape[0], "alpha vocabulary axis");
+
+    if (pred.data_type != runtime::DataType::Float32 ||
+        pred.shape.size() != 3U)
+    {
+        throw_contract("pred_logits must be FP32 [1,K,V]");
+    }
+    require_batch_one(pred.shape[0], "pred_logits");
+    require_dimension(pred.shape[1], options.max_pairs, "pred_logits pair axis");
+    require_dynamic_dimension(pred.shape[2], "pred_logits vocabulary axis");
+
+    validate_pair_tensor(
+        pair, options, runtime::DataType::Float32, "pair_logits");
+    validate_pair_tensor(
+        sub, options, runtime::DataType::Int64, "sub_idx");
+    validate_pair_tensor(
+        obj, options, runtime::DataType::Int64, "obj_idx");
+    validate_pair_tensor(
+        valid, options, runtime::DataType::Bool, "valid_mask");
+}
+
 
 void validate_regions(const std::vector<Region>& regions,
                       std::int32_t image_width,
