@@ -238,6 +238,62 @@ Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
 cannot increase recall or AP. GT-box evaluation does not use detector
 confidence.
 
+## Frozen DINOv3 baseline runner
+
+The first reproducible training recipe keeps the DINOv3 backbone frozen and
+trains only KFCore-owned relation parameters.
+
+Required inputs:
+
+- canonical train JSONL;
+- canonical validation JSONL;
+- one shared vocabulary JSON;
+- image root;
+- a saved predicate embedding tensor `[V,D]`.
+
+Example:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  --train-annotations data/train.jsonl ^
+  --validation-annotations data/validation.jsonl ^
+  --vocabulary data/vocabulary.json ^
+  --image-root data ^
+  --predicate-embeddings data/predicate_embeddings.pt ^
+  --output-dir build/relation-v1-frozen ^
+  --epochs 5 ^
+  --batch-size 4 ^
+  --image-size 448 ^
+  --max-boxes 32 ^
+  --pair-budget 128
+```
+
+The default backbone is the public
+`hf_hub:timm/vit_small_patch16_dinov3.lvd1689m`. It is loaded pretrained,
+frozen with `requires_grad=False`, and held in eval mode while tap fusion,
+geometry sampler, pair/context layers and predicate head train.
+
+The runner is fail-fast:
+
+- output directory must not already exist;
+- train and validation image paths must be disjoint;
+- decoded image dimensions must match the manifest;
+- examples exceeding `max_boxes` are rejected rather than truncated;
+- multi-label targets use the full predicate vocabulary;
+- non-finite loss or gradients abort training.
+
+A successful run writes:
+
+```text
+relation-v1.pt
+training.json
+benchmark.json
+```
+
+`training.json` records the split/vocabulary hashes, frozen backbone ID,
+training configuration, epoch losses and checkpoint SHA-256.
+`benchmark.json` is the canonical GT-box validation report.
+
 ## Checkpoint
 
 ```python
