@@ -560,6 +560,53 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Apache relation context stack
+
+Issue #119 ports the three post-pair context stages from
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`.
+
+Enable the complete context slice with:
+
+```text
+--pair-evidence-contract apache
+--pair-sampler-contract apache
+--relation-context-contract apache
+```
+
+The execution order is fixed:
+
+```text
+pair projection
+  -> RelationTransformer
+       2 pair self-attention layers
+       2 scene/box-token cross-attention layers
+  -> DeformableRelRead
+       4 anchors: subject/object/union/contact
+       8 heads x 4 sampled points
+       2 learned null slots
+       zero-initialized residual gate
+  -> RelationInteractionBlock
+       2 pair-dependency self-attention layers
+       1 joint pair+scene grounding layer
+```
+
+The RelationTransformer cross-attention memory concatenates projected scene
+patches with the four subject/object TL/BR Fourier box tokens produced by #98.
+Pair-padding masks also mask those box tokens. During training,
+`apache_box_token_dropout=0.3` can hide an image's box tokens while keeping
+scene patches visible.
+
+Deformable offsets are expressed in units of each anchor's half extent and the
+sampled positions are clamped to the image. The residual gate starts at zero,
+so adding this module begins as the exact RelationTransformer result.
+
+The final interaction block first models relation dependencies across pairs,
+then concatenates pair queries and scene tokens into one self-attention
+sequence and reads back only the pair positions.
+
+The legacy pair-only Transformer stays as a checkpoint-compatible control and
+is frozen when the Apache context stack is active.
+
 ## Apache two-stage relatedness pair sampler
 
 Issue #118 ports the pair-selection contract from the same last Apache-2.0
