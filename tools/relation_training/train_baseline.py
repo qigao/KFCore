@@ -541,6 +541,11 @@ def main() -> None:
         effective_bank,
         dim=-1,
     )
+    predicate_semantic_ontology_report = {
+        "enabled": predicate_soft_positive_weights is not None,
+        "weights_tensor_sha256": predicate_soft_positive_sha256,
+    }
+
     predicate_adapter_report = {
         "rank": model.config.predicate_adapter_rank,
         "parameter_count": model.predicate_adapter_parameter_count(),
@@ -577,6 +582,13 @@ def main() -> None:
                 "pair_loss_weight": loss_config.pair_loss_weight,
                 "predicate_loss_weight": loss_config.predicate_loss_weight,
                 "negative_pair_weight": loss_config.negative_pair_weight,
+                "predicate_objective": loss_config.predicate_objective,
+                "predicate_contrastive_temperature": (
+                    loss_config.predicate_contrastive_temperature
+                ),
+                "predicate_contrastive_hard_negative_count": (
+                    loss_config.predicate_contrastive_hard_negative_count
+                ),
             },
             "predicate_weighting": {
                 "mode": predicate_weighting.mode,
@@ -608,17 +620,18 @@ def main() -> None:
                     effective_train_predicate_support
                 ),
                 "holdout_row_policy": args.holdout_row_policy,
+                "contrastive_negative_candidate_indices": [
+                    index
+                    for index, enabled in enumerate(
+                        predicate_contrastive_negative_mask.tolist()
+                    )
+                    if enabled
+                ],
             },
-            "predicate_semantic_ontology": {
-            "enabled": predicate_soft_positive_weights is not None,
-            "weights_tensor_sha256": predicate_soft_positive_sha256,
-            "path": (
-                str(args.predicate_soft_positive_weights)
-                if args.predicate_soft_positive_weights
-                else None
+            "predicate_semantic_ontology": (
+                predicate_semantic_ontology_report
             ),
-        },
-        "predicate_negative_weighting": {
+            "predicate_negative_weighting": {
                 "zero_support_negative_weight": (
                     args.zero_support_negative_weight
                 ),
@@ -718,6 +731,9 @@ def main() -> None:
                 if enabled
             ],
         },
+        "predicate_semantic_ontology": (
+            predicate_semantic_ontology_report
+        ),
         "predicate_negative_weighting": {
             "zero_support_negative_weight": (
                 args.zero_support_negative_weight
