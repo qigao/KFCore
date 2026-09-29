@@ -593,6 +593,70 @@ modes under the same hard8 InfoNCE + calibration=0.10 contract. This isolates
 whether the previous union-contact gain is primarily attributable to contact
 evidence or to the combination.
 
+## Rich pair geometry evidence
+
+After contact-only pooling was selected as the lean open-vocabulary visual
+baseline, the next #98 attribution keeps that visual evidence fixed and adds a
+zero-initialized rich geometry residual.
+
+Historical geometry remains unchanged:
+
+```text
+dx, dy, distance,
+log(width ratio), log(height ratio),
+subject area, object area, IoU
+```
+
+Rich mode adds ten normalized features through separate residual branches:
+
+```text
+dx / subject width
+dy / subject height
+dx / object width
+dy / object height
+intersection / subject area
+intersection / object area
+horizontal box gap
+vertical box gap
+cos(relative direction)
+sin(relative direction)
+```
+
+Relative offsets are clipped to [-8,8]; overlap fractions stay in [0,1].
+Box gaps remain in normalized image coordinates and direction terms in [-1,1].
+
+The existing 8-D geometry encoder and sampler are not widened. Instead rich
+mode adds:
+
+```text
+10-D rich geometry
+   -> zero-init residual -> geometry embedding
+   -> zero-init residual -> pair sampler logit
+```
+
+All historical/common parameters are initialized identically under the same
+seed and rich mode starts with bitwise-identical outputs. On the canonical
+experiment configuration (`geometry_dim=32`) rich mode adds exactly 330
+trainable parameters:
+
+```text
+10 * 32 representation residual
++ 10 * 1 sampler residual
+```
+
+`.github/workflows/openimages-pair-geometry-evidence.yml` compares
+`basic` vs `rich` while fixing:
+
+- contact-only visual evidence;
+- hard8 batch-local InfoNCE;
+- calibration weight 0.10;
+- frozen DINOv3 ViT-S/16;
+- canonical Open Images 256/64;
+- K=48, shared whitened CLIP prototypes, optimizer and seed.
+
+Sampler recall is deliberately reported rather than forced equal because rich
+geometry is also allowed to improve pair selection.
+
 ## Source-aware predicate calibration auxiliary
 
 Bounded hard negatives broaden the InfoNCE contrast set and improve retained
