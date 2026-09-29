@@ -360,6 +360,13 @@ def train_epoch(
         "pair_loss": 0.0,
         "predicate_loss": 0.0,
     }
+    diagnostic_sums = {
+        "predicate_contrast_set_size": 0.0,
+        "predicate_positive_cosine": 0.0,
+        "predicate_hard_negative_margin": 0.0,
+        "predicate_query_raw_norm": 0.0,
+        "predicate_unobserved_column_fraction": 0.0,
+    }
     examples = 0
     predicate_rows = 0
     predicate_rows_skipped = 0
@@ -407,6 +414,10 @@ def train_epoch(
         )
         for key in sums:
             sums[key] += float(losses[key].detach().cpu()) * batch_size
+        for key in diagnostic_sums:
+            diagnostic_sums[key] += (
+                float(losses[key].detach().cpu()) * batch_size
+            )
 
     if examples == 0:
         raise ValueError("training loader produced no examples")
@@ -418,6 +429,8 @@ def train_epoch(
     report["predicate_rows_skipped"] = float(
         predicate_rows_skipped
     )
+    for key, value in diagnostic_sums.items():
+        report[key] = value / examples
     return report
 
 

@@ -437,6 +437,70 @@ The train manifest alone determines the weights. `training.json` records:
 K=48 and whitened CLIP prototypes. The final compare job rejects any
 dataset/prototype/parameter-count drift before reporting metric deltas.
 
+## Open-world predicate objective v2
+
+The historical relation baseline uses exhaustive multi-label BCE. That remains
+the default control, but it assumes that every unannotated predicate column on
+an annotated positive pair is false. The explicit zero-support and holdout
+experiments showed that assumption can suppress semantic transfer.
+
+The first objective-v2 step is a batch-local multi-positive InfoNCE:
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-temperature 0.07
+```
+
+For each training batch:
+
+1. keep sampled positive relation pairs;
+2. apply the explicit predicate supervision/holdout mask;
+3. build the contrast set from the union of predicate directions that remain
+   positive somewhere in that batch;
+4. align each visual relation query against all of its known positive text
+   directions;
+5. do not place vocabulary columns that were unobserved in the batch into the
+   denominator.
+
+This is deliberately narrower than the final #97 objective. Source-aware safe
+negatives, synonym soft positives and explicit inverse negatives are separate
+follow-up steps. The important first contract is that the model no longer
+receives an exhaustive negative gradient from every vocabulary column.
+
+Multi-label pairs keep every supervised positive. An explicit-holdout-only pair
+naturally has no visible predicate positive under InfoNCE and is therefore
+skipped for predicate loss while retaining pair-existence and sampler
+supervision.
+
+Training evidence reports:
+
+```text
+predicate_contrast_set_size
+predicate_positive_cosine
+predicate_hard_negative_margin
+predicate_query_raw_norm
+predicate_unobserved_column_fraction
+predicate_rows_skipped
+```
+
+BCE-only negative reweighting (`--zero-support-negative-weight != 1`) cannot be
+combined with batch-local InfoNCE.
+
+`.github/workflows/openimages-predicate-objective-v2.yml` runs a four-arm
+controlled ladder on the canonical 256/64 Open Images slice:
+
+```text
+bce-baseline
+bce-holdout
+infonce-baseline
+infonce-holdout
+```
+
+All arms share the same whitened CLIP bank, frozen DINOv3 ViT-S/16, K=48,
+sqrt-balanced positive weighting, architecture, optimizer, seed and three-epoch
+schedule. The comparison separates the objective's in-distribution effect from
+its robustness to the explicit `contain / holds / ride` predicate holdout.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive
