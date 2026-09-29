@@ -8,6 +8,10 @@ from pathlib import Path
 import torch
 
 from benchmark import RelationVocabulary
+from semantic_ontology import (
+    build_metadata,
+    semantic_soft_positive_weights,
+)
 from make_predicate_embeddings import (
     DEFAULT_TEMPLATES,
     aggregate_prompt_embeddings,
@@ -133,6 +137,70 @@ class PredicatePrototypeTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             symmetric_whiten_predicates(duplicate)
+
+    def test_semantic_soft_positive_weights_use_sparse_symmetric_neighbors(self):
+        embeddings = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],
+                [0.98, 0.20, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=torch.float32,
+        )
+        weights, cosine = semantic_soft_positive_weights(
+            embeddings,
+            top_k=1,
+            temperature=0.1,
+            min_weight=0.05,
+        )
+
+        self.assertEqual(tuple(weights.shape), (4, 4))
+        self.assertTrue(torch.allclose(weights.diag(), torch.ones(4)))
+        self.assertTrue(torch.allclose(weights, weights.T))
+        self.assertGreater(float(weights[0, 1]), 0.05)
+        self.assertEqual(float(weights[0, 2]), 0.0)
+        self.assertEqual(float(weights[0, 3]), 0.0)
+        self.assertTrue(torch.allclose(cosine, cosine.T))
+
+    def test_semantic_soft_positive_weights_respect_minimum_weight(self):
+        embeddings = torch.eye(3)
+        weights, _ = semantic_soft_positive_weights(
+            embeddings,
+            top_k=2,
+            temperature=0.1,
+            min_weight=0.05,
+        )
+        self.assertTrue(torch.equal(weights, torch.eye(3)))
+
+    def test_semantic_ontology_metadata_records_named_edges(self):
+        vocabulary = RelationVocabulary(
+            predicates=("contain", "inside_of", "ride"),
+        )
+        weights = torch.eye(3)
+        weights[0, 1] = 0.4
+        weights[1, 0] = 0.4
+        cosine = torch.tensor(
+            [
+                [1.0, 0.8, 0.1],
+                [0.8, 1.0, 0.2],
+                [0.1, 0.2, 1.0],
+            ]
+        )
+        metadata = build_metadata(
+            vocabulary,
+            weights,
+            cosine,
+            source_tensor_sha256="source-hash",
+            top_k=2,
+            temperature=0.1,
+            min_weight=0.05,
+        )
+        self.assertEqual(metadata["edge_count"], 1)
+        edge = metadata["edges"][0]
+        self.assertEqual(edge["left"], "contain")
+        self.assertEqual(edge["right"], "inside_of")
+        self.assertAlmostEqual(edge["weight"], 0.4)
 
     def test_write_outputs_records_stable_tensor_hash(self):
         vocabulary = RelationVocabulary(
