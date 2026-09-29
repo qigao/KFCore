@@ -13,7 +13,7 @@ from PIL import Image
 from benchmark import DatasetManifest, RelationVocabulary, VOCAB_SCHEMA
 
 
-REQUIRED_COLUMNS = (
+BASE_COLUMNS = (
     "ImageID",
     "LabelName1",
     "LabelName2",
@@ -25,8 +25,22 @@ REQUIRED_COLUMNS = (
     "XMax2",
     "YMin2",
     "YMax2",
-    "RelationLabel",
 )
+RELATION_COLUMN_ALIASES = ("RelationLabel", "RelationshipLabel")
+CANONICAL_COLUMNS = BASE_COLUMNS + ("RelationLabel",)
+
+
+def _relation_column(fieldnames: Sequence[str]) -> str:
+    present = [
+        name for name in RELATION_COLUMN_ALIASES
+        if name in fieldnames
+    ]
+    if len(present) != 1:
+        raise ValueError(
+            "Open Images relationship CSV must contain exactly one of "
+            "RelationLabel or RelationshipLabel"
+        )
+    return present[0]
 
 
 @dataclass(frozen=True, order=True)
@@ -160,15 +174,16 @@ def iter_relationship_rows(
         reader = csv.DictReader(stream)
         if reader.fieldnames is None:
             raise ValueError("Open Images relationship CSV has no header")
-        missing = set(REQUIRED_COLUMNS).difference(reader.fieldnames)
+        missing = set(BASE_COLUMNS).difference(reader.fieldnames)
         if missing:
             raise ValueError(
                 f"Open Images relationship CSV is missing columns: {sorted(missing)}"
             )
+        relation_column = _relation_column(reader.fieldnames)
 
         for line_number, row in enumerate(reader, start=2):
             image_id = row["ImageID"]
-            predicate = row["RelationLabel"]
+            predicate = row[relation_column]
             if not image_id or not predicate:
                 raise ValueError(
                     f"Open Images line {line_number} has empty image/predicate"
@@ -483,17 +498,21 @@ def subset_relationship_csv(
         reader = csv.DictReader(stream)
         if reader.fieldnames is None:
             raise ValueError("Open Images relationship CSV has no header")
-        missing = set(REQUIRED_COLUMNS).difference(reader.fieldnames)
+        missing = set(BASE_COLUMNS).difference(reader.fieldnames)
         if missing:
             raise ValueError(
                 f"Open Images relationship CSV is missing columns: {sorted(missing)}"
             )
+        relation_column = _relation_column(reader.fieldnames)
         for row in reader:
             if (
                 row["ImageID"] in selected
-                and row["RelationLabel"] != "is"
+                and row[relation_column] != "is"
             ):
-                rows.append(tuple(row[column] for column in REQUIRED_COLUMNS))
+                rows.append(
+                    tuple(row[column] for column in BASE_COLUMNS)
+                    + (row[relation_column],)
+                )
 
     present = {row[0] for row in rows}
     missing_ids = sorted(selected - present)
@@ -507,7 +526,7 @@ def subset_relationship_csv(
 
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(REQUIRED_COLUMNS)
+    writer.writerow(CANONICAL_COLUMNS)
     writer.writerows(rows)
     return buffer.getvalue()
 

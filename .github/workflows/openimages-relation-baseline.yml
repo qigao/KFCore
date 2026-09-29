@@ -25,6 +25,7 @@ jobs:
       CLASS_DESCRIPTIONS_URL: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
       DOWNLOADER_URL: https://raw.githubusercontent.com/openimages/dataset/main/downloader.py
       DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+      OPENIMAGES_FORMAT_REVISION: relationship-label-alias-v1
       HF_HUB_DISABLE_TELEMETRY: '1'
     steps:
       - uses: actions/checkout@v4
