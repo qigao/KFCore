@@ -26,7 +26,6 @@ jobs:
       DOWNLOADER_URL: https://raw.githubusercontent.com/openimages/dataset/main/downloader.py
       DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
       HF_HUB_DISABLE_TELEMETRY: '1'
-      HF_HOME: ${{ runner.temp }}/hf-home
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,6 +113,8 @@ jobs:
           python tools/relation_training/make_predicate_embeddings.py             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json"             --out "$RUNNER_TEMP/predicate-embeddings.pt"
 
       - name: Train frozen-DINOv3 real-data smoke baseline
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         shell: bash
         run: |
           set -euxo pipefail
