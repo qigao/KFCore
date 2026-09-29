@@ -528,13 +528,32 @@ jobs:
                           f"A/B contract mismatch for {name} {key}: "
                           f"{control[key]} != {candidate[key]}"
                       )
+              control_zero_support = control["predicate_weighting"].get(
+                  "zero_support_predicate_indices",
+                  [
+                      index
+                      for index, count in enumerate(
+                          control["predicate_weighting"]["predicate_positive_counts"]
+                      )
+                      if count == 0
+                  ],
+              )
+              candidate_zero_support = candidate["predicate_weighting"].get(
+                  "zero_support_predicate_indices",
+                  [
+                      index
+                      for index, count in enumerate(
+                          candidate["predicate_weighting"]["predicate_positive_counts"]
+                      )
+                      if count == 0
+                  ],
+              )
               if (
                   control["predicate_weighting"]["positive_pair_count"]
                   != candidate["predicate_weighting"]["positive_pair_count"]
                   or control["predicate_weighting"]["predicate_positive_counts"]
                   != candidate["predicate_weighting"]["predicate_positive_counts"]
-                  or control["predicate_weighting"]["zero_support_predicate_indices"]
-                  != candidate["predicate_weighting"]["zero_support_predicate_indices"]
+                  or control_zero_support != candidate_zero_support
               ):
                   raise RuntimeError(
                       f"predicate support drift in {name}"
