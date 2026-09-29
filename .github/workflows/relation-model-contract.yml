@@ -38,19 +38,30 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: tools/relation_training/requirements-ci.txt
+          cache-dependency-path: |
+            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-ci.txt
 
-      - name: Install focused CPU dependency
+      - name: Install focused CPU dependencies
         shell: bash
         run: |
           set -euxo pipefail
-          python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-ci.txt
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-ci-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-ci.txt
 
       - name: Compile Python contracts
         shell: bash
         run: |
           set -euxo pipefail
-          python -m py_compile             tools/relation_training/model.py             tools/relation_training/losses.py             tools/relation_training/checkpoint.py             tools/relation_training/export_onnx.py             tools/relation_training/test_model.py
+          python -m py_compile \
+            tools/relation_training/model.py \
+            tools/relation_training/losses.py \
+            tools/relation_training/checkpoint.py \
+            tools/relation_training/export_onnx.py \
+            tools/relation_training/test_model.py
 
       - name: Run synthetic forward/backward and ONNX contract
         shell: bash
