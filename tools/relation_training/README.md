@@ -501,6 +501,75 @@ sqrt-balanced positive weighting, architecture, optimizer, seed and three-epoch
 schedule. The comparison separates the objective's in-distribution effect from
 its robustness to the explicit `contain / holds / ride` predicate holdout.
 
+## Semantic soft positives for predicate InfoNCE
+
+Bounded hard negatives expand the contrast set and improve seen-predicate
+ranking, but they do not recover strict explicit-holdout transfer. The next
+objective-v2 step adds a **supervision-only semantic ontology**.
+
+The inference predicate bank remains the whitened CLIP bank. A second raw CLIP
+tensor from the exact same text-encoding pass is used only to construct sparse
+semantic-neighbor weights:
+
+```text
+raw CLIP predicate text space
+        |
+        +-- top-k semantic neighbors
+        +-- temperature-scaled edge weight
+        +-- minimum edge weight
+        |
+        v
+soft-positive [V,V] supervision matrix
+```
+
+The ontology never changes runtime/export tensors or predicate embeddings.
+
+Strict holdout semantics are preserved:
+
+1. direct annotation labels are filtered through the supervision/holdout mask;
+2. rows with no visible direct positive are skipped before semantic expansion;
+3. only visible seed predicates may propagate positive mass through the
+   text-only ontology;
+4. a semantic soft-positive inherits the **seed predicate's** class-balance
+   mass, never the target predicate's train-frequency weight;
+5. semantic soft-positive columns are excluded from hard-negative mining;
+6. explicit holdouts and natural zero-support predicates remain outside the
+   direct hard-negative candidate pool.
+
+This permits a held-out direction to receive indirect semantic supervision from
+another visible relation phrase without using the held-out annotation itself.
+
+Build a raw+whitened pair from one CLIP encoding:
+
+```powershell
+python tools/relation_training/make_predicate_embeddings.py ^
+  --vocabulary vocabulary.json ^
+  --out predicate-prototypes.pt ^
+  --mode clip-whitened ^
+  --source-out raw-predicate-prototypes.pt
+```
+
+Then build the supervision ontology:
+
+```powershell
+python tools/relation_training/semantic_ontology.py ^
+  --vocabulary vocabulary.json ^
+  --source-embeddings raw-predicate-prototypes.pt ^
+  --out semantic-soft-positives.pt ^
+  --top-k 2 ^
+  --temperature 0.1 ^
+  --min-weight 0.05
+```
+
+Training consumes it only under batch-local InfoNCE:
+
+```text
+--predicate-soft-positive-weights semantic-soft-positives.pt
+```
+
+Evidence records the ontology tensor hash and the per-epoch
+`predicate_soft_positive_count`.
+
 ## Bounded hard negatives for predicate InfoNCE
 
 The first predicate-objective-v2 experiment showed that positive-only
