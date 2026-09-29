@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 import tempfile
@@ -9,8 +10,10 @@ import torch
 import torch.nn.functional as F
 
 from apache_vocab_head import (
+    SPATIAL_FLAGS_SCHEMA,
     ApacheVocabHead,
     balanced_spatial_probe_targets,
+    load_predicate_spatial_flags,
 )
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import (
@@ -44,6 +47,45 @@ def head_config() -> RelationModelConfig:
 
 
 class ApacheVocabHeadTest(unittest.TestCase):
+    def test_spatial_flag_sidecar_requires_exact_vocabulary_order(self):
+        payload = {
+            "schema": SPATIAL_FLAGS_SCHEMA,
+            "predicates": ["beside", "holding", "riding"],
+            "is_spatial": [True, False, False],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spatial-flags.json"
+            path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            flags = load_predicate_spatial_flags(
+                path,
+                ["beside", "holding", "riding"],
+            )
+            self.assertTrue(
+                torch.equal(
+                    flags,
+                    torch.tensor([True, False, False]),
+                )
+            )
+            with self.assertRaises(ValueError):
+                load_predicate_spatial_flags(
+                    path,
+                    ["holding", "beside", "riding"],
+                )
+
+            payload["is_spatial"] = [True, True, True]
+            path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                load_predicate_spatial_flags(
+                    path,
+                    ["beside", "holding", "riding"],
+                )
+
     def test_routing_is_text_conditioned_and_permutation_equivariant(self):
         torch.manual_seed(51)
         head = ApacheVocabHead(
