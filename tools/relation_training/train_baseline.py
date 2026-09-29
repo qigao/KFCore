@@ -21,6 +21,7 @@ from training import (
     FrozenBaselineConfig,
     RelationTrainingDataset,
     build_predicate_weighting,
+    build_zero_support_negative_weights,
     config_payload,
     evaluate_gt_boxes,
     freeze_backbone,
@@ -125,6 +126,16 @@ def main() -> None:
             "Exclude train-zero-support predicate dimensions from predicate BCE."
         ),
     )
+    parser.add_argument(
+        "--zero-support-negative-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Multiplier for negative BCE terms on train-zero-support "
+            "predicate dimensions; 1 is legacy exhaustive BCE, 0 is "
+            "equivalent to masking those negative-only dimensions."
+        ),
+    )
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260929)
@@ -184,6 +195,21 @@ def main() -> None:
         cap=args.predicate_positive_weight_cap,
     )
     predicate_positive_weights = predicate_weighting.tensor()
+    if (
+        args.mask_zero_support_predicates
+        and args.zero_support_negative_weight != 1.0
+    ):
+        raise ValueError(
+            "--mask-zero-support-predicates cannot be combined with "
+            "--zero-support-negative-weight != 1"
+        )
+    predicate_negative_weights = build_zero_support_negative_weights(
+        predicate_count=len(vocabulary.predicates),
+        zero_support_predicate_indices=(
+            predicate_weighting.zero_support_predicate_indices
+        ),
+        zero_support_negative_weight=args.zero_support_negative_weight,
+    )
     if args.mask_zero_support_predicates:
         predicate_supervision_mask = torch.tensor(
             [
@@ -262,6 +288,7 @@ def main() -> None:
             loss_config=loss_config,
             predicate_positive_weights=predicate_positive_weights,
             predicate_supervision_mask=predicate_supervision_mask,
+            predicate_negative_weights=predicate_negative_weights,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -340,6 +367,14 @@ def main() -> None:
                 "supervised_predicate_indices": supervised_predicate_indices,
                 "masked_predicate_indices": masked_predicate_indices,
             },
+            "predicate_negative_weighting": {
+                "zero_support_negative_weight": (
+                    args.zero_support_negative_weight
+                ),
+                "negative_weights": (
+                    predicate_negative_weights.tolist()
+                ),
+            },
             "predicate_adapter": predicate_adapter_report,
             "history": history,
         },
@@ -405,6 +440,14 @@ def main() -> None:
             "mode": predicate_supervision_mode,
             "supervised_predicate_indices": supervised_predicate_indices,
             "masked_predicate_indices": masked_predicate_indices,
+        },
+        "predicate_negative_weighting": {
+            "zero_support_negative_weight": (
+                args.zero_support_negative_weight
+            ),
+            "negative_weights": (
+                predicate_negative_weights.tolist()
+            ),
         },
         "predicate_adapter": predicate_adapter_report,
         "history": history,

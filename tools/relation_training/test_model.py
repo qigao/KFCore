@@ -555,6 +555,154 @@ class RelationModelTest(unittest.TestCase):
                 ),
             )
 
+    def test_predicate_negative_weights_scale_only_negative_terms(self):
+        torch.manual_seed(17)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+
+        pred_logits, _, sub_idx, obj_idx, valid_mask = output.runtime
+        pred_logits.retain_grad()
+        valid_slots = torch.nonzero(valid_mask[0], as_tuple=False)
+        slot = int(valid_slots[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+
+        negative_weights = torch.tensor([0.0, 0.25, 0.0])
+        losses = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+            ),
+            predicate_negative_weights=negative_weights,
+        )
+
+        raw = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, slot],
+            torch.tensor([1.0, 0.0, 0.0]),
+            reduction="none",
+        )
+        expected = (raw[0] + 0.25 * raw[1]) / 1.25
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(pred_logits.grad)
+        self.assertGreater(
+            float(pred_logits.grad[0, slot, 0].abs()),
+            0.0,
+        )
+        self.assertGreater(
+            float(pred_logits.grad[0, slot, 1].abs()),
+            0.0,
+        )
+        self.assertEqual(
+            float(pred_logits.grad[0, slot, 2].abs()),
+            0.0,
+        )
+
+    def test_zero_negative_weight_matches_zero_support_mask(self):
+        torch.manual_seed(18)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        _, _, sub_idx, obj_idx, valid_mask = output.runtime
+        slot = int(torch.nonzero(valid_mask[0], as_tuple=False)[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+        config_value = RelationLossConfig(
+            sampler_loss_weight=0.0,
+            pair_loss_weight=0.0,
+            predicate_loss_weight=1.0,
+        )
+
+        weighted = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            config_value,
+            predicate_negative_weights=torch.tensor(
+                [1.0, 1.0, 0.0]
+            ),
+        )
+        masked = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            config_value,
+            predicate_supervision_mask=torch.tensor(
+                [True, True, False]
+            ),
+        )
+        self.assertTrue(
+            torch.allclose(
+                weighted["predicate_loss"],
+                masked["predicate_loss"],
+            )
+        )
+
+    def test_predicate_negative_weights_fail_fast_on_invalid_contract(self):
+        torch.manual_seed(20)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        _, _, sub_idx, obj_idx, valid_mask = output.runtime
+        slot = int(torch.nonzero(valid_mask[0], as_tuple=False)[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+
+        invalid = (
+            torch.ones(2),
+            torch.tensor([1.0, -0.1, 1.0]),
+            torch.tensor([1.0, float("nan"), 1.0]),
+        )
+        for weights in invalid:
+            with self.assertRaises(ValueError):
+                supervised_relation_loss(
+                    output,
+                    pair_targets,
+                    predicate_targets,
+                    predicate_negative_weights=weights,
+                )
+
     def test_predicate_supervision_mask_zeroes_masked_gradients(self):
         torch.manual_seed(19)
         model = KFRelationModel(
