@@ -120,6 +120,11 @@ void validate_options(
         throw_invalid(
             "at least one predicate template is required");
     }
+    if (options.inference_batch_size < options.templates.size())
+    {
+        throw_invalid(
+            "inference_batch_size must fit every template for one predicate");
+    }
     for (const auto& value : options.templates)
     {
         if (value.empty() ||
@@ -420,6 +425,21 @@ struct PredicateTextEncoder::Impl final
         {
             return {};
         }
+
+        std::size_t text_bytes = 0U;
+        for (const auto& text : texts)
+        {
+            text_bytes = checked_add(
+                text_bytes,
+                text.size(),
+                "expanded predicate text");
+        }
+        if (text_bytes > options.max_text_bytes)
+        {
+            throw_resource(
+                "expanded predicate text exceeds configured byte limit");
+        }
+
         const PredicateTokenBatch tokens =
             tokenizer->tokenize(
                 texts,
@@ -827,6 +847,7 @@ void PredicateTextEncoder::clear_cache()
     {
         return;
     }
+    UseGuard guard(impl_->in_use);
     impl_->cache.clear();
     impl_->lru.clear();
 }
