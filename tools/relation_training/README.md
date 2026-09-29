@@ -560,6 +560,58 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Apache two-stage relatedness pair sampler
+
+Issue #118 ports the pair-selection contract from the same last Apache-2.0
+RelateAnything snapshot used by #98.
+
+Enable it with:
+
+```text
+--pair-evidence-contract apache
+--pair-sampler-contract apache
+```
+
+The sampler has two stages:
+
+```text
+all ordered non-self pairs
+  -> exact 19-D geometry MLP
+  -> top 400
+  -> asymmetric visual relatedness
+       dot(f_sub(v_i), f_obj(v_j)) / sqrt(d)
+  -> top K (default 128)
+```
+
+The stage-2 relatedness logit is the runtime `pair_logit` consumed by the
+relation score contract. The historical post-transformer `pair_head` is not
+used in this mode.
+
+Training passes the dense pair target matrix into the model only through
+`forward_training`. Annotated directed pairs and their swapped copies are
+forced through both TopK stages so later direction supervision can address the
+same pair slots.
+
+Reference sampler losses are computed inside the sampler:
+
+```text
+geometry pre-scorer:
+  BCE over every valid ordered pair
+
+relatedness:
+  focal BCE over stage-1 survivors
+  positive weight = 1
+  unlabelled floor = 0.3
+```
+
+The outer training loss directly consumes these two values in Apache sampler
+mode. The older generic dense sampler / selected-pair BCE remains the legacy
+control.
+
+The current slice implements the reference PU floor. Category-pair statistical
+negative-rate overrides remain a follow-up in #118; they are training-only and
+must never become inference inputs.
+
 ## Apache RelateAnything pair-evidence reference path
 
 Issue #98 is now anchored to the last Apache-2.0 RelateAnything snapshot,
