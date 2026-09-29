@@ -56,6 +56,9 @@ class RelationTrainingOutputs:
     runtime: tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
     sampler_logits: Tensor
     sampler_valid: Tensor
+    predicate_query: Tensor
+    predicate_query_raw: Tensor
+    predicate_bank: Tensor
 
 
 class BackboneAdapter(nn.Module):
@@ -790,7 +793,7 @@ class KFRelationModel(nn.Module):
         box_counts: Tensor,
         *,
         encoder_only: bool = False,
-    ) -> tuple[tuple[Tensor, ...], Tensor, Tensor]:
+    ) -> tuple[tuple[Tensor, ...], Tensor, Tensor, Tensor, Tensor, Tensor]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
         if image.shape[2] != self.config.image_size or image.shape[3] != self.config.image_size:
@@ -869,9 +872,11 @@ class KFRelationModel(nn.Module):
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
 
         pair_logits = self.pair_head(tokens).squeeze(-1)
+        predicate_query_raw = self.predicate_projection(tokens)
         predicate_query = F.normalize(
-            self.predicate_projection(tokens), dim=-1
+            predicate_query_raw, dim=-1
         )
+        predicate_bank = self.effective_predicate_bank()
         if encoder_only:
             # Phase-1 open-vocabulary ABI reserves independent semantic and
             # spatial query outputs. Until the dual-expert model lands they
@@ -888,12 +893,15 @@ class KFRelationModel(nn.Module):
                 encoder_runtime,
                 sampler_logits,
                 flat_valid.to(torch.bool),
+                predicate_query,
+                predicate_query_raw,
+                predicate_bank,
             )
 
         scale = self.logit_scale.exp().clamp(max=100.0)
         pred_logits = scale * torch.matmul(
             predicate_query,
-            self.effective_predicate_bank().transpose(0, 1),
+            predicate_bank.transpose(0, 1),
         )
         runtime = (
             pred_logits,
@@ -902,12 +910,19 @@ class KFRelationModel(nn.Module):
             object_index.to(torch.int64),
             selected_valid.to(torch.bool),
         )
-        return runtime, sampler_logits, flat_valid.to(torch.bool)
+        return (
+            runtime,
+            sampler_logits,
+            flat_valid.to(torch.bool),
+            predicate_query,
+            predicate_query_raw,
+            predicate_bank,
+        )
 
     def forward_encoder(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _ = self._forward_impl(
             image,
             boxes,
             box_counts,
@@ -922,17 +937,27 @@ class KFRelationModel(nn.Module):
     def forward(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _ = self._forward_impl(image, boxes, box_counts)
+        runtime, _, _, _, _, _ = self._forward_impl(
+            image, boxes, box_counts
+        )
         return runtime
 
     def forward_training(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> RelationTrainingOutputs:
-        runtime, sampler_logits, sampler_valid = self._forward_impl(
-            image, boxes, box_counts
-        )
+        (
+            runtime,
+            sampler_logits,
+            sampler_valid,
+            predicate_query,
+            predicate_query_raw,
+            predicate_bank,
+        ) = self._forward_impl(image, boxes, box_counts)
         return RelationTrainingOutputs(
             runtime=runtime,
             sampler_logits=sampler_logits,
             sampler_valid=sampler_valid,
+            predicate_query=predicate_query,
+            predicate_query_raw=predicate_query_raw,
+            predicate_bank=predicate_bank,
         )
