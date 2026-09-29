@@ -501,6 +501,65 @@ sqrt-balanced positive weighting, architecture, optimizer, seed and three-epoch
 schedule. The comparison separates the objective's in-distribution effect from
 its robustness to the explicit `contain / holds / ride` predicate holdout.
 
+## Bounded hard negatives for predicate InfoNCE
+
+The first predicate-objective-v2 experiment showed that positive-only
+batch-local InfoNCE produces a very small contrast set and collapses strict
+explicit-holdout transfer even though pair AP improves.
+
+The next controlled step keeps the same multi-positive InfoNCE objective but
+adds a bounded set of hard predicate negatives:
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-hard-negative-count N
+```
+
+The candidate pool is intentionally conservative:
+
+```text
+train support > 0
+AND predicate remains inside the current supervision mask
+```
+
+Therefore:
+
+- explicit holdouts cannot become hard negatives;
+- natural train-zero-support predicates cannot become hard negatives;
+- candidates already positive somewhere in the batch are not duplicated;
+- the loss re-applies the supervision mask internally even if a caller passes
+  an overly broad candidate mask.
+
+For each batch, candidate hardness is the maximum current visual-query cosine
+against that predicate direction. The top `N` candidates are added to the
+contrast set. Mining uses detached scores; gradients flow only through the
+subsequent selected contrastive logits.
+
+Training evidence records:
+
+```text
+predicate_hard_negative_count
+predicate_contrast_set_size
+predicate_unobserved_column_fraction
+contrastive_negative_candidate_indices
+```
+
+`.github/workflows/openimages-predicate-hard-negatives.yml` compares four
+arms on the same canonical Open Images 256/64, whitened-CLIP, frozen-DINOv3,
+K=48 contract:
+
+```text
+positive-only-baseline
+positive-only-holdout
+hard8-baseline
+hard8-holdout
+```
+
+The experiment answers one narrow question: whether broadening the contrast set
+with bounded train-supported negatives restores global text-space ranking and
+strict held-out predicate transfer before adding ontology/source-aware
+negative weighting.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive
