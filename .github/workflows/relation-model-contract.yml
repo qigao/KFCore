@@ -67,6 +67,7 @@ jobs:
             tools/relation_training/training.py \
             tools/relation_training/train_baseline.py \
             tools/relation_training/compare_zero_support_sweep.py \
+            tools/relation_training/compare_predicate_objective_v2.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
