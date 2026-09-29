@@ -16,6 +16,7 @@ from training import (
     FrozenBaselineConfig,
     RelationTrainingDataset,
     build_predicate_weighting,
+    build_zero_support_negative_weights,
     evaluate_gt_boxes,
     freeze_backbone,
     make_training_loader,
@@ -219,6 +220,37 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
             zero_support.positive_weights[2],
             1.0,
         )
+
+    def test_zero_support_negative_weight_builder(self):
+        weights = build_zero_support_negative_weights(
+            predicate_count=5,
+            zero_support_predicate_indices=(1, 4),
+            zero_support_negative_weight=0.25,
+        )
+        self.assertEqual(
+            weights.tolist(),
+            [1.0, 0.25, 1.0, 1.0, 0.25],
+        )
+
+        for value in (-0.1, 1.1, float("nan")):
+            with self.assertRaises(ValueError):
+                build_zero_support_negative_weights(
+                    predicate_count=5,
+                    zero_support_predicate_indices=(1,),
+                    zero_support_negative_weight=value,
+                )
+        with self.assertRaises(ValueError):
+            build_zero_support_negative_weights(
+                predicate_count=5,
+                zero_support_predicate_indices=(1, 1),
+                zero_support_negative_weight=0.5,
+            )
+        with self.assertRaises(ValueError):
+            build_zero_support_negative_weights(
+                predicate_count=5,
+                zero_support_predicate_indices=(5,),
+                zero_support_negative_weight=0.5,
+            )
 
     def test_frozen_baseline_updates_head_not_backbone_and_evaluates(self):
         seed_everything(17)
