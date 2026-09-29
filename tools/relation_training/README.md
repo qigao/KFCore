@@ -285,6 +285,60 @@ This is an attribution experiment. If whitening recovers the orthogonal
 control, the next useful model change is a relation-specific shared text
 adapter rather than generic raw CLIP prototypes.
 
+## Train-zero-support predicate supervision mask
+
+A shared train+validation vocabulary can contain predicates that have validation
+ground truth but no positive examples in the fixed training split. Treating
+those dimensions as ordinary zero labels on every positive training pair gives
+the model repeated negative evidence for a class it has never had a chance to
+observe positively.
+
+For semantic/open-vocabulary diagnostics, the runner can exclude only those
+train-zero-support dimensions from predicate BCE:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  ... ^
+  --predicate-positive-weight-mode sqrt-balanced ^
+  --predicate-positive-weight-cap 20 ^
+  --mask-zero-support-predicates
+```
+
+The mask is training-only. It does not change:
+- predicate vocabulary;
+- predicate bank;
+- runtime logits;
+- ONNX ABI;
+- sampler or pair-existence objectives.
+
+The loss accepts an optional bool `predicate_supervision_mask [V]`. It must
+leave at least one predicate supervised and may never hide a positive predicate
+label in the current selected training pairs. Masked predicate-logit dimensions
+receive zero predicate-loss gradient.
+
+`training.json` and checkpoint metadata record:
+
+```json
+{
+  "predicate_supervision": {
+    "mode": "all",
+    "supervised_predicate_indices": [],
+    "masked_predicate_indices": []
+  }
+}
+```
+
+The controlled Open Images experiment in
+`.github/workflows/openimages-zero-shot-mask.yml` compares the legacy
+all-dimensions BCE against `train-supported-only` BCE while keeping the exact
+same K=48, shared whitened CLIP prototypes, sqrt-balanced class weights,
+DINOv3 backbone, dataset hashes, optimizer and seed.
+
+The comparison reports both overall metrics and the canonical benchmark's
+`seen` / `train_zero_support` mRecall groups. This distinguishes improved
+long-tail fitting from genuine transfer to predicates with no positive training
+examples.
+
 ## Predicate class-balance ablation
 
 After CLIP prototype whitening, medium/high-K metrics are close to the
