@@ -330,8 +330,13 @@ class TimmDinoV3Backbone(BackboneAdapter):
             raise ValueError("timm DINOv3 model is missing a valid patch size")
         if depth <= 0:
             raise ValueError("timm DINOv3 model is missing transformer blocks")
-        if not callable(getattr(model, "get_intermediate_layers", None)):
-            raise ValueError("timm DINOv3 model lacks get_intermediate_layers")
+        if not (
+            callable(getattr(model, "forward_intermediates", None))
+            or callable(getattr(model, "get_intermediate_layers", None))
+        ):
+            raise ValueError(
+                "timm DINOv3 model lacks an intermediate-feature API"
+            )
         if len(image_mean) != 3 or len(image_std) != 3:
             raise ValueError("timm DINOv3 normalization must have three channels")
 
@@ -395,13 +400,26 @@ class TimmDinoV3Backbone(BackboneAdapter):
         mean = self._mean.to(dtype=image.dtype, device=image.device)
         std = self._std.to(dtype=image.dtype, device=image.device)
         normalized = (image - mean) / std
-        outputs = self.model.get_intermediate_layers(
-            normalized,
-            n=absolute,
-            reshape=True,
-            return_prefix_tokens=False,
-            norm=False,
+        forward_intermediates = getattr(
+            self.model, "forward_intermediates", None
         )
+        if callable(forward_intermediates):
+            outputs = forward_intermediates(
+                normalized,
+                indices=absolute,
+                return_prefix_tokens=False,
+                norm=False,
+                output_fmt="NCHW",
+                intermediates_only=True,
+            )
+        else:
+            outputs = self.model.get_intermediate_layers(
+                normalized,
+                n=absolute,
+                reshape=True,
+                return_prefix_tokens=False,
+                norm=False,
+            )
         if len(outputs) != len(absolute):
             raise RuntimeError(
                 "timm DINOv3 returned the wrong number of intermediate taps"
