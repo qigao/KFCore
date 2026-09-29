@@ -103,6 +103,7 @@ def supervised_relation_loss(
     config: RelationLossConfig = RelationLossConfig(),
     predicate_positive_weights: Tensor | None = None,
     predicate_supervision_mask: Tensor | None = None,
+    predicate_negative_weights: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -111,10 +112,11 @@ def supervised_relation_loss(
     predicate vocabulary for each ordered pair.
 
     Predicate BCE is evaluated only on positive related pairs. Zeros in their
-    multi-hot predicate vectors are supervised negatives by default. An optional
-    bool [V] supervision mask can exclude predicate dimensions that have no
-    positive training support; it may never hide a positive target in the
-    current batch.
+    multi-hot predicate vectors are supervised negatives by default. Optional
+    [V] negative weights scale only target=0 predicate BCE terms; positive
+    target terms always keep multiplier 1. An optional bool [V] supervision
+    mask can exclude predicate dimensions entirely; it may never hide a
+    positive target in the current batch.
 
     The dense sampler loss is training-only. Runtime/export keeps the existing
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
@@ -203,6 +205,29 @@ def supervised_relation_loss(
                 "predicate_supervision_mask must supervise at least one predicate"
             )
 
+    negative_weights = None
+    if predicate_negative_weights is not None:
+        if predicate_negative_weights.ndim != 1:
+            raise ValueError(
+                "predicate_negative_weights must be [V]"
+            )
+        if predicate_negative_weights.shape[0] != pred_logits.shape[2]:
+            raise ValueError(
+                "predicate_negative_weights width does not match pred_logits"
+            )
+        if not torch.isfinite(predicate_negative_weights).all():
+            raise ValueError(
+                "predicate_negative_weights must be finite"
+            )
+        if (predicate_negative_weights < 0).any():
+            raise ValueError(
+                "predicate_negative_weights must be non-negative"
+            )
+        negative_weights = predicate_negative_weights.to(
+            device=pred_logits.device,
+            dtype=pred_logits.dtype,
+        )
+
     if positive.any():
         positive_logits = pred_logits[positive]
         positive_targets = selected_predicate_targets[positive]
@@ -221,11 +246,30 @@ def supervised_relation_loss(
             pos_weight=pos_weight,
             reduction="none",
         )
+        element_weights = torch.ones_like(raw_predicate_loss)
+        if negative_weights is not None:
+            element_weights = torch.where(
+                positive_targets > 0.5,
+                element_weights,
+                negative_weights.view(1, -1).expand_as(
+                    raw_predicate_loss
+                ),
+            )
         if supervision_mask is not None:
             raw_predicate_loss = raw_predicate_loss[
                 :, supervision_mask
             ]
-        predicate_loss = raw_predicate_loss.mean()
+            element_weights = element_weights[
+                :, supervision_mask
+            ]
+        weight_sum = element_weights.sum()
+        if weight_sum <= 0:
+            raise ValueError(
+                "predicate supervision weights must keep at least one term"
+            )
+        predicate_loss = (
+            raw_predicate_loss * element_weights
+        ).sum() / weight_sum
     else:
         predicate_loss = pred_logits.sum() * 0.0
 
