@@ -348,6 +348,7 @@ def train_epoch(
     predicate_positive_weights: Tensor | None = None,
     predicate_supervision_mask: Tensor | None = None,
     predicate_negative_weights: Tensor | None = None,
+    allow_masked_positive_targets: bool = False,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -380,6 +381,7 @@ def train_epoch(
             predicate_positive_weights=predicate_positive_weights,
             predicate_supervision_mask=predicate_supervision_mask,
             predicate_negative_weights=predicate_negative_weights,
+            allow_masked_positive_targets=allow_masked_positive_targets,
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
@@ -409,6 +411,7 @@ def evaluate_gt_boxes(
     device: torch.device,
     benchmark_config: BenchmarkConfig = BenchmarkConfig(),
     train_predicate_support: tuple[int, ...] | None = None,
+    explicit_holdout_predicate_indices: tuple[int, ...] | None = None,
 ) -> dict[str, object]:
     benchmark = RelationBenchmark(
         predicate_count=int(model.predicate_bank.shape[0]),
@@ -435,6 +438,9 @@ def evaluate_gt_boxes(
         annotations_sha256=manifest.annotations_sha256,
         vocabulary_sha256=manifest.vocabulary_sha256,
         train_predicate_support=train_predicate_support,
+        explicit_holdout_predicate_indices=(
+            explicit_holdout_predicate_indices
+        ),
     )
 
 
