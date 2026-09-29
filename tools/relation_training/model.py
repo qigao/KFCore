@@ -725,36 +725,6 @@ class KFRelationModel(nn.Module):
         )
         self.tap_logits = nn.Parameter(torch.zeros(len(config.tap_indices)))
 
-        self.apache_spatial_pool: ApacheSoftSpatialPool | None = None
-        self.apache_box_prompt_encoder: ApacheBoxPromptEncoder | None = None
-        self.apache_geometry_encoder: ApacheRelGeomEncoder | None = None
-        self.apache_pair_projection: nn.Linear | None = None
-        if config.pair_evidence_contract == "apache":
-            self.apache_spatial_pool = ApacheSoftSpatialPool(
-                backbone.hidden_size,
-                n_heads=8,
-                num_freqs=16,
-                max_octave=7.0,
-            )
-            self.apache_box_prompt_encoder = ApacheBoxPromptEncoder(
-                config.hidden_dim,
-                num_freqs=16,
-                max_octave=7.0,
-            )
-            self.apache_geometry_encoder = ApacheRelGeomEncoder(
-                config.hidden_dim
-            )
-            self.apache_pair_projection = nn.Linear(
-                backbone.hidden_size * 4 + config.hidden_dim,
-                config.hidden_dim,
-            )
-            nn.init.xavier_uniform_(
-                self.apache_pair_projection.weight
-            )
-            nn.init.zeros_(
-                self.apache_pair_projection.bias
-            )
-
         self.geometry_encoder = nn.Sequential(
             nn.Linear(self.geometry_feature_count, config.geometry_dim),
             nn.GELU(),
@@ -862,6 +832,39 @@ class KFRelationModel(nn.Module):
         else:
             self.rich_geometry_projection = None
             self.rich_geometry_sampler = None
+
+        # Apache-reference pair evidence is initialized last so enabling the
+        # alternative pair construction cannot perturb any existing common
+        # parameter initialization under the same global RNG seed.
+        self.apache_spatial_pool: ApacheSoftSpatialPool | None = None
+        self.apache_box_prompt_encoder: ApacheBoxPromptEncoder | None = None
+        self.apache_geometry_encoder: ApacheRelGeomEncoder | None = None
+        self.apache_pair_projection: nn.Linear | None = None
+        if config.pair_evidence_contract == "apache":
+            self.apache_spatial_pool = ApacheSoftSpatialPool(
+                backbone.hidden_size,
+                n_heads=8,
+                num_freqs=16,
+                max_octave=7.0,
+            )
+            self.apache_box_prompt_encoder = ApacheBoxPromptEncoder(
+                config.hidden_dim,
+                num_freqs=16,
+                max_octave=7.0,
+            )
+            self.apache_geometry_encoder = ApacheRelGeomEncoder(
+                config.hidden_dim
+            )
+            self.apache_pair_projection = nn.Linear(
+                backbone.hidden_size * 4 + config.hidden_dim,
+                config.hidden_dim,
+            )
+            nn.init.xavier_uniform_(
+                self.apache_pair_projection.weight
+            )
+            nn.init.zeros_(
+                self.apache_pair_projection.bias
+            )
 
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
