@@ -18,7 +18,9 @@ from apache_vocab_head import (
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import (
     ENCODER_OUTPUT_NAMES,
+    check_dynamic_vocabulary_parity,
     check_onnx_parity,
+    export_dynamic_vocabulary_graph,
     export_encoder_graph,
     export_graph,
 )
@@ -326,6 +328,112 @@ class ApacheVocabHeadTest(unittest.TestCase):
 
         self.assertLessEqual(relation_delta, 1.0e-3)
         self.assertLessEqual(encoder_delta, 1.0e-3)
+
+    def test_dynamic_vocabulary_graph_reuses_one_onnx_for_multiple_vocab_sizes(self):
+        torch.manual_seed(58)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            head_config(),
+        ).eval()
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+
+        W3 = F.normalize(
+            torch.randn(3, 6),
+            dim=-1,
+        )
+        alpha3 = torch.tensor(
+            [0.0, 0.5, 1.0],
+            dtype=torch.float32,
+        )
+        W1 = W3[:1].clone()
+        alpha1 = alpha3[:1].clone()
+        W5 = F.normalize(
+            torch.randn(5, 6),
+            dim=-1,
+        )
+        assert model.apache_vocab_head is not None
+        with torch.inference_mode():
+            alpha5 = model.apache_vocab_head.routing_alpha(W5)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "apache-dynamic-vocab.onnx"
+            reference = export_dynamic_vocabulary_graph(
+                model,
+                path,
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                W3,
+                alpha3,
+            )
+            self.assertEqual(
+                tuple(reference[0].shape),
+                (1, 6, 3),
+            )
+            delta = check_dynamic_vocabulary_parity(
+                path,
+                model,
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                [
+                    (W1, alpha1),
+                    (W3, alpha3),
+                    (W5, alpha5),
+                ],
+            )
+
+        self.assertLessEqual(delta, 1.0e-3)
+
+    def test_dynamic_vocabulary_graph_alpha_controls_exact_expert_route(self):
+        torch.manual_seed(59)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            head_config(),
+        ).eval()
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+        W = F.normalize(
+            torch.randn(2, 6),
+            dim=-1,
+        )
+
+        with torch.inference_mode():
+            (
+                semantic,
+                spatial,
+                _,
+                _,
+                _,
+                _,
+            ) = model.forward_encoder(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+            )
+            assert model.apache_vocab_head is not None
+            semantic_only = model.apache_vocab_head.score_query_dual(
+                semantic,
+                spatial,
+                W,
+                alpha=torch.zeros(2),
+            )
+            spatial_only = model.apache_vocab_head.score_query_dual(
+                semantic,
+                spatial,
+                W,
+                alpha=torch.ones(2),
+            )
+
+        self.assertFalse(
+            torch.allclose(
+                semantic_only,
+                spatial_only,
+            )
+        )
 
     def test_head_checkpoint_round_trip(self):
         torch.manual_seed(57)
