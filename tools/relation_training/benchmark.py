@@ -379,6 +379,7 @@ class RelationBenchmark:
         annotations_sha256: str = "",
         vocabulary_sha256: str = "",
         train_predicate_support: Sequence[int] | None = None,
+        explicit_holdout_predicate_indices: Sequence[int] | None = None,
     ) -> dict[str, object]:
         if self.example_count <= 0:
             raise ValueError("benchmark contains no evaluated examples")
@@ -492,6 +493,36 @@ class RelationBenchmark:
                     zero_shot_indices
                 ),
             }
+
+            if explicit_holdout_predicate_indices is not None:
+                holdout: list[int] = []
+                seen_holdout: set[int] = set()
+                for value in explicit_holdout_predicate_indices:
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        raise ValueError(
+                            "explicit holdout predicate indices must be integers"
+                        )
+                    if value < 0 or value >= self.predicate_count:
+                        raise ValueError(
+                            "explicit holdout predicate index is outside vocabulary"
+                        )
+                    if value in seen_holdout:
+                        raise ValueError(
+                            "explicit holdout predicate indices must be unique"
+                        )
+                    seen_holdout.add(value)
+                    if self.predicate_support[value] <= 0:
+                        raise ValueError(
+                            "explicit holdout predicate must have validation support"
+                        )
+                    holdout.append(value)
+                if not holdout:
+                    raise ValueError(
+                        "explicit holdout predicate indices must not be empty"
+                    )
+                predicate_groups["explicit_holdout"] = group_payload(
+                    sorted(holdout)
+                )
 
         report = {
             "schema": "kfcore.relation-benchmark/1",
