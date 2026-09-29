@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -27,6 +27,72 @@ def tensor_sha256(value: torch.Tensor) -> str:
     digest.update(str(tuple(tensor.shape)).encode("utf-8"))
     digest.update(tensor.numpy().tobytes(order="C"))
     return digest.hexdigest()
+
+
+def gram_diagnostics(value: torch.Tensor) -> dict[str, float]:
+    if value.ndim != 2 or value.shape[0] < 1 or value.shape[1] < 1:
+        raise ValueError("prototype tensor must be [V,D]")
+    if not torch.isfinite(value).all():
+        raise ValueError("prototype tensor must be finite")
+
+    rows = F.normalize(value.double(), dim=-1)
+    gram = rows @ rows.T
+    eigenvalues = torch.linalg.eigvalsh(gram)
+    count = int(gram.shape[0])
+    if count > 1:
+        mask = ~torch.eye(count, dtype=torch.bool, device=gram.device)
+        off = gram[mask].abs()
+        max_off = float(off.max().item())
+        mean_off = float(off.mean().item())
+    else:
+        max_off = 0.0
+        mean_off = 0.0
+    return {
+        "max_abs_off_diagonal": max_off,
+        "mean_abs_off_diagonal": mean_off,
+        "min_eigenvalue": float(eigenvalues.min().item()),
+        "max_eigenvalue": float(eigenvalues.max().item()),
+    }
+
+
+def symmetric_whiten_predicates(
+    value: torch.Tensor,
+    *,
+    relative_epsilon: float = 1.0e-8,
+) -> torch.Tensor:
+    if relative_epsilon <= 0.0:
+        raise ValueError("relative_epsilon must be positive")
+    if value.ndim != 2 or value.shape[0] < 1 or value.shape[1] < 1:
+        raise ValueError("predicate embeddings must be [V,D]")
+    if value.shape[0] > value.shape[1]:
+        raise ValueError(
+            "row whitening requires embedding dimension >= predicate count"
+        )
+    if not torch.isfinite(value).all():
+        raise ValueError("predicate embeddings must be finite")
+
+    rows = F.normalize(value.double(), dim=-1)
+    gram = rows @ rows.T
+    eigenvalues, eigenvectors = torch.linalg.eigh(gram)
+    max_eigenvalue = float(eigenvalues.max().item())
+    threshold = max(relative_epsilon * max_eigenvalue, relative_epsilon)
+    min_eigenvalue = float(eigenvalues.min().item())
+    if min_eigenvalue <= threshold:
+        raise ValueError(
+            "predicate Gram matrix is numerically rank-deficient: "
+            f"min_eigenvalue={min_eigenvalue} threshold={threshold}"
+        )
+
+    inverse_sqrt = (
+        eigenvectors
+        @ torch.diag(eigenvalues.rsqrt())
+        @ eigenvectors.T
+    )
+    whitened = inverse_sqrt @ rows
+    whitened = F.normalize(whitened, dim=-1).float()
+    if not torch.isfinite(whitened).all():
+        raise ValueError("whitened predicate embeddings are non-finite")
+    return whitened
 
 
 def identity_predicate_embeddings(
@@ -170,6 +236,7 @@ def write_outputs(
     mode: str,
     model_id: str | None,
     templates: Sequence[str],
+    source_embeddings: torch.Tensor | None = None,
 ) -> None:
     if out.exists():
         raise FileExistsError(f"output already exists: {out}")
@@ -208,6 +275,12 @@ def write_outputs(
         "tensor_sha256": tensor_sha256(embeddings),
         "vocabulary_sha256": vocabulary.sha256(),
         "predicates": list(vocabulary.predicates),
+        "gram": gram_diagnostics(embeddings),
+        "source_gram": (
+            gram_diagnostics(source_embeddings)
+            if source_embeddings is not None
+            else None
+        ),
     }
     metadata_path.write_text(
         json.dumps(
@@ -236,7 +309,7 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument(
         "--mode",
-        choices=("identity", "clip"),
+        choices=("identity", "clip", "clip-whitened"),
         default="identity",
     )
     parser.add_argument(
@@ -252,6 +325,7 @@ def main() -> None:
     args = parser.parse_args()
 
     vocabulary = RelationVocabulary.load(args.vocabulary)
+    source_embeddings: torch.Tensor | None = None
     if args.mode == "identity":
         embeddings = identity_predicate_embeddings(
             len(vocabulary.predicates),
@@ -263,12 +337,17 @@ def main() -> None:
         if args.dimension is not None:
             raise ValueError("--dimension is identity-only")
         templates = DEFAULT_TEMPLATES
-        embeddings = clip_predicate_embeddings(
+        raw_clip = clip_predicate_embeddings(
             vocabulary.predicates,
             model_id=args.clip_model,
             templates=templates,
             device=args.device,
         )
+        if args.mode == "clip-whitened":
+            source_embeddings = raw_clip
+            embeddings = symmetric_whiten_predicates(raw_clip)
+        else:
+            embeddings = raw_clip
         model_id = args.clip_model
 
     write_outputs(
@@ -278,6 +357,7 @@ def main() -> None:
         mode=args.mode,
         model_id=model_id,
         templates=templates,
+        source_embeddings=source_embeddings,
     )
 
 

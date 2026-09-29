@@ -238,6 +238,53 @@ Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
 cannot increase recall or AP. GT-box evaluation does not use detector
 confidence.
 
+## CLIP prototype whitening diagnostic
+
+Raw CLIP text prototypes underperformed the dimension-matched orthogonal
+control even though dataset hashes, prototype width and trainable parameter
+counts were identical. The next diagnostic isolates row correlation.
+
+`clip-whitened` applies symmetric row whitening:
+
+```text
+W_white = (W W^T)^(-1/2) W
+```
+
+to the normalized raw CLIP bank. Whitening is computed from a symmetric
+eigendecomposition and fails if the predicate Gram matrix is numerically
+rank-deficient. Rows are normalized again after whitening.
+
+Prototype sidecars record Gram diagnostics:
+
+```text
+max_abs_off_diagonal
+mean_abs_off_diagonal
+min_eigenvalue
+max_eigenvalue
+```
+
+and, for `clip-whitened`, also retain the raw CLIP source Gram diagnostics.
+
+Example:
+
+```powershell
+python tools/relation_training/make_predicate_embeddings.py ^
+  --vocabulary vocabulary.json ^
+  --out predicates.pt ^
+  --mode clip-whitened ^
+  --clip-model openai/clip-vit-base-patch32
+```
+
+`.github/workflows/openimages-clip-whitening.yml` runs
+`identity512 / clip / clip-whitened` on the exact same K=48 Open Images
+slice. The compare job verifies identical trainable parameter counts and
+dataset hashes, requires the whitened off-diagonal Gram magnitude to be below
+`1e-5`, and reports metric deltas between all three geometries.
+
+This is an attribution experiment. If whitening recovers the orthogonal
+control, the next useful model change is a relation-specific shared text
+adapter rather than generic raw CLIP prototypes.
+
 ## Predicate prototype semantic A/B
 
 After the sampler ablation, K=48 is the practical baseline for the next
