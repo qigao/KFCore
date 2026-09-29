@@ -560,6 +560,61 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Bounded hard negatives for predicate InfoNCE
+
+The first objective-v2 experiment showed that a positive-only batch contrast
+set is too small for strict predicate holdout transfer. On the canonical
+256/64 Open Images slice, the final-epoch contrast set averaged only about
+4.6 predicates in the normal arm and 3.1 with explicit holdouts.
+
+The next controlled step expands the denominator with bounded hard negatives:
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-hard-negative-count 8
+```
+
+Hard-negative candidates are restricted to predicates that:
+
+- have positive support in the training split;
+- remain inside the active supervision mask.
+
+Therefore:
+
+- explicit holdout predicates cannot become hard negatives;
+- natural train-zero-support predicates cannot become hard negatives;
+- candidate selection stays inside the source's observed predicate support for
+  this single-source Open Images experiment.
+
+For each batch, KFCore scores candidate predicate directions against the
+current visual relation queries under `torch.no_grad()` and adds up to the
+requested number of most confusable columns to the batch-positive contrast
+set. Selection itself is non-differentiable; gradients flow only through the
+final selected cosine logits.
+
+Training evidence records both:
+
+```text
+predicate_contrastive_hard_negative_count   # configured cap
+predicate_hard_negative_count               # selected count for the epoch/batch average
+```
+
+`.github/workflows/openimages-predicate-hard-negatives.yml` compares:
+
+```text
+positive-only-baseline
+positive-only-holdout
+hard8-baseline
+hard8-holdout
+```
+
+All four arms use the same canonical Open Images 256/64 hashes, shared
+whitened-CLIP bank, frozen DINOv3 ViT-S/16, K=48, sqrt-balanced positive
+weights, architecture, optimizer, seed and three epochs.
+
+The workflow supports compare-only recovery from existing arm artifacts so a
+comparator bug never forces expensive retraining.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive
