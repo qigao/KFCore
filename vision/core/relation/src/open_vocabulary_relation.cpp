@@ -704,11 +704,6 @@ RelationFrame OpenVocabularyRelation::infer(
             4
         };
         const runtime::TensorShape count_shape {1};
-        const runtime::TensorShape query_shape {
-            1,
-            static_cast<std::int64_t>(impl_->options.max_pairs),
-            static_cast<std::int64_t>(impl_->options.query_dim)
-        };
         const runtime::TensorShape pair_shape {
             1,
             static_cast<std::int64_t>(impl_->options.max_pairs)
@@ -726,52 +721,119 @@ RelationFrame OpenVocabularyRelation::infer(
              &box_count, sizeof(box_count),
              runtime::MemoryKind::Host, {}},
         };
-        std::vector<runtime::MutableTensorView> outputs {
-            {"semantic_query", runtime::DataType::Float32, query_shape,
-             impl_->semantic_query.data(),
-             impl_->semantic_query.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"spatial_query", runtime::DataType::Float32, query_shape,
-             impl_->spatial_query.data(),
-             impl_->spatial_query.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"pair_logits", runtime::DataType::Float32, pair_shape,
-             impl_->pair_logits.data(),
-             impl_->pair_logits.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"sub_idx", runtime::DataType::Int64, pair_shape,
-             impl_->subject_indices.data(),
-             impl_->subject_indices.size() * sizeof(std::int64_t),
-             runtime::MemoryKind::Host, {}},
-            {"obj_idx", runtime::DataType::Int64, pair_shape,
-             impl_->object_indices.data(),
-             impl_->object_indices.size() * sizeof(std::int64_t),
-             runtime::MemoryKind::Host, {}},
-            {"valid_mask", runtime::DataType::Bool, pair_shape,
-             impl_->valid_mask.data(),
-             impl_->valid_mask.size() * sizeof(std::uint8_t),
-             runtime::MemoryKind::Host, {}},
-        };
-        impl_->context->run(inputs, outputs);
+        std::vector<runtime::MutableTensorView> outputs;
 
-        const detail::RawOpenVocabularyQueries queries {
-            impl_->semantic_query.data(),
-            impl_->spatial_query.data(),
-            impl_->valid_mask.data(),
-            impl_->options.max_pairs,
-            impl_->options.query_dim,
-        };
-        const detail::NormalizedVocabularyView vocabulary {
-            impl_->vocabulary.embeddings.data(),
-            impl_->vocabulary.spatial_weights.data(),
-            impl_->vocabulary.predicates.size(),
-            impl_->vocabulary.embedding_dim,
-        };
-        detail::score_open_vocabulary_queries(
-            queries, vocabulary,
-            impl_->options.logit_scale,
-            impl_->options.logit_bias,
-            impl_->pred_logits.data());
+        if (impl_->mode == ScoringMode::BackendLogits)
+        {
+            const std::int64_t predicate_count =
+                static_cast<std::int64_t>(
+                    impl_->vocabulary.predicates.size());
+            const runtime::TensorShape bank_shape {
+                predicate_count,
+                static_cast<std::int64_t>(
+                    impl_->options.query_dim)
+            };
+            const runtime::TensorShape alpha_shape {
+                predicate_count
+            };
+            const runtime::TensorShape pred_shape {
+                1,
+                static_cast<std::int64_t>(
+                    impl_->options.max_pairs),
+                predicate_count
+            };
+
+            inputs.push_back(
+                {"W", runtime::DataType::Float32, bank_shape,
+                 impl_->vocabulary.embeddings.data(),
+                 impl_->vocabulary.embeddings.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}});
+            inputs.push_back(
+                {"alpha", runtime::DataType::Float32, alpha_shape,
+                 impl_->vocabulary.spatial_weights.data(),
+                 impl_->vocabulary.spatial_weights.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}});
+
+            outputs = {
+                {"pred_logits", runtime::DataType::Float32, pred_shape,
+                 impl_->pred_logits.data(),
+                 impl_->pred_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"pair_logits", runtime::DataType::Float32, pair_shape,
+                 impl_->pair_logits.data(),
+                 impl_->pair_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"sub_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->subject_indices.data(),
+                 impl_->subject_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"obj_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->object_indices.data(),
+                 impl_->object_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"valid_mask", runtime::DataType::Bool, pair_shape,
+                 impl_->valid_mask.data(),
+                 impl_->valid_mask.size() * sizeof(std::uint8_t),
+                 runtime::MemoryKind::Host, {}},
+            };
+            impl_->context->run(inputs, outputs);
+        }
+        else
+        {
+            const runtime::TensorShape query_shape {
+                1,
+                static_cast<std::int64_t>(
+                    impl_->options.max_pairs),
+                static_cast<std::int64_t>(
+                    impl_->options.query_dim)
+            };
+            outputs = {
+                {"semantic_query", runtime::DataType::Float32, query_shape,
+                 impl_->semantic_query.data(),
+                 impl_->semantic_query.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"spatial_query", runtime::DataType::Float32, query_shape,
+                 impl_->spatial_query.data(),
+                 impl_->spatial_query.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"pair_logits", runtime::DataType::Float32, pair_shape,
+                 impl_->pair_logits.data(),
+                 impl_->pair_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"sub_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->subject_indices.data(),
+                 impl_->subject_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"obj_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->object_indices.data(),
+                 impl_->object_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"valid_mask", runtime::DataType::Bool, pair_shape,
+                 impl_->valid_mask.data(),
+                 impl_->valid_mask.size() * sizeof(std::uint8_t),
+                 runtime::MemoryKind::Host, {}},
+            };
+            impl_->context->run(inputs, outputs);
+
+            const detail::RawOpenVocabularyQueries queries {
+                impl_->semantic_query.data(),
+                impl_->spatial_query.data(),
+                impl_->valid_mask.data(),
+                impl_->options.max_pairs,
+                impl_->options.query_dim,
+            };
+            const detail::NormalizedVocabularyView vocabulary {
+                impl_->vocabulary.embeddings.data(),
+                impl_->vocabulary.spatial_weights.data(),
+                impl_->vocabulary.predicates.size(),
+                impl_->vocabulary.embedding_dim,
+            };
+            detail::score_open_vocabulary_queries(
+                queries, vocabulary,
+                impl_->options.logit_scale,
+                impl_->options.logit_bias,
+                impl_->pred_logits.data());
+        }
 
         const detail::RawRelationOutputs raw {
             impl_->pred_logits.data(),
