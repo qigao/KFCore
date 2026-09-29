@@ -83,7 +83,10 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      DINOV3_REPO_COMMIT: 6876159a11b4df116f30f667f8c9888617df0751
+      HF_HOME: ${{ runner.temp }}/hf-home
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
+      DINOV3_FILENAME: model.safetensors
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,7 +104,7 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: |
-            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-real-smoke-torch.txt
             tools/relation_training/requirements-real-smoke.txt
 
       - name: Install real-smoke dependencies
@@ -110,46 +113,41 @@ jobs:
           set -euxo pipefail
           python -m pip install --disable-pip-version-check \
             --index-url https://download.pytorch.org/whl/cpu \
-            -r tools/relation_training/requirements-ci-torch.txt
+            -r tools/relation_training/requirements-real-smoke-torch.txt
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-real-smoke.txt
 
-      - name: Checkout official DINOv3 source
+      - name: Download public DINOv3 ViT-S/16 weights
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf "$RUNNER_TEMP/dinov3"
-          git init "$RUNNER_TEMP/dinov3"
-          git -C "$RUNNER_TEMP/dinov3" remote add origin https://github.com/facebookresearch/dinov3.git
-          git -C "$RUNNER_TEMP/dinov3" fetch --depth 1 origin "$DINOV3_REPO_COMMIT"
-          git -C "$RUNNER_TEMP/dinov3" checkout --detach FETCH_HEAD
-          test "$(git -C "$RUNNER_TEMP/dinov3" rev-parse HEAD)" = "$DINOV3_REPO_COMMIT"
+          rm -rf "$HF_HOME"
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          import hashlib
+          from pathlib import Path
+          import os
 
-      - name: Download official DINOv3 ViT-S/16 weights
-        env:
-          DINOV3_WEIGHTS_URL: ${{ secrets.DINOV3_WEIGHTS_URL }}
-        shell: bash
-        run: |
-          set -euxo pipefail
-          test -n "${DINOV3_WEIGHTS_URL:-}"
-          WEIGHTS="$RUNNER_TEMP/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
-          curl --fail --location --retry 3 --retry-delay 2 \
-            --output "$WEIGHTS" \
-            "$DINOV3_WEIGHTS_URL"
-          test -s "$WEIGHTS"
-          sha256sum "$WEIGHTS"
+          path = Path(hf_hub_download(
+              repo_id=os.environ["DINOV3_REPO"],
+              filename=os.environ["DINOV3_FILENAME"],
+              force_download=True,
+          ))
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          print(f"downloaded={path}")
+          print(f"sha256={digest}")
+          print(f"bytes={path.stat().st_size}")
+          PY
 
       - name: Run real DINOv3 ViT-S/16 forward and export smoke
         shell: bash
         run: |
           set -euxo pipefail
-          WEIGHTS="$RUNNER_TEMP/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
           OUT="$RUNNER_TEMP/real-dinov3-smoke"
           mkdir -p "$OUT"
           python tools/relation_training/real_dinov3_smoke.py \
-            --repo-dir "$RUNNER_TEMP/dinov3" \
-            --weights "$WEIGHTS" \
-            --expected-repo-commit "$DINOV3_REPO_COMMIT" \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
             --image-size 224 \
             --output-dir "$OUT"
 
