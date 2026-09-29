@@ -327,6 +327,47 @@ class OpenImagesConversionTest(unittest.TestCase):
         self.assertEqual(selected, second_selected)
         self.assertEqual(subset, second_subset)
 
+    def test_subset_minimum_object_count_filters_easy_images(self):
+        path = self.root / "minimum.csv"
+        rows = [
+            relationship(
+                "abc123", "/m/person", "/m/bike", "on"
+            ),
+            relationship(
+                "def456",
+                "/m/person",
+                "/m/bike",
+                "near",
+                subject_box=(0.0, 0.3, 0.0, 1.0),
+                object_box=(0.4, 0.7, 0.0, 1.0),
+            ),
+            relationship(
+                "def456",
+                "/m/person",
+                "/m/person",
+                "behind",
+                subject_box=(0.0, 0.3, 0.0, 1.0),
+                object_box=(0.75, 1.0, 0.0, 1.0),
+            ),
+        ]
+        write_csv(path, rows)
+
+        selected = select_subset_image_ids(
+            path,
+            max_images=1,
+            min_boxes=3,
+            max_boxes=4,
+        )
+        self.assertEqual(selected, ("def456",))
+
+        with self.assertRaises(ValueError):
+            select_subset_image_ids(
+                path,
+                max_images=1,
+                min_boxes=5,
+                max_boxes=4,
+            )
+
     def test_missing_image_and_invalid_box_fail_fast(self):
         classes = load_class_descriptions(self.classes)
         vocabulary = RelationVocabulary(
