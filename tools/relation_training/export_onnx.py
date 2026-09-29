@@ -15,6 +15,13 @@ from model import HFDinoV3Backbone, KFRelationModel
 
 
 INPUT_NAMES = ["image", "boxes", "box_counts"]
+DYNAMIC_VOCAB_INPUT_NAMES = [
+    "image",
+    "boxes",
+    "box_counts",
+    "W",
+    "alpha",
+]
 OUTPUT_NAMES = [
     "pred_logits",
     "pair_logits",
@@ -40,6 +47,55 @@ _OUTPUT_TYPES = {
     "obj_idx": "tensor(int64)",
     "valid_mask": "tensor(bool)",
 }
+
+
+class RelationDynamicVocabularyExport(nn.Module):
+    def __init__(self, model: KFRelationModel) -> None:
+        super().__init__()
+        if model.config.predicate_head_contract != "apache":
+            raise ValueError(
+                "dynamic-vocabulary graph requires the Apache predicate head"
+            )
+        if model.apache_vocab_head is None:
+            raise ValueError(
+                "dynamic-vocabulary graph requires ApacheVocabHead"
+            )
+        self.model = model
+
+    def forward(
+        self,
+        image: Tensor,
+        boxes: Tensor,
+        box_counts: Tensor,
+        W: Tensor,
+        alpha: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        (
+            semantic_query,
+            spatial_query,
+            pair_logits,
+            sub_idx,
+            obj_idx,
+            valid_mask,
+        ) = self.model.forward_encoder(
+            image,
+            boxes,
+            box_counts,
+        )
+        assert self.model.apache_vocab_head is not None
+        pred_logits = self.model.apache_vocab_head.score_query_dual(
+            semantic_query,
+            spatial_query,
+            W,
+            alpha=alpha,
+        )
+        return (
+            pred_logits,
+            pair_logits,
+            sub_idx,
+            obj_idx,
+            valid_mask,
+        )
 
 
 class RelationEncoderExport(nn.Module):
@@ -115,6 +171,151 @@ def export_graph(
         dynamo=False,
     )
     return reference
+
+
+def export_dynamic_vocabulary_graph(
+    model: KFRelationModel,
+    output_path: str | Path,
+    image: Tensor,
+    boxes: Tensor,
+    box_counts: Tensor,
+    W: Tensor,
+    alpha: Tensor,
+    *,
+    opset: int = 18,
+) -> tuple[Tensor, ...]:
+    if W.ndim != 2 or W.shape[1] != model.predicate_dim:
+        raise ValueError(
+            "dynamic predicate bank must be [V,predicate_dim]"
+        )
+    if alpha.shape != (W.shape[0],):
+        raise ValueError("dynamic predicate alpha must be [V]")
+    wrapper = RelationDynamicVocabularyExport(model).eval()
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with torch.inference_mode():
+        reference = tuple(
+            wrapper(
+                image,
+                boxes,
+                box_counts,
+                W,
+                alpha,
+            )
+        )
+    torch.onnx.export(
+        wrapper,
+        (image, boxes, box_counts, W, alpha),
+        str(path),
+        input_names=DYNAMIC_VOCAB_INPUT_NAMES,
+        output_names=OUTPUT_NAMES,
+        dynamic_axes={
+            "W": {0: "num_predicates"},
+            "alpha": {0: "num_predicates"},
+            "pred_logits": {2: "num_predicates"},
+        },
+        opset_version=opset,
+        do_constant_folding=True,
+        dynamo=False,
+    )
+    return reference
+
+
+def check_dynamic_vocabulary_parity(
+    output_path: str | Path,
+    model: KFRelationModel,
+    image: Tensor,
+    boxes: Tensor,
+    box_counts: Tensor,
+    vocabularies: Sequence[tuple[Tensor, Tensor]],
+    *,
+    tolerance: float = 1.0e-3,
+) -> float:
+    import onnx
+    import onnxruntime as ort
+
+    if not vocabularies:
+        raise ValueError(
+            "dynamic-vocabulary parity requires at least one vocabulary"
+        )
+    path = Path(output_path)
+    graph = onnx.load(str(path))
+    onnx.checker.check_model(graph)
+    session = ort.InferenceSession(
+        str(path),
+        providers=["CPUExecutionProvider"],
+    )
+    if [item.name for item in session.get_inputs()] != DYNAMIC_VOCAB_INPUT_NAMES:
+        raise RuntimeError(
+            "dynamic-vocabulary ONNX input names drifted"
+        )
+    if [item.name for item in session.get_outputs()] != OUTPUT_NAMES:
+        raise RuntimeError(
+            "dynamic-vocabulary ONNX output names drifted"
+        )
+
+    wrapper = RelationDynamicVocabularyExport(model).eval()
+    worst = 0.0
+    for W, alpha in vocabularies:
+        if W.ndim != 2 or W.shape[1] != model.predicate_dim:
+            raise ValueError(
+                "dynamic parity W must be [V,predicate_dim]"
+            )
+        if alpha.shape != (W.shape[0],):
+            raise ValueError("dynamic parity alpha must be [V]")
+        with torch.inference_mode():
+            expected = tuple(
+                wrapper(
+                    image,
+                    boxes,
+                    box_counts,
+                    W,
+                    alpha,
+                )
+            )
+        actual = session.run(
+            OUTPUT_NAMES,
+            {
+                "image": image.detach().cpu().numpy(),
+                "boxes": boxes.detach().cpu().numpy(),
+                "box_counts": box_counts.detach().cpu().numpy(),
+                "W": W.detach().cpu().numpy(),
+                "alpha": alpha.detach().cpu().numpy(),
+            },
+        )
+        if actual[0].shape != (
+            1,
+            model.config.pair_budget,
+            int(W.shape[0]),
+        ):
+            raise RuntimeError(
+                "dynamic predicate-logit shape does not follow runtime V"
+            )
+        for name, expected_value, got in zip(
+            OUTPUT_NAMES,
+            expected,
+            actual,
+        ):
+            expected_np = expected_value.detach().cpu().numpy()
+            if expected_np.dtype == np.bool_ or np.issubdtype(
+                expected_np.dtype,
+                np.integer,
+            ):
+                if not np.array_equal(expected_np, got):
+                    raise RuntimeError(
+                        f"dynamic ONNX parity failed for {name}"
+                    )
+            else:
+                delta = float(
+                    np.max(np.abs(expected_np - got))
+                )
+                worst = max(worst, delta)
+                if delta > tolerance:
+                    raise RuntimeError(
+                        f"dynamic ONNX parity failed for {name}: "
+                        f"max abs delta {delta}"
+                    )
+    return worst
 
 
 def export_encoder_graph(
@@ -256,9 +457,22 @@ def main() -> None:
             "queries instead of baked [K,V] predicate logits."
         ),
     )
+    parser.add_argument(
+        "--dynamic-vocabulary",
+        action="store_true",
+        help=(
+            "Export relation.open-vocabulary with runtime W[V,D] and "
+            "alpha[V] inputs and dynamic pred_logits vocabulary axis."
+        ),
+    )
     parser.add_argument("--opset", type=int, default=18)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
+
+    if args.encoder_only and args.dynamic_vocabulary:
+        raise ValueError(
+            "--encoder-only and --dynamic-vocabulary are mutually exclusive"
+        )
 
     checkpoint_path = Path(args.checkpoint)
     output_path = Path(args.out)
@@ -285,7 +499,38 @@ def main() -> None:
         [config.max_boxes], dtype=torch.int64
     )
 
-    if args.encoder_only:
+    dynamic_W = None
+    dynamic_alpha = None
+    if args.dynamic_vocabulary:
+        if model.config.predicate_head_contract != "apache":
+            raise ValueError(
+                "--dynamic-vocabulary requires predicate_head_contract=apache"
+            )
+        dynamic_W = torch.nn.functional.normalize(
+            payload["predicate_embeddings"].float(),
+            dim=-1,
+        )
+        assert model.apache_vocab_head is not None
+        with torch.no_grad():
+            dynamic_alpha = (
+                model.apache_vocab_head.routing_alpha(dynamic_W)
+                .detach()
+                .clone()
+            )
+        reference = export_dynamic_vocabulary_graph(
+            model,
+            output_path,
+            image,
+            boxes,
+            box_counts,
+            dynamic_W,
+            dynamic_alpha,
+            opset=args.opset,
+        )
+        output_names = OUTPUT_NAMES
+        model_type = "relation.open-vocabulary"
+        output_kind = "dynamic-vocabulary-logits"
+    elif args.encoder_only:
         reference = export_encoder_graph(
             model,
             output_path,
@@ -327,16 +572,52 @@ def main() -> None:
         "onnx_sha256": sha256(output_path),
         "opset": args.opset,
     }
-    if args.encoder_only:
+    if args.dynamic_vocabulary:
+        assert model.apache_vocab_head is not None
+        metadata.update({
+            "vocabulary_dynamic": True,
+            "vocabulary_graph_input": True,
+            "query_dim": model.predicate_dim,
+            "predicate_axis": "dynamic",
+            "default_predicate_count": len(predicates),
+            "score_logit_scale": float(
+                model.apache_vocab_head.logit_scale.exp()
+                .clamp(max=100.0)
+                .detach()
+                .cpu()
+            ),
+            "score_logit_bias": float(
+                model.apache_vocab_head.logit_bias.detach().cpu()
+            ),
+            "score_contract": (
+                "scale*((1-alpha)*cos(q_sem,W)+alpha*cos(q_spa,W))+bias"
+            ),
+        })
+    elif args.encoder_only:
         metadata.update({
             "vocabulary_dynamic": True,
             "query_dim": model.predicate_dim,
             "semantic_query": True,
             "spatial_query": True,
             "score_logit_scale": float(
-                model.logit_scale.exp().clamp(max=100.0).detach().cpu()
+                (
+                    model.apache_vocab_head.logit_scale.exp()
+                    if model.apache_vocab_head is not None
+                    else model.logit_scale.exp()
+                )
+                .clamp(max=100.0)
+                .detach()
+                .cpu()
             ),
-            "score_logit_bias": 0.0,
+            "score_logit_bias": float(
+                (
+                    model.apache_vocab_head.logit_bias
+                    if model.apache_vocab_head is not None
+                    else torch.zeros(())
+                )
+                .detach()
+                .cpu()
+            ),
             "score_contract": (
                 "scale*((1-alpha)*dot(q_sem,w)+alpha*dot(q_spa,w))+bias"
             ),
@@ -350,14 +631,42 @@ def main() -> None:
         })
 
     if args.check:
-        metadata["check_max_abs_delta"] = check_onnx_parity(
-            output_path,
-            image,
-            boxes,
-            box_counts,
-            reference,
-            output_names=output_names,
-        )
+        if args.dynamic_vocabulary:
+            assert dynamic_W is not None
+            assert dynamic_alpha is not None
+            one_W = dynamic_W[:1]
+            one_alpha = dynamic_alpha[:1]
+            random_W = torch.nn.functional.normalize(
+                torch.randn(3, model.predicate_dim),
+                dim=-1,
+            )
+            random_alpha = torch.tensor(
+                [0.0, 0.5, 1.0],
+                dtype=torch.float32,
+            )
+            metadata["check_max_abs_delta"] = (
+                check_dynamic_vocabulary_parity(
+                    output_path,
+                    model,
+                    image,
+                    boxes,
+                    box_counts,
+                    [
+                        (one_W, one_alpha),
+                        (random_W, random_alpha),
+                        (dynamic_W, dynamic_alpha),
+                    ],
+                )
+            )
+        else:
+            metadata["check_max_abs_delta"] = check_onnx_parity(
+                output_path,
+                image,
+                boxes,
+                box_counts,
+                reference,
+                output_names=output_names,
+            )
 
     metadata_path = output_path.with_suffix(".json")
     metadata_path.write_text(
