@@ -1,0 +1,173 @@
+name: Open Images relation baseline
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/openimages-relation-baseline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openimages-relation-baseline
+  cancel-in-progress: false
+
+jobs:
+  real-baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      TRAIN_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-vrd.csv
+      VALIDATION_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-validation-annotations-vrd.csv
+      CLASS_DESCRIPTIONS_URL: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
+      DOWNLOADER_URL: https://raw.githubusercontent.com/openimages/dataset/main/downloader.py
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-openimages-baseline.txt
+
+      - name: Install focused baseline dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-openimages-baseline.txt
+
+      - name: Download public Open Images annotations
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          mkdir -p "$DATA"
+          curl --fail --location --retry 3             "$TRAIN_VRD_URL" -o "$DATA/train-vrd.csv"
+          curl --fail --location --retry 3             "$VALIDATION_VRD_URL" -o "$DATA/validation-vrd.csv"
+          curl --fail --location --retry 3             "$CLASS_DESCRIPTIONS_URL" -o "$DATA/classes.csv"
+          wc -c "$DATA"/*
+
+      - name: Select deterministic real-data smoke slices
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          mkdir -p "$SUBSET"
+          python tools/relation_training/convert_openimages.py subset             --split train             --relationships "$DATA/train-vrd.csv"             --max-images 32             --max-boxes 8             --output-csv "$SUBSET/train.csv"
+          python tools/relation_training/convert_openimages.py subset             --split validation             --relationships "$DATA/validation-vrd.csv"             --max-images 16             --max-boxes 8             --output-csv "$SUBSET/validation.csv"
+
+      - name: Build shared vocabulary and downloader image lists
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          python tools/relation_training/convert_openimages.py scan             --source "train=$SUBSET/train.csv"             --source "validation=$SUBSET/validation.csv"             --class-descriptions "$DATA/classes.csv"             --output-dir "$SCAN"
+          cat "$SCAN/scan.manifest.json"
+
+      - name: Download selected Open Images pixels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          curl --fail --location --retry 3             "$DOWNLOADER_URL" -o "$RUNNER_TEMP/openimages-downloader.py"
+          python "$RUNNER_TEMP/openimages-downloader.py"             "$SCAN/train.image_ids.txt"             --download_folder="$IMAGES"             --num_processes=8
+          python "$RUNNER_TEMP/openimages-downloader.py"             "$SCAN/validation.image_ids.txt"             --download_folder="$IMAGES"             --num_processes=8
+          test "$(find "$IMAGES" -maxdepth 1 -type f -name '*.jpg' | wc -l)" -eq 48
+
+      - name: Convert real Open Images splits
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          python tools/relation_training/convert_openimages.py convert             --split train             --relationships "$SUBSET/train.csv"             --class-descriptions "$DATA/classes.csv"             --vocabulary "$SCAN/vocabulary.json"             --image-root "$IMAGES"             --output-dir "$RUNNER_TEMP/openimages-train"
+          python tools/relation_training/convert_openimages.py convert             --split validation             --relationships "$SUBSET/validation.csv"             --class-descriptions "$DATA/classes.csv"             --vocabulary "$SCAN/vocabulary.json"             --image-root "$IMAGES"             --output-dir "$RUNNER_TEMP/openimages-validation"
+
+      - name: Build deterministic closed-vocabulary predicate prototypes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/make_predicate_embeddings.py             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json"             --out "$RUNNER_TEMP/predicate-embeddings.pt"
+
+      - name: Train frozen-DINOv3 real-data smoke baseline
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/train_baseline.py             --train-annotations "$RUNNER_TEMP/openimages-train/train.jsonl"             --validation-annotations "$RUNNER_TEMP/openimages-validation/validation.jsonl"             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json"             --image-root "$RUNNER_TEMP/openimages-images"             --predicate-embeddings "$RUNNER_TEMP/predicate-embeddings.pt"             --output-dir "$RUNNER_TEMP/relation-baseline-run"             --backbone "$DINOV3_MODEL"             --image-size 224             --max-boxes 8             --pair-budget 32             --hidden-dim 64             --geometry-dim 16             --num-heads 4             --num-layers 1             --epochs 1             --batch-size 4             --learning-rate 0.001             --weight-decay 0.0001             --device cpu
+          cat "$RUNNER_TEMP/relation-baseline-run/training.json"
+          cat "$RUNNER_TEMP/relation-baseline-run/benchmark.json"
+
+      - name: Build evidence bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          EVIDENCE="$RUNNER_TEMP/openimages-evidence"
+          mkdir -p "$EVIDENCE"
+          cp "$RUNNER_TEMP/openimages-scan/scan.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-scan/vocabulary.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-train/train.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-validation/validation.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/relation-baseline-run/training.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/relation-baseline-run/benchmark.json" "$EVIDENCE/"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["RUNNER_TEMP"]) / "openimages-evidence"
+          payload = {
+              "schema": "kfcore.openimages-real-baseline-evidence/1",
+              "exact_head": os.environ["EXPECTED_SHA"],
+              "train_images": 32,
+              "validation_images": 16,
+              "max_boxes": 8,
+              "epochs": 1,
+              "image_size": 224,
+              "backbone": os.environ["DINOV3_MODEL"],
+              "checkpoint_uploaded": False,
+              "images_uploaded": False,
+              "annotations_uploaded": False,
+          }
+          (evidence / "experiment.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openimages-relation-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: ${{ runner.temp }}/openimages-evidence/
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

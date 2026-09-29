@@ -15,7 +15,9 @@ from openimages import (
     image_id_payload,
     load_class_descriptions,
     scan_relationship_files,
+    select_subset_image_ids,
     stable_manifest_json,
+    subset_relationship_csv,
     vocabulary_payload,
 )
 
@@ -242,6 +244,60 @@ class OpenImagesConversionTest(unittest.TestCase):
         self.assertTrue(
             stable_manifest_json(first_manifest).endswith("\n")
         )
+
+    def test_subset_selection_is_deterministic_and_respects_box_budget(self):
+        path = self.root / "full.csv"
+        rows = self.rows() + [
+            relationship(
+                "aaa000",
+                "/m/person",
+                "/m/bike",
+                "on",
+            ),
+            relationship(
+                "zzz999",
+                "/m/person",
+                "/m/bike",
+                "near",
+            ),
+        ]
+        Image.new("RGB", (20, 20), (1, 2, 3)).save(
+            self.root / "aaa000.jpg"
+        )
+        Image.new("RGB", (20, 20), (3, 2, 1)).save(
+            self.root / "zzz999.jpg"
+        )
+        write_csv(path, list(reversed(rows)))
+
+        selected = select_subset_image_ids(
+            path,
+            max_images=2,
+            max_boxes=2,
+        )
+        self.assertEqual(selected, ("aaa000", "abc123"))
+
+        subset = subset_relationship_csv(path, selected)
+        subset_path = self.root / "subset.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        summary = scan_relationship_files([subset_path])
+
+        self.assertEqual(summary.images, ("aaa000", "abc123"))
+        self.assertEqual(summary.skipped_attributes, 0)
+        self.assertNotIn(",is\n", subset)
+
+        # Reversing source rows does not change deterministic subset bytes.
+        second_path = self.root / "full-second.csv"
+        write_csv(second_path, rows)
+        second_selected = select_subset_image_ids(
+            second_path,
+            max_images=2,
+            max_boxes=2,
+        )
+        second_subset = subset_relationship_csv(
+            second_path, second_selected
+        )
+        self.assertEqual(selected, second_selected)
+        self.assertEqual(subset, second_subset)
 
     def test_missing_image_invalid_box_and_self_relation_fail(self):
         classes = load_class_descriptions(self.classes)

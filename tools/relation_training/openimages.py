@@ -429,6 +429,89 @@ def convert_relationship_file(
     return output, manifest
 
 
+def select_subset_image_ids(
+    relationship_csv: str | Path,
+    *,
+    max_images: int,
+    max_boxes: int,
+) -> tuple[str, ...]:
+    if max_images <= 0:
+        raise ValueError("max_images must be positive")
+    if max_boxes < 2:
+        raise ValueError("max_boxes must be at least 2")
+
+    endpoints: dict[str, set[NormalizedEndpoint]] = {}
+    relation_counts: dict[str, int] = {}
+    for relation in iter_relationship_rows(relationship_csv):
+        if relation is None:
+            continue
+        endpoints.setdefault(relation.image_id, set()).update(
+            (relation.subject, relation.object)
+        )
+        relation_counts[relation.image_id] = (
+            relation_counts.get(relation.image_id, 0) + 1
+        )
+
+    eligible = [
+        image_id
+        for image_id in sorted(endpoints)
+        if 2 <= len(endpoints[image_id]) <= max_boxes
+        and relation_counts.get(image_id, 0) > 0
+    ]
+    if len(eligible) < max_images:
+        raise ValueError(
+            f"only {len(eligible)} eligible Open Images examples; "
+            f"requested {max_images}"
+        )
+    return tuple(eligible[:max_images])
+
+
+def subset_relationship_csv(
+    relationship_csv: str | Path,
+    image_ids: Sequence[str],
+) -> str:
+    selected = set(image_ids)
+    if not selected:
+        raise ValueError("subset image_ids must not be empty")
+    if len(selected) != len(image_ids):
+        raise ValueError("subset image_ids must be unique")
+
+    rows: list[tuple[str, ...]] = []
+    with Path(relationship_csv).open(
+        "r", encoding="utf-8-sig", newline=""
+    ) as stream:
+        reader = csv.DictReader(stream)
+        if reader.fieldnames is None:
+            raise ValueError("Open Images relationship CSV has no header")
+        missing = set(REQUIRED_COLUMNS).difference(reader.fieldnames)
+        if missing:
+            raise ValueError(
+                f"Open Images relationship CSV is missing columns: {sorted(missing)}"
+            )
+        for row in reader:
+            if (
+                row["ImageID"] in selected
+                and row["RelationLabel"] != "is"
+            ):
+                rows.append(tuple(row[column] for column in REQUIRED_COLUMNS))
+
+    present = {row[0] for row in rows}
+    missing_ids = sorted(selected - present)
+    if missing_ids:
+        raise ValueError(
+            f"selected Open Images ID has no object relations: {missing_ids[0]}"
+        )
+
+    rows.sort()
+    import io
+
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(REQUIRED_COLUMNS)
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
 def stable_manifest_json(manifest: dict[str, object]) -> str:
     return (
         json.dumps(

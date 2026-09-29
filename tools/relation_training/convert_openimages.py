@@ -11,7 +11,9 @@ from openimages import (
     image_id_payload,
     load_class_descriptions,
     scan_relationship_files,
+    select_subset_image_ids,
     sha256_file,
+    subset_relationship_csv,
     stable_manifest_json,
     vocabulary_payload,
 )
@@ -127,6 +129,34 @@ def convert(args: argparse.Namespace) -> None:
     print(json.dumps(summary, sort_keys=True))
 
 
+def subset(args: argparse.Namespace) -> None:
+    selected = select_subset_image_ids(
+        args.relationships,
+        max_images=args.max_images,
+        max_boxes=args.max_boxes,
+    )
+    output_path = Path(args.output_csv)
+    if output_path.exists():
+        raise FileExistsError(f"output CSV already exists: {output_path}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        subset_relationship_csv(args.relationships, selected),
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {
+                "split": args.split,
+                "images": len(selected),
+                "max_boxes": args.max_boxes,
+                "output_csv": str(output_path),
+                "output_sha256": sha256_file(output_path),
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -152,6 +182,24 @@ def main() -> None:
     scan_parser.add_argument("--class-descriptions", required=True)
     scan_parser.add_argument("--output-dir", required=True)
     scan_parser.set_defaults(func=scan)
+
+    subset_parser = subparsers.add_parser(
+        "subset",
+        help=(
+            "Select a deterministic lexicographic image slice that fits "
+            "the requested max_boxes budget."
+        ),
+    )
+    subset_parser.add_argument(
+        "--split",
+        required=True,
+        choices=("train", "validation", "test"),
+    )
+    subset_parser.add_argument("--relationships", required=True)
+    subset_parser.add_argument("--max-images", type=int, required=True)
+    subset_parser.add_argument("--max-boxes", type=int, required=True)
+    subset_parser.add_argument("--output-csv", required=True)
+    subset_parser.set_defaults(func=subset)
 
     convert_parser = subparsers.add_parser(
         "convert",

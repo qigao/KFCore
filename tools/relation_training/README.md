@@ -296,6 +296,51 @@ KFCore does not redistribute Open Images annotations or pixels. Review the
 Open Images annotation and per-image license terms before using or
 redistributing the dataset.
 
+## Real Open Images smoke experiment
+
+`.github/workflows/openimages-relation-baseline.yml` runs the first real-data
+training qualification without making it part of every PR gate.
+
+The fixed experiment uses:
+
+```text
+32 train images
+16 validation images
+<= 8 relation endpoints / image
+224 x 224 model input
+pair budget 32
+1 frozen-DINOv3 epoch
+small 64-d relation hidden state
+```
+
+The workflow downloads the public Open Images VRD annotation CSVs and class
+descriptions, selects the lexicographically first eligible images, downloads
+those pixels with the official Open Images downloader, converts both splits
+through the canonical converter, creates an identity predicate prototype bank,
+and invokes `train_baseline.py`.
+
+Identity prototypes intentionally make this a closed-vocabulary optimization
+smoke rather than an open-vocabulary result. They remove text-encoder quality
+as a variable while proving the real dataset/model/training/benchmark path.
+
+On its first merge the workflow runs once from the master push. It is also
+available through `workflow_dispatch` for later qualification runs.
+
+Only JSON evidence is uploaded:
+
+```text
+experiment.json
+scan.manifest.json
+vocabulary.json
+train.manifest.json
+validation.manifest.json
+training.json
+benchmark.json
+```
+
+Source images, source annotation CSVs, DINOv3 weights and the trained
+DINOv3-derived checkpoint are deliberately excluded from the artifact.
+
 ## Frozen DINOv3 baseline runner
 
 The first reproducible training recipe keeps the DINOv3 backbone frozen and
