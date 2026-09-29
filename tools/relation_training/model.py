@@ -179,6 +179,16 @@ class RelationModelConfig:
 
 
 @dataclass(frozen=True)
+class ApachePairEvidenceOutputs:
+    pair_tokens: Tensor
+    box_tokens: Tensor
+    anchors: Tensor
+    geometry_features: Tensor
+    subject_features: Tensor
+    object_features: Tensor
+
+
+@dataclass(frozen=True)
 class RelationTrainingOutputs:
     runtime: tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
     sampler_logits: Tensor
@@ -1295,7 +1305,7 @@ class KFRelationModel(nn.Module):
         object_index: Tensor,
         selected_valid: Tensor,
         region_features: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    ) -> ApachePairEvidenceOutputs:
         if (
             self.apache_spatial_pool is None
             or self.apache_box_prompt_encoder is None
@@ -1411,13 +1421,13 @@ class KFRelationModel(nn.Module):
             .unsqueeze(-1)
             .unsqueeze(-1)
         )
-        return (
-            pair_tokens,
-            box_tokens,
-            anchors,
-            geometry_features,
-            subject_features,
-            object_features,
+        return ApachePairEvidenceOutputs(
+            pair_tokens=pair_tokens,
+            box_tokens=box_tokens,
+            anchors=anchors,
+            geometry_features=geometry_features,
+            subject_features=subject_features,
+            object_features=object_features,
         )
 
     def _forward_impl(
@@ -1576,14 +1586,7 @@ class KFRelationModel(nn.Module):
             )
 
         if self.config.pair_evidence_contract == "apache":
-            (
-                tokens,
-                _reference_box_tokens,
-                _reference_anchors,
-                _reference_geometry_features,
-                _reference_subject_features,
-                _reference_object_features,
-            ) = self._apache_pair_evidence(
+            reference_evidence = self._apache_pair_evidence(
                 patch_features,
                 boxes,
                 valid_boxes,
@@ -1591,6 +1594,18 @@ class KFRelationModel(nn.Module):
                 object_index,
                 selected_valid,
                 region_features=region_features,
+            )
+            tokens = reference_evidence.pair_tokens
+            _reference_box_tokens = reference_evidence.box_tokens
+            _reference_anchors = reference_evidence.anchors
+            _reference_geometry_features = (
+                reference_evidence.geometry_features
+            )
+            _reference_subject_features = (
+                reference_evidence.subject_features
+            )
+            _reference_object_features = (
+                reference_evidence.object_features
             )
         else:
             assert region_features is not None
