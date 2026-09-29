@@ -348,6 +348,35 @@ benchmark.json
 Source images, source annotation CSVs, DINOv3 weights and the trained
 DINOv3-derived checkpoint are deliberately excluded from the artifact.
 
+## Open Images frozen baseline v1
+
+After the 32/16 pipeline smoke, the first sampler-stressing baseline uses a
+larger deterministic Open Images slice:
+
+```text
+256 train / 64 validation
+4..12 relation endpoints per image
+pair budget 24
+224px input
+frozen DINOv3 ViT-S/16
+identity predicate prototypes
+3 epochs
+```
+
+The minimum object-count filter matters: with six or more objects, the full
+ordered-pair set exceeds the 24-pair budget, so sampler recall is no longer
+structurally guaranteed to be 1.0.
+
+`.github/workflows/openimages-relation-baseline-v1.yml` runs once on its first
+merge and is also available through `workflow_dispatch`. It uploads only JSON
+provenance and metrics; pixels, source CSVs, DINOv3 weights and the trained
+checkpoint remain outside artifacts.
+
+This baseline remains closed-vocabulary because predicate prototypes are an
+identity matrix. Its purpose is to establish a reproducible optimization and
+sampling anchor before introducing a semantic text embedding bank or backbone
+fine-tuning.
+
 ## Frozen DINOv3 baseline runner
 
 The first reproducible training recipe keeps the DINOv3 backbone frozen and

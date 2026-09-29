@@ -137,6 +137,7 @@ def subset(args: argparse.Namespace) -> None:
         args.relationships,
         max_images=args.max_images,
         max_boxes=args.max_boxes,
+        min_boxes=args.min_boxes,
     )
     output_path = Path(args.output_csv)
     if output_path.exists():
@@ -157,6 +158,7 @@ def subset(args: argparse.Namespace) -> None:
         "skipped_attribute_rows": source_summary.skipped_attributes,
         "skipped_self_relation_rows": source_summary.skipped_self_relations,
         "selected_images": len(selected),
+        "min_boxes": args.min_boxes,
         "max_boxes": args.max_boxes,
         "output_csv": output_path.name,
         "output_sha256": sha256_file(output_path),
@@ -211,6 +213,7 @@ def main() -> None:
     )
     subset_parser.add_argument("--relationships", required=True)
     subset_parser.add_argument("--max-images", type=int, required=True)
+    subset_parser.add_argument("--min-boxes", type=int, default=2)
     subset_parser.add_argument("--max-boxes", type=int, required=True)
     subset_parser.add_argument("--output-csv", required=True)
     subset_parser.set_defaults(func=subset)
