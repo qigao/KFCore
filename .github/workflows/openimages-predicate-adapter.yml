@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: openimages-predicate-adapter
+  group: openimages-predicate-adapter-rng-control
   cancel-in-progress: false
 
 jobs:
