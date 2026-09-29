@@ -45,6 +45,7 @@ jobs:
           cache-dependency-path: |
             tools/relation_training/requirements-real-smoke-torch.txt
             tools/relation_training/requirements-openimages-baseline.txt
+            tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Install prototype dependencies
         shell: bash
@@ -55,6 +56,8 @@ jobs:
             -r tools/relation_training/requirements-real-smoke-torch.txt
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-openimages-baseline.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Recreate exact vocabulary
         shell: bash
@@ -176,7 +179,6 @@ jobs:
           cache-dependency-path: |
             tools/relation_training/requirements-real-smoke-torch.txt
             tools/relation_training/requirements-openimages-baseline.txt
-            tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Install focused experiment dependencies
         shell: bash
@@ -187,8 +189,6 @@ jobs:
             -r tools/relation_training/requirements-real-smoke-torch.txt
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-openimages-baseline.txt
-          python -m pip install --disable-pip-version-check \
-            -r tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Download public Open Images annotations
         shell: bash
