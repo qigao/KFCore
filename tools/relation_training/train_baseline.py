@@ -127,6 +127,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--holdout-predicate",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Repeat to explicitly exclude a predicate from predicate BCE "
+            "while retaining pair-existence supervision."
+        ),
+    )
+    parser.add_argument(
         "--zero-support-negative-weight",
         type=float,
         default=1.0,
@@ -194,7 +204,53 @@ def main() -> None:
         mode=args.predicate_positive_weight_mode,
         cap=args.predicate_positive_weight_cap,
     )
+    validation_weighting = build_predicate_weighting(
+        validation_manifest,
+        predicate_count=len(vocabulary.predicates),
+        mode="none",
+        cap=args.predicate_positive_weight_cap,
+    )
     predicate_positive_weights = predicate_weighting.tensor()
+
+    holdout_names = tuple(args.holdout_predicate)
+    if len(set(holdout_names)) != len(holdout_names):
+        raise ValueError("--holdout-predicate values must be unique")
+    if holdout_names and args.mask_zero_support_predicates:
+        raise ValueError(
+            "--holdout-predicate cannot be combined with "
+            "--mask-zero-support-predicates"
+        )
+
+    predicate_index = {
+        name: index
+        for index, name in enumerate(vocabulary.predicates)
+    }
+    unknown_holdouts = [
+        name for name in holdout_names
+        if name not in predicate_index
+    ]
+    if unknown_holdouts:
+        raise ValueError(
+            f"unknown holdout predicate: {unknown_holdouts[0]}"
+        )
+    holdout_indices = tuple(
+        sorted(predicate_index[name] for name in holdout_names)
+    )
+    for index in holdout_indices:
+        if predicate_weighting.predicate_positive_counts[index] <= 0:
+            raise ValueError(
+                "explicit holdout predicate must have positive train support"
+            )
+        if validation_weighting.predicate_positive_counts[index] <= 0:
+            raise ValueError(
+                "explicit holdout predicate must have positive validation support"
+            )
+
+    effective_train_predicate_support = list(
+        predicate_weighting.predicate_positive_counts
+    )
+    for index in holdout_indices:
+        effective_train_predicate_support[index] = 0
     if (
         args.mask_zero_support_predicates
         and args.zero_support_negative_weight != 1.0
@@ -210,7 +266,18 @@ def main() -> None:
         ),
         zero_support_negative_weight=args.zero_support_negative_weight,
     )
-    if args.mask_zero_support_predicates:
+    explicit_holdout_mask = None
+    if holdout_indices:
+        predicate_supervision_mask = torch.ones(
+            len(vocabulary.predicates),
+            dtype=torch.bool,
+        )
+        predicate_supervision_mask[
+            list(holdout_indices)
+        ] = False
+        explicit_holdout_mask = ~predicate_supervision_mask
+        predicate_supervision_mode = "explicit-holdout"
+    elif args.mask_zero_support_predicates:
         predicate_supervision_mask = torch.tensor(
             [
                 count > 0
@@ -225,12 +292,10 @@ def main() -> None:
 
     supervised_predicate_indices = [
         index
-        for index, count in enumerate(
-            predicate_weighting.predicate_positive_counts
-        )
+        for index in range(len(vocabulary.predicates))
         if (
-            not args.mask_zero_support_predicates
-            or count > 0
+            predicate_supervision_mask is None
+            or bool(predicate_supervision_mask[index])
         )
     ]
     masked_predicate_indices = [
@@ -289,6 +354,7 @@ def main() -> None:
             predicate_positive_weights=predicate_positive_weights,
             predicate_supervision_mask=predicate_supervision_mask,
             predicate_negative_weights=predicate_negative_weights,
+            explicit_holdout_mask=explicit_holdout_mask,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -301,6 +367,9 @@ def main() -> None:
         benchmark_config=benchmark_config,
         train_predicate_support=(
             predicate_weighting.predicate_positive_counts
+        ),
+        explicit_holdout_predicate_indices=(
+            holdout_indices if holdout_indices else None
         ),
     )
 
@@ -366,6 +435,17 @@ def main() -> None:
                 "mode": predicate_supervision_mode,
                 "supervised_predicate_indices": supervised_predicate_indices,
                 "masked_predicate_indices": masked_predicate_indices,
+                "held_out_predicate_indices": list(holdout_indices),
+                "held_out_predicate_names": [
+                    vocabulary.predicates[index]
+                    for index in holdout_indices
+                ],
+                "original_train_predicate_support": list(
+                    predicate_weighting.predicate_positive_counts
+                ),
+                "effective_train_predicate_support": list(
+                    effective_train_predicate_support
+                ),
             },
             "predicate_negative_weighting": {
                 "zero_support_negative_weight": (
@@ -440,6 +520,17 @@ def main() -> None:
             "mode": predicate_supervision_mode,
             "supervised_predicate_indices": supervised_predicate_indices,
             "masked_predicate_indices": masked_predicate_indices,
+            "held_out_predicate_indices": list(holdout_indices),
+            "held_out_predicate_names": [
+                vocabulary.predicates[index]
+                for index in holdout_indices
+            ],
+            "original_train_predicate_support": list(
+                predicate_weighting.predicate_positive_counts
+            ),
+            "effective_train_predicate_support": list(
+                effective_train_predicate_support
+            ),
         },
         "predicate_negative_weighting": {
             "zero_support_negative_weight": (

@@ -731,6 +731,56 @@ identity matrix. Its purpose is to establish a reproducible optimization and
 sampling anchor before introducing a semantic text embedding bank or backbone
 fine-tuning.
 
+## Explicit predicate holdout
+
+Incidental train-zero-support predicates in a small deterministic slice are
+useful diagnostics, but they are not a stable open-vocabulary evaluation.
+`train_baseline.py` therefore supports an explicit predicate holdout:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  ... ^
+  --holdout-predicate contain ^
+  --holdout-predicate holds ^
+  --holdout-predicate ride
+```
+
+An explicit holdout keeps the original annotations and pair-existence targets
+unchanged, but excludes the selected predicate dimensions from predicate BCE.
+Unlike the ordinary supervision-mask path, this mode is allowed to hide positive
+predicate labels by design.
+
+Safety invariants:
+
+- holdout names must be unique and present in the vocabulary;
+- every held-out predicate must have positive support in both train and
+  validation;
+- `--holdout-predicate` cannot be combined with
+  `--mask-zero-support-predicates`;
+- ordinary predicate masks still fail fast if they hide a positive label;
+- runtime / ONNX outputs are unchanged.
+
+Training evidence records the held-out names/indices plus both original and
+effective train predicate support. Benchmark grouping keeps the original train
+support semantics: `train_zero_support` contains only predicates that truly had
+zero positive support in the source train split, `seen` excludes explicit
+holdouts, and `predicate_groups.explicit_holdout` reports validation support
+and mRecall@K for exactly the requested predicates.
+
+The first controlled holdout set is `contain / holds / ride`, which have
+non-trivial support in both train and validation on the canonical 256/64 Open
+Images slice.
+
+`.github/workflows/openimages-explicit-predicate-holdout.yml` runs the real
+two-arm diagnostic after merge. Both arms use the exact same canonical 256/64
+data, shared whitened CLIP prototype tensor, frozen DINOv3 ViT-S/16, K=48,
+sqrt-balanced positive weighting, adapter rank 0 and zero-support negative
+weight `alpha=0.10`. The only training difference is whether
+`contain / holds / ride` are excluded from predicate BCE. The comparator
+reconstructs the same holdout group from per-predicate metrics for both arms,
+keeps naturally train-zero-support predicates separate, and rejects
+data/prototype/model/loss-contract drift before reporting metric deltas.
+
 ## Seen vs train-zero-support predicate recall
 
 Canonical benchmark reports can optionally stratify predicate mRecall by

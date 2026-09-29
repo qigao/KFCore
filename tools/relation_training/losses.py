@@ -104,6 +104,7 @@ def supervised_relation_loss(
     predicate_positive_weights: Tensor | None = None,
     predicate_supervision_mask: Tensor | None = None,
     predicate_negative_weights: Tensor | None = None,
+    explicit_holdout_mask: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -115,8 +116,9 @@ def supervised_relation_loss(
     multi-hot predicate vectors are supervised negatives by default. Optional
     [V] negative weights scale only target=0 predicate BCE terms; positive
     target terms always keep multiplier 1. An optional bool [V] supervision
-    mask can exclude predicate dimensions entirely; it may never hide a
-    positive target in the current batch.
+    mask can exclude predicate dimensions entirely. Positive targets may be
+    hidden only when the same dimensions are explicitly declared through
+    explicit_holdout_mask.
 
     The dense sampler loss is training-only. Runtime/export keeps the existing
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
@@ -205,6 +207,32 @@ def supervised_relation_loss(
                 "predicate_supervision_mask must supervise at least one predicate"
             )
 
+    holdout_mask = None
+    if explicit_holdout_mask is not None:
+        if supervision_mask is None:
+            raise ValueError(
+                "explicit_holdout_mask requires predicate_supervision_mask"
+            )
+        if explicit_holdout_mask.ndim != 1:
+            raise ValueError("explicit_holdout_mask must be [V]")
+        if explicit_holdout_mask.shape[0] != pred_logits.shape[2]:
+            raise ValueError(
+                "explicit_holdout_mask width does not match pred_logits"
+            )
+        if explicit_holdout_mask.dtype != torch.bool:
+            raise ValueError("explicit_holdout_mask must have bool dtype")
+        holdout_mask = explicit_holdout_mask.to(
+            device=pred_logits.device,
+        )
+        if not holdout_mask.any():
+            raise ValueError(
+                "explicit_holdout_mask must contain at least one predicate"
+            )
+        if (holdout_mask & supervision_mask).any():
+            raise ValueError(
+                "explicit holdout predicates must be excluded from supervision"
+            )
+
     negative_weights = None
     if predicate_negative_weights is not None:
         if predicate_negative_weights.ndim != 1:
@@ -232,10 +260,15 @@ def supervised_relation_loss(
         positive_logits = pred_logits[positive]
         positive_targets = selected_predicate_targets[positive]
         if supervision_mask is not None:
-            masked_positive = (
-                positive_targets[:, ~supervision_mask] > 0.5
+            hidden_positive = (
+                positive_targets > 0.5
+            ) & (~supervision_mask).view(1, -1)
+            allowed_hidden = (
+                holdout_mask.view(1, -1)
+                if holdout_mask is not None
+                else torch.zeros_like(hidden_positive)
             )
-            if masked_positive.any():
+            if (hidden_positive & ~allowed_hidden).any():
                 raise ValueError(
                     "predicate supervision mask cannot hide positive labels"
                 )
