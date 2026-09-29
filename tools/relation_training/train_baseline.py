@@ -375,14 +375,6 @@ def main() -> None:
                     predicate_negative_weights.tolist()
                 ),
             },
-            "predicate_negative_weighting": {
-                "zero_support_negative_weight": (
-                    args.zero_support_negative_weight
-                ),
-                "negative_weights": (
-                    predicate_negative_weights.tolist()
-                ),
-            },
             "predicate_adapter": predicate_adapter_report,
             "history": history,
         },
@@ -448,6 +440,14 @@ def main() -> None:
             "mode": predicate_supervision_mode,
             "supervised_predicate_indices": supervised_predicate_indices,
             "masked_predicate_indices": masked_predicate_indices,
+        },
+        "predicate_negative_weighting": {
+            "zero_support_negative_weight": (
+                args.zero_support_negative_weight
+            ),
+            "negative_weights": (
+                predicate_negative_weights.tolist()
+            ),
         },
         "predicate_adapter": predicate_adapter_report,
         "history": history,
