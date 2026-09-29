@@ -560,6 +560,58 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Apache RelateAnything pair-evidence reference path
+
+Issue #98 is now anchored to the last Apache-2.0 RelateAnything snapshot,
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`.
+
+Use:
+
+```text
+--pair-evidence-contract apache
+```
+
+to select the reference pair-evidence construction. This path is intentionally
+separate from the earlier KFCore `pair_visual_evidence` /
+`pair_geometry_evidence` ablations.
+
+The Apache contract adds:
+
+```text
+DINO fused scene map
+  -> box-conditioned global SoftSpatialPool
+  -> v_sub / v_obj / v_union / v_contact
+  -> exact 19-D RelGeomEncoder
+  -> concat [sub,obj,union,contact,geometry]
+  -> pair projection
+```
+
+`SoftSpatialPool` is global cross-attention over every scene patch. A box
+provides a query through top-left / bottom-right Fourier prompt tokens; it does
+not restrict the receptive field to patches inside the box.
+
+The reference contact zone is the box intersection when endpoints overlap and
+the rectangle between their facing edges when they do not.
+
+The 19-D geometry path implements the Apache feature order and
+`10*tanh(x/10)` normalization exactly, including box-only fallbacks for
+mask-fill / region-IoU / region-contact fields.
+
+### Transitional boundary
+
+This #98 path deliberately does **not** claim the whole Apache architecture:
+
+- pair selection still uses the existing KFCore sampler until #118 lands;
+- BoxPromptEncoder outputs are produced/frozen but are not consumed until #119
+  ports the relation context stack;
+- predicate scoring remains the current KFCore head until #99;
+- the current legacy path remains the default for checkpoint compatibility.
+
+The Apache pair-evidence modules are initialized after existing common modules,
+so enabling the contract does not perturb common parameter initialization under
+the same seed. Legacy representation modules that leave the forward path are
+frozen rather than left as dead trainable parameters.
+
 ## Contact-only visual evidence attribution
 
 The first endpoint/union/union-contact A/B showed that union pooling alone was
