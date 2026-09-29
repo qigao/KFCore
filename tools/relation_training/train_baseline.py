@@ -112,6 +112,16 @@ def main() -> None:
             "and union-contact add zero-initialized residual projections."
         ),
     )
+    parser.add_argument(
+        "--pair-geometry-evidence",
+        choices=("basic", "rich"),
+        default="basic",
+        help=(
+            "Pair geometry feature contract. rich adds a zero-initialized "
+            "residual over normalized offsets, overlap fractions, gaps "
+            "and direction without changing the historical basic path."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -245,6 +255,7 @@ def main() -> None:
         tap_indices=(-6, -3, -1),
         predicate_adapter_rank=args.predicate_adapter_rank,
         pair_visual_evidence=args.pair_visual_evidence,
+        pair_geometry_evidence=args.pair_geometry_evidence,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -615,6 +626,7 @@ def main() -> None:
             "tap_indices": list(model.config.tap_indices),
             "predicate_adapter_rank": model.config.predicate_adapter_rank,
             "pair_visual_evidence": model.config.pair_visual_evidence,
+            "pair_geometry_evidence": model.config.pair_geometry_evidence,
         },
         "baseline_config": config_payload(baseline_config),
         "loss_config": {
