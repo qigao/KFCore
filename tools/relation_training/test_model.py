@@ -34,6 +34,22 @@ class ToyBackbone(BackboneAdapter):
         return [base + float(index) * 0.1 for index, _ in enumerate(taps)]
 
 
+class FakeOfficialModel(nn.Module):
+    embed_dim = 8
+    patch_size = 2
+    n_blocks = 4
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(3, self.embed_dim, kernel_size=2, stride=2, bias=False)
+
+    def get_intermediate_layers(self, image, *, n, reshape, norm):
+        if not reshape or norm:
+            raise AssertionError("official adapter requested the wrong intermediate-layer contract")
+        base = self.conv(image)
+        return tuple(base + float(index) * 0.1 for index in n)
+
+
 class FakeHFModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -139,6 +155,15 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_official_adapter_extracts_multi_tap_feature_maps(self):
+        adapter = OfficialDinoV3Backbone(FakeOfficialModel())
+        taps = adapter.forward_taps(
+            torch.rand(2, 3, 8, 8), (-3, -2, -1)
+        )
+        self.assertEqual(len(taps), 3)
+        for tap in taps:
+            self.assertEqual(tuple(tap.shape), (2, 8, 4, 4))
+
     def test_hf_adapter_extracts_patch_tail_from_multi_tap_hidden_states(self):
         adapter = HFDinoV3Backbone(
             FakeHFModel(),
