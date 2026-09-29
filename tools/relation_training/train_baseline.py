@@ -259,6 +259,9 @@ def main() -> None:
                 "predicate_positive_counts": list(
                     predicate_weighting.predicate_positive_counts
                 ),
+                "zero_support_predicate_indices": list(
+                    predicate_weighting.zero_support_predicate_indices
+                ),
                 "positive_weights": list(
                     predicate_weighting.positive_weights
                 ),
