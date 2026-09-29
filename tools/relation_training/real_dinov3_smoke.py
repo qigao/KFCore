@@ -3,21 +3,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 import torch
+from huggingface_hub import hf_hub_download
 
 from export_onnx import check_onnx_parity, export_graph
-from model import KFRelationModel, OfficialDinoV3Backbone, RelationModelConfig
+from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 
 
-DEFAULT_MODEL = "dinov3_vits16"
-DEFAULT_WEIGHTS_URL = (
-    "https://dl.fbaipublicfiles.com/dinov3/"
-    "dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
-)
+DEFAULT_REPO = "timm/vit_small_patch16_dinov3.lvd1689m"
+DEFAULT_FILENAME = "model.safetensors"
+DEFAULT_MODEL = "hf_hub:timm/vit_small_patch16_dinov3.lvd1689m"
 
 
 def file_sha256(path: Path) -> str:
@@ -30,41 +27,41 @@ def file_sha256(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=(
-            "Run Meta official DINOv3 ViT-S/16 -> KFRelationModel -> ONNX smoke."
-        )
+        description="Run public DINOv3 ViT-S/16 -> KFRelationModel -> ONNX smoke."
     )
-    parser.add_argument("--dinov3-repo", required=True)
+    parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument("--filename", default=DEFAULT_FILENAME)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--weights-url", default=DEFAULT_WEIGHTS_URL)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--opset", type=int, default=18)
     args = parser.parse_args()
 
-    repo_dir = Path(args.dinov3_repo).resolve()
-    if not (repo_dir / "dinov3" / "hub" / "backbones.py").is_file():
-        raise ValueError("dinov3-repo is not a Meta DINOv3 source checkout")
-    if args.model != "dinov3_vits16":
-        raise ValueError("real qualification currently requires dinov3_vits16")
     if args.image_size <= 0:
         raise ValueError("image-size must be positive")
 
     torch.manual_seed(20260929)
     torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
 
-    sys.path.insert(0, str(repo_dir))
-    from dinov3.hub.backbones import dinov3_vits16
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = output_dir / "real-dinov3-relation-smoke.onnx"
+    report_path = output_dir / "real-dinov3-smoke.json"
 
-    official_model = dinov3_vits16(
-        pretrained=True,
-        weights=args.weights_url,
-        check_hash=True,
+    downloaded = Path(
+        hf_hub_download(
+            repo_id=args.repo,
+            filename=args.filename,
+        )
+    ).resolve()
+    if not downloaded.is_file():
+        raise RuntimeError("public DINOv3 weights were not downloaded")
+    weights_sha256 = file_sha256(downloaded)
+
+    backbone = TimmDinoV3Backbone.from_pretrained(
+        args.model,
+        train_backbone=False,
     )
-    official_model.requires_grad_(False)
-    official_model.eval()
-    backbone = OfficialDinoV3Backbone(official_model)
-
     if args.image_size % backbone.patch_size != 0:
         raise ValueError(
             "smoke image size must be divisible by DINOv3 patch size"
@@ -75,19 +72,8 @@ def main() -> None:
         or backbone.depth != 12
     ):
         raise RuntimeError(
-            "official DINOv3 ViT-S/16 architecture contract changed"
+            "public DINOv3 ViT-S/16 architecture contract changed"
         )
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    onnx_path = output_dir / "real-dinov3-relation-smoke.onnx"
-    report_path = output_dir / "real-dinov3-smoke.json"
-
-    filename = Path(urlparse(args.weights_url).path).name
-    weights_path = Path(torch.hub.get_dir()) / "checkpoints" / filename
-    if not weights_path.is_file():
-        raise RuntimeError("official DINOv3 weights were not downloaded")
-    weights_sha256 = file_sha256(weights_path)
 
     config = RelationModelConfig(
         image_size=args.image_size,
@@ -170,12 +156,12 @@ def main() -> None:
     )
 
     report = {
-        "schema": "kfcore.real-dinov3-relation-smoke/4",
-        "source": "facebookresearch/dinov3",
-        "model": args.model,
-        "weights_url": args.weights_url,
+        "schema": "kfcore.real-dinov3-relation-smoke/5",
+        "weights_repo": args.repo,
+        "weights_filename": args.filename,
         "weights_sha256": weights_sha256,
-        "weights_bytes": weights_path.stat().st_size,
+        "weights_bytes": downloaded.stat().st_size,
+        "model": args.model,
         "image_size": args.image_size,
         "patch_size": backbone.patch_size,
         "hidden_size": backbone.hidden_size,
