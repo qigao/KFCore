@@ -105,6 +105,7 @@ def supervised_relation_loss(
     predicate_supervision_mask: Tensor | None = None,
     predicate_negative_weights: Tensor | None = None,
     explicit_holdout_mask: Tensor | None = None,
+    explicit_holdout_row_policy: str = "dimension-only",
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -118,12 +119,23 @@ def supervised_relation_loss(
     target terms always keep multiplier 1. An optional bool [V] supervision
     mask can exclude predicate dimensions entirely. Positive targets may be
     hidden only when the same dimensions are explicitly declared through
-    explicit_holdout_mask.
+    explicit_holdout_mask. The optional explicit holdout row policy can skip
+    predicate BCE for positive pairs whose known positive predicate labels are
+    entirely held out, while leaving pair/sampler supervision unchanged.
 
     The dense sampler loss is training-only. Runtime/export keeps the existing
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
     negative_pair_weight.
     """
+    if explicit_holdout_row_policy not in (
+        "dimension-only",
+        "skip-holdout-only",
+    ):
+        raise ValueError(
+            "explicit_holdout_row_policy must be dimension-only "
+            "or skip-holdout-only"
+        )
+
     training_outputs = (
         outputs if isinstance(outputs, RelationTrainingOutputs) else None
     )
@@ -233,6 +245,14 @@ def supervised_relation_loss(
                 "explicit holdout predicates must be excluded from supervision"
             )
 
+    if (
+        explicit_holdout_row_policy == "skip-holdout-only"
+        and holdout_mask is None
+    ):
+        raise ValueError(
+            "skip-holdout-only requires an explicit_holdout_mask"
+        )
+
     negative_weights = None
     if predicate_negative_weights is not None:
         if predicate_negative_weights.ndim != 1:
@@ -256,6 +276,9 @@ def supervised_relation_loss(
             dtype=pred_logits.dtype,
         )
 
+    predicate_rows = positive.sum().to(dtype=pred_logits.dtype)
+    predicate_rows_skipped = pred_logits.new_zeros(())
+
     if positive.any():
         positive_logits = pred_logits[positive]
         positive_targets = selected_predicate_targets[positive]
@@ -273,36 +296,59 @@ def supervised_relation_loss(
                     "predicate supervision mask cannot hide positive labels"
                 )
 
-        raw_predicate_loss = F.binary_cross_entropy_with_logits(
-            positive_logits,
-            positive_targets,
-            pos_weight=pos_weight,
-            reduction="none",
-        )
-        element_weights = torch.ones_like(raw_predicate_loss)
-        if negative_weights is not None:
-            element_weights = torch.where(
-                positive_targets > 0.5,
-                element_weights,
-                negative_weights.view(1, -1).expand_as(
-                    raw_predicate_loss
-                ),
+        if explicit_holdout_row_policy == "skip-holdout-only":
+            assert holdout_mask is not None
+            assert supervision_mask is not None
+            positive_labels = positive_targets > 0.5
+            has_holdout_positive = (
+                positive_labels & holdout_mask.view(1, -1)
+            ).any(dim=1)
+            has_supervised_positive = (
+                positive_labels & supervision_mask.view(1, -1)
+            ).any(dim=1)
+            skip_rows = (
+                has_holdout_positive & ~has_supervised_positive
             )
-        if supervision_mask is not None:
-            raw_predicate_loss = raw_predicate_loss[
-                :, supervision_mask
-            ]
-            element_weights = element_weights[
-                :, supervision_mask
-            ]
-        weight_sum = element_weights.sum()
-        if weight_sum <= 0:
-            raise ValueError(
-                "predicate supervision weights must keep at least one term"
+            predicate_rows_skipped = skip_rows.sum().to(
+                dtype=pred_logits.dtype
             )
-        predicate_loss = (
-            raw_predicate_loss * element_weights
-        ).sum() / weight_sum
+            keep_rows = ~skip_rows
+            positive_logits = positive_logits[keep_rows]
+            positive_targets = positive_targets[keep_rows]
+
+        if positive_logits.shape[0] > 0:
+            raw_predicate_loss = F.binary_cross_entropy_with_logits(
+                positive_logits,
+                positive_targets,
+                pos_weight=pos_weight,
+                reduction="none",
+            )
+            element_weights = torch.ones_like(raw_predicate_loss)
+            if negative_weights is not None:
+                element_weights = torch.where(
+                    positive_targets > 0.5,
+                    element_weights,
+                    negative_weights.view(1, -1).expand_as(
+                        raw_predicate_loss
+                    ),
+                )
+            if supervision_mask is not None:
+                raw_predicate_loss = raw_predicate_loss[
+                    :, supervision_mask
+                ]
+                element_weights = element_weights[
+                    :, supervision_mask
+                ]
+            weight_sum = element_weights.sum()
+            if weight_sum <= 0:
+                raise ValueError(
+                    "predicate supervision weights must keep at least one term"
+                )
+            predicate_loss = (
+                raw_predicate_loss * element_weights
+            ).sum() / weight_sum
+        else:
+            predicate_loss = pred_logits.sum() * 0.0
     else:
         predicate_loss = pred_logits.sum() * 0.0
 
@@ -335,4 +381,6 @@ def supervised_relation_loss(
         "sampler_loss": sampler_loss,
         "pair_loss": pair_loss,
         "predicate_loss": predicate_loss,
+        "predicate_rows": predicate_rows,
+        "predicate_rows_skipped": predicate_rows_skipped,
     }
