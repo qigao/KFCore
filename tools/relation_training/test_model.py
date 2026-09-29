@@ -250,8 +250,8 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(int(output.sampler_valid[1].sum()), 2)
 
         pair_targets = torch.zeros(2, 4, 4)
-        predicate_targets = torch.full(
-            (2, 4, 4), -1, dtype=torch.int64
+        predicate_targets = torch.zeros(
+            (2, 4, 4, 3), dtype=torch.float32
         )
         for batch, count in enumerate((4, 2)):
             for subject in range(count):
@@ -259,9 +259,12 @@ class RelationModelTest(unittest.TestCase):
                     if subject == object_:
                         continue
                     pair_targets[batch, subject, object_] = 1.0
-                    predicate_targets[batch, subject, object_] = (
-                        subject + object_
-                    ) % 3
+                    predicate_targets[
+                        batch,
+                        subject,
+                        object_,
+                        (subject + object_) % 3,
+                    ] = 1.0
 
         losses = supervised_relation_loss(
             output, pair_targets, predicate_targets
@@ -289,8 +292,8 @@ class RelationModelTest(unittest.TestCase):
             box_counts,
         )
         pair_targets = torch.zeros(2, 4, 4)
-        predicate_targets = torch.full(
-            (2, 4, 4), -1, dtype=torch.int64
+        predicate_targets = torch.zeros(
+            (2, 4, 4, 3), dtype=torch.float32
         )
 
         with self.assertRaises(ValueError):
@@ -305,6 +308,75 @@ class RelationModelTest(unittest.TestCase):
             RelationLossConfig(sampler_loss_weight=0.0),
         )
         self.assertEqual(float(losses["sampler_loss"]), 0.0)
+
+    def test_predicate_loss_supports_multiple_labels_on_one_pair(self):
+        torch.manual_seed(11)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+
+        pred_logits, _, sub_idx, obj_idx, valid_mask = output.runtime
+        valid_slots = torch.nonzero(valid_mask[0], as_tuple=False)
+        self.assertGreater(valid_slots.numel(), 0)
+        slot = int(valid_slots[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+        predicate_targets[0, subject, object_, 2] = 1.0
+
+        losses = supervised_relation_loss(
+            output, pair_targets, predicate_targets
+        )
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, slot],
+            torch.tensor([1.0, 0.0, 1.0]),
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+
+    def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, 0, 1] = 1.0
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output, pair_targets, predicate_targets
+            )
+
+        pair_targets.zero_()
+        predicate_targets[0, 0, 1, 0] = 1.0
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output, pair_targets, predicate_targets
+            )
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                torch.zeros(1, 4, 4),
+                torch.zeros(1, 4, 4, 2),
+            )
 
     def test_synthetic_onnx_matches_native_runtime_contract(self):
         torch.manual_seed(8)
