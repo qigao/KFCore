@@ -13,6 +13,7 @@ from apache_context import (
 )
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import check_onnx_parity, export_graph
+from losses import RelationLossConfig, supervised_relation_loss
 from model import KFRelationModel, RelationModelConfig
 from test_model import ToyBackbone, boxes
 
@@ -296,6 +297,91 @@ class ApacheRelationContextTest(unittest.TestCase):
                 reference,
             )
         self.assertLessEqual(delta, 1.0e-3)
+
+    def test_full_apache_stack_trains_end_to_end(self):
+        torch.manual_seed(49)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            context_config(),
+        )
+        model.train()
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+        pair_targets = torch.zeros(1, 4, 4)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 2, 3] = 1.0
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 2, 3, 1] = 1.0
+
+        outputs = model.forward_training(
+            image,
+            box_tensor[:1],
+            box_counts[:1],
+            pair_targets=pair_targets,
+        )
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(),
+        )
+        self.assertTrue(torch.isfinite(losses["loss"]))
+        losses["loss"].backward()
+
+        assert model.apache_spatial_pool is not None
+        assert model.apache_pair_sampler is not None
+        assert model.apache_relation_transformer is not None
+        assert model.apache_deformable_read is not None
+        assert model.apache_relation_interaction is not None
+
+        gradients = {
+            "spatial_pool": (
+                model.apache_spatial_pool.cross_attn.in_proj_weight.grad
+            ),
+            "pair_sampler": (
+                model.apache_pair_sampler.f_sub[1].weight.grad
+            ),
+            "relation_transformer": (
+                model.apache_relation_transformer
+                .self_layers[0]
+                .self_attn
+                .in_proj_weight
+                .grad
+            ),
+            "deformable_gate": model.apache_deformable_read.gamma.grad,
+            "interaction": (
+                model.apache_relation_interaction
+                .dependency_layers[0]
+                .self_attn
+                .in_proj_weight
+                .grad
+            ),
+        }
+        for name, gradient in gradients.items():
+            self.assertIsNotNone(
+                gradient,
+                msg=f"{name} received no gradient",
+            )
+            assert gradient is not None
+            self.assertTrue(
+                torch.isfinite(gradient).all(),
+                msg=f"{name} gradient is non-finite",
+            )
+            self.assertGreater(
+                float(gradient.abs().sum()),
+                0.0,
+                msg=f"{name} gradient is identically zero",
+            )
+
+        self.assertIsNotNone(outputs.sampler_geo_loss)
+        self.assertIsNotNone(
+            outputs.sampler_relatedness_loss
+        )
+        self.assertTrue(
+            torch.isfinite(outputs.runtime[0]).all()
+        )
 
     def test_context_checkpoint_round_trip(self):
         torch.manual_seed(48)
