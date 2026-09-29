@@ -16,8 +16,9 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.sha }}
-      DINOV3_SHA: 6876159a11b4df116f30f667f8c9888617df0751
-      DINOV3_WEIGHTS_URL: https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
+      DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
+      DINOV3_FILENAME: model.safetensors
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,57 +49,44 @@ jobs:
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-real-smoke.txt
 
-      - name: Checkout pinned Meta DINOv3 source
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf "$RUNNER_TEMP/dinov3"
-          git init "$RUNNER_TEMP/dinov3"
-          git -C "$RUNNER_TEMP/dinov3" remote add origin https://github.com/facebookresearch/dinov3.git
-          git -C "$RUNNER_TEMP/dinov3" fetch --depth=1 origin "$DINOV3_SHA"
-          git -C "$RUNNER_TEMP/dinov3" checkout --detach FETCH_HEAD
-          test "$(git -C "$RUNNER_TEMP/dinov3" rev-parse HEAD)" = "$DINOV3_SHA"
-
-      - name: Download official DINOv3 ViT-S/16 weights
+      - name: Download public DINOv3 ViT-S/16 weights
         env:
-          TORCH_HOME: ${{ runner.temp }}/torch-home
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf "$TORCH_HOME"
+          rm -rf "$HF_HOME"
           python - <<'PY'
+          import hashlib
           import os
           from pathlib import Path
-          from urllib.parse import urlparse
-          import torch
+          from huggingface_hub import hf_hub_download
 
-          url = os.environ["DINOV3_WEIGHTS_URL"]
-          torch.hub.load_state_dict_from_url(
-              url,
-              map_location="cpu",
-              check_hash=True,
-              weights_only=True,
-          )
-          filename = Path(urlparse(url).path).name
-          path = Path(torch.hub.get_dir()) / "checkpoints" / filename
-          if not path.is_file():
-              raise RuntimeError("DINOv3 weight download did not materialize")
+          path = Path(hf_hub_download(
+              repo_id=os.environ["DINOV3_REPO"],
+              filename=os.environ["DINOV3_FILENAME"],
+              force_download=True,
+          )).resolve()
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
           print(f"downloaded={path}")
+          print(f"sha256={digest}")
           print(f"bytes={path.stat().st_size}")
           PY
 
       - name: Run real DINOv3 ViT-S/16 forward and export smoke
         env:
-          TORCH_HOME: ${{ runner.temp }}/torch-home
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
         shell: bash
         run: |
           set -euxo pipefail
           OUT="$RUNNER_TEMP/real-dinov3-smoke"
           mkdir -p "$OUT"
           python tools/relation_training/real_dinov3_smoke.py \
-            --dinov3-repo "$RUNNER_TEMP/dinov3" \
-            --model dinov3_vits16 \
-            --weights-url "$DINOV3_WEIGHTS_URL" \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
             --image-size 224 \
             --output-dir "$OUT"
 
