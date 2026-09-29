@@ -114,12 +114,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--pair-geometry-evidence",
-        choices=("basic", "rich"),
+        choices=("basic", "rich-repr", "rich-sampler", "rich"),
         default="basic",
         help=(
-            "Pair geometry feature contract. rich adds a zero-initialized "
-            "residual over normalized offsets, overlap fractions, gaps "
-            "and direction without changing the historical basic path."
+            "Pair geometry feature contract. rich-repr and rich-sampler "
+            "isolate the zero-initialized representation/sampler residuals; "
+            "rich enables both without changing the historical basic path."
         ),
     )
     parser.add_argument("--epochs", type=int, default=5)

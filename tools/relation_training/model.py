@@ -63,10 +63,13 @@ class RelationModelConfig:
             )
         if self.pair_geometry_evidence not in {
             "basic",
+            "rich-repr",
+            "rich-sampler",
             "rich",
         }:
             raise ValueError(
-                "pair_geometry_evidence must be basic/rich"
+                "pair_geometry_evidence must be "
+                "basic/rich-repr/rich-sampler/rich"
             )
 
 
@@ -789,21 +792,30 @@ class KFRelationModel(nn.Module):
         # Rich-geometry evidence is an additive residual created after every
         # common stochastic module. Zero initialization keeps basic/rich
         # common parameters and initial outputs exactly aligned under one seed.
-        if config.pair_geometry_evidence == "rich":
+        if config.pair_geometry_evidence in {
+            "rich-repr",
+            "rich",
+        }:
             self.rich_geometry_projection: nn.Linear | None = nn.Linear(
                 self.rich_geometry_feature_count,
                 config.geometry_dim,
                 bias=False,
             )
+            nn.init.zeros_(self.rich_geometry_projection.weight)
+        else:
+            self.rich_geometry_projection = None
+
+        if config.pair_geometry_evidence in {
+            "rich-sampler",
+            "rich",
+        }:
             self.rich_geometry_sampler: nn.Linear | None = nn.Linear(
                 self.rich_geometry_feature_count,
                 1,
                 bias=False,
             )
-            nn.init.zeros_(self.rich_geometry_projection.weight)
             nn.init.zeros_(self.rich_geometry_sampler.weight)
         else:
-            self.rich_geometry_projection = None
             self.rich_geometry_sampler = None
 
     def effective_predicate_bank(self) -> Tensor:
@@ -1051,7 +1063,10 @@ class KFRelationModel(nn.Module):
         geometry = self._pair_geometry(boxes)
         rich_geometry = (
             self._rich_pair_geometry(boxes)
-            if self.rich_geometry_projection is not None
+            if (
+                self.rich_geometry_projection is not None
+                or self.rich_geometry_sampler is not None
+            )
             else None
         )
 
@@ -1067,10 +1082,13 @@ class KFRelationModel(nn.Module):
                 self.config.max_boxes * self.config.max_boxes,
                 self.rich_geometry_feature_count,
             )
-            assert self.rich_geometry_sampler is not None
-            sampler_logits = sampler_logits + self.rich_geometry_sampler(
-                flat_rich_geometry
-            ).squeeze(-1)
+            if self.rich_geometry_sampler is not None:
+                sampler_logits = (
+                    sampler_logits
+                    + self.rich_geometry_sampler(
+                        flat_rich_geometry
+                    ).squeeze(-1)
+                )
         sampler_scores = sampler_logits.masked_fill(
             ~flat_valid, torch.finfo(sampler_logits.dtype).min
         )
@@ -1102,7 +1120,10 @@ class KFRelationModel(nn.Module):
             ),
         )
         geometry_features = self.geometry_encoder(selected_geometry)
-        if flat_rich_geometry is not None:
+        if (
+            flat_rich_geometry is not None
+            and self.rich_geometry_projection is not None
+        ):
             selected_rich_geometry = torch.gather(
                 flat_rich_geometry,
                 1,
@@ -1112,7 +1133,6 @@ class KFRelationModel(nn.Module):
                     self.rich_geometry_feature_count,
                 ),
             )
-            assert self.rich_geometry_projection is not None
             geometry_features = (
                 geometry_features
                 + self.rich_geometry_projection(

@@ -282,21 +282,38 @@ class RelationModelTest(unittest.TestCase):
             )
 
         basic = build("basic")
+        rich_repr = build("rich-repr")
+        rich_sampler = build("rich-sampler")
         rich = build("rich")
 
         basic_state = basic.state_dict()
-        rich_state = rich.state_dict()
-        for name, value in basic_state.items():
-            self.assertIn(name, rich_state)
-            self.assertTrue(
-                torch.equal(value, rich_state[name]),
-                msg=f"common parameter drift: {name}",
-            )
+        for candidate in (rich_repr, rich_sampler, rich):
+            state = candidate.state_dict()
+            for name, value in basic_state.items():
+                self.assertIn(name, state)
+                self.assertTrue(
+                    torch.equal(value, state[name]),
+                    msg=f"common parameter drift: {name}",
+                )
 
         self.assertIsNone(basic.rich_geometry_projection)
         self.assertIsNone(basic.rich_geometry_sampler)
+
+        self.assertIsNotNone(rich_repr.rich_geometry_projection)
+        self.assertIsNone(rich_repr.rich_geometry_sampler)
+        self.assertIsNone(rich_sampler.rich_geometry_projection)
+        self.assertIsNotNone(rich_sampler.rich_geometry_sampler)
         self.assertIsNotNone(rich.rich_geometry_projection)
         self.assertIsNotNone(rich.rich_geometry_sampler)
+
+        self.assertEqual(
+            float(rich_repr.rich_geometry_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(rich_sampler.rich_geometry_sampler.weight.abs().sum()),
+            0.0,
+        )
         self.assertEqual(
             float(rich.rich_geometry_projection.weight.abs().sum()),
             0.0,
@@ -306,18 +323,48 @@ class RelationModelTest(unittest.TestCase):
             0.0,
         )
 
+        def parameter_count(model: KFRelationModel) -> int:
+            return sum(
+                parameter.numel()
+                for parameter in model.parameters()
+            )
+
+        base_count = parameter_count(basic)
+        self.assertEqual(
+            parameter_count(rich_repr) - base_count,
+            model.rich_geometry_feature_count
+            * model.config.geometry_dim,
+        )
+        self.assertEqual(
+            parameter_count(rich_sampler) - base_count,
+            model.rich_geometry_feature_count,
+        )
+        self.assertEqual(
+            parameter_count(rich) - base_count,
+            model.rich_geometry_feature_count
+            * (model.config.geometry_dim + 1),
+        )
+
         box_tensor, box_counts = boxes()
         torch.manual_seed(67)
         image = torch.rand(1, 3, 8, 8)
         with torch.inference_mode():
-            basic_output = basic(
-                image, box_tensor[:1], box_counts[:1]
-            )
-            rich_output = rich(
-                image, box_tensor[:1], box_counts[:1]
-            )
-        for left, right in zip(basic_output, rich_output):
-            self.assertTrue(torch.equal(left, right))
+            outputs = [
+                candidate(
+                    image, box_tensor[:1], box_counts[:1]
+                )
+                for candidate in (
+                    basic,
+                    rich_repr,
+                    rich_sampler,
+                    rich,
+                )
+            ]
+        for candidate_output in outputs[1:]:
+            for left, right in zip(
+                outputs[0], candidate_output
+            ):
+                self.assertTrue(torch.equal(left, right))
 
     def test_union_and_contact_box_geometry(self):
         subject = torch.tensor(

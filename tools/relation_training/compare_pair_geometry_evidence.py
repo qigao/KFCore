@@ -102,13 +102,20 @@ def load_rows(arms_dir: Path) -> dict[str, dict[str, object]]:
 
 def compare(arms_dir: Path) -> dict[str, object]:
     rows = load_rows(arms_dir)
-    expected = {"basic", "rich"}
+    expected = {
+        "basic",
+        "rich-repr",
+        "rich-sampler",
+        "rich",
+    }
     if set(rows) != expected:
         raise RuntimeError(
             f"unexpected geometry-evidence arms: {sorted(rows)}"
         )
 
     basic = rows["basic"]
+    rich_repr = rows["rich-repr"]
+    rich_sampler = rows["rich-sampler"]
     rich = rows["rich"]
 
     common_keys = (
@@ -124,16 +131,25 @@ def compare(arms_dir: Path) -> dict[str, object]:
         "predicate_adapter_contract",
         "loss_config",
     )
-    for key in common_keys:
-        if basic[key] != rich[key]:
-            raise RuntimeError(
-                f"A/B contract mismatch for {key}"
-            )
+    for candidate in (rich_repr, rich_sampler, rich):
+        for key in common_keys:
+            if basic[key] != candidate[key]:
+                raise RuntimeError(
+                    f"A/B contract mismatch for "
+                    f"{candidate['arm']} {key}"
+                )
 
-    if basic["pair_geometry_evidence"] != "basic":
-        raise RuntimeError("basic geometry mode drift")
-    if rich["pair_geometry_evidence"] != "rich":
-        raise RuntimeError("rich geometry mode drift")
+    expected_modes = {
+        "basic": "basic",
+        "rich-repr": "rich-repr",
+        "rich-sampler": "rich-sampler",
+        "rich": "rich",
+    }
+    for arm, mode in expected_modes.items():
+        if rows[arm]["pair_geometry_evidence"] != mode:
+            raise RuntimeError(
+                f"{arm} geometry mode drift"
+            )
 
     common_model = basic["common_model_config"]
     if common_model["pair_visual_evidence"] != "contact":
@@ -142,14 +158,31 @@ def compare(arms_dir: Path) -> dict[str, object]:
         )
 
     basic_params = int(basic["trainable_parameter_count"])
+    repr_params = int(rich_repr["trainable_parameter_count"])
+    sampler_params = int(
+        rich_sampler["trainable_parameter_count"]
+    )
     rich_params = int(rich["trainable_parameter_count"])
-    parameter_delta = rich_params - basic_params
     geometry_dim = int(common_model["geometry_dim"])
-    expected_delta = 10 * (geometry_dim + 1)
-    if parameter_delta != expected_delta:
+    expected_repr_delta = 10 * geometry_dim
+    expected_sampler_delta = 10
+    expected_full_delta = (
+        expected_repr_delta + expected_sampler_delta
+    )
+    if repr_params - basic_params != expected_repr_delta:
         raise RuntimeError(
-            "rich geometry parameter delta drifted: "
-            f"{parameter_delta} != {expected_delta}"
+            "rich-repr parameter delta drifted"
+        )
+    if (
+        sampler_params - basic_params
+        != expected_sampler_delta
+    ):
+        raise RuntimeError(
+            "rich-sampler parameter delta drifted"
+        )
+    if rich_params - basic_params != expected_full_delta:
+        raise RuntimeError(
+            "rich-full parameter delta drifted"
         )
 
     loss = basic["loss_config"]
@@ -175,9 +208,25 @@ def compare(arms_dir: Path) -> dict[str, object]:
     return {
         "schema": "kfcore.pair-geometry-evidence/1",
         "basic": basic,
+        "rich_repr": rich_repr,
+        "rich_sampler": rich_sampler,
         "rich": rich,
+        "rich_repr_minus_basic": delta(
+            rich_repr, basic
+        ),
+        "rich_sampler_minus_basic": delta(
+            rich_sampler, basic
+        ),
         "rich_minus_basic": delta(rich, basic),
-        "rich_parameter_count": parameter_delta,
+        "rich_minus_repr": delta(rich, rich_repr),
+        "rich_minus_sampler": delta(
+            rich, rich_sampler
+        ),
+        "rich_repr_parameter_count": expected_repr_delta,
+        "rich_sampler_parameter_count": (
+            expected_sampler_delta
+        ),
+        "rich_parameter_count": expected_full_delta,
     }
 
 

@@ -645,7 +645,20 @@ trainable parameters:
 ```
 
 `.github/workflows/openimages-pair-geometry-evidence.yml` compares
-`basic` vs `rich` while fixing:
+four attribution modes:
+
+```text
+basic
+rich-repr
+rich-sampler
+rich
+```
+
+`rich-repr` adds only the 320-parameter representation residual,
+`rich-sampler` adds only the 10-parameter sampler residual, and `rich`
+enables both. All optional branches remain zero initialized.
+
+The experiment fixes:
 
 - contact-only visual evidence;
 - hard8 batch-local InfoNCE;
@@ -654,8 +667,8 @@ trainable parameters:
 - canonical Open Images 256/64;
 - K=48, shared whitened CLIP prototypes, optimizer and seed.
 
-Sampler recall is deliberately reported rather than forced equal because rich
-geometry is also allowed to improve pair selection.
+Sampler recall is deliberately reported rather than forced equal. The split
+arms distinguish pair-selection gains from relation-representation effects.
 
 ## Source-aware predicate calibration auxiliary
 

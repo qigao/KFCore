@@ -149,6 +149,12 @@ jobs:
           - name: basic
             holdout: 'false'
             pair_geometry_evidence: basic
+          - name: rich-repr
+            holdout: 'false'
+            pair_geometry_evidence: rich-repr
+          - name: rich-sampler
+            holdout: 'false'
+            pair_geometry_evidence: rich-sampler
           - name: rich
             holdout: 'false'
             pair_geometry_evidence: rich
@@ -539,7 +545,7 @@ jobs:
               count="$(gh api \
                 "repos/$GITHUB_REPOSITORY/actions/runs/$candidate/artifacts?per_page=100" \
                 --jq '[.artifacts[] | select(.name | startswith("pair-geometry-evidence-arm-"))] | length')"
-              if [ "$count" -ge 2 ]; then
+              if [ "$count" -ge 4 ]; then
                 run_id="$candidate"
                 break
               fi
