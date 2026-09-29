@@ -83,7 +83,6 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      HF_HOME: ${{ runner.temp }}/hf-home
       HF_HUB_DISABLE_TELEMETRY: '1'
       DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
       DINOV3_FILENAME: model.safetensors
@@ -118,6 +117,8 @@ jobs:
             -r tools/relation_training/requirements-real-smoke.txt
 
       - name: Download public DINOv3 ViT-S/16 weights
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         shell: bash
         run: |
           set -euxo pipefail
@@ -140,6 +141,8 @@ jobs:
           PY
 
       - name: Run real DINOv3 ViT-S/16 forward and export smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         shell: bash
         run: |
           set -euxo pipefail
