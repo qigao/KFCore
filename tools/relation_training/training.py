@@ -350,6 +350,7 @@ def train_epoch(
     predicate_negative_weights: Tensor | None = None,
     explicit_holdout_mask: Tensor | None = None,
     explicit_holdout_row_policy: str = "dimension-only",
+    predicate_contrastive_negative_mask: Tensor | None = None,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -366,6 +367,7 @@ def train_epoch(
         "predicate_hard_negative_margin": 0.0,
         "predicate_query_raw_norm": 0.0,
         "predicate_unobserved_column_fraction": 0.0,
+        "predicate_hard_negative_count": 0.0,
     }
     examples = 0
     predicate_rows = 0
@@ -393,6 +395,9 @@ def train_epoch(
             predicate_negative_weights=predicate_negative_weights,
             explicit_holdout_mask=explicit_holdout_mask,
             explicit_holdout_row_policy=explicit_holdout_row_policy,
+            predicate_contrastive_negative_mask=(
+                predicate_contrastive_negative_mask
+            ),
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
