@@ -901,6 +901,12 @@ std::size_t OpenVocabularyRelation::predicate_count() const noexcept
     return impl_ ? impl_->vocabulary.predicates.size() : 0U;
 }
 
+bool OpenVocabularyRelation::backend_scoring() const noexcept
+{
+    return impl_ &&
+        impl_->mode == ScoringMode::BackendLogits;
+}
+
 const std::vector<std::string>&
 OpenVocabularyRelation::predicates() const noexcept
 {
