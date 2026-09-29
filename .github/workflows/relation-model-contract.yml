@@ -72,6 +72,7 @@ jobs:
             tools/relation_training/compare_predicate_calibration.py \
             tools/relation_training/compare_predicate_calibration_sweep.py \
             tools/relation_training/compare_pair_visual_evidence.py \
+            tools/relation_training/compare_pair_geometry_evidence.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
