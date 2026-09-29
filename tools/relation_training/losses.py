@@ -219,10 +219,13 @@ def _batch_local_predicate_infonce(
             direct_weight,
             semantic,
         )
-        positive_strength = torch.maximum(
-            direct_weight,
-            expanded_weight,
+        # Semantic propagation only creates new soft-positive columns.
+        # Already observed direct positives keep their original class weight
+        # and are not inflated by semantic edges from other direct labels.
+        expanded_weight = expanded_weight * (~visible).to(
+            dtype=query.dtype
         )
+        positive_strength = direct_weight + expanded_weight
         semantic_only = (
             positive_strength > 0
         ) & ~visible
