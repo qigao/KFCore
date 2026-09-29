@@ -615,6 +615,26 @@ void OpenVocabularyRelation::set_vocabulary(
         impl_->options.query_dim,
         impl_->options.max_vocabulary_bytes);
 
+    if (impl_->mode == ScoringMode::BackendLogits)
+    {
+        std::size_t input_bytes = checked_multiply(
+            impl_->vocabulary.embeddings.size(),
+            sizeof(float),
+            "predicate embedding input");
+        input_bytes = checked_add(
+            input_bytes,
+            checked_multiply(
+                impl_->vocabulary.spatial_weights.size(),
+                sizeof(float),
+                "predicate alpha input"),
+            "dynamic vocabulary inputs");
+        if (input_bytes > impl_->options.max_tensor_bytes)
+        {
+            throw_resource(
+                "dynamic vocabulary inputs exceed configured tensor byte limit");
+        }
+    }
+
     const std::size_t pred_values = checked_multiply(
         impl_->options.max_pairs,
         impl_->vocabulary.predicates.size(),
