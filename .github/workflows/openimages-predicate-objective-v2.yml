@@ -21,6 +21,8 @@ concurrency:
   group: openimages-predicate-objective-v2
   cancel-in-progress: false
 
+# A [recompare-only] push skips all training jobs and reuses the most recent
+# failed objective-v2 arm artifacts through the comparator below.
 jobs:
   prepare-prototype:
     if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
