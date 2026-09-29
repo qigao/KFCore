@@ -1,0 +1,4 @@
+transformers>=4.56,<5
+tokenizers>=0.20,<1
+safetensors>=0.5,<1
+huggingface_hub>=0.34,<2
