@@ -368,6 +368,11 @@ def train_epoch(
         "predicate_query_raw_norm": 0.0,
         "predicate_unobserved_column_fraction": 0.0,
         "predicate_hard_negative_count": 0.0,
+        "predicate_contrastive_loss": 0.0,
+        "predicate_calibration_loss": 0.0,
+        "predicate_calibration_rows": 0.0,
+        "predicate_calibration_rows_skipped": 0.0,
+        "predicate_calibration_column_fraction": 0.0,
     }
     examples = 0
     predicate_rows = 0
