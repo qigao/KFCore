@@ -101,9 +101,9 @@ void validate_options(const RelateAnythingOptions& options)
     {
         throw_invalid("score fusion parameters must be finite and calibration_a positive");
     }
-    if (options.top_k == 0U)
+    if (options.top_k == 0U || options.top_k > options.max_pairs)
     {
-        throw_invalid("top_k must be positive");
+        throw_invalid("top_k must be within [1,max_pairs]");
     }
     if (options.max_source_bytes == 0U || options.max_tensor_bytes == 0U ||
         options.max_output_bytes == 0U)
@@ -331,11 +331,6 @@ struct RelateAnything::Impl final
         const std::size_t pred_elements =
             checked_multiply(options.max_pairs, options.predicates.size(),
                              "predicate output");
-        pred_logits.resize(pred_elements);
-        pair_logits.resize(options.max_pairs);
-        subject_indices.resize(options.max_pairs);
-        object_indices.resize(options.max_pairs);
-        valid_mask.resize(options.max_pairs);
 
         std::size_t output_bytes =
             checked_multiply(pred_elements, sizeof(float), "predicate output");
@@ -357,6 +352,12 @@ struct RelateAnything::Impl final
         {
             throw_resource("relation outputs exceed configured output byte limit");
         }
+
+        pred_logits.resize(pred_elements);
+        pair_logits.resize(options.max_pairs);
+        subject_indices.resize(options.max_pairs);
+        object_indices.resize(options.max_pairs);
+        valid_mask.resize(options.max_pairs);
     }
 
     runtime::ResolvedModel resolved;
@@ -461,7 +462,9 @@ RelationFrame RelateAnything::infer(const image::ImageView& image,
             throw_contract("preprocessed image tensor has unexpected size");
         }
 
-        std::vector<float> boxes(impl_->options.max_boxes * 4U, 0.0F);
+        const std::size_t box_values =
+            checked_multiply(impl_->options.max_boxes, 4U, "boxes tensor");
+        std::vector<float> boxes(box_values, 0.0F);
         const float image_width = static_cast<float>(source.width);
         const float image_height = static_cast<float>(source.height);
         for (std::size_t index = 0U; index < regions.size(); ++index)
