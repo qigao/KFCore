@@ -9,7 +9,14 @@ import torch
 from torch import nn
 
 from checkpoint import config_from_payload, load_payload, save_checkpoint
-from export_onnx import INPUT_NAMES, OUTPUT_NAMES, check_onnx_parity, export_graph
+from export_onnx import (
+    ENCODER_OUTPUT_NAMES,
+    INPUT_NAMES,
+    OUTPUT_NAMES,
+    check_onnx_parity,
+    export_encoder_graph,
+    export_graph,
+)
 from losses import RelationLossConfig, supervised_relation_loss
 from model import (
     BackboneAdapter,
@@ -171,6 +178,35 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_open_vocabulary_encoder_is_independent_of_predicate_count(self):
+        torch.manual_seed(31)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+
+        with torch.inference_mode():
+            first = model.forward_encoder(
+                image, box_tensor[:1], box_counts[:1]
+            )
+
+        self.assertEqual(len(first), 6)
+        self.assertEqual(tuple(first[0].shape), (1, 6, 6))
+        self.assertEqual(tuple(first[1].shape), (1, 6, 6))
+        self.assertTrue(torch.equal(first[0], first[1]))
+
+        model.predicate_bank = torch.nn.functional.normalize(
+            torch.randn(7, 6), dim=-1
+        )
+        with torch.inference_mode():
+            second = model.forward_encoder(
+                image, box_tensor[:1], box_counts[:1]
+            )
+
+        for left, right in zip(first, second):
+            self.assertTrue(torch.equal(left, right))
+
     def test_official_adapter_extracts_multi_tap_feature_maps(self):
         adapter = OfficialDinoV3Backbone(FakeOfficialModel())
         taps = adapter.forward_taps(

@@ -22,6 +22,35 @@ OUTPUT_NAMES = [
     "obj_idx",
     "valid_mask",
 ]
+ENCODER_OUTPUT_NAMES = [
+    "semantic_query",
+    "spatial_query",
+    "pair_logits",
+    "sub_idx",
+    "obj_idx",
+    "valid_mask",
+]
+
+_OUTPUT_TYPES = {
+    "pred_logits": "tensor(float)",
+    "semantic_query": "tensor(float)",
+    "spatial_query": "tensor(float)",
+    "pair_logits": "tensor(float)",
+    "sub_idx": "tensor(int64)",
+    "obj_idx": "tensor(int64)",
+    "valid_mask": "tensor(bool)",
+}
+
+
+class RelationEncoderExport(nn.Module):
+    def __init__(self, model: KFRelationModel) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(
+        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        return self.model.forward_encoder(image, boxes, box_counts)
 
 
 def sha256(path: Path) -> str:
@@ -51,13 +80,9 @@ def export_graph(
     box_counts: Tensor,
     *,
     opset: int = 18,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    """Export the exact native batch-1 relation contract.
-
-    Native kfcore::relation::RelateAnything executes one frame per call.
-    Keeping batch=1 static makes the ONNX/TensorRT contract smaller and avoids
-    advertising a dynamic-batch capability the C++ API does not consume.
-    """
+    output_names: Sequence[str] = OUTPUT_NAMES,
+) -> tuple[Tensor, ...]:
+    """Export an exact batch-1 KFCore relation graph contract."""
     if image.ndim != 4 or image.shape[0] != 1 or image.shape[1] != 3:
         raise ValueError("ONNX export image must be [1,3,H,W]")
     if boxes.ndim != 3 or boxes.shape[0] != 1 or boxes.shape[2] != 4:
@@ -65,23 +90,51 @@ def export_graph(
     if box_counts.shape != (1,):
         raise ValueError("ONNX export box_counts must be [1]")
 
+    names = list(output_names)
+    if not names or len(set(names)) != len(names):
+        raise ValueError("ONNX output names must be non-empty and unique")
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     model.eval()
     with torch.inference_mode():
-        reference = model(image, boxes, box_counts)
+        reference = tuple(model(image, boxes, box_counts))
+    if len(reference) != len(names):
+        raise RuntimeError(
+            "model output count does not match requested ONNX names"
+        )
 
     torch.onnx.export(
         model,
         (image, boxes, box_counts),
         str(path),
         input_names=INPUT_NAMES,
-        output_names=OUTPUT_NAMES,
+        output_names=names,
         opset_version=opset,
         do_constant_folding=True,
         dynamo=False,
     )
     return reference
+
+
+def export_encoder_graph(
+    model: KFRelationModel,
+    output_path: str | Path,
+    image: Tensor,
+    boxes: Tensor,
+    box_counts: Tensor,
+    *,
+    opset: int = 18,
+) -> tuple[Tensor, ...]:
+    return export_graph(
+        RelationEncoderExport(model),
+        output_path,
+        image,
+        boxes,
+        box_counts,
+        opset=opset,
+        output_names=ENCODER_OUTPUT_NAMES,
+    )
 
 
 def check_onnx_parity(
@@ -92,10 +145,12 @@ def check_onnx_parity(
     reference: Sequence[Tensor],
     *,
     tolerance: float = 1.0e-3,
+    output_names: Sequence[str] = OUTPUT_NAMES,
 ) -> float:
     import onnx
     import onnxruntime as ort
 
+    names = list(output_names)
     path = Path(output_path)
     graph = onnx.load(str(path))
     onnx.checker.check_model(graph)
@@ -106,9 +161,13 @@ def check_onnx_parity(
     inputs = session.get_inputs()
     outputs = session.get_outputs()
     if [item.name for item in inputs] != INPUT_NAMES:
-        raise RuntimeError("ONNX input names do not match native runtime contract")
-    if [item.name for item in outputs] != OUTPUT_NAMES:
-        raise RuntimeError("ONNX output names do not match native runtime contract")
+        raise RuntimeError(
+            "ONNX input names do not match native runtime contract"
+        )
+    if [item.name for item in outputs] != names:
+        raise RuntimeError(
+            "ONNX output names do not match requested runtime contract"
+        )
 
     expected_input_shapes = [
         list(image.shape),
@@ -132,16 +191,12 @@ def check_onnx_parity(
                 f"ONNX input {item.name} type {item.type} != {dtype}"
             )
 
-    expected_output_shapes = [
-        list(value.shape) for value in reference
-    ]
-    expected_output_types = [
-        "tensor(float)",
-        "tensor(float)",
-        "tensor(int64)",
-        "tensor(int64)",
-        "tensor(bool)",
-    ]
+    if len(reference) != len(names):
+        raise RuntimeError(
+            "reference output count does not match requested contract"
+        )
+    expected_output_shapes = [list(value.shape) for value in reference]
+    expected_output_types = [_OUTPUT_TYPES[name] for name in names]
     for item, shape, dtype in zip(
         outputs, expected_output_shapes, expected_output_types
     ):
@@ -159,9 +214,9 @@ def check_onnx_parity(
         "boxes": boxes.detach().cpu().numpy(),
         "box_counts": box_counts.detach().cpu().numpy(),
     }
-    actual = session.run(OUTPUT_NAMES, feed)
+    actual = session.run(names, feed)
     worst = 0.0
-    for name, expected, got in zip(OUTPUT_NAMES, reference, actual):
+    for name, expected, got in zip(names, reference, actual):
         expected_np = expected.detach().cpu().numpy()
         if expected_np.dtype == np.bool_ or np.issubdtype(
             expected_np.dtype, np.integer
@@ -173,7 +228,8 @@ def check_onnx_parity(
             worst = max(worst, delta)
             if delta > tolerance:
                 raise RuntimeError(
-                    f"ONNX parity failed for {name}: max abs delta {delta}"
+                    f"ONNX parity failed for {name}: "
+                    f"max abs delta {delta}"
                 )
     return worst
 
@@ -187,7 +243,18 @@ def main() -> None:
     parser.add_argument(
         "--backbone",
         default="",
-        help="Hugging Face model ID or local model directory. Defaults to checkpoint provenance.",
+        help=(
+            "Hugging Face model ID or local model directory. "
+            "Defaults to checkpoint provenance."
+        ),
+    )
+    parser.add_argument(
+        "--encoder-only",
+        action="store_true",
+        help=(
+            "Export relation.open-vocabulary-encoder with fixed [K,D] "
+            "queries instead of baked [K,V] predicate logits."
+        ),
     )
     parser.add_argument("--opset", type=int, default=18)
     parser.add_argument("--check", action="store_true")
@@ -214,29 +281,44 @@ def main() -> None:
         1, 3, config.image_size, config.image_size, dtype=torch.float32
     )
     boxes = dummy_boxes(config.max_boxes)
-    box_counts = torch.tensor([config.max_boxes], dtype=torch.int64)
-
-    reference = export_graph(
-        model,
-        output_path,
-        image,
-        boxes,
-        box_counts,
-        opset=args.opset,
+    box_counts = torch.tensor(
+        [config.max_boxes], dtype=torch.int64
     )
 
+    if args.encoder_only:
+        reference = export_encoder_graph(
+            model,
+            output_path,
+            image,
+            boxes,
+            box_counts,
+            opset=args.opset,
+        )
+        output_names = ENCODER_OUTPUT_NAMES
+        model_type = "relation.open-vocabulary-encoder"
+        output_kind = "relation-queries"
+    else:
+        reference = export_graph(
+            model,
+            output_path,
+            image,
+            boxes,
+            box_counts,
+            opset=args.opset,
+        )
+        output_names = OUTPUT_NAMES
+        model_type = "relation.relate-anything"
+        output_kind = "logits"
+
     metadata = {
-        "schema": "kfcore.relation-onnx/1",
-        "model_type": "relation.relate-anything",
+        "schema": "kfcore.relation-onnx/2",
+        "model_type": model_type,
         "implementation": "kfcore-relation-v1",
-        "output_kind": "logits",
+        "output_kind": output_kind,
         "batch_size": 1,
-        "score_contract": "sigmoid(a * (pred + w * pair) + b)",
         "image_size": config.image_size,
         "max_boxes": config.max_boxes,
         "final_budget": config.pair_budget,
-        "predicates": predicates,
-        "predicate_count": len(predicates),
         "backbone_model": backbone_name,
         "backbone_patch_size": backbone.patch_size,
         "backbone_hidden_size": backbone.hidden_size,
@@ -245,6 +327,27 @@ def main() -> None:
         "onnx_sha256": sha256(output_path),
         "opset": args.opset,
     }
+    if args.encoder_only:
+        metadata.update({
+            "vocabulary_dynamic": True,
+            "query_dim": model.predicate_dim,
+            "semantic_query": True,
+            "spatial_query": True,
+            "score_logit_scale": float(
+                model.logit_scale.exp().clamp(max=100.0).detach().cpu()
+            ),
+            "score_logit_bias": 0.0,
+            "score_contract": (
+                "scale*((1-alpha)*dot(q_sem,w)+alpha*dot(q_spa,w))+bias"
+            ),
+        })
+    else:
+        metadata.update({
+            "vocabulary_dynamic": False,
+            "score_contract": "sigmoid(a * (pred + w * pair) + b)",
+            "predicates": predicates,
+            "predicate_count": len(predicates),
+        })
 
     if args.check:
         metadata["check_max_abs_delta"] = check_onnx_parity(
@@ -253,6 +356,7 @@ def main() -> None:
             boxes,
             box_counts,
             reference,
+            output_names=output_names,
         )
 
     metadata_path = output_path.with_suffix(".json")
