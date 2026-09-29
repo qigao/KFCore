@@ -10,6 +10,7 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_vocab_head import ApacheVocabHead
 from apache_context import (
     ApacheDeformableRelRead,
     ApacheRelationInteractionBlock,
@@ -45,6 +46,7 @@ class RelationModelConfig:
     relation_context_contract: str = "legacy"
     apache_context_dropout: float = 0.2
     apache_box_token_dropout: float = 0.3
+    predicate_head_contract: str = "legacy"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -152,6 +154,28 @@ class RelationModelConfig:
             raise ValueError(
                 "apache_box_token_dropout must be within [0,1]"
             )
+        if self.predicate_head_contract not in {
+            "legacy",
+            "apache",
+        }:
+            raise ValueError(
+                "predicate_head_contract must be legacy/apache"
+            )
+        if (
+            self.predicate_head_contract == "apache"
+            and self.relation_context_contract != "apache"
+        ):
+            raise ValueError(
+                "apache predicate head requires apache relation context"
+            )
+        if (
+            self.predicate_head_contract == "apache"
+            and self.predicate_adapter_rank != 0
+        ):
+            raise ValueError(
+                "apache predicate head keeps W fixed and does not allow "
+                "predicate_adapter_rank"
+            )
 
 
 @dataclass(frozen=True)
@@ -162,6 +186,7 @@ class RelationTrainingOutputs:
     predicate_query: Tensor
     predicate_query_raw: Tensor
     predicate_bank: Tensor
+    predicate_spatial_query: Tensor | None = None
     sampler_geo_loss: Tensor | None = None
     sampler_relatedness_loss: Tensor | None = None
 
@@ -985,6 +1010,71 @@ class KFRelationModel(nn.Module):
             assert self.apache_box_prompt_encoder is not None
             self.apache_box_prompt_encoder.requires_grad_(True)
 
+        self.apache_vocab_head: ApacheVocabHead | None = None
+        self.apache_sub_text_proj: nn.Linear | None = None
+        self.apache_obj_text_proj: nn.Linear | None = None
+        self.apache_compose_norm: nn.LayerNorm | None = None
+        self.apache_compose_gate: nn.Parameter | None = None
+        self.apache_spatial_proj: nn.Module | None = None
+        if config.predicate_head_contract == "apache":
+            self.apache_vocab_head = ApacheVocabHead(
+                d_model=config.hidden_dim,
+                text_dim=self.predicate_dim,
+                logit_scale_init=5.0,
+                projection_layers=2,
+                gate_hidden=128,
+            )
+            self.apache_sub_text_proj = nn.Linear(
+                backbone.hidden_size,
+                self.predicate_dim,
+                bias=False,
+            )
+            self.apache_obj_text_proj = nn.Linear(
+                backbone.hidden_size,
+                self.predicate_dim,
+                bias=False,
+            )
+            nn.init.xavier_uniform_(
+                self.apache_sub_text_proj.weight
+            )
+            nn.init.xavier_uniform_(
+                self.apache_obj_text_proj.weight
+            )
+            self.apache_compose_norm = nn.LayerNorm(
+                self.predicate_dim
+            )
+            self.apache_compose_gate = nn.Parameter(
+                torch.tensor([0.1, 0.1])
+            )
+
+            hidden = max(
+                config.hidden_dim * 2,
+                self.predicate_dim // 2,
+            )
+            spatial_first = nn.Linear(
+                config.hidden_dim * 2,
+                hidden,
+            )
+            spatial_final = nn.Linear(
+                hidden,
+                self.predicate_dim,
+                bias=False,
+            )
+            nn.init.xavier_uniform_(spatial_first.weight)
+            nn.init.zeros_(spatial_first.bias)
+            nn.init.xavier_uniform_(spatial_final.weight)
+            self.apache_spatial_proj = nn.Sequential(
+                spatial_first,
+                nn.GELU(),
+                nn.LayerNorm(hidden),
+                spatial_final,
+            )
+
+            # The Apache head replaces the historical single-query projection
+            # and learned prototype adapter. W stays as the text direction.
+            self.predicate_projection.requires_grad_(False)
+            self.logit_scale.requires_grad_(False)
+
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
         if (
@@ -1205,7 +1295,7 @@ class KFRelationModel(nn.Module):
         object_index: Tensor,
         selected_valid: Tensor,
         region_features: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         if (
             self.apache_spatial_pool is None
             or self.apache_box_prompt_encoder is None
@@ -1326,6 +1416,8 @@ class KFRelationModel(nn.Module):
             box_tokens,
             anchors,
             geometry_features,
+            subject_features,
+            object_features,
         )
 
     def _forward_impl(
@@ -1343,6 +1435,7 @@ class KFRelationModel(nn.Module):
         Tensor,
         Tensor,
         Tensor,
+        Tensor | None,
         Tensor | None,
         Tensor | None,
     ]:
@@ -1488,6 +1581,8 @@ class KFRelationModel(nn.Module):
                 _reference_box_tokens,
                 _reference_anchors,
                 _reference_geometry_features,
+                _reference_subject_features,
+                _reference_object_features,
             ) = self._apache_pair_evidence(
                 patch_features,
                 boxes,
@@ -1646,23 +1741,85 @@ class KFRelationModel(nn.Module):
             if apache_pair_logits is not None
             else self.pair_head(tokens).squeeze(-1)
         )
-        predicate_query_raw = self.predicate_projection(tokens)
-        predicate_query = F.normalize(
-            predicate_query_raw, dim=-1
-        )
         predicate_bank = self.effective_predicate_bank()
-        if encoder_only:
-            # Phase-1 open-vocabulary ABI reserves independent semantic and
-            # spatial query outputs. Until the dual-expert model lands they
-            # intentionally carry the same learned text-space query.
-            encoder_runtime = (
-                predicate_query,
-                predicate_query.clone(),
-                pair_logits,
-                subject_index.to(torch.int64),
-                object_index.to(torch.int64),
-                selected_valid.to(torch.bool),
+
+        predicate_spatial_query: Tensor | None = None
+        if self.config.predicate_head_contract == "apache":
+            if (
+                self.apache_vocab_head is None
+                or self.apache_sub_text_proj is None
+                or self.apache_obj_text_proj is None
+                or self.apache_compose_norm is None
+                or self.apache_compose_gate is None
+                or self.apache_spatial_proj is None
+            ):
+                raise RuntimeError(
+                    "Apache predicate head is not configured"
+                )
+            semantic_base = self.apache_vocab_head.proj(tokens)
+            predicate_query_raw = self.apache_compose_norm(
+                semantic_base
+                + self.apache_compose_gate[0]
+                * self.apache_sub_text_proj(
+                    _reference_subject_features
+                )
+                + self.apache_compose_gate[1]
+                * self.apache_obj_text_proj(
+                    _reference_object_features
+                )
             )
+            predicate_spatial_query = self.apache_spatial_proj(
+                torch.cat(
+                    (
+                        tokens,
+                        _reference_geometry_features,
+                    ),
+                    dim=-1,
+                )
+            )
+            predicate_query = F.normalize(
+                predicate_query_raw,
+                dim=-1,
+            )
+            if encoder_only:
+                encoder_runtime = (
+                    predicate_query_raw,
+                    predicate_spatial_query,
+                    pair_logits,
+                    subject_index.to(torch.int64),
+                    object_index.to(torch.int64),
+                    selected_valid.to(torch.bool),
+                )
+            else:
+                pred_logits = self.apache_vocab_head.score_query_dual(
+                    predicate_query_raw,
+                    predicate_spatial_query,
+                    predicate_bank,
+                )
+        else:
+            predicate_query_raw = self.predicate_projection(tokens)
+            predicate_query = F.normalize(
+                predicate_query_raw,
+                dim=-1,
+            )
+            predicate_spatial_query = predicate_query.clone()
+            if encoder_only:
+                encoder_runtime = (
+                    predicate_query,
+                    predicate_spatial_query,
+                    pair_logits,
+                    subject_index.to(torch.int64),
+                    object_index.to(torch.int64),
+                    selected_valid.to(torch.bool),
+                )
+            else:
+                scale = self.logit_scale.exp().clamp(max=100.0)
+                pred_logits = scale * torch.matmul(
+                    predicate_query,
+                    predicate_bank.transpose(0, 1),
+                )
+
+        if encoder_only:
             return (
                 encoder_runtime,
                 sampler_logits,
@@ -1670,15 +1827,10 @@ class KFRelationModel(nn.Module):
                 predicate_query,
                 predicate_query_raw,
                 predicate_bank,
+                predicate_spatial_query,
                 sampler_geo_loss,
                 sampler_relatedness_loss,
             )
-
-        scale = self.logit_scale.exp().clamp(max=100.0)
-        pred_logits = scale * torch.matmul(
-            predicate_query,
-            predicate_bank.transpose(0, 1),
-        )
         runtime = (
             pred_logits,
             pair_logits,
@@ -1693,6 +1845,7 @@ class KFRelationModel(nn.Module):
             predicate_query,
             predicate_query_raw,
             predicate_bank,
+            predicate_spatial_query,
             sampler_geo_loss,
             sampler_relatedness_loss,
         )
@@ -1700,7 +1853,7 @@ class KFRelationModel(nn.Module):
     def forward_encoder(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _, _ = self._forward_impl(
             image,
             boxes,
             box_counts,
@@ -1715,7 +1868,7 @@ class KFRelationModel(nn.Module):
     def forward(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _, _ = self._forward_impl(
             image, boxes, box_counts
         )
         return runtime
@@ -1741,6 +1894,7 @@ class KFRelationModel(nn.Module):
             predicate_query,
             predicate_query_raw,
             predicate_bank,
+            predicate_spatial_query,
             sampler_geo_loss,
             sampler_relatedness_loss,
         ) = self._forward_impl(
@@ -1756,6 +1910,7 @@ class KFRelationModel(nn.Module):
             predicate_query=predicate_query,
             predicate_query_raw=predicate_query_raw,
             predicate_bank=predicate_bank,
+            predicate_spatial_query=predicate_spatial_query,
             sampler_geo_loss=sampler_geo_loss,
             sampler_relatedness_loss=sampler_relatedness_loss,
         )
