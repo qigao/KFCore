@@ -50,6 +50,94 @@ class BackboneAdapter(nn.Module):
         raise NotImplementedError
 
 
+class OfficialDinoV3Backbone(BackboneAdapter):
+    """Adapter for Meta's official DINOv3 PyTorch implementation."""
+
+    _IMAGENET_MEAN = (0.485, 0.456, 0.406)
+    _IMAGENET_STD = (0.229, 0.224, 0.225)
+
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        if not hasattr(model, "get_intermediate_layers"):
+            raise TypeError("official DINOv3 model must expose get_intermediate_layers")
+        hidden_size = int(getattr(model, "embed_dim", 0))
+        patch_size_value = getattr(model, "patch_size", 0)
+        patch_size = (
+            int(patch_size_value[0])
+            if isinstance(patch_size_value, (tuple, list))
+            else int(patch_size_value)
+        )
+        depth = int(getattr(model, "n_blocks", 0))
+        if hidden_size <= 0 or patch_size <= 0 or depth <= 0:
+            raise ValueError("invalid official DINOv3 model dimensions")
+        self.model = model
+        self.hidden_size = hidden_size
+        self.patch_size = patch_size
+        self.depth = depth
+        self.register_buffer(
+            "_mean",
+            torch.tensor(self._IMAGENET_MEAN, dtype=torch.float32).reshape(1, 3, 1, 1),
+            persistent=True,
+        )
+        self.register_buffer(
+            "_std",
+            torch.tensor(self._IMAGENET_STD, dtype=torch.float32).reshape(1, 3, 1, 1),
+            persistent=True,
+        )
+
+    @classmethod
+    def from_torch_hub(
+        cls,
+        repo_dir: str,
+        *,
+        weights: str,
+        model_name: str = "dinov3_vits16",
+        train_backbone: bool = True,
+    ) -> "OfficialDinoV3Backbone":
+        model = torch.hub.load(
+            repo_dir,
+            model_name,
+            source="local",
+            weights=weights,
+            check_hash=True,
+        )
+        model.requires_grad_(train_backbone)
+        return cls(model)
+
+    def forward_taps(self, image: Tensor, taps: Sequence[int]) -> list[Tensor]:
+        if image.ndim != 4 or image.shape[1] != 3:
+            raise ValueError("DINOv3 image input must be NCHW with three channels")
+        height = int(image.shape[2])
+        width = int(image.shape[3])
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
+            raise ValueError("image dimensions must be divisible by DINOv3 patch size")
+
+        indices: list[int] = []
+        for tap in taps:
+            index = self.depth + int(tap) if int(tap) < 0 else int(tap)
+            if index < 0 or index >= self.depth:
+                raise ValueError("DINOv3 tap index is outside backbone depth")
+            indices.append(index)
+
+        normalized = (
+            image - self._mean.to(dtype=image.dtype, device=image.device)
+        ) / self._std.to(dtype=image.dtype, device=image.device)
+        outputs = self.model.get_intermediate_layers(
+            normalized,
+            n=indices,
+            reshape=True,
+            norm=False,
+        )
+        if len(outputs) != len(indices):
+            raise RuntimeError("official DINOv3 returned the wrong number of taps")
+        result: list[Tensor] = []
+        for feature in outputs:
+            if feature.ndim != 4 or feature.shape[1] != self.hidden_size:
+                raise RuntimeError("official DINOv3 tap must be BCHW")
+            result.append(feature)
+        return result
+
+
 class HFDinoV3Backbone(BackboneAdapter):
     """Thin Transformers adapter. No DINOv3 source or weights are bundled here."""
 
