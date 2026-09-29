@@ -804,6 +804,70 @@ class RelationModelTest(unittest.TestCase):
                 ),
             )
 
+    def test_explicit_holdout_can_hide_positive_predicate_targets(self):
+        torch.manual_seed(24)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+
+        pred_logits, _, sub_idx, obj_idx, valid_mask = output.runtime
+        pred_logits.retain_grad()
+        slot = int(torch.nonzero(valid_mask[0], as_tuple=False)[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 2] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        # The ordinary supervision-mask path still rejects hidden positives.
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                pair_targets,
+                predicate_targets,
+                predicate_supervision_mask=supervision,
+            )
+
+        losses = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            allow_masked_positive_targets=True,
+        )
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, slot, :2],
+            torch.zeros(2),
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(pred_logits.grad)
+        self.assertEqual(
+            float(pred_logits.grad[..., 2].abs().sum()),
+            0.0,
+        )
+        self.assertGreater(
+            float(pred_logits.grad[..., :2].abs().sum()),
+            0.0,
+        )
+
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
         model = KFRelationModel(
             ToyBackbone(), torch.randn(3, 6), config()
