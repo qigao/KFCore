@@ -134,6 +134,7 @@ def _batch_local_predicate_infonce(
     supervision_mask: Tensor | None,
     positive_weights: Tensor | None,
     negative_candidate_mask: Tensor | None,
+    semantic_positive_weights: Tensor | None,
     hard_negative_count: int,
     temperature: float,
 ) -> dict[str, Tensor]:
@@ -168,13 +169,71 @@ def _batch_local_predicate_infonce(
             "query_raw_norm": zero,
             "unobserved_column_fraction": query.new_tensor(1.0),
             "hard_negative_count": zero,
+            "soft_positive_count": zero,
         }
 
     query = query[keep_rows]
     raw_query = raw_query[keep_rows]
     visible = visible[keep_rows]
 
-    contrast_mask = visible.any(dim=0)
+    direct_weight = visible.to(dtype=query.dtype)
+    if positive_weights is not None:
+        direct_weight = direct_weight * positive_weights.to(
+            device=query.device,
+            dtype=query.dtype,
+        ).view(1, -1)
+
+    positive_strength = direct_weight
+    soft_positive_count = query.new_zeros(())
+    if semantic_positive_weights is not None:
+        if (
+            semantic_positive_weights.ndim != 2
+            or semantic_positive_weights.shape
+            != (
+                predicate_bank.shape[0],
+                predicate_bank.shape[0],
+            )
+        ):
+            raise ValueError(
+                "predicate_soft_positive_weights must be [V,V]"
+            )
+        if not torch.isfinite(semantic_positive_weights).all():
+            raise ValueError(
+                "predicate_soft_positive_weights must be finite"
+            )
+        if (
+            (semantic_positive_weights < 0).any()
+            or (semantic_positive_weights > 1).any()
+        ):
+            raise ValueError(
+                "predicate_soft_positive_weights must be within [0,1]"
+            )
+        semantic = semantic_positive_weights.to(
+            device=query.device,
+            dtype=query.dtype,
+        )
+        # Propagate supervision mass from visible seed labels. This is
+        # deliberately seed-weighted: an indirectly reached holdout column
+        # never reads that holdout predicate's own train-frequency weight.
+        expanded_weight = torch.matmul(
+            direct_weight,
+            semantic,
+        )
+        # Semantic propagation only creates new soft-positive columns.
+        # Already observed direct positives keep their original class weight
+        # and are not inflated by semantic edges from other direct labels.
+        expanded_weight = expanded_weight * (~visible).to(
+            dtype=query.dtype
+        )
+        positive_strength = direct_weight + expanded_weight
+        semantic_only = (
+            positive_strength > 0
+        ) & ~visible
+        soft_positive_count = semantic_only.sum(
+            dim=1
+        ).to(dtype=query.dtype).mean()
+
+    contrast_mask = (positive_strength > 0).any(dim=0)
     positive_indices = torch.nonzero(
         contrast_mask, as_tuple=False
     ).flatten()
@@ -235,16 +294,12 @@ def _batch_local_predicate_infonce(
     bank = predicate_bank[contrast_indices]
     cosine = torch.matmul(query, bank.transpose(0, 1))
     logits = cosine / float(temperature)
-    positive = visible[:, contrast_indices]
+    positive_strength = positive_strength[
+        :, contrast_indices
+    ]
+    positive = positive_strength > 0
 
-    weights = positive.to(dtype=logits.dtype)
-    if positive_weights is not None:
-        weights = weights * positive_weights[
-            contrast_indices
-        ].view(1, -1).to(
-            device=logits.device,
-            dtype=logits.dtype,
-        )
+    weights = positive_strength.to(dtype=logits.dtype)
 
     positive_mass = weights.sum(dim=1)
     if (positive_mass <= 0).any():
@@ -298,6 +353,7 @@ def _batch_local_predicate_infonce(
         "hard_negative_count": query.new_tensor(
             float(hard_negative_indices.numel())
         ),
+        "soft_positive_count": soft_positive_count,
     }
 
 
@@ -313,6 +369,7 @@ def supervised_relation_loss(
     explicit_holdout_mask: Tensor | None = None,
     explicit_holdout_row_policy: str = "dimension-only",
     predicate_contrastive_negative_mask: Tensor | None = None,
+    predicate_soft_positive_weights: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -491,6 +548,7 @@ def supervised_relation_loss(
     predicate_query_raw_norm = pred_logits.new_zeros(())
     predicate_unobserved_column_fraction = pred_logits.new_zeros(())
     predicate_hard_negative_count = pred_logits.new_zeros(())
+    predicate_soft_positive_count = pred_logits.new_zeros(())
 
     if positive.any():
         positive_logits = pred_logits[positive]
@@ -534,6 +592,9 @@ def supervised_relation_loss(
                 negative_candidate_mask=(
                     predicate_contrastive_negative_mask
                 ),
+                semantic_positive_weights=(
+                    predicate_soft_positive_weights
+                ),
                 hard_negative_count=(
                     config.predicate_contrastive_hard_negative_count
                 ),
@@ -558,6 +619,9 @@ def supervised_relation_loss(
             ]
             predicate_hard_negative_count = contrastive[
                 "hard_negative_count"
+            ]
+            predicate_soft_positive_count = contrastive[
+                "soft_positive_count"
             ]
         else:
             if explicit_holdout_row_policy == "skip-holdout-only":
@@ -655,4 +719,5 @@ def supervised_relation_loss(
             predicate_unobserved_column_fraction
         ),
         "predicate_hard_negative_count": predicate_hard_negative_count,
+        "predicate_soft_positive_count": predicate_soft_positive_count,
     }

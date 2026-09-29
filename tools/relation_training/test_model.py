@@ -1339,6 +1339,277 @@ class RelationModelTest(unittest.TestCase):
         )
         self.assertEqual(float(losses["predicate_loss"]), 0.0)
 
+    def test_semantic_soft_positive_can_expand_from_visible_seen_label(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]],
+            requires_grad=True,
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.8, 0.6],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, False, True])
+        ontology = torch.eye(3)
+        ontology[0, 1] = 0.5
+        ontology[1, 0] = 0.5
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_soft_positive_weights=ontology,
+        )
+
+        denominator = torch.logsumexp(
+            torch.tensor([1.0, 0.8]), dim=0
+        )
+        expected = (
+            (denominator - 1.0)
+            + 0.5 * (denominator - 0.8)
+        ) / 1.5
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_soft_positive_count"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+
+    def test_semantic_soft_positive_inherits_visible_seed_class_weight(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor([[[1.0, 0.0]]]),
+            predicate_query_raw=torch.tensor([[[1.0, 0.0]]]),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.8, 0.6],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, False, True])
+        ontology = torch.eye(3)
+        ontology[0, 1] = 0.5
+        ontology[1, 0] = 0.5
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+            predicate_positive_weights=torch.tensor(
+                [2.0, 20.0, 1.0]
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_soft_positive_weights=ontology,
+        )
+
+        denominator = torch.logsumexp(
+            torch.tensor([1.0, 0.8]), dim=0
+        )
+        # Direct seed mass is 2.0; the semantic neighbor inherits
+        # 2.0 * 0.5 = 1.0. The held-out target's own class weight 20.0
+        # must never enter this row.
+        expected = (
+            2.0 * (denominator - 1.0)
+            + 1.0 * (denominator - 0.8)
+        ) / 3.0
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+
+    def test_semantic_ontology_does_not_seed_from_heldout_only_label(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]],
+            requires_grad=True,
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.8, 0.6],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 1] = 1.0
+        supervision = torch.tensor([True, False, True])
+        ontology = torch.eye(3)
+        ontology[1, 0] = 0.8
+        ontology[0, 1] = 0.8
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_soft_positive_weights=ontology,
+        )
+
+        self.assertEqual(
+            float(losses["predicate_rows_skipped"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_soft_positive_count"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            0.0,
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+
+    def test_semantic_soft_positive_is_not_mined_as_hard_negative(self):
+        pred_logits = torch.zeros(1, 1, 4)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor(
+                [[[1.0, 0.0]]]
+            ),
+            predicate_query_raw=torch.tensor(
+                [[[1.0, 0.0]]]
+            ),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.95, 0.05],
+                    [0.70, 0.7141428],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 4)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        ontology = torch.eye(4)
+        ontology[0, 1] = 0.5
+        ontology[1, 0] = 0.5
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_contrastive_hard_negative_count=1,
+            ),
+            predicate_contrastive_negative_mask=torch.tensor(
+                [False, True, True, True]
+            ),
+            predicate_soft_positive_weights=ontology,
+        )
+
+        # Column 1 is the highest-cosine candidate but is already a semantic
+        # soft positive, so hard-negative mining must choose column 2.
+        self.assertEqual(
+            float(losses["predicate_soft_positive_count"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_hard_negative_count"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            3.0,
+        )
+
     def test_batch_local_infonce_rejects_bce_negative_reweighting(self):
         pred_logits = torch.zeros(1, 1, 2)
         pair_logits = torch.zeros(1, 1)

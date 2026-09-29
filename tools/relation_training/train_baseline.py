@@ -64,6 +64,44 @@ def load_predicate_embeddings(
     return value.float()
 
 
+def load_predicate_soft_positive_weights(
+    path: str | Path,
+    predicate_count: int,
+) -> torch.Tensor:
+    value = torch.load(
+        Path(path),
+        map_location="cpu",
+        weights_only=True,
+    )
+    if not isinstance(value, torch.Tensor):
+        raise ValueError(
+            "predicate soft-positive file must contain one tensor"
+        )
+    if value.shape != (predicate_count, predicate_count):
+        raise ValueError(
+            "predicate soft-positive weights must be [V,V]"
+        )
+    value = value.float()
+    if (
+        not torch.isfinite(value).all()
+        or (value < 0).any()
+        or (value > 1).any()
+    ):
+        raise ValueError(
+            "predicate soft-positive weights must be finite within [0,1]"
+        )
+    if not torch.allclose(
+        value.diag(),
+        torch.ones(predicate_count),
+        atol=1.0e-6,
+        rtol=1.0e-6,
+    ):
+        raise ValueError(
+            "predicate soft-positive diagonal must be 1"
+        )
+    return value
+
+
 def resolve_device(requested: str) -> torch.device:
     if requested == "auto":
         return torch.device(
@@ -87,6 +125,14 @@ def main() -> None:
     parser.add_argument("--vocabulary", required=True)
     parser.add_argument("--image-root", required=True)
     parser.add_argument("--predicate-embeddings", required=True)
+    parser.add_argument(
+        "--predicate-soft-positive-weights",
+        default="",
+        help=(
+            "Optional [V,V] supervision-only semantic soft-positive "
+            "matrix for batch-local InfoNCE."
+        ),
+    )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     parser.add_argument("--image-size", type=int, default=448)
@@ -288,6 +334,14 @@ def main() -> None:
             "--predicate-contrastive-hard-negative-count is "
             "batch-local-infonce-only"
         )
+    if (
+        args.predicate_soft_positive_weights
+        and args.predicate_objective != "batch-local-infonce"
+    ):
+        raise ValueError(
+            "--predicate-soft-positive-weights is "
+            "batch-local-infonce-only"
+        )
 
     predicate_index = {
         name: index
@@ -396,6 +450,19 @@ def main() -> None:
         args.predicate_embeddings,
         len(vocabulary.predicates),
     )
+    predicate_soft_positive_weights = None
+    predicate_soft_positive_sha256 = None
+    if args.predicate_soft_positive_weights:
+        predicate_soft_positive_weights = (
+            load_predicate_soft_positive_weights(
+                args.predicate_soft_positive_weights,
+                len(vocabulary.predicates),
+            )
+        )
+        predicate_soft_positive_sha256 = tensor_sha256(
+            predicate_soft_positive_weights
+        )
+
     backbone = TimmDinoV3Backbone.from_pretrained(
         args.backbone,
         train_backbone=False,
@@ -446,6 +513,9 @@ def main() -> None:
             predicate_contrastive_negative_mask=(
                 predicate_contrastive_negative_mask
             ),
+            predicate_soft_positive_weights=(
+                predicate_soft_positive_weights
+            ),
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -471,6 +541,11 @@ def main() -> None:
         effective_bank,
         dim=-1,
     )
+    predicate_semantic_ontology_report = {
+        "enabled": predicate_soft_positive_weights is not None,
+        "weights_tensor_sha256": predicate_soft_positive_sha256,
+    }
+
     predicate_adapter_report = {
         "rank": model.config.predicate_adapter_rank,
         "parameter_count": model.predicate_adapter_parameter_count(),
@@ -507,6 +582,13 @@ def main() -> None:
                 "pair_loss_weight": loss_config.pair_loss_weight,
                 "predicate_loss_weight": loss_config.predicate_loss_weight,
                 "negative_pair_weight": loss_config.negative_pair_weight,
+                "predicate_objective": loss_config.predicate_objective,
+                "predicate_contrastive_temperature": (
+                    loss_config.predicate_contrastive_temperature
+                ),
+                "predicate_contrastive_hard_negative_count": (
+                    loss_config.predicate_contrastive_hard_negative_count
+                ),
             },
             "predicate_weighting": {
                 "mode": predicate_weighting.mode,
@@ -538,7 +620,17 @@ def main() -> None:
                     effective_train_predicate_support
                 ),
                 "holdout_row_policy": args.holdout_row_policy,
+                "contrastive_negative_candidate_indices": [
+                    index
+                    for index, enabled in enumerate(
+                        predicate_contrastive_negative_mask.tolist()
+                    )
+                    if enabled
+                ],
             },
+            "predicate_semantic_ontology": (
+                predicate_semantic_ontology_report
+            ),
             "predicate_negative_weighting": {
                 "zero_support_negative_weight": (
                     args.zero_support_negative_weight
@@ -639,6 +731,9 @@ def main() -> None:
                 if enabled
             ],
         },
+        "predicate_semantic_ontology": (
+            predicate_semantic_ontology_report
+        ),
         "predicate_negative_weighting": {
             "zero_support_negative_weight": (
                 args.zero_support_negative_weight
