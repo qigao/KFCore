@@ -34,6 +34,8 @@ def main() -> None:
     parser.add_argument("--repo", default=DEFAULT_REPO)
     parser.add_argument("--filename", default=DEFAULT_FILENAME)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--dinov3-repo", required=True)
+    parser.add_argument("--weights-url", default=DEFAULT_WEIGHTS_URL)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--opset", type=int, default=18)
@@ -161,6 +163,7 @@ def main() -> None:
         "weights_filename": args.filename,
         "weights_sha256": weights_sha256,
         "model": args.model,
+        "weights_url": args.weights_url,
         "image_size": args.image_size,
         "patch_size": backbone.patch_size,
         "hidden_size": backbone.hidden_size,
