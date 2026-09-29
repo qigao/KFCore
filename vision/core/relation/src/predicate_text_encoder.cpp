@@ -4,6 +4,7 @@
 #include "kfcore/runtime/error.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -63,6 +64,42 @@ std::size_t checked_multiply(
     }
     return left * right;
 }
+
+std::size_t checked_add(
+    std::size_t left,
+    std::size_t right,
+    const char* subject)
+{
+    if (right >
+        (std::numeric_limits<std::size_t>::max)() - left)
+    {
+        throw_resource(
+            std::string(subject) + " byte count overflow");
+    }
+    return left + right;
+}
+
+class UseGuard final
+{
+public:
+    explicit UseGuard(std::atomic_flag& flag)
+        : flag_(flag)
+    {
+        if (flag_.test_and_set(std::memory_order_acquire))
+        {
+            throw_invalid(
+                "calls on one text encoder instance must not overlap");
+        }
+    }
+
+    ~UseGuard()
+    {
+        flag_.clear(std::memory_order_release);
+    }
+
+private:
+    std::atomic_flag& flag_;
+};
 
 void validate_options(
     const PredicateTextEncoderOptions& options)
@@ -329,6 +366,7 @@ struct PredicateTextEncoder::Impl final
 
     std::unordered_map<std::string, CacheEntry> cache;
     std::list<std::string> lru;
+    std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 
     void touch(
         std::unordered_map<std::string, CacheEntry>::iterator item)
@@ -667,6 +705,7 @@ PredicateVocabulary PredicateTextEncoder::encode(
         throw_invalid(
             "model state is unavailable");
     }
+    UseGuard guard(impl_->in_use);
     if (predicates.empty())
     {
         throw_invalid(
@@ -703,7 +742,10 @@ PredicateVocabulary PredicateTextEncoder::encode(
             throw_invalid(
                 "predicate strings must not be empty");
         }
-        text_bytes += predicate.size();
+        text_bytes = checked_add(
+            text_bytes,
+            predicate.size(),
+            "predicate text");
         if (text_bytes > impl_->options.max_text_bytes)
         {
             throw_resource(
