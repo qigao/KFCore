@@ -104,12 +104,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--pair-visual-evidence",
-        choices=("endpoint", "union", "union-contact"),
+        choices=("endpoint", "union", "contact", "union-contact"),
         default="endpoint",
         help=(
             "Visual evidence injected into the relation pair token. "
-            "endpoint preserves the historical model; union and "
-            "union-contact add zero-initialized residual projections."
+            "endpoint preserves the historical model; union, contact, "
+            "and union-contact add zero-initialized residual projections."
         ),
     )
     parser.add_argument("--epochs", type=int, default=5)
