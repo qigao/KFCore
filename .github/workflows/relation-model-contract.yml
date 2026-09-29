@@ -78,11 +78,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
 
-  real-vits16-evidence:
+  real-vits16:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DINOV3_REPO_COMMIT: 6876159a11b4df116f30f667f8c9888617df0751
+      DINOV3_WEIGHTS_URL: https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,23 +97,7 @@ jobs:
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
-      - name: Detect DINOv3 model access
-        id: access
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -n "${HF_TOKEN:-}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "HF_TOKEN is configured; attempting real DINOv3 qualification."
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "HF_TOKEN is not configured; real DINOv3 qualification is skipped."
-          fi
-
       - uses: actions/setup-python@v5
-        if: steps.access.outputs.available == 'true'
         with:
           python-version: '3.11'
           cache: pip
@@ -120,7 +106,6 @@ jobs:
             tools/relation_training/requirements-real-smoke.txt
 
       - name: Install real-smoke dependencies
-        if: steps.access.outputs.available == 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -130,43 +115,43 @@ jobs:
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-real-smoke.txt
 
-      - name: Run real DINOv3 ViT-S/16 export smoke
-        id: smoke
-        if: steps.access.outputs.available == 'true'
-        continue-on-error: true
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_HUB_DISABLE_TELEMETRY: '1'
-          HF_HOME: ${{ runner.temp }}/hf-home
+      - name: Checkout official DINOv3 source
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p "$RUNNER_TEMP/real-dinov3-smoke"
-          python tools/relation_training/real_dinov3_smoke.py \
-            --model facebook/dinov3-vits16-pretrain-lvd1689m \
-            --image-size 224 \
-            --output-dir "$RUNNER_TEMP/real-dinov3-smoke"
+          rm -rf "$RUNNER_TEMP/dinov3"
+          git init "$RUNNER_TEMP/dinov3"
+          git -C "$RUNNER_TEMP/dinov3" remote add origin https://github.com/facebookresearch/dinov3.git
+          git -C "$RUNNER_TEMP/dinov3" fetch --depth 1 origin "$DINOV3_REPO_COMMIT"
+          git -C "$RUNNER_TEMP/dinov3" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/dinov3" rev-parse HEAD)" = "$DINOV3_REPO_COMMIT"
 
-      - name: Record qualification result
-        if: always()
+      - name: Download official DINOv3 ViT-S/16 weights
         shell: bash
         run: |
-          {
-            echo "## Real DINOv3 relation smoke"
-            echo
-            echo "- exact head: `$EXPECTED_SHA`"
-            echo "- model: `facebook/dinov3-vits16-pretrain-lvd1689m`"
-            if [ "${{ steps.access.outputs.available }}" != "true" ]; then
-              echo "- result: **SKIPPED** — HF_TOKEN is not configured"
-            elif [ "${{ steps.smoke.outcome }}" = "success" ]; then
-              echo "- result: **PASS**"
-            else
-              echo "- result: **FAIL (non-blocking evidence)** — inspect the smoke step"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euxo pipefail
+          WEIGHTS="$RUNNER_TEMP/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --output "$WEIGHTS" \
+            "$DINOV3_WEIGHTS_URL"
+          test -s "$WEIGHTS"
+          sha256sum "$WEIGHTS"
+
+      - name: Run real DINOv3 ViT-S/16 forward and export smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WEIGHTS="$RUNNER_TEMP/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
+          OUT="$RUNNER_TEMP/real-dinov3-smoke"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo-dir "$RUNNER_TEMP/dinov3" \
+            --weights "$WEIGHTS" \
+            --expected-repo-commit "$DINOV3_REPO_COMMIT" \
+            --image-size 224 \
+            --output-dir "$OUT"
 
       - uses: actions/upload-artifact@v4
-        if: steps.smoke.outcome == 'success'
         with:
           name: real-dinov3-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 1
@@ -178,4 +163,3 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
-
