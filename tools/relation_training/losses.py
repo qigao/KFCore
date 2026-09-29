@@ -477,12 +477,18 @@ def supervised_relation_loss(
     ].to(pred_logits.dtype)
 
     valid = valid_mask.to(torch.bool)
-    pair_loss = _weighted_pair_bce(
-        pair_logits,
-        selected_pair_targets,
-        valid,
-        negative_pair_weight=config.negative_pair_weight,
-    )
+    if (
+        training_outputs is not None
+        and training_outputs.sampler_relatedness_loss is not None
+    ):
+        pair_loss = training_outputs.sampler_relatedness_loss
+    else:
+        pair_loss = _weighted_pair_bce(
+            pair_logits,
+            selected_pair_targets,
+            valid,
+            negative_pair_weight=config.negative_pair_weight,
+        )
 
     positive = valid & (selected_pair_targets > 0.5)
     pos_weight = None
@@ -751,21 +757,36 @@ def supervised_relation_loss(
         predicate_loss = pred_logits.sum() * 0.0
 
     if training_outputs is not None:
-        sampler_logits = training_outputs.sampler_logits
-        sampler_valid = training_outputs.sampler_valid.to(torch.bool)
-        dense_pair_targets = pair_targets.reshape(pair_targets.shape[0], -1)
-        if sampler_logits.shape != sampler_valid.shape:
-            raise ValueError("sampler logits and validity mask shapes differ")
-        if sampler_logits.shape != dense_pair_targets.shape:
+        if (
+            (training_outputs.sampler_geo_loss is None)
+            != (training_outputs.sampler_relatedness_loss is None)
+        ):
             raise ValueError(
-                "sampler output shape does not match dense pair targets"
+                "reference sampler losses must be provided together"
             )
-        sampler_loss = _weighted_pair_bce(
-            sampler_logits,
-            dense_pair_targets,
-            sampler_valid,
-            negative_pair_weight=config.negative_pair_weight,
-        )
+        if training_outputs.sampler_geo_loss is not None:
+            sampler_loss = training_outputs.sampler_geo_loss
+        else:
+            sampler_logits = training_outputs.sampler_logits
+            sampler_valid = training_outputs.sampler_valid.to(torch.bool)
+            dense_pair_targets = pair_targets.reshape(
+                pair_targets.shape[0],
+                -1,
+            )
+            if sampler_logits.shape != sampler_valid.shape:
+                raise ValueError(
+                    "sampler logits and validity mask shapes differ"
+                )
+            if sampler_logits.shape != dense_pair_targets.shape:
+                raise ValueError(
+                    "sampler output shape does not match dense pair targets"
+                )
+            sampler_loss = _weighted_pair_bce(
+                sampler_logits,
+                dense_pair_targets,
+                sampler_valid,
+                negative_pair_weight=config.negative_pair_weight,
+            )
     else:
         sampler_loss = pair_logits.sum() * 0.0
 

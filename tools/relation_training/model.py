@@ -10,6 +10,7 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_pair_sampler import ApacheRelatednessPairSampler
 from apache_pair_evidence import (
     BoxPromptEncoder as ApacheBoxPromptEncoder,
     RelGeomEncoder as ApacheRelGeomEncoder,
@@ -35,6 +36,7 @@ class RelationModelConfig:
     pair_visual_evidence: str = "endpoint"
     pair_geometry_evidence: str = "basic"
     pair_evidence_contract: str = "legacy"
+    pair_sampler_contract: str = "legacy"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -95,6 +97,27 @@ class RelationModelConfig:
             raise ValueError(
                 "apache pair evidence supersedes legacy visual/geometry knobs"
             )
+        if self.pair_sampler_contract not in {
+            "legacy",
+            "apache",
+        }:
+            raise ValueError(
+                "pair_sampler_contract must be legacy/apache"
+            )
+        if (
+            self.pair_sampler_contract == "apache"
+            and self.pair_evidence_contract != "apache"
+        ):
+            raise ValueError(
+                "apache pair sampler requires apache pair evidence"
+            )
+        if (
+            self.pair_sampler_contract == "apache"
+            and self.pair_budget > 400
+        ):
+            raise ValueError(
+                "apache pair sampler final budget must not exceed 400"
+            )
 
 
 @dataclass(frozen=True)
@@ -105,6 +128,8 @@ class RelationTrainingOutputs:
     predicate_query: Tensor
     predicate_query_raw: Tensor
     predicate_bank: Tensor
+    sampler_geo_loss: Tensor | None = None
+    sampler_relatedness_loss: Tensor | None = None
 
 
 class BackboneAdapter(nn.Module):
@@ -875,6 +900,23 @@ class KFRelationModel(nn.Module):
             self.pair_projection.requires_grad_(False)
             self.apache_box_prompt_encoder.requires_grad_(False)
 
+        self.apache_pair_sampler: ApacheRelatednessPairSampler | None = None
+        if config.pair_sampler_contract == "apache":
+            self.apache_pair_sampler = ApacheRelatednessPairSampler(
+                feature_dim=backbone.hidden_size,
+                geo_budget=400,
+                final_budget=config.pair_budget,
+                rel_dim=256,
+                negative_weight=0.3,
+                swap_include=True,
+            )
+            # Apache stage-1 geometry scoring and stage-2 relatedness replace
+            # the historical single-stage sampler and post-transformer pair
+            # head. Keep those tensors for legacy checkpoint compatibility,
+            # but remove them from the active optimizer.
+            self.geometry_sampler.requires_grad_(False)
+            self.pair_head.requires_grad_(False)
+
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
         if (
@@ -1094,6 +1136,7 @@ class KFRelationModel(nn.Module):
         subject_index: Tensor,
         object_index: Tensor,
         selected_valid: Tensor,
+        region_features: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         if (
             self.apache_spatial_pool is None
@@ -1105,14 +1148,15 @@ class KFRelationModel(nn.Module):
                 "Apache pair evidence modules are not configured"
             )
 
-        region_features = self.apache_spatial_pool(
-            patch_features,
-            boxes,
-        )
-        region_features = (
-            region_features
-            * valid_boxes.to(region_features.dtype).unsqueeze(-1)
-        )
+        if region_features is None:
+            region_features = self.apache_spatial_pool(
+                patch_features,
+                boxes,
+            )
+            region_features = (
+                region_features
+                * valid_boxes.to(region_features.dtype).unsqueeze(-1)
+            )
 
         subject_features = _batch_gather(
             region_features,
@@ -1223,7 +1267,17 @@ class KFRelationModel(nn.Module):
         box_counts: Tensor,
         *,
         encoder_only: bool = False,
-    ) -> tuple[tuple[Tensor, ...], Tensor, Tensor, Tensor, Tensor, Tensor]:
+        pair_targets: Tensor | None = None,
+    ) -> tuple[
+        tuple[Tensor, ...],
+        Tensor,
+        Tensor,
+        Tensor,
+        Tensor,
+        Tensor,
+        Tensor | None,
+        Tensor | None,
+    ]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
         if image.shape[2] != self.config.image_size or image.shape[3] != self.config.image_size:
@@ -1246,58 +1300,119 @@ class KFRelationModel(nn.Module):
         valid_pairs = subject_valid & object_valid & not_self
 
         patch_features = self._fused_patch_features(image)
-        region_features = (
-            self._pool_regions(
+        if self.config.pair_evidence_contract == "legacy":
+            region_features = self._pool_regions(
                 patch_features,
                 boxes,
                 valid_boxes,
             )
-            if self.config.pair_evidence_contract == "legacy"
-            else None
-        )
-        geometry = self._pair_geometry(boxes)
-        rich_geometry = (
-            self._rich_pair_geometry(boxes)
-            if self.rich_geometry_projection is not None
-            else None
-        )
+        else:
+            if self.apache_spatial_pool is None:
+                raise RuntimeError(
+                    "Apache pair evidence is not configured"
+                )
+            region_features = self.apache_spatial_pool(
+                patch_features,
+                boxes,
+            )
+            region_features = (
+                region_features
+                * valid_boxes.to(region_features.dtype).unsqueeze(-1)
+            )
 
-        flat_geometry = geometry.reshape(
-            batch, self.config.max_boxes * self.config.max_boxes, self.geometry_feature_count
-        )
-        flat_valid = valid_pairs.reshape(batch, -1)
-        sampler_logits = self.geometry_sampler(flat_geometry).squeeze(-1)
-        flat_rich_geometry = None
-        if rich_geometry is not None:
-            flat_rich_geometry = rich_geometry.reshape(
+        sampler_geo_loss: Tensor | None = None
+        sampler_relatedness_loss: Tensor | None = None
+        apache_pair_logits: Tensor | None = None
+        flat_rich_geometry: Tensor | None = None
+        flat_geometry: Tensor | None = None
+        pair_slot: Tensor | None = None
+
+        if self.config.pair_sampler_contract == "apache":
+            if self.apache_pair_sampler is None:
+                raise RuntimeError(
+                    "Apache pair sampler is not configured"
+                )
+            sampler_out = self.apache_pair_sampler(
+                boxes,
+                region_features,
+                box_counts,
+                pair_targets=pair_targets,
+            )
+            subject_index = sampler_out.sub_idx
+            object_index = sampler_out.obj_idx
+            selected_valid = sampler_out.valid_mask
+            sampler_logits = sampler_out.geo_logits
+            flat_valid = sampler_out.pair_valid
+            apache_pair_logits = sampler_out.pair_logits
+            if pair_targets is not None:
+                sampler_geo_loss = sampler_out.geo_loss
+                sampler_relatedness_loss = (
+                    sampler_out.relatedness_loss
+                )
+        else:
+            geometry = self._pair_geometry(boxes)
+            rich_geometry = (
+                self._rich_pair_geometry(boxes)
+                if self.rich_geometry_projection is not None
+                else None
+            )
+            flat_geometry = geometry.reshape(
                 batch,
                 self.config.max_boxes * self.config.max_boxes,
-                self.rich_geometry_feature_count,
+                self.geometry_feature_count,
             )
-            assert self.rich_geometry_sampler is not None
-            sampler_logits = sampler_logits + self.rich_geometry_sampler(
-                flat_rich_geometry
+            flat_valid = valid_pairs.reshape(batch, -1)
+            sampler_logits = self.geometry_sampler(
+                flat_geometry
             ).squeeze(-1)
-        sampler_scores = sampler_logits.masked_fill(
-            ~flat_valid, torch.finfo(sampler_logits.dtype).min
-        )
-        _, pair_slot = torch.topk(
-            sampler_scores, k=self.config.pair_budget, dim=1, largest=True, sorted=True
-        )
+            if rich_geometry is not None:
+                flat_rich_geometry = rich_geometry.reshape(
+                    batch,
+                    self.config.max_boxes * self.config.max_boxes,
+                    self.rich_geometry_feature_count,
+                )
+                assert self.rich_geometry_sampler is not None
+                sampler_logits = (
+                    sampler_logits
+                    + self.rich_geometry_sampler(
+                        flat_rich_geometry
+                    ).squeeze(-1)
+                )
+            sampler_scores = sampler_logits.masked_fill(
+                ~flat_valid,
+                torch.finfo(sampler_logits.dtype).min,
+            )
+            _, pair_slot = torch.topk(
+                sampler_scores,
+                k=self.config.pair_budget,
+                dim=1,
+                largest=True,
+                sorted=True,
+            )
 
-        all_subject = (
-            box_index.view(-1, 1)
-            .expand(self.config.max_boxes, self.config.max_boxes)
-            .reshape(-1)
-        )
-        all_object = (
-            box_index.view(1, -1)
-            .expand(self.config.max_boxes, self.config.max_boxes)
-            .reshape(-1)
-        )
-        subject_index = all_subject[pair_slot]
-        object_index = all_object[pair_slot]
-        selected_valid = torch.gather(flat_valid, 1, pair_slot)
+            all_subject = (
+                box_index.view(-1, 1)
+                .expand(
+                    self.config.max_boxes,
+                    self.config.max_boxes,
+                )
+                .reshape(-1)
+            )
+            all_object = (
+                box_index.view(1, -1)
+                .expand(
+                    self.config.max_boxes,
+                    self.config.max_boxes,
+                )
+                .reshape(-1)
+            )
+            subject_index = all_subject[pair_slot]
+            object_index = all_object[pair_slot]
+            selected_valid = torch.gather(
+                flat_valid,
+                1,
+                pair_slot,
+            )
 
         if self.config.pair_evidence_contract == "apache":
             (
@@ -1312,6 +1427,7 @@ class KFRelationModel(nn.Module):
                 subject_index,
                 object_index,
                 selected_valid,
+                region_features=region_features,
             )
         else:
             assert region_features is not None
@@ -1323,6 +1439,8 @@ class KFRelationModel(nn.Module):
                 region_features,
                 object_index,
             )
+            assert flat_geometry is not None
+            assert pair_slot is not None
             selected_geometry = torch.gather(
                 flat_geometry,
                 1,
@@ -1405,7 +1523,11 @@ class KFRelationModel(nn.Module):
         tokens = self.relation_transformer(tokens)
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
 
-        pair_logits = self.pair_head(tokens).squeeze(-1)
+        pair_logits = (
+            apache_pair_logits
+            if apache_pair_logits is not None
+            else self.pair_head(tokens).squeeze(-1)
+        )
         predicate_query_raw = self.predicate_projection(tokens)
         predicate_query = F.normalize(
             predicate_query_raw, dim=-1
@@ -1430,6 +1552,8 @@ class KFRelationModel(nn.Module):
                 predicate_query,
                 predicate_query_raw,
                 predicate_bank,
+                sampler_geo_loss,
+                sampler_relatedness_loss,
             )
 
         scale = self.logit_scale.exp().clamp(max=100.0)
@@ -1451,12 +1575,14 @@ class KFRelationModel(nn.Module):
             predicate_query,
             predicate_query_raw,
             predicate_bank,
+            sampler_geo_loss,
+            sampler_relatedness_loss,
         )
 
     def forward_encoder(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _ = self._forward_impl(
             image,
             boxes,
             box_counts,
@@ -1471,14 +1597,25 @@ class KFRelationModel(nn.Module):
     def forward(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _ = self._forward_impl(
             image, boxes, box_counts
         )
         return runtime
 
     def forward_training(
-        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+        self,
+        image: Tensor,
+        boxes: Tensor,
+        box_counts: Tensor,
+        pair_targets: Tensor | None = None,
     ) -> RelationTrainingOutputs:
+        if (
+            self.config.pair_sampler_contract == "apache"
+            and pair_targets is None
+        ):
+            raise ValueError(
+                "Apache sampler training requires dense pair_targets"
+            )
         (
             runtime,
             sampler_logits,
@@ -1486,7 +1623,14 @@ class KFRelationModel(nn.Module):
             predicate_query,
             predicate_query_raw,
             predicate_bank,
-        ) = self._forward_impl(image, boxes, box_counts)
+            sampler_geo_loss,
+            sampler_relatedness_loss,
+        ) = self._forward_impl(
+            image,
+            boxes,
+            box_counts,
+            pair_targets=pair_targets,
+        )
         return RelationTrainingOutputs(
             runtime=runtime,
             sampler_logits=sampler_logits,
@@ -1494,4 +1638,6 @@ class KFRelationModel(nn.Module):
             predicate_query=predicate_query,
             predicate_query_raw=predicate_query_raw,
             predicate_bank=predicate_bank,
+            sampler_geo_loss=sampler_geo_loss,
+            sampler_relatedness_loss=sampler_relatedness_loss,
         )

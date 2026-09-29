@@ -388,7 +388,10 @@ def train_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         outputs = model.forward_training(
-            image, boxes, box_counts
+            image,
+            boxes,
+            box_counts,
+            pair_targets=pair_targets,
         )
         losses = supervised_relation_loss(
             outputs,
