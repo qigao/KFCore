@@ -52,7 +52,7 @@ jobs:
           set -euxo pipefail
           python -m py_compile             tools/relation_training/model.py             tools/relation_training/losses.py             tools/relation_training/checkpoint.py             tools/relation_training/export_onnx.py             tools/relation_training/test_model.py
 
-      - name: Run synthetic forward/backward contract
+      - name: Run synthetic forward/backward and ONNX contract
         shell: bash
         working-directory: tools/relation_training
         run: |
