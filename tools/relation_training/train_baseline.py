@@ -136,6 +136,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--predicate-calibration-loss-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight of the source-aware sigmoid calibration auxiliary "
+            "on top of batch-local InfoNCE. Only rows with at least one "
+            "visible positive predicate are calibrated."
+        ),
+    )
+    parser.add_argument(
         "--predicate-positive-weight-mode",
         choices=("none", "sqrt-balanced", "balanced"),
         default="none",
@@ -237,6 +247,9 @@ def main() -> None:
         predicate_contrastive_hard_negative_count=(
             args.predicate_contrastive_hard_negative_count
         ),
+        predicate_calibration_loss_weight=(
+            args.predicate_calibration_loss_weight
+        ),
     )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
@@ -286,6 +299,14 @@ def main() -> None:
     ):
         raise ValueError(
             "--predicate-contrastive-hard-negative-count is "
+            "batch-local-infonce-only"
+        )
+    if (
+        args.predicate_objective != "batch-local-infonce"
+        and args.predicate_calibration_loss_weight != 0.0
+    ):
+        raise ValueError(
+            "--predicate-calibration-loss-weight is "
             "batch-local-infonce-only"
         )
 
@@ -595,6 +616,9 @@ def main() -> None:
             ),
             "predicate_contrastive_hard_negative_count": (
                 loss_config.predicate_contrastive_hard_negative_count
+            ),
+            "predicate_calibration_loss_weight": (
+                loss_config.predicate_calibration_loss_weight
             ),
         },
         "benchmark_config": {

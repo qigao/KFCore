@@ -560,6 +560,58 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Source-aware predicate calibration auxiliary
+
+Bounded hard negatives broaden the InfoNCE contrast set and improve retained
+seen ranking, but strict held-out predicate transfer remains weak. The next
+objective-v2 component separates semantic ranking from absolute/cross-pair
+calibration.
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-hard-negative-count 8
+--predicate-calibration-loss-weight 0.25
+```
+
+The predicate objective becomes:
+
+```text
+predicate_loss =
+    contrastive_loss
+  + lambda_calibration * sigmoid_calibration_loss
+```
+
+The calibration auxiliary is source/holdout aware:
+
+- a relation row participates only when it retains at least one visible
+  positive predicate;
+- visible positives receive target 1;
+- negative columns come only from the train-supported predicate candidate mask
+  inside the active supervision mask;
+- explicit holdouts are excluded;
+- natural train-zero-support predicates are excluded;
+- holdout-only rows are skipped entirely rather than becoming all-negative
+  seen rows.
+
+This intentionally uses the same runtime predicate logits that KFCore exports,
+so the auxiliary also trains their absolute scale while InfoNCE continues to
+shape relative text-space ranking.
+
+Training evidence records:
+
+```text
+predicate_contrastive_loss
+predicate_calibration_loss
+predicate_calibration_rows
+predicate_calibration_rows_skipped
+predicate_calibration_column_fraction
+```
+
+The controlled experiment keeps hard-negative count fixed at 8 and compares
+`lambda_calibration=0` against `0.25` for both normal and explicit
+`contain / holds / ride` holdout arms. No pair/sampler, prototype, visual
+encoder, optimizer or dataset variable changes in that attribution.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive

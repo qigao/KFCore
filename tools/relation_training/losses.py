@@ -18,6 +18,7 @@ class RelationLossConfig:
     predicate_objective: str = "bce"
     predicate_contrastive_temperature: float = 0.07
     predicate_contrastive_hard_negative_count: int = 0
+    predicate_calibration_loss_weight: float = 0.0
 
     def __post_init__(self) -> None:
         if (
@@ -54,6 +55,24 @@ class RelationLossConfig:
             raise ValueError(
                 "predicate_contrastive_hard_negative_count must be "
                 "a non-negative integer"
+            )
+        if (
+            not torch.isfinite(
+                torch.tensor(self.predicate_calibration_loss_weight)
+            )
+            or self.predicate_calibration_loss_weight < 0.0
+        ):
+            raise ValueError(
+                "predicate_calibration_loss_weight must be finite "
+                "and non-negative"
+            )
+        if (
+            self.predicate_calibration_loss_weight > 0.0
+            and self.predicate_objective != "batch-local-infonce"
+        ):
+            raise ValueError(
+                "predicate calibration auxiliary requires "
+                "batch-local-infonce"
             )
 
 
@@ -301,6 +320,91 @@ def _batch_local_predicate_infonce(
     }
 
 
+def _source_aware_predicate_calibration(
+    logits: Tensor,
+    positive_targets: Tensor,
+    *,
+    supervision_mask: Tensor | None,
+    negative_candidate_mask: Tensor | None,
+    positive_weights: Tensor | None,
+) -> dict[str, Tensor]:
+    if logits.ndim != 2 or positive_targets.shape != logits.shape:
+        raise ValueError(
+            "predicate calibration logits/targets must both be [M,V]"
+        )
+    if negative_candidate_mask is None:
+        raise ValueError(
+            "predicate calibration requires a known-negative candidate mask"
+        )
+    if (
+        negative_candidate_mask.ndim != 1
+        or negative_candidate_mask.shape[0] != logits.shape[1]
+        or negative_candidate_mask.dtype != torch.bool
+    ):
+        raise ValueError(
+            "predicate calibration negative mask must be bool [V]"
+        )
+
+    visible_positive = positive_targets > 0.5
+    if supervision_mask is not None:
+        visible_positive = (
+            visible_positive
+            & supervision_mask.view(1, -1)
+        )
+
+    keep_rows = visible_positive.any(dim=1)
+    skipped = (~keep_rows).sum().to(dtype=logits.dtype)
+    if not keep_rows.any():
+        zero = logits.sum() * 0.0
+        return {
+            "loss": zero,
+            "rows": zero,
+            "rows_skipped": skipped,
+            "column_fraction": zero,
+        }
+
+    logits = logits[keep_rows]
+    targets = visible_positive[keep_rows].to(dtype=logits.dtype)
+    allowed_negative = negative_candidate_mask.to(
+        device=logits.device
+    )
+    if supervision_mask is not None:
+        allowed_negative = (
+            allowed_negative
+            & supervision_mask.to(device=logits.device)
+        )
+
+    allowed = (
+        visible_positive[keep_rows]
+        | allowed_negative.view(1, -1)
+    )
+    if not allowed.any():
+        raise RuntimeError(
+            "predicate calibration has no supervised columns"
+        )
+
+    raw = F.binary_cross_entropy_with_logits(
+        logits,
+        targets,
+        pos_weight=positive_weights,
+        reduction="none",
+    )
+    weights = allowed.to(dtype=raw.dtype)
+    weight_sum = weights.sum()
+    if weight_sum <= 0:
+        raise RuntimeError(
+            "predicate calibration has zero supervision mass"
+        )
+    loss = (raw * weights).sum() / weight_sum
+
+    return {
+        "loss": loss,
+        "rows": logits.new_tensor(float(logits.shape[0])),
+        "rows_skipped": skipped,
+        "column_fraction": weights.mean(),
+    }
+
+
 def supervised_relation_loss(
     outputs: RelationTrainingOutputs
     | tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
@@ -491,6 +595,11 @@ def supervised_relation_loss(
     predicate_query_raw_norm = pred_logits.new_zeros(())
     predicate_unobserved_column_fraction = pred_logits.new_zeros(())
     predicate_hard_negative_count = pred_logits.new_zeros(())
+    predicate_contrastive_loss = pred_logits.new_zeros(())
+    predicate_calibration_loss = pred_logits.new_zeros(())
+    predicate_calibration_rows = pred_logits.new_zeros(())
+    predicate_calibration_rows_skipped = pred_logits.new_zeros(())
+    predicate_calibration_column_fraction = pred_logits.new_zeros(())
 
     if positive.any():
         positive_logits = pred_logits[positive]
@@ -539,7 +648,8 @@ def supervised_relation_loss(
                 ),
                 temperature=config.predicate_contrastive_temperature,
             )
-            predicate_loss = contrastive["loss"]
+            predicate_contrastive_loss = contrastive["loss"]
+            predicate_loss = predicate_contrastive_loss
             predicate_rows_skipped = contrastive["rows_skipped"]
             predicate_contrast_set_size = contrastive[
                 "contrast_set_size"
@@ -559,6 +669,30 @@ def supervised_relation_loss(
             predicate_hard_negative_count = contrastive[
                 "hard_negative_count"
             ]
+
+            if config.predicate_calibration_loss_weight > 0.0:
+                calibration = _source_aware_predicate_calibration(
+                    positive_logits,
+                    positive_targets,
+                    supervision_mask=supervision_mask,
+                    negative_candidate_mask=(
+                        predicate_contrastive_negative_mask
+                    ),
+                    positive_weights=pos_weight,
+                )
+                predicate_calibration_loss = calibration["loss"]
+                predicate_calibration_rows = calibration["rows"]
+                predicate_calibration_rows_skipped = calibration[
+                    "rows_skipped"
+                ]
+                predicate_calibration_column_fraction = calibration[
+                    "column_fraction"
+                ]
+                predicate_loss = (
+                    predicate_contrastive_loss
+                    + config.predicate_calibration_loss_weight
+                    * predicate_calibration_loss
+                )
         else:
             if explicit_holdout_row_policy == "skip-holdout-only":
                 assert holdout_mask is not None
@@ -655,4 +789,13 @@ def supervised_relation_loss(
             predicate_unobserved_column_fraction
         ),
         "predicate_hard_negative_count": predicate_hard_negative_count,
+        "predicate_contrastive_loss": predicate_contrastive_loss,
+        "predicate_calibration_loss": predicate_calibration_loss,
+        "predicate_calibration_rows": predicate_calibration_rows,
+        "predicate_calibration_rows_skipped": (
+            predicate_calibration_rows_skipped
+        ),
+        "predicate_calibration_column_fraction": (
+            predicate_calibration_column_fraction
+        ),
     }
