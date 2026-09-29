@@ -511,9 +511,11 @@ def main() -> None:
             dim=-1,
         )
         assert model.apache_vocab_head is not None
-        with torch.inference_mode():
-            dynamic_alpha = model.apache_vocab_head.routing_alpha(
-                dynamic_W
+        with torch.no_grad():
+            dynamic_alpha = (
+                model.apache_vocab_head.routing_alpha(dynamic_W)
+                .detach()
+                .clone()
             )
         reference = export_dynamic_vocabulary_graph(
             model,
