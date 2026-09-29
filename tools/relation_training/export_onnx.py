@@ -579,6 +579,7 @@ def main() -> None:
             "vocabulary_graph_input": True,
             "query_dim": model.predicate_dim,
             "predicate_axis": "dynamic",
+            "default_predicate_count": len(predicates),
             "score_logit_scale": float(
                 model.apache_vocab_head.logit_scale.exp()
                 .clamp(max=100.0)
