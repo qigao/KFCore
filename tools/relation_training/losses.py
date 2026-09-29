@@ -15,6 +15,8 @@ class RelationLossConfig:
     pair_loss_weight: float = 1.0
     predicate_loss_weight: float = 1.0
     negative_pair_weight: float = 0.25
+    predicate_objective: str = "bce"
+    predicate_contrastive_temperature: float = 0.07
 
     def __post_init__(self) -> None:
         if (
@@ -25,6 +27,22 @@ class RelationLossConfig:
             raise ValueError("loss weights must be non-negative")
         if not 0.0 <= self.negative_pair_weight <= 1.0:
             raise ValueError("negative_pair_weight must be within [0,1]")
+        if self.predicate_objective not in {
+            "bce",
+            "batch-local-infonce",
+        }:
+            raise ValueError(
+                "predicate_objective must be bce or batch-local-infonce"
+            )
+        if (
+            not torch.isfinite(
+                torch.tensor(self.predicate_contrastive_temperature)
+            )
+            or self.predicate_contrastive_temperature <= 0.0
+        ):
+            raise ValueError(
+                "predicate_contrastive_temperature must be finite and positive"
+            )
 
 
 def _weighted_pair_bce(
@@ -93,6 +111,125 @@ def _validate_targets(
         raise ValueError(
             "negative pairs must not carry positive predicate labels"
         )
+
+
+def _batch_local_predicate_infonce(
+    query: Tensor,
+    raw_query: Tensor,
+    predicate_bank: Tensor,
+    positive_targets: Tensor,
+    *,
+    supervision_mask: Tensor | None,
+    positive_weights: Tensor | None,
+    temperature: float,
+) -> dict[str, Tensor]:
+    if query.ndim != 2 or raw_query.shape != query.shape:
+        raise ValueError("predicate query tensors must be [M,D]")
+    if predicate_bank.ndim != 2 or predicate_bank.shape[1] != query.shape[1]:
+        raise ValueError("predicate bank must be [V,D] matching query width")
+    if positive_targets.ndim != 2:
+        raise ValueError("contrastive predicate targets must be [M,V]")
+    if positive_targets.shape != (
+        query.shape[0],
+        predicate_bank.shape[0],
+    ):
+        raise ValueError(
+            "contrastive predicate target shape does not match query/bank"
+        )
+
+    visible = positive_targets > 0.5
+    if supervision_mask is not None:
+        visible = visible & supervision_mask.view(1, -1)
+
+    keep_rows = visible.any(dim=1)
+    skipped = (~keep_rows).sum().to(dtype=query.dtype)
+    if not keep_rows.any():
+        zero = query.sum() * 0.0
+        return {
+            "loss": zero,
+            "rows_skipped": skipped,
+            "contrast_set_size": zero,
+            "positive_cosine": zero,
+            "hard_negative_margin": zero,
+            "query_raw_norm": zero,
+            "unobserved_column_fraction": query.new_tensor(1.0),
+        }
+
+    query = query[keep_rows]
+    raw_query = raw_query[keep_rows]
+    visible = visible[keep_rows]
+
+    contrast_mask = visible.any(dim=0)
+    contrast_indices = torch.nonzero(
+        contrast_mask, as_tuple=False
+    ).flatten()
+    if contrast_indices.numel() <= 0:
+        raise RuntimeError("contrastive predicate set unexpectedly empty")
+
+    bank = predicate_bank[contrast_indices]
+    cosine = torch.matmul(query, bank.transpose(0, 1))
+    logits = cosine / float(temperature)
+    positive = visible[:, contrast_indices]
+
+    weights = positive.to(dtype=logits.dtype)
+    if positive_weights is not None:
+        weights = weights * positive_weights[
+            contrast_indices
+        ].view(1, -1).to(
+            device=logits.device,
+            dtype=logits.dtype,
+        )
+
+    positive_mass = weights.sum(dim=1)
+    if (positive_mass <= 0).any():
+        raise ValueError(
+            "contrastive predicate rows must retain positive supervision"
+        )
+    denominator = torch.logsumexp(logits, dim=1)
+    per_positive = denominator.unsqueeze(1) - logits
+    row_loss = (
+        per_positive * weights
+    ).sum(dim=1) / positive_mass
+    loss = row_loss.mean()
+
+    positive_cosine = (
+        cosine * weights
+    ).sum() / weights.sum().clamp_min(1.0)
+
+    negative = ~positive
+    has_negative = negative.any(dim=1)
+    if has_negative.any():
+        negative_cosine = cosine.masked_fill(
+            ~negative,
+            torch.finfo(cosine.dtype).min,
+        ).max(dim=1).values
+        positive_mean = (
+            cosine * weights
+        ).sum(dim=1) / positive_mass
+        hard_negative_margin = (
+            positive_mean[has_negative]
+            - negative_cosine[has_negative]
+        ).mean()
+    else:
+        hard_negative_margin = cosine.sum() * 0.0
+
+    contrast_size = query.new_tensor(
+        float(contrast_indices.numel())
+    )
+    unobserved_fraction = query.new_tensor(
+        1.0
+        - float(contrast_indices.numel())
+        / float(predicate_bank.shape[0])
+    )
+    return {
+        "loss": loss,
+        "rows_skipped": skipped,
+        "contrast_set_size": contrast_size,
+        "positive_cosine": positive_cosine,
+        "hard_negative_margin": hard_negative_margin,
+        "query_raw_norm": raw_query.norm(dim=-1).mean(),
+        "unobserved_column_fraction": unobserved_fraction,
+    }
 
 
 def supervised_relation_loss(
@@ -278,6 +415,11 @@ def supervised_relation_loss(
 
     predicate_rows = positive.sum().to(dtype=pred_logits.dtype)
     predicate_rows_skipped = pred_logits.new_zeros(())
+    predicate_contrast_set_size = pred_logits.new_zeros(())
+    predicate_positive_cosine = pred_logits.new_zeros(())
+    predicate_hard_negative_margin = pred_logits.new_zeros(())
+    predicate_query_raw_norm = pred_logits.new_zeros(())
+    predicate_unobserved_column_fraction = pred_logits.new_zeros(())
 
     if positive.any():
         positive_logits = pred_logits[positive]
@@ -296,59 +438,101 @@ def supervised_relation_loss(
                     "predicate supervision mask cannot hide positive labels"
                 )
 
-        if explicit_holdout_row_policy == "skip-holdout-only":
-            assert holdout_mask is not None
-            assert supervision_mask is not None
-            positive_labels = positive_targets > 0.5
-            has_holdout_positive = (
-                positive_labels & holdout_mask.view(1, -1)
-            ).any(dim=1)
-            has_supervised_positive = (
-                positive_labels & supervision_mask.view(1, -1)
-            ).any(dim=1)
-            skip_rows = (
-                has_holdout_positive & ~has_supervised_positive
-            )
-            predicate_rows_skipped = skip_rows.sum().to(
-                dtype=pred_logits.dtype
-            )
-            keep_rows = ~skip_rows
-            positive_logits = positive_logits[keep_rows]
-            positive_targets = positive_targets[keep_rows]
-
-        if positive_logits.shape[0] > 0:
-            raw_predicate_loss = F.binary_cross_entropy_with_logits(
-                positive_logits,
-                positive_targets,
-                pos_weight=pos_weight,
-                reduction="none",
-            )
-            element_weights = torch.ones_like(raw_predicate_loss)
-            if negative_weights is not None:
-                element_weights = torch.where(
-                    positive_targets > 0.5,
-                    element_weights,
-                    negative_weights.view(1, -1).expand_as(
-                        raw_predicate_loss
-                    ),
-                )
-            if supervision_mask is not None:
-                raw_predicate_loss = raw_predicate_loss[
-                    :, supervision_mask
-                ]
-                element_weights = element_weights[
-                    :, supervision_mask
-                ]
-            weight_sum = element_weights.sum()
-            if weight_sum <= 0:
+        if config.predicate_objective == "batch-local-infonce":
+            if training_outputs is None:
                 raise ValueError(
-                    "predicate supervision weights must keep at least one term"
+                    "batch-local-infonce requires forward_training outputs"
                 )
-            predicate_loss = (
-                raw_predicate_loss * element_weights
-            ).sum() / weight_sum
+            if (
+                negative_weights is not None
+                and not torch.allclose(
+                    negative_weights,
+                    torch.ones_like(negative_weights),
+                )
+            ):
+                raise ValueError(
+                    "batch-local-infonce does not consume BCE negative weights"
+                )
+            contrastive = _batch_local_predicate_infonce(
+                training_outputs.predicate_query[positive],
+                training_outputs.predicate_query_raw[positive],
+                training_outputs.predicate_bank,
+                positive_targets,
+                supervision_mask=supervision_mask,
+                positive_weights=pos_weight,
+                temperature=config.predicate_contrastive_temperature,
+            )
+            predicate_loss = contrastive["loss"]
+            predicate_rows_skipped = contrastive["rows_skipped"]
+            predicate_contrast_set_size = contrastive[
+                "contrast_set_size"
+            ]
+            predicate_positive_cosine = contrastive[
+                "positive_cosine"
+            ]
+            predicate_hard_negative_margin = contrastive[
+                "hard_negative_margin"
+            ]
+            predicate_query_raw_norm = contrastive[
+                "query_raw_norm"
+            ]
+            predicate_unobserved_column_fraction = contrastive[
+                "unobserved_column_fraction"
+            ]
         else:
-            predicate_loss = pred_logits.sum() * 0.0
+            if explicit_holdout_row_policy == "skip-holdout-only":
+                assert holdout_mask is not None
+                assert supervision_mask is not None
+                positive_labels = positive_targets > 0.5
+                has_holdout_positive = (
+                    positive_labels & holdout_mask.view(1, -1)
+                ).any(dim=1)
+                has_supervised_positive = (
+                    positive_labels & supervision_mask.view(1, -1)
+                ).any(dim=1)
+                skip_rows = (
+                    has_holdout_positive & ~has_supervised_positive
+                )
+                predicate_rows_skipped = skip_rows.sum().to(
+                    dtype=pred_logits.dtype
+                )
+                keep_rows = ~skip_rows
+                positive_logits = positive_logits[keep_rows]
+                positive_targets = positive_targets[keep_rows]
+
+            if positive_logits.shape[0] > 0:
+                raw_predicate_loss = F.binary_cross_entropy_with_logits(
+                    positive_logits,
+                    positive_targets,
+                    pos_weight=pos_weight,
+                    reduction="none",
+                )
+                element_weights = torch.ones_like(raw_predicate_loss)
+                if negative_weights is not None:
+                    element_weights = torch.where(
+                        positive_targets > 0.5,
+                        element_weights,
+                        negative_weights.view(1, -1).expand_as(
+                            raw_predicate_loss
+                        ),
+                    )
+                if supervision_mask is not None:
+                    raw_predicate_loss = raw_predicate_loss[
+                        :, supervision_mask
+                    ]
+                    element_weights = element_weights[
+                        :, supervision_mask
+                    ]
+                weight_sum = element_weights.sum()
+                if weight_sum <= 0:
+                    raise ValueError(
+                        "predicate supervision weights must keep at least one term"
+                    )
+                predicate_loss = (
+                    raw_predicate_loss * element_weights
+                ).sum() / weight_sum
+            else:
+                predicate_loss = pred_logits.sum() * 0.0
     else:
         predicate_loss = pred_logits.sum() * 0.0
 
@@ -383,4 +567,11 @@ def supervised_relation_loss(
         "predicate_loss": predicate_loss,
         "predicate_rows": predicate_rows,
         "predicate_rows_skipped": predicate_rows_skipped,
+        "predicate_contrast_set_size": predicate_contrast_set_size,
+        "predicate_positive_cosine": predicate_positive_cosine,
+        "predicate_hard_negative_margin": predicate_hard_negative_margin,
+        "predicate_query_raw_norm": predicate_query_raw_norm,
+        "predicate_unobserved_column_fraction": (
+            predicate_unobserved_column_fraction
+        ),
     }
