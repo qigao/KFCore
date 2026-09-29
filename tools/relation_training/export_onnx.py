@@ -103,10 +103,56 @@ def check_onnx_parity(
     session = ort.InferenceSession(
         str(path), providers=["CPUExecutionProvider"]
     )
-    if [item.name for item in session.get_inputs()] != INPUT_NAMES:
+    inputs = session.get_inputs()
+    outputs = session.get_outputs()
+    if [item.name for item in inputs] != INPUT_NAMES:
         raise RuntimeError("ONNX input names do not match native runtime contract")
-    if [item.name for item in session.get_outputs()] != OUTPUT_NAMES:
+    if [item.name for item in outputs] != OUTPUT_NAMES:
         raise RuntimeError("ONNX output names do not match native runtime contract")
+
+    expected_input_shapes = [
+        list(image.shape),
+        list(boxes.shape),
+        list(box_counts.shape),
+    ]
+    expected_input_types = [
+        "tensor(float)",
+        "tensor(float)",
+        "tensor(int64)",
+    ]
+    for item, shape, dtype in zip(
+        inputs, expected_input_shapes, expected_input_types
+    ):
+        if list(item.shape) != shape:
+            raise RuntimeError(
+                f"ONNX input {item.name} shape {item.shape} != {shape}"
+            )
+        if item.type != dtype:
+            raise RuntimeError(
+                f"ONNX input {item.name} type {item.type} != {dtype}"
+            )
+
+    expected_output_shapes = [
+        list(value.shape) for value in reference
+    ]
+    expected_output_types = [
+        "tensor(float)",
+        "tensor(float)",
+        "tensor(int64)",
+        "tensor(int64)",
+        "tensor(bool)",
+    ]
+    for item, shape, dtype in zip(
+        outputs, expected_output_shapes, expected_output_types
+    ):
+        if list(item.shape) != shape:
+            raise RuntimeError(
+                f"ONNX output {item.name} shape {item.shape} != {shape}"
+            )
+        if item.type != dtype:
+            raise RuntimeError(
+                f"ONNX output {item.name} type {item.type} != {dtype}"
+            )
 
     feed = {
         "image": image.detach().cpu().numpy(),
