@@ -781,6 +781,33 @@ reconstructs the same holdout group from per-predicate metrics for both arms,
 keeps naturally train-zero-support predicates separate, and rejects
 data/prototype/model/loss-contract drift before reporting metric deltas.
 
+### Explicit holdout row policy
+
+The default explicit-holdout behavior is `dimension-only`: held-out predicate
+dimensions are removed from BCE, while the remaining predicate dimensions on
+the same positive pair keep their ordinary exhaustive supervision.
+
+For attribution experiments, the runner also supports:
+
+```text
+--holdout-row-policy skip-holdout-only
+```
+
+This mode keeps pair-existence and sampler supervision unchanged, but skips
+predicate BCE for a sampled positive pair when all of that pair's positive
+predicate labels are explicitly held out. Mixed-label pairs that contain both
+held-out and supervised positive predicates still train the supervised
+predicate dimensions normally.
+
+Each epoch records `predicate_rows` and `predicate_rows_skipped` in
+`training.json`. The top-level predicate-supervision evidence records the
+selected `holdout_row_policy`.
+
+`.github/workflows/openimages-explicit-holdout-row-policy.yml` compares:
+`baseline`, `dimension-only`, and `skip-holdout-only` using the exact same
+Open Images 256/64, DINOv3, whitened CLIP, K=48, sqrt-balanced and alpha=0.10
+contract.
+
 ## Seen vs train-zero-support predicate recall
 
 Canonical benchmark reports can optionally stratify predicate mRecall by
