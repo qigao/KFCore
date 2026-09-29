@@ -43,6 +43,7 @@ jobs:
       HF_HUB_DISABLE_TELEMETRY: '1'
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
+      PREDICATE_WEIGHTING_REVISION: zero-support-neutral-v1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -381,6 +382,8 @@ jobs:
                   != candidate["predicate_weighting"]["positive_pair_count"]
                   or control["predicate_weighting"]["predicate_positive_counts"]
                   != candidate["predicate_weighting"]["predicate_positive_counts"]
+                  or control["predicate_weighting"]["zero_support_predicate_indices"]
+                  != candidate["predicate_weighting"]["zero_support_predicate_indices"]
               ):
                   raise RuntimeError(
                       f"predicate support drift in {name}"
