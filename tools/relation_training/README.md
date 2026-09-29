@@ -771,6 +771,16 @@ The first controlled holdout set is `contain / holds / ride`, which have
 non-trivial support in both train and validation on the canonical 256/64 Open
 Images slice.
 
+`.github/workflows/openimages-explicit-predicate-holdout.yml` runs the real
+two-arm diagnostic after merge. Both arms use the exact same canonical 256/64
+data, shared whitened CLIP prototype tensor, frozen DINOv3 ViT-S/16, K=48,
+sqrt-balanced positive weighting, adapter rank 0 and zero-support negative
+weight `alpha=0.10`. The only training difference is whether
+`contain / holds / ride` are excluded from predicate BCE. The comparator
+reconstructs the same holdout group from per-predicate metrics for both arms,
+keeps naturally train-zero-support predicates separate, and rejects
+data/prototype/model/loss-contract drift before reporting metric deltas.
+
 ## Seen vs train-zero-support predicate recall
 
 Canonical benchmark reports can optionally stratify predicate mRecall by
