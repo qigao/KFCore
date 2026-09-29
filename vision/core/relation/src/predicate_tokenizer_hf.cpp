@@ -12,6 +12,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <sstream>
 #include <string>
@@ -198,6 +199,7 @@ public:
         }
 
         EncodeResults encoded(texts.size());
+        std::lock_guard<std::mutex> lock(mutex_);
         tokenizers_encode_batch(
             handle_,
             pointers.data(),
@@ -300,6 +302,7 @@ private:
     TokenizerHandle handle_ = nullptr;
     ClipTokenizerJsonOptions options_;
     std::string provenance_;
+    mutable std::mutex mutex_;
 };
 
 } // namespace
