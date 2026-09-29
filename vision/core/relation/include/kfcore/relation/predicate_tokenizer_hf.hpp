@@ -3,6 +3,7 @@
 #include "kfcore/relation/predicate_text_encoder.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
