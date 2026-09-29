@@ -102,6 +102,7 @@ def supervised_relation_loss(
     predicate_targets: Tensor,
     config: RelationLossConfig = RelationLossConfig(),
     predicate_positive_weights: Tensor | None = None,
+    predicate_supervision_mask: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -110,9 +111,10 @@ def supervised_relation_loss(
     predicate vocabulary for each ordered pair.
 
     Predicate BCE is evaluated only on positive related pairs. Zeros in their
-    multi-hot predicate vectors are supervised negatives, so this objective
-    assumes exhaustive pair-level predicate labels. Incomplete/open-world labels
-    require a separate PU-aware objective.
+    multi-hot predicate vectors are supervised negatives by default. An optional
+    bool [V] supervision mask can exclude predicate dimensions that have no
+    positive training support; it may never hide a positive target in the
+    current batch.
 
     The dense sampler loss is training-only. Runtime/export keeps the existing
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
@@ -179,12 +181,51 @@ def supervised_relation_loss(
             dtype=pred_logits.dtype,
         )
 
-    if positive.any():
-        predicate_loss = F.binary_cross_entropy_with_logits(
-            pred_logits[positive],
-            selected_predicate_targets[positive],
-            pos_weight=pos_weight,
+    supervision_mask = None
+    if predicate_supervision_mask is not None:
+        if predicate_supervision_mask.ndim != 1:
+            raise ValueError(
+                "predicate_supervision_mask must be [V]"
+            )
+        if predicate_supervision_mask.shape[0] != pred_logits.shape[2]:
+            raise ValueError(
+                "predicate_supervision_mask width does not match pred_logits"
+            )
+        if predicate_supervision_mask.dtype != torch.bool:
+            raise ValueError(
+                "predicate_supervision_mask must have bool dtype"
+            )
+        supervision_mask = predicate_supervision_mask.to(
+            device=pred_logits.device,
         )
+        if not supervision_mask.any():
+            raise ValueError(
+                "predicate_supervision_mask must supervise at least one predicate"
+            )
+
+    if positive.any():
+        positive_logits = pred_logits[positive]
+        positive_targets = selected_predicate_targets[positive]
+        if supervision_mask is not None:
+            masked_positive = (
+                positive_targets[:, ~supervision_mask] > 0.5
+            )
+            if masked_positive.any():
+                raise ValueError(
+                    "predicate supervision mask cannot hide positive labels"
+                )
+
+        raw_predicate_loss = F.binary_cross_entropy_with_logits(
+            positive_logits,
+            positive_targets,
+            pos_weight=pos_weight,
+            reduction="none",
+        )
+        if supervision_mask is not None:
+            raw_predicate_loss = raw_predicate_loss[
+                :, supervision_mask
+            ]
+        predicate_loss = raw_predicate_loss.mean()
     else:
         predicate_loss = pred_logits.sum() * 0.0
 

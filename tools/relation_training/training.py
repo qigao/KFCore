@@ -315,6 +315,7 @@ def train_epoch(
     device: torch.device,
     loss_config: RelationLossConfig = RelationLossConfig(),
     predicate_positive_weights: Tensor | None = None,
+    predicate_supervision_mask: Tensor | None = None,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -345,6 +346,7 @@ def train_epoch(
             predicate_targets,
             loss_config,
             predicate_positive_weights=predicate_positive_weights,
+            predicate_supervision_mask=predicate_supervision_mask,
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
