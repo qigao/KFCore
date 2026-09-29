@@ -280,6 +280,14 @@ def main() -> None:
             "--zero-support-negative-weight is BCE-only; "
             "batch-local-infonce does not consume BCE negative weights"
         )
+    if (
+        args.predicate_objective != "batch-local-infonce"
+        and args.predicate_contrastive_hard_negative_count != 0
+    ):
+        raise ValueError(
+            "--predicate-contrastive-hard-negative-count is "
+            "batch-local-infonce-only"
+        )
 
     predicate_index = {
         name: index
