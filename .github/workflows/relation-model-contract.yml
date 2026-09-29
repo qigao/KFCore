@@ -86,7 +86,6 @@ jobs:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DINOV3_SHA: 6876159a11b4df116f30f667f8c9888617df0751
       DINOV3_WEIGHTS_URL: https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
-      TORCH_HOME: ${{ runner.temp }}/torch-home
     steps:
       - uses: actions/checkout@v4
         with:
@@ -129,6 +128,8 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/dinov3" rev-parse HEAD)" = "$DINOV3_SHA"
 
       - name: Download official DINOv3 ViT-S/16 weights
+        env:
+          TORCH_HOME: ${{ runner.temp }}/torch-home
         shell: bash
         run: |
           set -euxo pipefail
@@ -155,6 +156,8 @@ jobs:
           PY
 
       - name: Run real DINOv3 ViT-S/16 forward and export smoke
+        env:
+          TORCH_HOME: ${{ runner.temp }}/torch-home
         shell: bash
         run: |
           set -euxo pipefail
