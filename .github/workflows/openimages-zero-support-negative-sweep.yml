@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   prepare-prototype:
-    if: ${{ github.event_name == 'push' || inputs.recompare_run_id == '' }}
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -137,7 +137,7 @@ jobs:
           path: ${{ runner.temp }}/shared-prototype/
 
   arm:
-    if: ${{ github.event_name == 'push' || inputs.recompare_run_id == '' }}
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     needs: prepare-prototype
     name: ${{ matrix.name }}
     strategy:
@@ -456,11 +456,16 @@ jobs:
           git diff --exit-code
 
   compare:
-    if: ${{ github.event_name == 'push' || inputs.recompare_run_id == '' }}
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     runs-on: ubuntu-24.04
     needs: arm
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: zero-support-negative-*
@@ -482,7 +487,7 @@ jobs:
           path: comparison.json
 
   recompare:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.recompare_run_id != '' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id != '') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[recompare-only]')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -491,12 +496,29 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Resolve source sweep run
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.recompare_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED_RUN_ID:-}" ]; then
+            run_id="$REQUESTED_RUN_ID"
+          else
+            run_id="$(gh api               "repos/$GITHUB_REPOSITORY/actions/workflows/openimages-zero-support-negative-sweep.yml/runs?branch=master&status=completed&per_page=20"               --jq '.workflow_runs[] | select(.conclusion == "failure") | .id'               | head -n 1)"
+          fi
+          test -n "$run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "recompare source run: $run_id"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: zero-support-negative-*
           path: arms
           merge-multiple: false
-          run-id: ${{ inputs.recompare_run_id }}
+          run-id: ${{ steps.source.outputs.run_id }}
           github-token: ${{ github.token }}
 
       - name: Recompare existing sweep artifacts
@@ -509,6 +531,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: zero-support-negative-recomparison-${{ inputs.recompare_run_id }}-${{ github.run_id }}
+          name: zero-support-negative-recomparison-${{ steps.source.outputs.run_id }}-${{ github.run_id }}
           retention-days: 30
           path: comparison.json
