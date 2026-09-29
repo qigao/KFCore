@@ -158,6 +158,22 @@ def visual_config(mode: str) -> RelationModelConfig:
     )
 
 
+def geometry_config(mode: str) -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+        pair_visual_evidence="contact",
+        pair_geometry_evidence=mode,
+    )
+
+
 def adapter_config() -> RelationModelConfig:
     return RelationModelConfig(
         image_size=8,
@@ -195,6 +211,114 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_rich_pair_geometry_has_bounded_normalized_features(self):
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            geometry_config("rich"),
+        )
+        box_tensor = torch.tensor(
+            [
+                [
+                    [0.25, 0.25, 0.20, 0.20],
+                    [0.35, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        rich = model._rich_pair_geometry(box_tensor)
+        expected = torch.tensor(
+            [
+                0.5, 0.0,
+                0.5, 0.0,
+                0.5, 0.5,
+                0.0, 0.0,
+                1.0, 0.0,
+            ],
+            dtype=torch.float32,
+        )
+        self.assertTrue(
+            torch.allclose(
+                rich[0, 0, 1],
+                expected,
+                atol=1.0e-5,
+            )
+        )
+
+        separated = torch.tensor(
+            [
+                [
+                    [0.20, 0.20, 0.20, 0.20],
+                    [0.80, 0.20, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        rich_separated = model._rich_pair_geometry(separated)
+        self.assertAlmostEqual(
+            float(rich_separated[0, 0, 1, 6]),
+            0.4,
+            places=5,
+        )
+        self.assertEqual(
+            float(rich_separated[0, 0, 1, 4]),
+            0.0,
+        )
+        self.assertAlmostEqual(
+            float(rich_separated[0, 0, 1, 8]),
+            1.0,
+            places=5,
+        )
+
+    def test_rich_geometry_keeps_common_initialization_and_output_identical(self):
+        def build(mode: str) -> KFRelationModel:
+            torch.manual_seed(66)
+            backbone = ToyBackbone()
+            embeddings = torch.randn(3, 6)
+            return KFRelationModel(
+                backbone,
+                embeddings,
+                geometry_config(mode),
+            )
+
+        basic = build("basic")
+        rich = build("rich")
+
+        basic_state = basic.state_dict()
+        rich_state = rich.state_dict()
+        for name, value in basic_state.items():
+            self.assertIn(name, rich_state)
+            self.assertTrue(
+                torch.equal(value, rich_state[name]),
+                msg=f"common parameter drift: {name}",
+            )
+
+        self.assertIsNone(basic.rich_geometry_projection)
+        self.assertIsNone(basic.rich_geometry_sampler)
+        self.assertIsNotNone(rich.rich_geometry_projection)
+        self.assertIsNotNone(rich.rich_geometry_sampler)
+        self.assertEqual(
+            float(rich.rich_geometry_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(rich.rich_geometry_sampler.weight.abs().sum()),
+            0.0,
+        )
+
+        box_tensor, box_counts = boxes()
+        torch.manual_seed(67)
+        image = torch.rand(1, 3, 8, 8)
+        with torch.inference_mode():
+            basic_output = basic(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            rich_output = rich(
+                image, box_tensor[:1], box_counts[:1]
+            )
+        for left, right in zip(basic_output, rich_output):
+            self.assertTrue(torch.equal(left, right))
+
     def test_union_and_contact_box_geometry(self):
         subject = torch.tensor(
             [
@@ -1791,6 +1915,37 @@ class RelationModelTest(unittest.TestCase):
                 reference,
             )
         self.assertLessEqual(delta, 1.0e-3)
+
+    def test_rich_geometry_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(68)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            geometry_config("rich"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rich-geometry.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_geometry_evidence,
+            "rich",
+        )
+        self.assertIn(
+            "rich_geometry_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "rich_geometry_sampler.weight",
+            payload["state_dict"],
+        )
 
     def test_contact_checkpoint_round_trip_preserves_mode(self):
         torch.manual_seed(63)
