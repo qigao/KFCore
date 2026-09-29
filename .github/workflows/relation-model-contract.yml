@@ -72,14 +72,15 @@ jobs:
             tools/relation_training/test_model.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_training.py \
-            tools/relation_training/test_openimages.py
+            tools/relation_training/test_openimages.py \
+            tools/relation_training/test_predicate_embeddings.py
 
       - name: Run synthetic forward/backward and ONNX contract
         shell: bash
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py
+          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
