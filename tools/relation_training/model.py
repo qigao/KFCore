@@ -42,6 +42,13 @@ class RelationModelConfig:
             raise ValueError("at least one backbone tap is required")
 
 
+@dataclass(frozen=True)
+class RelationTrainingOutputs:
+    runtime: tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+    sampler_logits: Tensor
+    sampler_valid: Tensor
+
+
 class BackboneAdapter(nn.Module):
     hidden_size: int
     patch_size: int
@@ -720,9 +727,13 @@ class KFRelationModel(nn.Module):
             dim=-1,
         )
 
-    def forward(
+    def _forward_impl(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[
+        tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
+        Tensor,
+        Tensor,
+    ]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
         if image.shape[2] != self.config.image_size or image.shape[3] != self.config.image_size:
@@ -752,9 +763,9 @@ class KFRelationModel(nn.Module):
             batch, self.config.max_boxes * self.config.max_boxes, self.geometry_feature_count
         )
         flat_valid = valid_pairs.reshape(batch, -1)
-        sampler_scores = self.geometry_sampler(flat_geometry).squeeze(-1)
-        sampler_scores = sampler_scores.masked_fill(
-            ~flat_valid, torch.finfo(sampler_scores.dtype).min
+        sampler_logits = self.geometry_sampler(flat_geometry).squeeze(-1)
+        sampler_scores = sampler_logits.masked_fill(
+            ~flat_valid, torch.finfo(sampler_logits.dtype).min
         )
         _, pair_slot = torch.topk(
             sampler_scores, k=self.config.pair_budget, dim=1, largest=True, sorted=True
@@ -806,10 +817,29 @@ class KFRelationModel(nn.Module):
         pred_logits = scale * torch.matmul(
             predicate_query, self.predicate_bank.transpose(0, 1)
         )
-        return (
+        runtime = (
             pred_logits,
             pair_logits,
             subject_index.to(torch.int64),
             object_index.to(torch.int64),
             selected_valid.to(torch.bool),
+        )
+        return runtime, sampler_logits, flat_valid.to(torch.bool)
+
+    def forward(
+        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        runtime, _, _ = self._forward_impl(image, boxes, box_counts)
+        return runtime
+
+    def forward_training(
+        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+    ) -> RelationTrainingOutputs:
+        runtime, sampler_logits, sampler_valid = self._forward_impl(
+            image, boxes, box_counts
+        )
+        return RelationTrainingOutputs(
+            runtime=runtime,
+            sampler_logits=sampler_logits,
+            sampler_valid=sampler_valid,
         )
