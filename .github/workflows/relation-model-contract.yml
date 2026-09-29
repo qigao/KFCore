@@ -69,6 +69,7 @@ jobs:
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
+            tools/relation_training/test_predicate_embeddings.py \
             tools/relation_training/test_model.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_training.py \
@@ -79,7 +80,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py
+          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
