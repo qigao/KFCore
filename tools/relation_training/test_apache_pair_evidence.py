@@ -319,12 +319,7 @@ class ApachePairEvidenceTest(unittest.TestCase):
         )
         valid = torch.tensor([[True, True, True]])
 
-        (
-            pair_tokens,
-            box_tokens,
-            anchors,
-            geometry,
-        ) = model._apache_pair_evidence(
+        evidence = model._apache_pair_evidence(
             patch_features,
             box_tensor[:1],
             valid_boxes,
@@ -332,12 +327,36 @@ class ApachePairEvidenceTest(unittest.TestCase):
             object_index,
             valid,
         )
-        self.assertEqual(tuple(pair_tokens.shape), (1, 3, 16))
-        self.assertEqual(tuple(box_tokens.shape), (1, 3, 4, 16))
-        self.assertEqual(tuple(anchors.shape), (1, 3, 4, 4))
-        self.assertEqual(tuple(geometry.shape), (1, 3, 16))
-        self.assertTrue(torch.isfinite(pair_tokens).all())
-        self.assertTrue(torch.isfinite(geometry).all())
+        self.assertEqual(
+            tuple(evidence.pair_tokens.shape),
+            (1, 3, 16),
+        )
+        self.assertEqual(
+            tuple(evidence.box_tokens.shape),
+            (1, 3, 4, 16),
+        )
+        self.assertEqual(
+            tuple(evidence.anchors.shape),
+            (1, 3, 4, 4),
+        )
+        self.assertEqual(
+            tuple(evidence.geometry_features.shape),
+            (1, 3, 16),
+        )
+        self.assertEqual(
+            tuple(evidence.subject_features.shape),
+            (1, 3, 8),
+        )
+        self.assertEqual(
+            tuple(evidence.object_features.shape),
+            (1, 3, 8),
+        )
+        self.assertTrue(
+            torch.isfinite(evidence.pair_tokens).all()
+        )
+        self.assertTrue(
+            torch.isfinite(evidence.geometry_features).all()
+        )
 
     def test_apache_forward_and_onnx_export(self):
         torch.manual_seed(4)

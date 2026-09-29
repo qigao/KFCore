@@ -55,6 +55,11 @@ def main() -> None:
         choices=("legacy", "apache"),
         default="legacy",
     )
+    parser.add_argument(
+        "--predicate-head-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+    )
     args = parser.parse_args()
 
     if args.image_size <= 0:
@@ -111,6 +116,7 @@ def main() -> None:
         pair_evidence_contract=args.pair_evidence_contract,
         pair_sampler_contract=args.pair_sampler_contract,
         relation_context_contract=args.relation_context_contract,
+        predicate_head_contract=args.predicate_head_contract,
     )
     predicate_names = ["beside", "holding", "riding"]
     predicate_embeddings = torch.randn(len(predicate_names), 32)
@@ -205,14 +211,22 @@ def main() -> None:
                 "open-vocabulary encoder output shape "
                 f"{tuple(value.shape)} != {shape}"
             )
-    if not torch.allclose(
-        encoder_reference[0],
-        encoder_reference[1],
-        atol=0.0,
-        rtol=0.0,
-    ):
+    semantic_query = encoder_reference[0]
+    spatial_query = encoder_reference[1]
+    if not torch.isfinite(semantic_query).all() or not torch.isfinite(
+        spatial_query
+    ).all():
         raise RuntimeError(
-            "phase-1 semantic/spatial relation queries diverged"
+            "open-vocabulary encoder produced non-finite query values"
+        )
+    if args.predicate_head_contract == "apache":
+        if torch.equal(semantic_query, spatial_query):
+            raise RuntimeError(
+                "Apache predicate head must emit independent semantic/spatial queries"
+            )
+    elif not torch.equal(semantic_query, spatial_query):
+        raise RuntimeError(
+            "legacy phase-1 semantic/spatial relation queries diverged"
         )
     encoder_max_abs_delta = check_onnx_parity(
         encoder_onnx_path,
@@ -228,6 +242,7 @@ def main() -> None:
         "pair_evidence_contract": args.pair_evidence_contract,
         "pair_sampler_contract": args.pair_sampler_contract,
         "relation_context_contract": args.relation_context_contract,
+        "predicate_head_contract": args.predicate_head_contract,
         "weights_repo": args.repo,
         "weights_filename": args.filename,
         "weights_sha256": weights_sha256,
@@ -249,6 +264,9 @@ def main() -> None:
         "encoder_onnx_bytes": encoder_onnx_path.stat().st_size,
         "encoder_ort_max_abs_delta": encoder_max_abs_delta,
         "encoder_query_dim": int(predicate_embeddings.shape[1]),
+        "semantic_spatial_mean_abs_delta": float(
+            (semantic_query - spatial_query).abs().mean().item()
+        ),
         "valid_pair_count": int(valid_mask.sum().item()),
     }
     report_path.write_text(

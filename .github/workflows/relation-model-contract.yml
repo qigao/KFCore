@@ -62,6 +62,7 @@ jobs:
             tools/relation_training/apache_pair_evidence.py \
             tools/relation_training/apache_pair_sampler.py \
             tools/relation_training/apache_context.py \
+            tools/relation_training/apache_vocab_head.py \
             tools/relation_training/losses.py \
             tools/relation_training/checkpoint.py \
             tools/relation_training/export_onnx.py \
@@ -84,6 +85,7 @@ jobs:
             tools/relation_training/test_apache_pair_evidence.py \
             tools/relation_training/test_apache_pair_sampler.py \
             tools/relation_training/test_apache_context.py \
+            tools/relation_training/test_apache_vocab_head.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_training.py \
             tools/relation_training/test_openimages.py
@@ -93,7 +95,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
@@ -105,7 +107,7 @@ jobs:
 
   real-vits16:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
@@ -236,6 +238,26 @@ jobs:
             --relation-context-contract apache \
             --output-dir "$OUT"
 
+      - name: Run Apache dual-vocab-head real DINOv3 smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke-apache-head"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --pair-evidence-contract apache \
+            --pair-sampler-contract apache \
+            --relation-context-contract apache \
+            --predicate-head-contract apache \
+            --output-dir "$OUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: real-dinov3-smoke-${{ github.run_id }}-${{ github.run_attempt }}
@@ -245,6 +267,7 @@ jobs:
             ${{ runner.temp }}/real-dinov3-smoke-apache/real-dinov3-smoke.json
             ${{ runner.temp }}/real-dinov3-smoke-apache-sampler/real-dinov3-smoke.json
             ${{ runner.temp }}/real-dinov3-smoke-apache-context/real-dinov3-smoke.json
+            ${{ runner.temp }}/real-dinov3-smoke-apache-head/real-dinov3-smoke.json
 
       - name: Verify unchanged tracked sources
         if: always()

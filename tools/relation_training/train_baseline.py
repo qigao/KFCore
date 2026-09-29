@@ -13,6 +13,10 @@ from benchmark import (
     RelationVocabulary,
     stable_report_json,
 )
+from apache_vocab_head import (
+    balanced_spatial_probe_targets,
+    load_predicate_spatial_flags,
+)
 from checkpoint import save_checkpoint
 from losses import RelationLossConfig
 from make_predicate_embeddings import gram_diagnostics, tensor_sha256
@@ -150,6 +154,24 @@ def main() -> None:
             "Relation context implementation. apache enables the reference "
             "RelationTransformer -> DeformableRelRead -> "
             "RelationInteractionBlock stack."
+        ),
+    )
+    parser.add_argument(
+        "--predicate-head-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+        help=(
+            "Predicate head implementation. apache enables independent "
+            "semantic/spatial queries and text-conditioned routing."
+        ),
+    )
+    parser.add_argument(
+        "--predicate-spatial-flags",
+        default="",
+        help=(
+            "JSON sidecar for Apache routing warm start. Required when "
+            "--predicate-head-contract apache. The predicate list/order must "
+            "exactly match --vocabulary."
         ),
     )
     parser.add_argument(
@@ -299,6 +321,7 @@ def main() -> None:
         pair_evidence_contract=args.pair_evidence_contract,
         pair_sampler_contract=args.pair_sampler_contract,
         relation_context_contract=args.relation_context_contract,
+        predicate_head_contract=args.predicate_head_contract,
         apache_context_dropout=args.apache_context_dropout,
         apache_box_token_dropout=args.apache_box_token_dropout,
     )
@@ -375,6 +398,22 @@ def main() -> None:
         raise ValueError(
             "--predicate-calibration-loss-weight is "
             "batch-local-infonce-only"
+        )
+    if (
+        args.predicate_head_contract == "apache"
+        and not args.predicate_spatial_flags
+    ):
+        raise ValueError(
+            "--predicate-spatial-flags is required for the Apache "
+            "predicate-head routing warm start"
+        )
+    if (
+        args.predicate_head_contract != "apache"
+        and args.predicate_spatial_flags
+    ):
+        raise ValueError(
+            "--predicate-spatial-flags requires "
+            "--predicate-head-contract apache"
         )
 
     predicate_index = {
@@ -497,6 +536,68 @@ def main() -> None:
 
     device = resolve_device(args.device)
     model.to(device)
+
+    routing_warm_start = None
+    if args.predicate_head_contract == "apache":
+        spatial_flags = load_predicate_spatial_flags(
+            args.predicate_spatial_flags,
+            vocabulary.predicates,
+        ).to(device)
+        assert model.apache_vocab_head is not None
+        bank = model.predicate_bank.detach()
+        with torch.no_grad():
+            alpha_before = model.apache_vocab_head.routing_alpha(
+                bank
+            )
+        target_alpha = balanced_spatial_probe_targets(
+            bank,
+            spatial_flags,
+            steps=1000,
+            learning_rate=5.0e-2,
+        )
+        with torch.no_grad():
+            mse_before = torch.nn.functional.mse_loss(
+                alpha_before,
+                target_alpha,
+            ).item()
+        final_mse = model.apache_vocab_head.warm_start_gate(
+            bank,
+            target_alpha,
+            steps=300,
+            learning_rate=1.0e-2,
+        )
+        with torch.no_grad():
+            alpha_after = model.apache_vocab_head.routing_alpha(
+                bank
+            )
+            mse_after = torch.nn.functional.mse_loss(
+                alpha_after,
+                target_alpha,
+            ).item()
+        routing_warm_start = {
+            "schema": "kfcore.apache-routing-warm-start/1",
+            "spatial_flags_sha256": sha256(
+                Path(args.predicate_spatial_flags)
+            ),
+            "spatial_count": int(spatial_flags.sum().item()),
+            "semantic_count": int((~spatial_flags).sum().item()),
+            "target_alpha_mean": float(
+                target_alpha.mean().detach().cpu()
+            ),
+            "target_alpha_spatial_mean": float(
+                target_alpha[spatial_flags].mean().detach().cpu()
+            ),
+            "target_alpha_semantic_mean": float(
+                target_alpha[~spatial_flags].mean().detach().cpu()
+            ),
+            "mse_before": float(mse_before),
+            "mse_after": float(mse_after),
+            "reported_final_mse": float(final_mse),
+        }
+        if not mse_after < mse_before:
+            raise RuntimeError(
+                "Apache predicate routing warm start did not improve MSE"
+            )
 
     train_dataset = RelationTrainingDataset(
         train_manifest,
@@ -636,6 +737,7 @@ def main() -> None:
                 ),
             },
             "predicate_adapter": predicate_adapter_report,
+            "routing_warm_start": routing_warm_start,
             "history": history,
         },
     )
@@ -677,6 +779,7 @@ def main() -> None:
             "relation_context_contract": (
                 model.config.relation_context_contract
             ),
+            "predicate_head_contract": model.config.predicate_head_contract,
             "apache_context_dropout": model.config.apache_context_dropout,
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
@@ -750,6 +853,7 @@ def main() -> None:
             ),
         },
         "predicate_adapter": predicate_adapter_report,
+        "routing_warm_start": routing_warm_start,
         "history": history,
     }
 

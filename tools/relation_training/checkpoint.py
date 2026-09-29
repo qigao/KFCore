@@ -44,6 +44,7 @@ def save_checkpoint(
             "relation_context_contract": (
                 model.config.relation_context_contract
             ),
+            "predicate_head_contract": model.config.predicate_head_contract,
             "apache_context_dropout": model.config.apache_context_dropout,
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
