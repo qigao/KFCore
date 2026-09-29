@@ -102,6 +102,16 @@ def main() -> None:
         default=0,
         help="Shared low-rank residual adapter rank; 0 disables it.",
     )
+    parser.add_argument(
+        "--pair-visual-evidence",
+        choices=("endpoint", "union", "union-contact"),
+        default="endpoint",
+        help=(
+            "Visual evidence injected into the relation pair token. "
+            "endpoint preserves the historical model; union and "
+            "union-contact add zero-initialized residual projections."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -234,6 +244,7 @@ def main() -> None:
         dropout=0.0,
         tap_indices=(-6, -3, -1),
         predicate_adapter_rank=args.predicate_adapter_rank,
+        pair_visual_evidence=args.pair_visual_evidence,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -603,6 +614,7 @@ def main() -> None:
             "num_layers": model.config.num_layers,
             "tap_indices": list(model.config.tap_indices),
             "predicate_adapter_rank": model.config.predicate_adapter_rank,
+            "pair_visual_evidence": model.config.pair_visual_evidence,
         },
         "baseline_config": config_payload(baseline_config),
         "loss_config": {
