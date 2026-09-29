@@ -73,6 +73,23 @@ jobs:
           c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/core/relation/tests/test_vocabulary_score.cpp             -o "$RUNNER_TEMP/relation-contract/test_vocabulary_score.o"
           c++ -fsanitize=address,undefined             "$RUNNER_TEMP/relation-contract/tinytest.o"             "$RUNNER_TEMP/relation-contract/vocabulary_score.o"             "$RUNNER_TEMP/relation-contract/decode.o"             "$RUNNER_TEMP/relation-contract/test_vocabulary_score.o"             -lm -o "$RUNNER_TEMP/relation-contract/test_relation_vocabulary_score"
 
+      - name: Build predicate text API tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/relation/include \
+            -Iruntime/core/include \
+            -Ivision/core/image_processor/include \
+            -Isalts/tinytest/include \
+            -c vision/core/relation/tests/test_predicate_text_api.cpp \
+            -o "$RUNNER_TEMP/relation-contract/test_predicate_text_api.o"
+          c++ -fsanitize=address,undefined \
+            "$RUNNER_TEMP/relation-contract/tinytest.o" \
+            "$RUNNER_TEMP/relation-contract/test_predicate_text_api.o" \
+            -o "$RUNNER_TEMP/relation-contract/test_relation_predicate_text_api"
+
       - name: Run relation tests
         shell: bash
         env:
@@ -82,6 +99,7 @@ jobs:
           set -euxo pipefail
           "$RUNNER_TEMP/relation-contract/test_relation_decode"
           "$RUNNER_TEMP/relation-contract/test_relation_vocabulary_score"
+          "$RUNNER_TEMP/relation-contract/test_relation_predicate_text_api"
 
       - name: Verify unchanged tracked sources
         if: always()
