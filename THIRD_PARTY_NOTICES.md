@@ -34,3 +34,24 @@ Offline tools include [TensorFlow (Apache-2.0)](https://github.com/tensorflow/te
 and [tf2onnx (Apache-2.0)](https://github.com/onnx/tensorflow-onnx/blob/main/LICENSE).
 They are not additional native runtime dependencies. Pinned versions and model
 provenance are recorded in `tools/mediapipe_gesture/`.
+
+## Optional DINOv3 relation-model training
+
+`tools/relation_training/` contains KFCore first-party model, training-loss and
+export code. The optional tool environment uses
+[PyTorch](https://github.com/pytorch/pytorch),
+[Hugging Face Transformers](https://github.com/huggingface/transformers),
+[timm](https://github.com/huggingface/pytorch-image-models), and
+[Hugging Face Hub](https://github.com/huggingface/huggingface_hub);
+those packages remain governed by their respective upstream licenses and are not
+native KFCore runtime dependencies.
+
+The tool can load DINOv3 through a caller-selected local/Transformers model,
+an official Meta source checkout with caller-supplied weights, or the public
+timm DINOv3 ViT package used by CI. DINOv3 source/model materials are
+governed by Meta's
+[DINOv3 License Agreement](https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md).
+KFCore does not redistribute DINOv3 source code, pretrained weights, or trained
+derivative checkpoints. Users are responsible for obtaining model access and
+for complying with the applicable DINOv3 terms when using or redistributing
+DINOv3-derived materials.

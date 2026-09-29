@@ -1,0 +1,104 @@
+name: Real DINOv3 relation smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-dinov3-relation-smoke-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  real-vits16:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
+      DINOV3_FILENAME: model.safetensors
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-real-smoke.txt
+
+      - name: Install real-smoke dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-real-smoke.txt
+
+      - name: Download public DINOv3 ViT-S/16 weights
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf "$HF_HOME"
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          from huggingface_hub import hf_hub_download
+
+          path = Path(hf_hub_download(
+              repo_id=os.environ["DINOV3_REPO"],
+              filename=os.environ["DINOV3_FILENAME"],
+              force_download=True,
+          )).resolve()
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          print(f"downloaded={path}")
+          print(f"sha256={digest}")
+          print(f"bytes={path.stat().st_size}")
+          PY
+
+      - name: Run real DINOv3 ViT-S/16 forward and export smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --output-dir "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-dinov3-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 1
+          path: ${{ runner.temp }}/real-dinov3-smoke/real-dinov3-smoke.json
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

@@ -1,0 +1,6 @@
+# Offline training/export only. These are not KFCore native runtime dependencies.
+torch>=2.8,<3
+transformers>=4.56,<5
+numpy>=1.26,<3
+onnx>=1.17,<2
+onnxruntime>=1.20,<2
