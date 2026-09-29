@@ -275,6 +275,37 @@ def build_predicate_weighting(
     )
 
 
+def build_zero_support_negative_weights(
+    *,
+    predicate_count: int,
+    zero_support_predicate_indices: tuple[int, ...],
+    zero_support_negative_weight: float = 1.0,
+) -> Tensor:
+    if predicate_count <= 0:
+        raise ValueError("predicate_count must be positive")
+    if (
+        not np.isfinite(zero_support_negative_weight)
+        or zero_support_negative_weight < 0.0
+        or zero_support_negative_weight > 1.0
+    ):
+        raise ValueError(
+            "zero_support_negative_weight must be finite within [0,1]"
+        )
+
+    result = torch.ones(predicate_count, dtype=torch.float32)
+    seen: set[int] = set()
+    for index in zero_support_predicate_indices:
+        if index in seen:
+            raise ValueError("zero-support predicate indices must be unique")
+        seen.add(index)
+        if index < 0 or index >= predicate_count:
+            raise ValueError(
+                "zero-support predicate index is outside vocabulary"
+            )
+        result[index] = float(zero_support_negative_weight)
+    return result
+
+
 def freeze_backbone(model: KFRelationModel) -> None:
     model.backbone.requires_grad_(False)
     model.backbone.eval()
@@ -316,6 +347,7 @@ def train_epoch(
     loss_config: RelationLossConfig = RelationLossConfig(),
     predicate_positive_weights: Tensor | None = None,
     predicate_supervision_mask: Tensor | None = None,
+    predicate_negative_weights: Tensor | None = None,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -347,6 +379,7 @@ def train_epoch(
             loss_config,
             predicate_positive_weights=predicate_positive_weights,
             predicate_supervision_mask=predicate_supervision_mask,
+            predicate_negative_weights=predicate_negative_weights,
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
