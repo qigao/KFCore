@@ -866,6 +866,15 @@ class KFRelationModel(nn.Module):
                 self.apache_pair_projection.bias
             )
 
+            # #98 replaces pair evidence while #118 still owns the legacy
+            # sampler. Freeze legacy representation modules that are no longer
+            # on the Apache forward path. Box prompts are produced as the
+            # #119 context contract but remain frozen until that context stack
+            # consumes them.
+            self.geometry_encoder.requires_grad_(False)
+            self.pair_projection.requires_grad_(False)
+            self.apache_box_prompt_encoder.requires_grad_(False)
+
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
         if (
