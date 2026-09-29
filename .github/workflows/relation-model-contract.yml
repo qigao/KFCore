@@ -63,6 +63,8 @@ jobs:
             tools/relation_training/apache_pair_sampler.py \
             tools/relation_training/apache_context.py \
             tools/relation_training/apache_vocab_head.py \
+            tools/relation_training/apache_text_student.py \
+            tools/relation_training/export_predicate_text_student.py \
             tools/relation_training/losses.py \
             tools/relation_training/checkpoint.py \
             tools/relation_training/export_onnx.py \
@@ -86,6 +88,7 @@ jobs:
             tools/relation_training/test_apache_pair_sampler.py \
             tools/relation_training/test_apache_context.py \
             tools/relation_training/test_apache_vocab_head.py \
+            tools/relation_training/test_apache_text_student.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_training.py \
             tools/relation_training/test_openimages.py
@@ -95,7 +98,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
