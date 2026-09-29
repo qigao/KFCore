@@ -104,6 +104,7 @@ def supervised_relation_loss(
     predicate_positive_weights: Tensor | None = None,
     predicate_supervision_mask: Tensor | None = None,
     predicate_negative_weights: Tensor | None = None,
+    allow_masked_positive_targets: bool = False,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -122,6 +123,9 @@ def supervised_relation_loss(
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
     negative_pair_weight.
     """
+    if not isinstance(allow_masked_positive_targets, bool):
+        raise ValueError("allow_masked_positive_targets must be bool")
+
     training_outputs = (
         outputs if isinstance(outputs, RelationTrainingOutputs) else None
     )
@@ -235,7 +239,10 @@ def supervised_relation_loss(
             masked_positive = (
                 positive_targets[:, ~supervision_mask] > 0.5
             )
-            if masked_positive.any():
+            if (
+                masked_positive.any()
+                and not allow_masked_positive_targets
+            ):
                 raise ValueError(
                     "predicate supervision mask cannot hide positive labels"
                 )
