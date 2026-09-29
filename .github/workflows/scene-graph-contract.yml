@@ -1,0 +1,78 @@
+name: Scene graph contract
+
+on:
+  pull_request:
+    branches:
+      - master
+      - 'poc/scene-relations'
+    paths:
+      - 'vision/pipelines/scene_graph/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/scene-graph-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scene-graph-contract-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Checkout pinned TinyTest source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: salts
+          persist-credentials: false
+
+      - name: Compile pipeline contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             vision/pipelines/scene_graph/src/scene_graph.cpp
+
+      - name: Build composition tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/scene-graph-contract"
+          cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer             -Isalts/tinytest/include             -c salts/tinytest/src/tinytest.c             -o "$RUNNER_TEMP/scene-graph-contract/tinytest.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/src/scene_graph_detail.cpp             -o "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/tests/test_scene_graph.cpp             -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"
+          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/scene-graph-contract/tinytest.o"             "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"             "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"             -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph"
+
+      - name: Run composition tests
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/scene-graph-contract/test_scene_graph"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
