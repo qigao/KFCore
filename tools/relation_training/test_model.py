@@ -17,6 +17,7 @@ from model import (
     KFRelationModel,
     MetaDinoV3Backbone,
     RelationModelConfig,
+    TimmDinoV3Backbone,
 )
 
 
@@ -77,6 +78,31 @@ class FakeMetaModel(nn.Module):
         return tuple(base + float(index) * 0.01 for index in n)
 
 
+class FakeTimmModel(nn.Module):
+    num_features = 8
+    pretrained_cfg = {
+        "mean": (0.485, 0.456, 0.406),
+        "std": (0.229, 0.224, 0.225),
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.patch_embed = SimpleNamespace(patch_size=(2, 2))
+        self.blocks = [object() for _ in range(8)]
+        self.conv = nn.Conv2d(3, self.num_features, kernel_size=2, stride=2, bias=False)
+        self.requested_layers = None
+
+    def get_intermediate_layers(
+        self, image, n=1, reshape=False, return_prefix_tokens=False,
+        norm=False, attn_mask=None
+    ):
+        if not reshape or return_prefix_tokens or norm or attn_mask is not None:
+            raise AssertionError("timm adapter requested an unexpected contract")
+        self.requested_layers = list(n)
+        base = self.conv(image)
+        return [base + float(index) * 0.01 for index in n]
+
+
 def config() -> RelationModelConfig:
     return RelationModelConfig(
         image_size=8,
@@ -131,6 +157,17 @@ class RelationModelTest(unittest.TestCase):
     def test_meta_adapter_resolves_negative_taps_and_bchw_features(self):
         model = FakeMetaModel()
         adapter = MetaDinoV3Backbone(model)
+        taps = adapter.forward_taps(
+            torch.rand(1, 3, 8, 8), (-6, -3, -1)
+        )
+        self.assertEqual(model.requested_layers, [2, 5, 7])
+        self.assertEqual(len(taps), 3)
+        for tap in taps:
+            self.assertEqual(tuple(tap.shape), (1, 8, 4, 4))
+
+    def test_timm_adapter_resolves_negative_taps_and_bchw_features(self):
+        model = FakeTimmModel()
+        adapter = TimmDinoV3Backbone(model)
         taps = adapter.forward_taps(
             torch.rand(1, 3, 8, 8), (-6, -3, -1)
         )
