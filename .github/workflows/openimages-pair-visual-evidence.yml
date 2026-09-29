@@ -152,6 +152,9 @@ jobs:
           - name: union
             holdout: 'false'
             pair_visual_evidence: union
+          - name: contact
+            holdout: 'false'
+            pair_visual_evidence: contact
           - name: union-contact
             holdout: 'false'
             pair_visual_evidence: union-contact
@@ -540,7 +543,7 @@ jobs:
               count="$(gh api \
                 "repos/$GITHUB_REPOSITORY/actions/runs/$candidate/artifacts?per_page=100" \
                 --jq '[.artifacts[] | select(.name | startswith("pair-visual-evidence-arm-"))] | length')"
-              if [ "$count" -ge 3 ]; then
+              if [ "$count" -ge 4 ]; then
                 run_id="$candidate"
                 break
               fi
