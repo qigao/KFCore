@@ -238,6 +238,64 @@ Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
 cannot increase recall or AP. GT-box evaluation does not use detector
 confidence.
 
+## Open Images V7 visual-relationship baseline data
+
+The first real supervised baseline uses Open Images V7 Visual Relationships.
+The converter intentionally keeps only binary object-object relationships and
+skips `RelationLabel=is` attribute rows, because the current canonical schema
+models ordered object pairs rather than object attributes.
+
+First scan train and validation together to lock one shared vocabulary and
+produce the image lists expected by the official Open Images downloader:
+
+```powershell
+python tools/relation_training/convert_openimages.py scan ^
+  --source train=data/oidv7-train-annotations-vrd.csv ^
+  --source validation=data/validation-annotations-vrd.csv ^
+  --class-descriptions data/oidv7-class-descriptions.csv ^
+  --output-dir build/openimages-v7-scan
+```
+
+This writes:
+
+```text
+vocabulary.json
+train.image_ids.txt
+validation.image_ids.txt
+scan.manifest.json
+```
+
+Download only the referenced images with the official Open Images downloader;
+it accepts lines such as `train/<ImageID>` and writes `<ImageID>.jpg` into
+the requested download directory.
+
+Then convert each split after the pixels are local:
+
+```powershell
+python tools/relation_training/convert_openimages.py convert ^
+  --split train ^
+  --relationships data/oidv7-train-annotations-vrd.csv ^
+  --class-descriptions data/oidv7-class-descriptions.csv ^
+  --vocabulary build/openimages-v7-scan/vocabulary.json ^
+  --image-root data/openimages-images ^
+  --output-dir build/openimages-v7-train
+```
+
+The converter builds one deterministic object table per image from exact
+`(MID, normalized box)` endpoints, decodes the local image for authoritative
+pixel dimensions, converts boxes to pixel XYXY, preserves multiple predicate
+labels on the same ordered pair, and validates the emitted bytes through
+`DatasetManifest.load`.
+
+Rows may be reordered without changing the canonical JSONL bytes. Missing
+images, malformed/out-of-range boxes, missing class descriptions and
+self-relations fail fast. The conversion manifest records source/output and
+vocabulary SHA-256 values plus row/image/relation counts.
+
+KFCore does not redistribute Open Images annotations or pixels. Review the
+Open Images annotation and per-image license terms before using or
+redistributing the dataset.
+
 ## Frozen DINOv3 baseline runner
 
 The first reproducible training recipe keeps the DINOv3 backbone frozen and
