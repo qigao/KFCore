@@ -200,7 +200,18 @@ def _load_rows(arms_dir: Path) -> dict[str, dict[str, object]]:
             "baseline_config": training["baseline_config"],
             "benchmark_config": training["benchmark_config"],
             "predicate_weighting": training["predicate_weighting"],
-            "predicate_adapter": training["predicate_adapter"],
+            "predicate_adapter_contract": {
+                "rank": training["predicate_adapter"]["rank"],
+                "parameter_count": training[
+                    "predicate_adapter"
+                ]["parameter_count"],
+                "source_tensor_sha256": training[
+                    "predicate_adapter"
+                ]["source_tensor_sha256"],
+                "effective_tensor_sha256": training[
+                    "predicate_adapter"
+                ]["effective_tensor_sha256"],
+            },
             "loss_config": training["loss_config"],
             "predicate_supervision": training[
                 "predicate_supervision"
@@ -295,7 +306,7 @@ def compare(arms_dir: Path) -> dict[str, object]:
         "baseline_config",
         "benchmark_config",
         "predicate_weighting",
-        "predicate_adapter",
+        "predicate_adapter_contract",
     )
     for candidate in (bce_hold, nce_base, nce_hold):
         for key in common_keys:
