@@ -10,6 +10,11 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_context import (
+    ApacheDeformableRelRead,
+    ApacheRelationInteractionBlock,
+    ApacheRelationTransformer,
+)
 from apache_pair_sampler import ApacheRelatednessPairSampler
 from apache_pair_evidence import (
     BoxPromptEncoder as ApacheBoxPromptEncoder,
@@ -37,6 +42,9 @@ class RelationModelConfig:
     pair_geometry_evidence: str = "basic"
     pair_evidence_contract: str = "legacy"
     pair_sampler_contract: str = "legacy"
+    relation_context_contract: str = "legacy"
+    apache_context_dropout: float = 0.2
+    apache_box_token_dropout: float = 0.3
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -117,6 +125,32 @@ class RelationModelConfig:
         ):
             raise ValueError(
                 "apache pair sampler final budget must not exceed 400"
+            )
+        if self.relation_context_contract not in {
+            "legacy",
+            "apache",
+        }:
+            raise ValueError(
+                "relation_context_contract must be legacy/apache"
+            )
+        if (
+            self.relation_context_contract == "apache"
+            and (
+                self.pair_evidence_contract != "apache"
+                or self.pair_sampler_contract != "apache"
+            )
+        ):
+            raise ValueError(
+                "apache relation context requires apache pair evidence "
+                "and apache pair sampler"
+            )
+        if not 0.0 <= self.apache_context_dropout < 1.0:
+            raise ValueError(
+                "apache_context_dropout must be within [0,1)"
+            )
+        if not 0.0 <= self.apache_box_token_dropout <= 1.0:
+            raise ValueError(
+                "apache_box_token_dropout must be within [0,1]"
             )
 
 
@@ -917,6 +951,40 @@ class KFRelationModel(nn.Module):
             self.geometry_sampler.requires_grad_(False)
             self.pair_head.requires_grad_(False)
 
+        self.apache_relation_transformer: ApacheRelationTransformer | None = None
+        self.apache_deformable_read: ApacheDeformableRelRead | None = None
+        self.apache_relation_interaction: ApacheRelationInteractionBlock | None = None
+        if config.relation_context_contract == "apache":
+            self.apache_relation_transformer = ApacheRelationTransformer(
+                d_model=config.hidden_dim,
+                scene_dim=backbone.hidden_size,
+                n_self_layers=2,
+                n_cross_layers=2,
+                n_heads=8,
+                ffn_ratio=2.0,
+                dropout=config.apache_context_dropout,
+            )
+            self.apache_deformable_read = ApacheDeformableRelRead(
+                d_model=config.hidden_dim,
+                n_points=4,
+                n_heads=8,
+                null_slots=2,
+            )
+            self.apache_relation_interaction = ApacheRelationInteractionBlock(
+                d_model=config.hidden_dim,
+                scene_dim=backbone.hidden_size,
+                n_dependency_layers=2,
+                n_grounding_layers=1,
+                n_heads=8,
+                ffn_ratio=2.0,
+                dropout=config.apache_context_dropout,
+            )
+            # The Apache context stack replaces the historical pair-only
+            # Transformer. Box prompt tokens created by #98 become active here.
+            self.relation_transformer.requires_grad_(False)
+            assert self.apache_box_prompt_encoder is not None
+            self.apache_box_prompt_encoder.requires_grad_(True)
+
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
         if (
@@ -1520,7 +1588,57 @@ class KFRelationModel(nn.Module):
                 )
 
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
-        tokens = self.relation_transformer(tokens)
+        if self.config.relation_context_contract == "apache":
+            if (
+                self.apache_relation_transformer is None
+                or self.apache_deformable_read is None
+                or self.apache_relation_interaction is None
+            ):
+                raise RuntimeError(
+                    "Apache relation context is not configured"
+                )
+            if self.config.pair_evidence_contract != "apache":
+                raise RuntimeError(
+                    "Apache context requires Apache pair evidence"
+                )
+            padding_mask = ~selected_valid
+            box_token_drop = None
+            if (
+                self.training
+                and self.config.apache_box_token_dropout > 0.0
+            ):
+                box_token_drop = (
+                    torch.rand(
+                        batch,
+                        device=tokens.device,
+                    )
+                    < self.config.apache_box_token_dropout
+                )
+
+            tokens = self.apache_relation_transformer(
+                tokens,
+                patch_features,
+                box_tokens=_reference_box_tokens,
+                pair_padding_mask=padding_mask,
+                box_token_drop=box_token_drop,
+            )
+            projected_scene = (
+                self.apache_relation_transformer.projected_scene_map(
+                    patch_features
+                )
+            )
+            tokens = self.apache_deformable_read(
+                tokens,
+                projected_scene,
+                _reference_anchors,
+            )
+            tokens = self.apache_relation_interaction(
+                tokens,
+                patch_features,
+                query_padding_mask=padding_mask,
+            )
+        else:
+            tokens = self.relation_transformer(tokens)
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
 
         pair_logits = (

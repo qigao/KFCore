@@ -142,6 +142,26 @@ def main() -> None:
             "--pair-evidence-contract apache."
         ),
     )
+    parser.add_argument(
+        "--relation-context-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+        help=(
+            "Relation context implementation. apache enables the reference "
+            "RelationTransformer -> DeformableRelRead -> "
+            "RelationInteractionBlock stack."
+        ),
+    )
+    parser.add_argument(
+        "--apache-context-dropout",
+        type=float,
+        default=0.2,
+    )
+    parser.add_argument(
+        "--apache-box-token-dropout",
+        type=float,
+        default=0.3,
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -278,6 +298,9 @@ def main() -> None:
         pair_geometry_evidence=args.pair_geometry_evidence,
         pair_evidence_contract=args.pair_evidence_contract,
         pair_sampler_contract=args.pair_sampler_contract,
+        relation_context_contract=args.relation_context_contract,
+        apache_context_dropout=args.apache_context_dropout,
+        apache_box_token_dropout=args.apache_box_token_dropout,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -651,6 +674,13 @@ def main() -> None:
             "pair_geometry_evidence": model.config.pair_geometry_evidence,
             "pair_evidence_contract": model.config.pair_evidence_contract,
             "pair_sampler_contract": model.config.pair_sampler_contract,
+            "relation_context_contract": (
+                model.config.relation_context_contract
+            ),
+            "apache_context_dropout": model.config.apache_context_dropout,
+            "apache_box_token_dropout": (
+                model.config.apache_box_token_dropout
+            ),
         },
         "baseline_config": config_payload(baseline_config),
         "loss_config": {

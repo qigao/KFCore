@@ -41,6 +41,13 @@ def save_checkpoint(
             "pair_geometry_evidence": model.config.pair_geometry_evidence,
             "pair_evidence_contract": model.config.pair_evidence_contract,
             "pair_sampler_contract": model.config.pair_sampler_contract,
+            "relation_context_contract": (
+                model.config.relation_context_contract
+            ),
+            "apache_context_dropout": model.config.apache_context_dropout,
+            "apache_box_token_dropout": (
+                model.config.apache_box_token_dropout
+            ),
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),
