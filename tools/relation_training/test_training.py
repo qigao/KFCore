@@ -202,12 +202,23 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
             math.sqrt(3.0),
         )
 
-        with self.assertRaises(ValueError):
-            build_predicate_weighting(
-                manifest,
-                predicate_count=3,
-                mode="balanced",
-            )
+        zero_support = build_predicate_weighting(
+            manifest,
+            predicate_count=3,
+            mode="balanced",
+        )
+        self.assertEqual(
+            zero_support.predicate_positive_counts,
+            (3, 1, 0),
+        )
+        self.assertEqual(
+            zero_support.zero_support_predicate_indices,
+            (2,),
+        )
+        self.assertEqual(
+            zero_support.positive_weights[2],
+            1.0,
+        )
 
     def test_frozen_baseline_updates_head_not_backbone_and_evaluates(self):
         seed_everything(17)
