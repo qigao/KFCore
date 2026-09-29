@@ -176,7 +176,14 @@ def _batch_local_predicate_infonce(
     raw_query = raw_query[keep_rows]
     visible = visible[keep_rows]
 
-    positive_strength = visible.to(dtype=query.dtype)
+    direct_weight = visible.to(dtype=query.dtype)
+    if positive_weights is not None:
+        direct_weight = direct_weight * positive_weights.to(
+            device=query.device,
+            dtype=query.dtype,
+        ).view(1, -1)
+
+    positive_strength = direct_weight
     soft_positive_count = query.new_zeros(())
     if semantic_positive_weights is not None:
         if (
@@ -205,13 +212,16 @@ def _batch_local_predicate_infonce(
             device=query.device,
             dtype=query.dtype,
         )
-        expanded = torch.matmul(
-            positive_strength,
+        # Propagate supervision mass from visible seed labels. This is
+        # deliberately seed-weighted: an indirectly reached holdout column
+        # never reads that holdout predicate's own train-frequency weight.
+        expanded_weight = torch.matmul(
+            direct_weight,
             semantic,
-        ).clamp(max=1.0)
+        )
         positive_strength = torch.maximum(
-            positive_strength,
-            expanded,
+            direct_weight,
+            expanded_weight,
         )
         semantic_only = (
             positive_strength > 0
@@ -287,13 +297,6 @@ def _batch_local_predicate_infonce(
     positive = positive_strength > 0
 
     weights = positive_strength.to(dtype=logits.dtype)
-    if positive_weights is not None:
-        weights = weights * positive_weights[
-            contrast_indices
-        ].view(1, -1).to(
-            device=logits.device,
-            dtype=logits.dtype,
-        )
 
     positive_mass = weights.sum(dim=1)
     if (positive_mass <= 0).any():
