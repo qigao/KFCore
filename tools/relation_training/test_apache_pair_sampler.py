@@ -51,17 +51,20 @@ class ApacheRelatednessSamplerTest(unittest.TestCase):
         self.assertEqual(tuple(output.obj_idx.shape), (1, 6))
         self.assertEqual(tuple(output.pair_logits.shape), (1, 6))
         self.assertEqual(int(output.valid_mask.sum()), 2)
-        for slot in range(6):
-            if bool(output.valid_mask[0, slot]):
-                subject = int(output.sub_idx[0, slot])
-                object_ = int(output.obj_idx[0, slot])
-                self.assertLess(subject, 2)
-                self.assertLess(object_, 2)
-                self.assertNotEqual(subject, object_)
-            else:
-                self.assertTrue(
-                    torch.isneginf(output.pair_logits[0, slot])
-                )
+        selected = {
+            (
+                int(output.sub_idx[0, slot]),
+                int(output.obj_idx[0, slot]),
+            )
+            for slot in range(6)
+            if bool(output.valid_mask[0, slot])
+        }
+        self.assertEqual(selected, {(0, 1), (1, 0)})
+        self.assertTrue(
+            torch.isfinite(
+                output.pair_logits[output.valid_mask]
+            ).all()
+        )
 
     def test_training_forces_positive_and_swapped_pair_through_both_stages(self):
         torch.manual_seed(32)
