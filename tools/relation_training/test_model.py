@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from checkpoint import config_from_payload, load_payload, save_checkpoint
+from export_onnx import INPUT_NAMES, OUTPUT_NAMES, check_onnx_parity, export_graph
 from losses import supervised_relation_loss
 from model import BackboneAdapter, HFDinoV3Backbone, KFRelationModel, RelationModelConfig
 
@@ -165,6 +166,49 @@ class RelationModelTest(unittest.TestCase):
         self.assertIsNotNone(backbone.conv.weight.grad)
         self.assertIsNotNone(model.pair_head.weight.grad)
         self.assertIsNotNone(model.predicate_projection.weight.grad)
+
+    def test_synthetic_onnx_matches_native_runtime_contract(self):
+        torch.manual_seed(8)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        image = torch.rand(1, 3, 8, 8)
+        export_boxes = box_tensor[:1].contiguous()
+        export_counts = box_counts[:1].contiguous()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "relation.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                export_boxes,
+                export_counts,
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                export_boxes,
+                export_counts,
+                reference,
+            )
+            self.assertLessEqual(delta, 1.0e-3)
+
+            import onnxruntime as ort
+
+            session = ort.InferenceSession(
+                str(path), providers=["CPUExecutionProvider"]
+            )
+            self.assertEqual(
+                [item.name for item in session.get_inputs()],
+                INPUT_NAMES,
+            )
+            self.assertEqual(
+                [item.name for item in session.get_outputs()],
+                OUTPUT_NAMES,
+            )
 
     def test_checkpoint_round_trip_preserves_runtime_configuration(self):
         torch.manual_seed(9)
