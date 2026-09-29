@@ -103,7 +103,7 @@ def load_rows(arms_dir: Path) -> dict[str, dict[str, object]]:
 
 def compare(arms_dir: Path) -> dict[str, object]:
     rows = load_rows(arms_dir)
-    expected = {"endpoint", "union", "union-contact"}
+    expected = {"endpoint", "union", "contact", "union-contact"}
     if set(rows) != expected:
         raise RuntimeError(
             f"unexpected visual-evidence arms: {sorted(rows)}"
@@ -111,7 +111,8 @@ def compare(arms_dir: Path) -> dict[str, object]:
 
     endpoint = rows["endpoint"]
     union = rows["union"]
-    contact = rows["union-contact"]
+    contact = rows["contact"]
+    union_contact = rows["union-contact"]
 
     common_keys = (
         "prototype_tensor_sha256",
@@ -126,7 +127,7 @@ def compare(arms_dir: Path) -> dict[str, object]:
         "predicate_adapter_contract",
         "loss_config",
     )
-    for candidate in (union, contact):
+    for candidate in (union, contact, union_contact):
         for key in common_keys:
             if endpoint[key] != candidate[key]:
                 raise RuntimeError(
@@ -138,21 +139,33 @@ def compare(arms_dir: Path) -> dict[str, object]:
         raise RuntimeError("endpoint mode drift")
     if union["pair_visual_evidence"] != "union":
         raise RuntimeError("union mode drift")
-    if contact["pair_visual_evidence"] != "union-contact":
+    if contact["pair_visual_evidence"] != "contact":
+        raise RuntimeError("contact mode drift")
+    if union_contact["pair_visual_evidence"] != "union-contact":
         raise RuntimeError("union-contact mode drift")
 
     endpoint_params = int(endpoint["trainable_parameter_count"])
     union_params = int(union["trainable_parameter_count"])
     contact_params = int(contact["trainable_parameter_count"])
-    union_delta = union_params - endpoint_params
-    contact_delta = contact_params - union_params
-    if union_delta <= 0 or contact_delta != union_delta:
+    union_contact_params = int(
+        union_contact["trainable_parameter_count"]
+    )
+    projection_delta = union_params - endpoint_params
+    if projection_delta <= 0:
         raise RuntimeError(
-            "visual evidence projection parameter deltas drifted"
+            "visual evidence projection parameter delta must be positive"
+        )
+    if contact_params - endpoint_params != projection_delta:
+        raise RuntimeError(
+            "contact-only projection parameter delta drifted"
+        )
+    if union_contact_params - endpoint_params != 2 * projection_delta:
+        raise RuntimeError(
+            "union-contact projection parameter delta drifted"
         )
 
     sampler = float(endpoint["sampler_recall"])
-    for candidate in (union, contact):
+    for candidate in (union, contact, union_contact):
         if float(candidate["sampler_recall"]) != sampler:
             raise RuntimeError(
                 f"sampler recall drift in {candidate['arm']}"
@@ -179,11 +192,20 @@ def compare(arms_dir: Path) -> dict[str, object]:
         "schema": "kfcore.pair-visual-evidence/1",
         "endpoint": endpoint,
         "union": union,
-        "union_contact": contact,
+        "contact": contact,
+        "union_contact": union_contact,
         "union_minus_endpoint": delta(union, endpoint),
-        "union_contact_minus_endpoint": delta(contact, endpoint),
-        "union_contact_minus_union": delta(contact, union),
-        "projection_parameter_count": union_delta,
+        "contact_minus_endpoint": delta(contact, endpoint),
+        "union_contact_minus_endpoint": delta(
+            union_contact, endpoint
+        ),
+        "union_contact_minus_union": delta(
+            union_contact, union
+        ),
+        "union_contact_minus_contact": delta(
+            union_contact, contact
+        ),
+        "projection_parameter_count": projection_delta,
     }
 
 
