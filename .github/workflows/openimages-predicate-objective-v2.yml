@@ -6,9 +6,16 @@ on:
     paths:
       - '.github/workflows/openimages-predicate-objective-v2.yml'
   workflow_dispatch:
+    inputs:
+      recompare_run_id:
+        description: Existing objective-v2 run ID to compare without retraining
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: openimages-predicate-objective-v2
@@ -16,6 +23,7 @@ concurrency:
 
 jobs:
   prepare-prototype:
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -129,6 +137,7 @@ jobs:
           path: ${{ runner.temp }}/shared-prototype/
 
   arm:
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     needs: prepare-prototype
     name: ${{ matrix.name }}
     strategy:
@@ -475,10 +484,16 @@ jobs:
           git diff --exit-code
 
   compare:
+    if: ${{ (github.event_name == 'push' && !contains(github.event.head_commit.message, '[recompare-only]')) || (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id == '') }}
     runs-on: ubuntu-24.04
     needs: arm
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: predicate-objective-v2-arm-*
@@ -489,313 +504,64 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          HOLDOUT_NAMES = ("contain", "holds", "ride")
-          TOP_KS = ("20", "50", "100")
-
-          def metric_group(benchmark, indices):
-              by_index = {
-                  item["predicate_index"]: item
-                  for item in benchmark["per_predicate"]
-              }
-              ordered = sorted(indices)
-              if not ordered:
-                  raise RuntimeError("metric group must not be empty")
-              return {
-                  "predicate_indices": ordered,
-                  "predicate_count": len(ordered),
-                  "validation_triplet_support": sum(
-                      by_index[index]["support"]
-                      for index in ordered
-                  ),
-                  "mean_recall_at_k": {
-                      k: sum(
-                          by_index[index]["recall"][k]
-                          for index in ordered
-                      ) / len(ordered)
-                      for k in TOP_KS
-                  },
-              }
-
-          rows = {}
-          for arm_json in sorted(Path("arms").glob("*/arm.json")):
-              root = arm_json.parent
-              arm = json.loads(arm_json.read_text())
-              training = json.loads((root / "training.json").read_text())
-              benchmark = json.loads((root / "benchmark.json").read_text())
-              prototypes = json.loads((root / "prototypes.json").read_text())
-              vocabulary = json.loads((root / "vocabulary.json").read_text())
-
-              names = vocabulary["predicates"]
-              holdout_indices = sorted(
-                  names.index(name) for name in HOLDOUT_NAMES
-              )
-              original_support = training[
-                  "predicate_weighting"
-              ]["predicate_positive_counts"]
-              retained_seen_indices = [
-                  index
-                  for index, item in enumerate(benchmark["per_predicate"])
-                  if (
-                      item["support"] > 0
-                      and original_support[index] > 0
-                      and index not in holdout_indices
-                  )
-              ]
-              natural_zero_indices = [
-                  index
-                  for index, item in enumerate(benchmark["per_predicate"])
-                  if item["support"] > 0 and original_support[index] == 0
-              ]
-              holdout_eval = metric_group(
-                  benchmark, holdout_indices
-              )
-              retained_seen_eval = metric_group(
-                  benchmark, retained_seen_indices
-              )
-              natural_zero_eval = metric_group(
-                  benchmark, natural_zero_indices
-              )
-              groups = benchmark["predicate_groups"]
-              if groups["train_zero_support"] != natural_zero_eval:
-                  raise RuntimeError(
-                      f"{arm['arm']} natural zero group drift"
-                  )
-              if arm["holdout_enabled"]:
-                  if groups.get("explicit_holdout") != holdout_eval:
-                      raise RuntimeError(
-                          f"{arm['arm']} explicit holdout group drift"
-                      )
-                  if groups["seen"] != retained_seen_eval:
-                      raise RuntimeError(
-                          f"{arm['arm']} seen group drift"
-                      )
-              elif "explicit_holdout" in groups:
-                  raise RuntimeError(
-                      f"{arm['arm']} unexpectedly reports holdout group"
-                  )
-
-              history = training["history"]
-              row = {
-                  "arm": arm["arm"],
-                  "objective": arm["predicate_objective"],
-                  "holdout_enabled": arm["holdout_enabled"],
-                  "zero_support_negative_weight": arm[
-                      "zero_support_negative_weight"
-                  ],
-                  "prototype_tensor_sha256": prototypes["tensor_sha256"],
-                  "trainable_parameter_count": training[
-                      "trainable_parameter_count"
-                  ],
-                  "train_annotations_sha256": training[
-                      "train_annotations_sha256"
-                  ],
-                  "validation_annotations_sha256": training[
-                      "validation_annotations_sha256"
-                  ],
-                  "vocabulary_sha256": training["vocabulary_sha256"],
-                  "model_config": training["model_config"],
-                  "baseline_config": training["baseline_config"],
-                  "benchmark_config": training["benchmark_config"],
-                  "predicate_weighting": training["predicate_weighting"],
-                  "predicate_adapter": training["predicate_adapter"],
-                  "loss_config": training["loss_config"],
-                  "predicate_supervision": training[
-                      "predicate_supervision"
-                  ],
-                  "predicate_rows_skipped": sum(
-                      int(epoch["predicate_rows_skipped"])
-                      for epoch in history
-                  ),
-                  "contrast_set_size": history[-1][
-                      "predicate_contrast_set_size"
-                  ],
-                  "positive_cosine": history[-1][
-                      "predicate_positive_cosine"
-                  ],
-                  "hard_negative_margin": history[-1][
-                      "predicate_hard_negative_margin"
-                  ],
-                  "query_raw_norm": history[-1][
-                      "predicate_query_raw_norm"
-                  ],
-                  "unobserved_column_fraction": history[-1][
-                      "predicate_unobserved_column_fraction"
-                  ],
-                  "sampler_recall": benchmark["sampler_recall"],
-                  "pair_ap": benchmark["pair_ap"],
-                  "predicate_top1_accuracy": benchmark[
-                      "predicate_top1_accuracy_on_sampled_pairs"
-                  ],
-                  "r20": benchmark["recall_at_k"]["20"],
-                  "r50": benchmark["recall_at_k"]["50"],
-                  "r100": benchmark["recall_at_k"]["100"],
-                  "mr20": benchmark["mean_recall_at_k"]["20"],
-                  "mr50": benchmark["mean_recall_at_k"]["50"],
-                  "mr100": benchmark["mean_recall_at_k"]["100"],
-                  "retained_seen_mr20": retained_seen_eval[
-                      "mean_recall_at_k"
-                  ]["20"],
-                  "retained_seen_mr50": retained_seen_eval[
-                      "mean_recall_at_k"
-                  ]["50"],
-                  "retained_seen_mr100": retained_seen_eval[
-                      "mean_recall_at_k"
-                  ]["100"],
-                  "natural_zero_mr20": natural_zero_eval[
-                      "mean_recall_at_k"
-                  ]["20"],
-                  "natural_zero_mr50": natural_zero_eval[
-                      "mean_recall_at_k"
-                  ]["50"],
-                  "natural_zero_mr100": natural_zero_eval[
-                      "mean_recall_at_k"
-                  ]["100"],
-                  "holdout_mr20": holdout_eval[
-                      "mean_recall_at_k"
-                  ]["20"],
-                  "holdout_mr50": holdout_eval[
-                      "mean_recall_at_k"
-                  ]["50"],
-                  "holdout_mr100": holdout_eval[
-                      "mean_recall_at_k"
-                  ]["100"],
-              }
-              rows[arm["arm"]] = row
-
-          expected = {
-              "bce-baseline",
-              "bce-holdout",
-              "infonce-baseline",
-              "infonce-holdout",
-          }
-          if set(rows) != expected:
-              raise RuntimeError(
-                  f"unexpected objective arms: {sorted(rows)}"
-              )
-
-          bce_base = rows["bce-baseline"]
-          bce_hold = rows["bce-holdout"]
-          nce_base = rows["infonce-baseline"]
-          nce_hold = rows["infonce-holdout"]
-
-          common_keys = (
-              "prototype_tensor_sha256",
-              "trainable_parameter_count",
-              "train_annotations_sha256",
-              "validation_annotations_sha256",
-              "vocabulary_sha256",
-              "model_config",
-              "baseline_config",
-              "benchmark_config",
-              "predicate_weighting",
-              "predicate_adapter",
-          )
-          for candidate in (bce_hold, nce_base, nce_hold):
-              for key in common_keys:
-                  if bce_base[key] != candidate[key]:
-                      raise RuntimeError(
-                          f"A/B contract mismatch for {candidate['arm']} {key}"
-                      )
-
-          for arm in (bce_base, bce_hold):
-              if arm["objective"] != "bce":
-                  raise RuntimeError("BCE arm objective drift")
-              if abs(arm["zero_support_negative_weight"] - 0.1) > 1e-12:
-                  raise RuntimeError("BCE alpha drift")
-              if arm["loss_config"]["predicate_objective"] != "bce":
-                  raise RuntimeError("BCE loss-config drift")
-
-          for arm in (nce_base, nce_hold):
-              if arm["objective"] != "batch-local-infonce":
-                  raise RuntimeError("InfoNCE arm objective drift")
-              if abs(arm["zero_support_negative_weight"] - 1.0) > 1e-12:
-                  raise RuntimeError("InfoNCE alpha must remain neutral")
-              if (
-                  arm["loss_config"]["predicate_objective"]
-                  != "batch-local-infonce"
-              ):
-                  raise RuntimeError("InfoNCE loss-config drift")
-              if arm["contrast_set_size"] <= 0:
-                  raise RuntimeError("InfoNCE contrast set is empty")
-              if not 0.0 <= arm["unobserved_column_fraction"] <= 1.0:
-                  raise RuntimeError("invalid InfoNCE unobserved fraction")
-
-          if bce_base["holdout_enabled"] or nce_base["holdout_enabled"]:
-              raise RuntimeError("baseline arm unexpectedly holds out labels")
-          if not bce_hold["holdout_enabled"] or not nce_hold["holdout_enabled"]:
-              raise RuntimeError("holdout arm did not enable holdout")
-          if nce_hold["predicate_rows_skipped"] <= 0:
-              raise RuntimeError(
-                  "InfoNCE holdout did not skip holdout-only rows"
-              )
-
-          sampler = bce_base["sampler_recall"]
-          for candidate in (bce_hold, nce_base, nce_hold):
-              if candidate["sampler_recall"] != sampler:
-                  raise RuntimeError(
-                      f"sampler recall drift in {candidate['arm']}"
-                  )
-
-          metric_keys = (
-              "sampler_recall",
-              "pair_ap",
-              "predicate_top1_accuracy",
-              "r20",
-              "r50",
-              "r100",
-              "mr20",
-              "mr50",
-              "mr100",
-              "retained_seen_mr20",
-              "retained_seen_mr50",
-              "retained_seen_mr100",
-              "natural_zero_mr20",
-              "natural_zero_mr50",
-              "natural_zero_mr100",
-              "holdout_mr20",
-              "holdout_mr50",
-              "holdout_mr100",
-          )
-
-          def delta(left, right):
-              return {
-                  key: left[key] - right[key]
-                  for key in metric_keys
-              }
-
-          payload = {
-              "schema": "kfcore.predicate-objective-v2/1",
-              "holdout_predicates": list(HOLDOUT_NAMES),
-              "bce_baseline": bce_base,
-              "bce_holdout": bce_hold,
-              "infonce_baseline": nce_base,
-              "infonce_holdout": nce_hold,
-              "bce_holdout_minus_baseline": delta(
-                  bce_hold, bce_base
-              ),
-              "infonce_holdout_minus_baseline": delta(
-                  nce_hold, nce_base
-              ),
-              "infonce_baseline_minus_bce_baseline": delta(
-                  nce_base, bce_base
-              ),
-              "infonce_holdout_minus_bce_holdout": delta(
-                  nce_hold, bce_hold
-              ),
-          }
-          Path("comparison.json").write_text(
-              json.dumps(payload, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8",
-          )
-          print(json.dumps(payload, indent=2, sort_keys=True))
-          PY
+          python tools/relation_training/compare_predicate_objective_v2.py \
+            --arms-dir arms \
+            --out comparison.json
 
       - uses: actions/upload-artifact@v4
         with:
           name: predicate-objective-v2-comparison-${{ github.run_id }}
+          retention-days: 30
+          path: comparison.json
+
+  recompare:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.recompare_run_id != '') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[recompare-only]')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve source objective run
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.recompare_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED_RUN_ID:-}" ]; then
+            run_id="$REQUESTED_RUN_ID"
+          else
+            run_id="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/openimages-predicate-objective-v2.yml/runs?branch=master&status=completed&per_page=20" \
+              --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' \
+              | head -n 1)"
+          fi
+          test -n "$run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "recompare source run: $run_id"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: predicate-objective-v2-arm-*
+          path: arms
+          merge-multiple: false
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Recompare existing objective artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/compare_predicate_objective_v2.py \
+            --arms-dir arms \
+            --out comparison.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: predicate-objective-v2-recomparison-${{ steps.source.outputs.run_id }}-${{ github.run_id }}
           retention-days: 30
           path: comparison.json
