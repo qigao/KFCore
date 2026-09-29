@@ -197,6 +197,120 @@ class RelationBenchmarkMetricTest(unittest.TestCase):
         self.assertIsNone(report["per_predicate"][1]["recall"]["1"])
         self.assertIsNone(report["per_predicate"][2]["recall"]["1"])
 
+    def test_seen_and_zero_shot_mean_recall_are_reported_separately(self):
+        benchmark = RelationBenchmark(
+            predicate_count=3,
+            config=BenchmarkConfig(top_ks=(1, 3)),
+        )
+        outputs = (
+            torch.tensor(
+                [[
+                    [5.0, 0.0, 0.0],
+                    [0.0, 4.0, 0.0],
+                ]]
+            ),
+            torch.tensor([[2.0, 1.0]]),
+            torch.tensor([[0, 1]], dtype=torch.int64),
+            torch.tensor([[1, 0]], dtype=torch.int64),
+            torch.tensor([[True, True]]),
+        )
+        benchmark.add(
+            outputs,
+            relations=[
+                (0, 0, 1),
+                (1, 1, 0),
+            ],
+        )
+        report = benchmark.report(
+            train_predicate_support=(10, 0, 0),
+        )
+
+        self.assertEqual(
+            report["mean_recall_at_k"]["1"],
+            0.5,
+        )
+        groups = report["predicate_groups"]
+        self.assertEqual(
+            groups["seen"]["predicate_indices"],
+            [0],
+        )
+        self.assertEqual(
+            groups["train_zero_support"]["predicate_indices"],
+            [1],
+        )
+        self.assertEqual(
+            groups["seen"]["validation_triplet_support"],
+            1,
+        )
+        self.assertEqual(
+            groups["train_zero_support"]["validation_triplet_support"],
+            1,
+        )
+        self.assertEqual(
+            groups["seen"]["mean_recall_at_k"]["1"],
+            1.0,
+        )
+        self.assertEqual(
+            groups["train_zero_support"]["mean_recall_at_k"]["1"],
+            0.0,
+        )
+        self.assertEqual(
+            groups["train_zero_support"]["mean_recall_at_k"]["3"],
+            1.0,
+        )
+        # Predicate 2 has no validation support and belongs to neither group.
+        self.assertNotIn(
+            2,
+            groups["seen"]["predicate_indices"],
+        )
+        self.assertNotIn(
+            2,
+            groups["train_zero_support"]["predicate_indices"],
+        )
+
+    def test_predicate_group_with_no_validation_support_reports_null(self):
+        benchmark = RelationBenchmark(
+            predicate_count=2,
+            config=BenchmarkConfig(top_ks=(1,)),
+        )
+        outputs = (
+            torch.tensor([[[3.0, 0.0]]]),
+            torch.tensor([[2.0]]),
+            torch.tensor([[0]], dtype=torch.int64),
+            torch.tensor([[1]], dtype=torch.int64),
+            torch.tensor([[True]]),
+        )
+        benchmark.add(outputs, relations=[(0, 0, 1)])
+        report = benchmark.report(
+            train_predicate_support=(5, 0),
+        )
+        zero = report["predicate_groups"]["train_zero_support"]
+        self.assertEqual(zero["predicate_indices"], [])
+        self.assertEqual(zero["predicate_count"], 0)
+        self.assertEqual(zero["validation_triplet_support"], 0)
+        self.assertIsNone(zero["mean_recall_at_k"]["1"])
+
+    def test_invalid_train_predicate_support_fails_fast(self):
+        benchmark = RelationBenchmark(
+            predicate_count=2,
+            config=BenchmarkConfig(top_ks=(1,)),
+        )
+        outputs = (
+            torch.tensor([[[2.0, 0.0]]]),
+            torch.tensor([[1.0]]),
+            torch.tensor([[0]], dtype=torch.int64),
+            torch.tensor([[1]], dtype=torch.int64),
+            torch.tensor([[True]]),
+        )
+        benchmark.add(outputs, relations=[(0, 0, 1)])
+
+        with self.assertRaises(ValueError):
+            benchmark.report(train_predicate_support=(1,))
+        with self.assertRaises(ValueError):
+            benchmark.report(train_predicate_support=(1, -1))
+        with self.assertRaises(ValueError):
+            benchmark.report(train_predicate_support=(1, True))
+
     def test_report_json_is_deterministic_and_strict(self):
         benchmark = RelationBenchmark(
             predicate_count=1,

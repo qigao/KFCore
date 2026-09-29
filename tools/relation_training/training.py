@@ -373,6 +373,7 @@ def evaluate_gt_boxes(
     image_root: str | Path,
     device: torch.device,
     benchmark_config: BenchmarkConfig = BenchmarkConfig(),
+    train_predicate_support: tuple[int, ...] | None = None,
 ) -> dict[str, object]:
     benchmark = RelationBenchmark(
         predicate_count=int(model.predicate_bank.shape[0]),
@@ -398,6 +399,7 @@ def evaluate_gt_boxes(
     return benchmark.report(
         annotations_sha256=manifest.annotations_sha256,
         vocabulary_sha256=manifest.vocabulary_sha256,
+        train_predicate_support=train_predicate_support,
     )
 
 

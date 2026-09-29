@@ -228,6 +228,9 @@ def main() -> None:
         image_root=args.image_root,
         device=device,
         benchmark_config=benchmark_config,
+        train_predicate_support=(
+            predicate_weighting.predicate_positive_counts
+        ),
     )
 
     output_dir.mkdir(parents=True, exist_ok=False)
