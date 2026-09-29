@@ -238,6 +238,65 @@ Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
 cannot increase recall or AP. GT-box evaluation does not use detector
 confidence.
 
+## Predicate prototype semantic A/B
+
+After the sampler ablation, K=48 is the practical baseline for the next
+controlled experiment. The predicate-prototype A/B compares:
+
+```text
+identity512  17 orthonormal rows in 512 dimensions
+clip         frozen CLIP text prototypes in 512 dimensions
+```
+
+The dimension-matched control is important. Comparing the original `V x V`
+identity bank directly against 512-d CLIP embeddings would also change the
+trainable `predicate_projection` size and parameter count.
+
+CLIP prototypes use public `openai/clip-vit-base-patch32` projected text
+embeddings with three fixed prompt templates:
+
+```text
+{predicate}
+a photo of one object {predicate} another object
+the relation between two objects is {predicate}
+```
+
+Underscores are converted to spaces. Each prompt embedding is normalized,
+the prompt vectors for one predicate are averaged, and the final predicate
+vector is normalized again.
+
+`make_predicate_embeddings.py` remains backward compatible:
+
+```powershell
+# Original V x V identity bank
+python tools/relation_training/make_predicate_embeddings.py ^
+  --vocabulary vocabulary.json ^
+  --out predicates.pt
+
+# Dimension-matched 512-d control
+python tools/relation_training/make_predicate_embeddings.py ^
+  --vocabulary vocabulary.json ^
+  --out predicates.pt ^
+  --mode identity ^
+  --dimension 512
+
+# Frozen CLIP semantic prototypes
+python tools/relation_training/make_predicate_embeddings.py ^
+  --vocabulary vocabulary.json ^
+  --out predicates.pt ^
+  --mode clip ^
+  --clip-model openai/clip-vit-base-patch32
+```
+
+Every prototype file gets a JSON sidecar containing the mode, shape,
+vocabulary hash, prompt templates/model provenance and a deterministic hash of
+the tensor values.
+
+`.github/workflows/openimages-predicate-prototype-ablation.yml` runs the two
+arms on the exact same 256/64 Open Images slice at K=48. The final comparison
+job verifies identical dataset hashes, `[17,512]` prototype shapes and
+identical trainable parameter counts before reporting metric deltas.
+
 ## Pair-sampler ablation
 
 The first sampler-stressing frozen baseline established a non-trivial pair
