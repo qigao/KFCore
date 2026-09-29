@@ -36,3 +36,44 @@ cmake_install_headers(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERNS "*.hpp")
+
+if(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER)
+  if(KFCORE_TOKENIZERS_CPP_SOURCE_DIR STREQUAL "")
+    message(FATAL_ERROR
+      "KFCORE_ENABLE_HF_TOKENIZER_PROVIDER requires KFCORE_TOKENIZERS_CPP_SOURCE_DIR")
+  endif()
+  if(NOT EXISTS "${KFCORE_TOKENIZERS_CPP_SOURCE_DIR}/CMakeLists.txt" OR
+     NOT EXISTS "${KFCORE_TOKENIZERS_CPP_SOURCE_DIR}/include/tokenizers_c.h")
+    message(FATAL_ERROR
+      "KFCORE_TOKENIZERS_CPP_SOURCE_DIR must point to a tokenizers-cpp checkout")
+  endif()
+
+  if(NOT TARGET tokenizers_c)
+    set(MLC_ENABLE_SENTENCEPIECE_TOKENIZER OFF CACHE BOOL "" FORCE)
+    add_subdirectory(
+      "${KFCORE_TOKENIZERS_CPP_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/tokenizers-cpp"
+      EXCLUDE_FROM_ALL)
+  endif()
+
+  add_library(kfcore_relation_tokenizer_hf STATIC
+    src/predicate_tokenizer_hf.cpp)
+  target_include_directories(kfcore_relation_tokenizer_hf
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+      "${KFCORE_TOKENIZERS_CPP_SOURCE_DIR}/include")
+  target_compile_features(kfcore_relation_tokenizer_hf PUBLIC cxx_std_17)
+  target_link_libraries(kfcore_relation_tokenizer_hf
+    PUBLIC
+      KFCore::relation_core
+    PRIVATE
+      tokenizers_c)
+  set_target_properties(kfcore_relation_tokenizer_hf PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    FOLDER "vision/core/relation")
+  add_library(KFCore::relation_tokenizer_hf ALIAS
+    kfcore_relation_tokenizer_hf)
+endif()
