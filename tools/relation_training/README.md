@@ -437,6 +437,43 @@ The train manifest alone determines the weights. `training.json` records:
 K=48 and whitened CLIP prototypes. The final compare job rejects any
 dataset/prototype/parameter-count drift before reporting metric deltas.
 
+## Train-zero-support negative supervision sweep
+
+The canonical 256-image training split has three predicates with no positive
+training examples. Under exhaustive multi-label BCE, those dimensions still
+receive negative targets on every annotated positive relation pair. The
+zero-support mask diagnostic showed that removing those negatives recovers
+zero-shot recall but damages seen-class ranking.
+
+`train_baseline.py` therefore exposes a continuous control:
+
+```text
+--zero-support-negative-weight ALPHA
+```
+
+For predicate BCE, positive target terms always keep multiplier 1. Only
+target=0 terms whose predicate has zero positive train support receive
+`ALPHA`. The loss is normalized by the sum of element weights so changing
+`ALPHA` changes relative supervision rather than the overall predicate-loss
+scale.
+
+Endpoints:
+
+```text
+alpha = 1   legacy exhaustive BCE
+alpha = 0   equivalent to masking train-zero-support negative-only dimensions
+```
+
+The existing `--mask-zero-support-predicates` flag remains available for
+backward-compatible diagnostics; it cannot be combined with a non-default
+negative-weight value.
+
+`.github/workflows/openimages-zero-support-negative-sweep.yml` evaluates
+`1.0 / 0.5 / 0.25 / 0.1 / 0.0` on the exact same K=48 frozen-DINOv3,
+sqrt-balanced, whitened-CLIP baseline. The final comparison requires identical
+dataset/prototype/common-model contracts and identical sampler recall before
+reporting overall, seen and zero-shot mRecall deltas.
+
 ## CLIP whitening evidence tolerance
 
 The raw CLIP and whitened-CLIP arms encode the same text prototypes in
