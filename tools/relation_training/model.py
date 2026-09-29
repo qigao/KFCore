@@ -53,11 +53,12 @@ class RelationModelConfig:
         if self.pair_visual_evidence not in {
             "endpoint",
             "union",
+            "contact",
             "union-contact",
         }:
             raise ValueError(
                 "pair_visual_evidence must be "
-                "endpoint/union/union-contact"
+                "endpoint/union/contact/union-contact"
             )
 
 
@@ -766,7 +767,7 @@ class KFRelationModel(nn.Module):
         else:
             self.union_projection = None
 
-        if config.pair_visual_evidence == "union-contact":
+        if config.pair_visual_evidence in {"contact", "union-contact"}:
             self.contact_projection: nn.Linear | None = nn.Linear(
                 backbone.hidden_size,
                 config.hidden_dim,
@@ -982,7 +983,10 @@ class KFRelationModel(nn.Module):
         )
         tokens = self.pair_projection(pair_features)
 
-        if self.union_projection is not None:
+        if (
+            self.union_projection is not None
+            or self.contact_projection is not None
+        ):
             subject_boxes = _batch_gather(boxes, subject_index)
             object_boxes = _batch_gather(boxes, object_index)
             (
@@ -994,14 +998,15 @@ class KFRelationModel(nn.Module):
                 object_boxes,
                 selected_valid,
             )
-            union_features = self._pool_regions(
-                patch_features,
-                union_boxes,
-                selected_valid,
-            )
-            tokens = tokens + self.union_projection(
-                union_features
-            )
+            if self.union_projection is not None:
+                union_features = self._pool_regions(
+                    patch_features,
+                    union_boxes,
+                    selected_valid,
+                )
+                tokens = tokens + self.union_projection(
+                    union_features
+                )
 
             if self.contact_projection is not None:
                 contact_features = self._pool_regions(
