@@ -11,8 +11,10 @@ from benchmark import RelationVocabulary
 from make_predicate_embeddings import (
     DEFAULT_TEMPLATES,
     aggregate_prompt_embeddings,
+    gram_diagnostics,
     identity_predicate_embeddings,
     predicate_prompts,
+    symmetric_whiten_predicates,
     tensor_sha256,
     write_outputs,
 )
@@ -94,6 +96,43 @@ class PredicatePrototypeTest(unittest.TestCase):
                 atol=1.0e-6,
             )
         )
+
+    def test_symmetric_whitening_removes_row_correlation(self):
+        correlated = torch.tensor(
+            [
+                [1.0, 0.8, 0.0, 0.0],
+                [0.9, 1.0, 0.2, 0.0],
+                [0.2, 0.4, 1.0, 0.3],
+            ],
+            dtype=torch.float32,
+        )
+        before = gram_diagnostics(correlated)
+        whitened = symmetric_whiten_predicates(correlated)
+        after = gram_diagnostics(whitened)
+
+        self.assertEqual(tuple(whitened.shape), (3, 4))
+        self.assertGreater(before["max_abs_off_diagonal"], 0.5)
+        self.assertLess(after["max_abs_off_diagonal"], 1.0e-5)
+        self.assertLess(after["mean_abs_off_diagonal"], 1.0e-5)
+        self.assertTrue(
+            torch.allclose(
+                whitened @ whitened.T,
+                torch.eye(3),
+                atol=1.0e-5,
+                rtol=1.0e-5,
+            )
+        )
+
+    def test_symmetric_whitening_rejects_rank_deficient_rows(self):
+        duplicate = torch.tensor(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        with self.assertRaises(ValueError):
+            symmetric_whiten_predicates(duplicate)
 
     def test_write_outputs_records_stable_tensor_hash(self):
         vocabulary = RelationVocabulary(
