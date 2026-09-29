@@ -1,0 +1,82 @@
+name: Relation contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'vision/core/relation/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/relation-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'vision/core/relation/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/relation-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relation-contract-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Checkout pinned TinyTest source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: salts
+          persist-credentials: false
+
+      - name: Compile typed runtime contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             vision/core/relation/src/relate_anything.cpp
+
+      - name: Build decoder tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/relation-contract"
+          cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer             -Isalts/tinytest/include             -c salts/tinytest/src/tinytest.c             -o "$RUNNER_TEMP/relation-contract/tinytest.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/core/relation/src/decode.cpp             -o "$RUNNER_TEMP/relation-contract/decode.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/core/relation/tests/test_decode.cpp             -o "$RUNNER_TEMP/relation-contract/test_decode.o"
+          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/relation-contract/tinytest.o"             "$RUNNER_TEMP/relation-contract/decode.o"             "$RUNNER_TEMP/relation-contract/test_decode.o"             -lm -o "$RUNNER_TEMP/relation-contract/test_relation_decode"
+
+      - name: Run decoder tests
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/relation-contract/test_relation_decode"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
