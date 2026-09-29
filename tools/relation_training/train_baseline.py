@@ -111,6 +111,13 @@ def main() -> None:
         type=float,
         default=20.0,
     )
+    parser.add_argument(
+        "--mask-zero-support-predicates",
+        action="store_true",
+        help=(
+            "Exclude train-zero-support predicate dimensions from predicate BCE."
+        ),
+    )
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260929)
@@ -169,6 +176,34 @@ def main() -> None:
         cap=args.predicate_positive_weight_cap,
     )
     predicate_positive_weights = predicate_weighting.tensor()
+    if args.mask_zero_support_predicates:
+        predicate_supervision_mask = torch.tensor(
+            [
+                count > 0
+                for count in predicate_weighting.predicate_positive_counts
+            ],
+            dtype=torch.bool,
+        )
+        predicate_supervision_mode = "train-supported-only"
+    else:
+        predicate_supervision_mask = None
+        predicate_supervision_mode = "all"
+
+    supervised_predicate_indices = [
+        index
+        for index, count in enumerate(
+            predicate_weighting.predicate_positive_counts
+        )
+        if (
+            not args.mask_zero_support_predicates
+            or count > 0
+        )
+    ]
+    masked_predicate_indices = [
+        index
+        for index in range(len(vocabulary.predicates))
+        if index not in supervised_predicate_indices
+    ]
 
     seed_everything(baseline_config.seed)
     predicate_embeddings = load_predicate_embeddings(
@@ -218,6 +253,7 @@ def main() -> None:
             device=device,
             loss_config=loss_config,
             predicate_positive_weights=predicate_positive_weights,
+            predicate_supervision_mask=predicate_supervision_mask,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -268,6 +304,11 @@ def main() -> None:
                 "positive_weights": list(
                     predicate_weighting.positive_weights
                 ),
+            },
+            "predicate_supervision": {
+                "mode": predicate_supervision_mode,
+                "supervised_predicate_indices": supervised_predicate_indices,
+                "masked_predicate_indices": masked_predicate_indices,
             },
             "history": history,
         },
@@ -327,6 +368,11 @@ def main() -> None:
             "positive_weights": list(
                 predicate_weighting.positive_weights
             ),
+        },
+        "predicate_supervision": {
+            "mode": predicate_supervision_mode,
+            "supervised_predicate_indices": supervised_predicate_indices,
+            "masked_predicate_indices": masked_predicate_indices,
         },
         "history": history,
     }
