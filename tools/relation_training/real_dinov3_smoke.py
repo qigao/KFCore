@@ -249,8 +249,12 @@ def main() -> None:
             predicate_embeddings.float(),
             dim=-1,
         )
-        with torch.inference_mode():
-            alpha3 = model.apache_vocab_head.routing_alpha(W3)
+        with torch.no_grad():
+            alpha3 = (
+                model.apache_vocab_head.routing_alpha(W3)
+                .detach()
+                .clone()
+            )
         dynamic_reference = export_dynamic_vocabulary_graph(
             model,
             dynamic_onnx_path,
@@ -267,8 +271,12 @@ def main() -> None:
             torch.randn(5, predicate_embeddings.shape[1]),
             dim=-1,
         )
-        with torch.inference_mode():
-            alpha5 = model.apache_vocab_head.routing_alpha(W5)
+        with torch.no_grad():
+            alpha5 = (
+                model.apache_vocab_head.routing_alpha(W5)
+                .detach()
+                .clone()
+            )
         dynamic_delta = check_dynamic_vocabulary_parity(
             dynamic_onnx_path,
             model,
