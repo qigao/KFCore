@@ -181,8 +181,12 @@ def main() -> None:
     loader = make_training_loader(
         train_dataset, baseline_config
     )
+    parameters = trainable_parameters(model)
+    trainable_parameter_count = sum(
+        parameter.numel() for parameter in parameters
+    )
     optimizer = torch.optim.AdamW(
-        trainable_parameters(model),
+        parameters,
         lr=baseline_config.learning_rate,
         weight_decay=baseline_config.weight_decay,
     )
@@ -248,6 +252,10 @@ def main() -> None:
         "predicate_embeddings_sha256": sha256(
             Path(args.predicate_embeddings)
         ),
+        "predicate_embedding_shape": list(
+            predicate_embeddings.shape
+        ),
+        "trainable_parameter_count": trainable_parameter_count,
         "checkpoint_sha256": sha256(checkpoint_path),
         "model_config": {
             "image_size": model.config.image_size,
