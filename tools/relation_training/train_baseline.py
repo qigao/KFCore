@@ -15,6 +15,7 @@ from benchmark import (
 )
 from checkpoint import save_checkpoint
 from losses import RelationLossConfig
+from make_predicate_embeddings import gram_diagnostics, tensor_sha256
 from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 from training import (
     FrozenBaselineConfig,
@@ -94,6 +95,12 @@ def main() -> None:
     parser.add_argument("--geometry-dim", type=int, default=64)
     parser.add_argument("--num-heads", type=int, default=4)
     parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument(
+        "--predicate-adapter-rank",
+        type=int,
+        default=0,
+        help="Shared low-rank residual adapter rank; 0 disables it.",
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -158,6 +165,7 @@ def main() -> None:
         num_layers=args.num_layers,
         dropout=0.0,
         tap_indices=(-6, -3, -1),
+        predicate_adapter_rank=args.predicate_adapter_rank,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -269,6 +277,28 @@ def main() -> None:
         ),
     )
 
+    source_bank = model.predicate_bank.detach().cpu()
+    effective_bank = model.effective_predicate_bank().detach().cpu()
+    source_effective_cosine = torch.nn.functional.cosine_similarity(
+        source_bank,
+        effective_bank,
+        dim=-1,
+    )
+    predicate_adapter_report = {
+        "rank": model.config.predicate_adapter_rank,
+        "parameter_count": model.predicate_adapter_parameter_count(),
+        "source_tensor_sha256": tensor_sha256(source_bank),
+        "effective_tensor_sha256": tensor_sha256(effective_bank),
+        "source_gram": gram_diagnostics(source_bank),
+        "effective_gram": gram_diagnostics(effective_bank),
+        "mean_row_cosine_to_source": float(
+            source_effective_cosine.mean().item()
+        ),
+        "min_row_cosine_to_source": float(
+            source_effective_cosine.min().item()
+        ),
+    }
+
     output_dir.mkdir(parents=True, exist_ok=False)
     checkpoint_path = output_dir / "relation-v1.pt"
     save_checkpoint(
@@ -310,6 +340,7 @@ def main() -> None:
                 "supervised_predicate_indices": supervised_predicate_indices,
                 "masked_predicate_indices": masked_predicate_indices,
             },
+            "predicate_adapter": predicate_adapter_report,
             "history": history,
         },
     )
@@ -343,6 +374,7 @@ def main() -> None:
             "num_heads": model.config.num_heads,
             "num_layers": model.config.num_layers,
             "tap_indices": list(model.config.tap_indices),
+            "predicate_adapter_rank": model.config.predicate_adapter_rank,
         },
         "baseline_config": config_payload(baseline_config),
         "loss_config": {
@@ -374,6 +406,7 @@ def main() -> None:
             "supervised_predicate_indices": supervised_predicate_indices,
             "masked_predicate_indices": masked_predicate_indices,
         },
+        "predicate_adapter": predicate_adapter_report,
         "history": history,
     }
 
