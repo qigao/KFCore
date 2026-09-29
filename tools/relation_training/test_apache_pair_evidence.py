@@ -245,6 +245,59 @@ class ApachePairEvidenceTest(unittest.TestCase):
             places=6,
         )
 
+    def test_apache_contract_preserves_existing_common_initialization(self):
+        def build(mode: str) -> KFRelationModel:
+            torch.manual_seed(23)
+            backbone = ToyBackbone()
+            embeddings = torch.randn(3, 6)
+            cfg = RelationModelConfig(
+                image_size=8,
+                max_boxes=4,
+                pair_budget=6,
+                hidden_dim=16,
+                geometry_dim=8,
+                num_heads=4,
+                num_layers=1,
+                dropout=0.0,
+                tap_indices=(-3, -2, -1),
+                pair_evidence_contract=mode,
+            )
+            return KFRelationModel(
+                backbone,
+                embeddings,
+                cfg,
+            )
+
+        legacy = build("legacy")
+        apache = build("apache")
+        apache_state = apache.state_dict()
+        for name, value in legacy.state_dict().items():
+            self.assertIn(name, apache_state)
+            self.assertTrue(
+                torch.equal(value, apache_state[name]),
+                msg=f"common initialization drift: {name}",
+            )
+
+        self.assertFalse(
+            any(
+                parameter.requires_grad
+                for parameter in apache.geometry_encoder.parameters()
+            )
+        )
+        self.assertFalse(
+            any(
+                parameter.requires_grad
+                for parameter in apache.pair_projection.parameters()
+            )
+        )
+        assert apache.apache_box_prompt_encoder is not None
+        self.assertFalse(
+            any(
+                parameter.requires_grad
+                for parameter in apache.apache_box_prompt_encoder.parameters()
+            )
+        )
+
     def test_apache_model_exposes_reference_pair_evidence_shapes(self):
         torch.manual_seed(3)
         model = KFRelationModel(
