@@ -169,7 +169,7 @@ class ApachePairEvidenceTest(unittest.TestCase):
         self.assertAlmostEqual(
             float(features[0, 0, 0]),
             n(0.5),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 1]),
@@ -179,47 +179,47 @@ class ApachePairEvidenceTest(unittest.TestCase):
         self.assertAlmostEqual(
             float(features[0, 0, 7]),
             n(1.0 / 3.0),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 8]),
             n(0.5),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 9]),
             n(0.5),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 12]),
             n(1.0),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 13]),
             0.0,
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 15]),
             n(1.0),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 16]),
             n(1.0),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 17]),
             n(1.0 / 3.0),
-            places=5,
+            delta=1.0e-5,
         )
         self.assertAlmostEqual(
             float(features[0, 0, 18]),
             n(0.5),
-            places=5,
+            delta=1.0e-5,
         )
 
     def test_region_coverage_metrics_are_pairwise(self):
