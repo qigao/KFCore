@@ -365,8 +365,8 @@ def main() -> None:
         image_root=args.image_root,
         device=device,
         benchmark_config=benchmark_config,
-        train_predicate_support=tuple(
-            effective_train_predicate_support
+        train_predicate_support=(
+            predicate_weighting.predicate_positive_counts
         ),
         explicit_holdout_predicate_indices=(
             holdout_indices if holdout_indices else None
