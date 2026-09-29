@@ -11,7 +11,13 @@ from torch import nn
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import INPUT_NAMES, OUTPUT_NAMES, check_onnx_parity, export_graph
 from losses import supervised_relation_loss
-from model import BackboneAdapter, HFDinoV3Backbone, KFRelationModel, RelationModelConfig
+from model import (
+    BackboneAdapter,
+    HFDinoV3Backbone,
+    KFRelationModel,
+    MetaDinoV3Backbone,
+    RelationModelConfig,
+)
 
 
 class ToyBackbone(BackboneAdapter):
@@ -48,6 +54,27 @@ class FakeHFModel(nn.Module):
     def assert_contract(output_hidden_states, return_dict) -> None:
         if not output_hidden_states or not return_dict:
             raise AssertionError("adapter did not request hidden states")
+
+
+class FakeMetaModel(nn.Module):
+    embed_dim = 8
+    patch_size = 2
+    n_blocks = 8
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(3, self.embed_dim, kernel_size=2, stride=2, bias=False)
+        self.requested_layers = None
+
+    def get_intermediate_layers(
+        self, image, *, n, reshape, return_class_token=False,
+        return_extra_tokens=False, norm=True
+    ):
+        if not reshape or return_class_token or return_extra_tokens or norm:
+            raise AssertionError("official adapter requested an unexpected contract")
+        self.requested_layers = list(n)
+        base = self.conv(image)
+        return tuple(base + float(index) * 0.01 for index in n)
 
 
 def config() -> RelationModelConfig:
@@ -100,6 +127,17 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(len(taps), 3)
         for tap in taps:
             self.assertEqual(tuple(tap.shape), (2, 8, 4, 4))
+
+    def test_meta_adapter_resolves_negative_taps_and_bchw_features(self):
+        model = FakeMetaModel()
+        adapter = MetaDinoV3Backbone(model)
+        taps = adapter.forward_taps(
+            torch.rand(1, 3, 8, 8), (-6, -3, -1)
+        )
+        self.assertEqual(model.requested_layers, [2, 5, 7])
+        self.assertEqual(len(taps), 3)
+        for tap in taps:
+            self.assertEqual(tuple(tap.shape), (1, 8, 4, 4))
 
     def test_runtime_shapes_and_valid_pair_indices(self):
         torch.manual_seed(3)
