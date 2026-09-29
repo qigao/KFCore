@@ -19,6 +19,7 @@ from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 from training import (
     FrozenBaselineConfig,
     RelationTrainingDataset,
+    build_predicate_weighting,
     config_payload,
     evaluate_gt_boxes,
     freeze_backbone,
@@ -100,6 +101,16 @@ def main() -> None:
     parser.add_argument("--sampler-loss-weight", type=float, default=1.0)
     parser.add_argument("--pair-loss-weight", type=float, default=1.0)
     parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--predicate-positive-weight-mode",
+        choices=("none", "sqrt-balanced", "balanced"),
+        default="none",
+    )
+    parser.add_argument(
+        "--predicate-positive-weight-cap",
+        type=float,
+        default=20.0,
+    )
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260929)
@@ -151,6 +162,13 @@ def main() -> None:
         top_ks=(20, 50, 100),
         pair_weight=args.pair_weight,
     )
+    predicate_weighting = build_predicate_weighting(
+        train_manifest,
+        predicate_count=len(vocabulary.predicates),
+        mode=args.predicate_positive_weight_mode,
+        cap=args.predicate_positive_weight_cap,
+    )
+    predicate_positive_weights = predicate_weighting.tensor()
 
     seed_everything(baseline_config.seed)
     predicate_embeddings = load_predicate_embeddings(
@@ -199,6 +217,7 @@ def main() -> None:
             optimizer,
             device=device,
             loss_config=loss_config,
+            predicate_positive_weights=predicate_positive_weights,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -232,6 +251,17 @@ def main() -> None:
                 "pair_loss_weight": loss_config.pair_loss_weight,
                 "predicate_loss_weight": loss_config.predicate_loss_weight,
                 "negative_pair_weight": loss_config.negative_pair_weight,
+            },
+            "predicate_weighting": {
+                "mode": predicate_weighting.mode,
+                "cap": predicate_weighting.cap,
+                "positive_pair_count": predicate_weighting.positive_pair_count,
+                "predicate_positive_counts": list(
+                    predicate_weighting.predicate_positive_counts
+                ),
+                "positive_weights": list(
+                    predicate_weighting.positive_weights
+                ),
             },
             "history": history,
         },
@@ -277,6 +307,17 @@ def main() -> None:
         "benchmark_config": {
             "pair_weight": benchmark_config.pair_weight,
             "top_ks": list(benchmark_config.top_ks),
+        },
+        "predicate_weighting": {
+            "mode": predicate_weighting.mode,
+            "cap": predicate_weighting.cap,
+            "positive_pair_count": predicate_weighting.positive_pair_count,
+            "predicate_positive_counts": list(
+                predicate_weighting.predicate_positive_counts
+            ),
+            "positive_weights": list(
+                predicate_weighting.positive_weights
+            ),
         },
         "history": history,
     }
