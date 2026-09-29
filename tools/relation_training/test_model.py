@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+import torch
+from torch import nn
+
+from checkpoint import config_from_payload, load_payload, save_checkpoint
+from losses import supervised_relation_loss
+from model import BackboneAdapter, HFDinoV3Backbone, KFRelationModel, RelationModelConfig
+
+
+class ToyBackbone(BackboneAdapter):
+    hidden_size = 8
+    patch_size = 2
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(3, self.hidden_size, kernel_size=2, stride=2)
+
+    def forward_taps(self, image: torch.Tensor, taps) -> list[torch.Tensor]:
+        base = self.conv(image)
+        return [base + float(index) * 0.1 for index, _ in enumerate(taps)]
+
+
+class FakeHFModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(3, 8, kernel_size=2, stride=2, bias=False)
+
+    def forward(self, pixel_values, output_hidden_states, return_dict):
+        self.assert_contract(output_hidden_states, return_dict)
+        patches = self.conv(pixel_values).flatten(2).transpose(1, 2)
+        prefix = torch.zeros(
+            patches.shape[0], 5, patches.shape[2],
+            dtype=patches.dtype, device=patches.device
+        )
+        tokens = torch.cat((prefix, patches), dim=1)
+        return SimpleNamespace(
+            hidden_states=tuple(tokens * float(i + 1) for i in range(4))
+        )
+
+    @staticmethod
+    def assert_contract(output_hidden_states, return_dict) -> None:
+        if not output_hidden_states or not return_dict:
+            raise AssertionError("adapter did not request hidden states")
+
+
+def config() -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+    )
+
+
+def boxes() -> tuple[torch.Tensor, torch.Tensor]:
+    value = torch.tensor(
+        [
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            [
+                [0.25, 0.25, 0.20, 0.20],
+                [0.65, 0.25, 0.20, 0.20],
+                [0.00, 0.00, 0.00, 0.00],
+                [0.00, 0.00, 0.00, 0.00],
+            ],
+        ],
+        dtype=torch.float32,
+    )
+    return value, torch.tensor([4, 2], dtype=torch.int64)
+
+
+class RelationModelTest(unittest.TestCase):
+    def test_hf_adapter_extracts_patch_tail_from_multi_tap_hidden_states(self):
+        adapter = HFDinoV3Backbone(
+            FakeHFModel(),
+            hidden_size=8,
+            patch_size=2,
+            image_mean=(0.0, 0.0, 0.0),
+            image_std=(1.0, 1.0, 1.0),
+        )
+        taps = adapter.forward_taps(
+            torch.rand(2, 3, 8, 8), (-3, -2, -1)
+        )
+        self.assertEqual(len(taps), 3)
+        for tap in taps:
+            self.assertEqual(tuple(tap.shape), (2, 8, 4, 4))
+
+    def test_runtime_shapes_and_valid_pair_indices(self):
+        torch.manual_seed(3)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            config(),
+        )
+        box_tensor, box_counts = boxes()
+        output = model(
+            torch.rand(2, 3, 8, 8),
+            box_tensor,
+            box_counts,
+        )
+        pred, pair, sub, obj, valid = output
+        self.assertEqual(tuple(pred.shape), (2, 6, 3))
+        self.assertEqual(tuple(pair.shape), (2, 6))
+        self.assertEqual(tuple(sub.shape), (2, 6))
+        self.assertEqual(tuple(obj.shape), (2, 6))
+        self.assertEqual(tuple(valid.shape), (2, 6))
+        self.assertEqual(valid.dtype, torch.bool)
+
+        for batch in range(2):
+            count = int(box_counts[batch])
+            for slot in range(6):
+                if bool(valid[batch, slot]):
+                    self.assertLess(int(sub[batch, slot]), count)
+                    self.assertLess(int(obj[batch, slot]), count)
+                    self.assertNotEqual(
+                        int(sub[batch, slot]), int(obj[batch, slot])
+                    )
+
+    def test_supervised_loss_backpropagates_into_backbone_and_heads(self):
+        torch.manual_seed(7)
+        backbone = ToyBackbone()
+        model = KFRelationModel(backbone, torch.randn(3, 6), config())
+        box_tensor, box_counts = boxes()
+        output = model(
+            torch.rand(2, 3, 8, 8),
+            box_tensor,
+            box_counts,
+        )
+
+        pair_targets = torch.zeros(2, 4, 4)
+        predicate_targets = torch.full(
+            (2, 4, 4), -1, dtype=torch.int64
+        )
+        for batch, count in enumerate((4, 2)):
+            for subject in range(count):
+                for object_ in range(count):
+                    if subject == object_:
+                        continue
+                    pair_targets[batch, subject, object_] = 1.0
+                    predicate_targets[batch, subject, object_] = (
+                        subject + object_
+                    ) % 3
+
+        losses = supervised_relation_loss(
+            output, pair_targets, predicate_targets
+        )
+        self.assertTrue(torch.isfinite(losses["loss"]))
+        losses["loss"].backward()
+
+        self.assertIsNotNone(backbone.conv.weight.grad)
+        self.assertIsNotNone(model.pair_head.weight.grad)
+        self.assertIsNotNone(model.predicate_projection.weight.grad)
+
+    def test_checkpoint_round_trip_preserves_runtime_configuration(self):
+        torch.manual_seed(9)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+                extra={"purpose": "unit-test"},
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+            self.assertEqual(restored, config())
+            self.assertEqual(
+                payload["predicates"],
+                ["beside", "holding", "riding"],
+            )
+            self.assertEqual(
+                tuple(payload["predicate_embeddings"].shape), (3, 6)
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
