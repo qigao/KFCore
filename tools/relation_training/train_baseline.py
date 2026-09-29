@@ -137,6 +137,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--holdout-row-policy",
+        choices=("dimension-only", "skip-holdout-only"),
+        default="dimension-only",
+        help=(
+            "Predicate-loss handling for explicit holdouts. "
+            "dimension-only masks only held-out dimensions; "
+            "skip-holdout-only also skips predicate BCE for positive "
+            "pairs whose positive predicate labels are entirely held out."
+        ),
+    )
+    parser.add_argument(
         "--zero-support-negative-weight",
         type=float,
         default=1.0,
@@ -219,6 +230,14 @@ def main() -> None:
         raise ValueError(
             "--holdout-predicate cannot be combined with "
             "--mask-zero-support-predicates"
+        )
+    if (
+        args.holdout_row_policy != "dimension-only"
+        and not holdout_names
+    ):
+        raise ValueError(
+            "--holdout-row-policy skip-holdout-only requires "
+            "--holdout-predicate"
         )
 
     predicate_index = {
@@ -355,6 +374,7 @@ def main() -> None:
             predicate_supervision_mask=predicate_supervision_mask,
             predicate_negative_weights=predicate_negative_weights,
             explicit_holdout_mask=explicit_holdout_mask,
+            explicit_holdout_row_policy=args.holdout_row_policy,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -446,6 +466,7 @@ def main() -> None:
                 "effective_train_predicate_support": list(
                     effective_train_predicate_support
                 ),
+                "holdout_row_policy": args.holdout_row_policy,
             },
             "predicate_negative_weighting": {
                 "zero_support_negative_weight": (
@@ -531,6 +552,7 @@ def main() -> None:
             "effective_train_predicate_support": list(
                 effective_train_predicate_support
             ),
+            "holdout_row_policy": args.holdout_row_policy,
         },
         "predicate_negative_weighting": {
             "zero_support_negative_weight": (
