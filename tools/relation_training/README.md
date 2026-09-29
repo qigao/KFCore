@@ -612,6 +612,64 @@ The controlled experiment keeps hard-negative count fixed at 8 and compares
 `contain / holds / ride` holdout arms. No pair/sampler, prototype, visual
 encoder, optimizer or dataset variable changes in that attribution.
 
+## Pair visual evidence: endpoint / union / contact
+
+RelationModelConfig now exposes:
+
+```text
+pair_visual_evidence =
+    endpoint
+    union
+    union-contact
+```
+
+The historical endpoint representation remains unchanged:
+
+```text
+subject
+object
+subject - object
+subject * object
+geometry
+    -> pair projection
+```
+
+Union/contact evidence is injected as a residual after the historical pair
+projection and before the relation transformer:
+
+```text
+base_pair_token
+    + union_projection(union_pool)
+    + contact_projection(contact_pool)
+```
+
+Both optional projections are created only after all common stochastic modules
+and are zero-initialized. Therefore:
+
+- endpoint keeps the exact historical architecture;
+- common parameters are bitwise-identical across evidence modes under one seed;
+- union/union-contact start from the exact endpoint output;
+- training must demonstrate value before the residual can affect predictions.
+
+The tight union rectangle covers both selected subject/object boxes. Contact is
+their positive-area intersection. Non-overlap and edge-touching pairs use an
+invalid contact mask and a stable zero contact feature.
+
+The public runtime/ONNX tensor ABI is unchanged. The evidence mode is an
+internal model configuration persisted in the training checkpoint.
+
+The first controlled A/B fixes the predicate objective at hard8 batch-local
+InfoNCE plus source-aware calibration weight 0.10 and compares:
+
+```text
+endpoint
+union
+union-contact
+```
+
+No holdout, sampler, dataset, prototype, optimizer, backbone or training
+schedule variable changes in this attribution.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive
