@@ -1,11 +1,6 @@
 name: Real DINOv3 relation smoke
 
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'tools/relation_training/**'
-      - '.github/workflows/real-dinov3-relation-smoke.yml'
   workflow_dispatch:
 
 permissions:
