@@ -151,6 +151,122 @@ class HFDinoV3Backbone(BackboneAdapter):
         return result
 
 
+class MetaDinoV3Backbone(BackboneAdapter):
+    """Adapter for Meta's official DINOv3 torch.hub implementation.
+
+    The caller supplies the official repository checkout and weight URL/path.
+    KFCore does not vendor either the upstream source or model weights.
+    """
+
+    IMAGENET_MEAN = (0.485, 0.456, 0.406)
+    IMAGENET_STD = (0.229, 0.224, 0.225)
+
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        hidden_size = getattr(model, "embed_dim", None)
+        patch_size = getattr(model, "patch_size", None)
+        depth = getattr(model, "n_blocks", None)
+        if not isinstance(hidden_size, int) or hidden_size <= 0:
+            raise ValueError("official DINOv3 model is missing a valid embed_dim")
+        if not isinstance(patch_size, int) or patch_size <= 0:
+            raise ValueError("official DINOv3 model is missing a valid patch_size")
+        if not isinstance(depth, int) or depth <= 0:
+            raise ValueError("official DINOv3 model is missing a valid n_blocks")
+        if not callable(getattr(model, "get_intermediate_layers", None)):
+            raise ValueError("official DINOv3 model lacks get_intermediate_layers")
+
+        self.model = model
+        self.hidden_size = hidden_size
+        self.patch_size = patch_size
+        self.depth = depth
+        self.register_buffer(
+            "_mean",
+            torch.tensor(self.IMAGENET_MEAN, dtype=torch.float32).reshape(
+                1, 3, 1, 1
+            ),
+            persistent=True,
+        )
+        self.register_buffer(
+            "_std",
+            torch.tensor(self.IMAGENET_STD, dtype=torch.float32).reshape(
+                1, 3, 1, 1
+            ),
+            persistent=True,
+        )
+
+    @classmethod
+    def from_torch_hub(
+        cls,
+        repo_dir: str,
+        *,
+        model_name: str = "dinov3_vits16",
+        weights: str,
+        train_backbone: bool = True,
+    ) -> "MetaDinoV3Backbone":
+        if not repo_dir:
+            raise ValueError("repo_dir must not be empty")
+        if not weights:
+            raise ValueError("weights URL/path must not be empty")
+        model = torch.hub.load(
+            repo_dir,
+            model_name,
+            source="local",
+            weights=weights,
+        )
+        backbone = cls(model)
+        backbone.model.requires_grad_(train_backbone)
+        return backbone
+
+    def forward_taps(self, image: Tensor, taps: Sequence[int]) -> list[Tensor]:
+        if image.ndim != 4 or image.shape[1] != 3:
+            raise ValueError(
+                "DINOv3 image input must be NCHW with three channels"
+            )
+        height = int(image.shape[2])
+        width = int(image.shape[3])
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
+            raise ValueError(
+                "image dimensions must be divisible by DINOv3 patch size"
+            )
+
+        absolute: list[int] = []
+        for tap in taps:
+            index = self.depth + int(tap) if int(tap) < 0 else int(tap)
+            if index < 0 or index >= self.depth:
+                raise ValueError(
+                    f"DINOv3 tap {tap} resolves outside [0,{self.depth})"
+                )
+            absolute.append(index)
+
+        mean = self._mean.to(dtype=image.dtype, device=image.device)
+        std = self._std.to(dtype=image.dtype, device=image.device)
+        normalized = (image - mean) / std
+        outputs = self.model.get_intermediate_layers(
+            normalized,
+            n=absolute,
+            reshape=True,
+            norm=False,
+        )
+        if len(outputs) != len(absolute):
+            raise RuntimeError(
+                "official DINOv3 returned the wrong number of intermediate taps"
+            )
+
+        result: list[Tensor] = []
+        for feature in outputs:
+            if (
+                feature.ndim != 4
+                or int(feature.shape[1]) != self.hidden_size
+                or int(feature.shape[2]) != height // self.patch_size
+                or int(feature.shape[3]) != width // self.patch_size
+            ):
+                raise RuntimeError(
+                    "official DINOv3 intermediate feature contract mismatch"
+                )
+            result.append(feature)
+        return result
+
+
 def _batch_gather(values: Tensor, indices: Tensor) -> Tensor:
     if values.ndim != 3 or indices.ndim != 2:
         raise ValueError("batch gather expects [B,N,C] values and [B,K] indices")
