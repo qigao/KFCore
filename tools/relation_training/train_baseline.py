@@ -97,6 +97,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
     parser.add_argument("--weight-decay", type=float, default=1.0e-4)
+    parser.add_argument("--sampler-loss-weight", type=float, default=1.0)
+    parser.add_argument("--pair-loss-weight", type=float, default=1.0)
+    parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260929)
@@ -139,7 +142,10 @@ def main() -> None:
         tap_indices=(-6, -3, -1),
     )
     loss_config = RelationLossConfig(
-        negative_pair_weight=args.negative_pair_weight
+        sampler_loss_weight=args.sampler_loss_weight,
+        pair_loss_weight=args.pair_loss_weight,
+        predicate_loss_weight=args.predicate_loss_weight,
+        negative_pair_weight=args.negative_pair_weight,
     )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
@@ -254,6 +260,16 @@ def main() -> None:
             "tap_indices": list(model.config.tap_indices),
         },
         "baseline_config": config_payload(baseline_config),
+        "loss_config": {
+            "sampler_loss_weight": loss_config.sampler_loss_weight,
+            "pair_loss_weight": loss_config.pair_loss_weight,
+            "predicate_loss_weight": loss_config.predicate_loss_weight,
+            "negative_pair_weight": loss_config.negative_pair_weight,
+        },
+        "benchmark_config": {
+            "pair_weight": benchmark_config.pair_weight,
+            "top_ks": list(benchmark_config.top_ks),
+        },
         "history": history,
     }
 
