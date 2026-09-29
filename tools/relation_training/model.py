@@ -784,12 +784,13 @@ class KFRelationModel(nn.Module):
         )
 
     def _forward_impl(
-        self, image: Tensor, boxes: Tensor, box_counts: Tensor
-    ) -> tuple[
-        tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
-        Tensor,
-        Tensor,
-    ]:
+        self,
+        image: Tensor,
+        boxes: Tensor,
+        box_counts: Tensor,
+        *,
+        encoder_only: bool = False,
+    ) -> tuple[tuple[Tensor, ...], Tensor, Tensor]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
         if image.shape[2] != self.config.image_size or image.shape[3] != self.config.image_size:
@@ -868,7 +869,27 @@ class KFRelationModel(nn.Module):
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
 
         pair_logits = self.pair_head(tokens).squeeze(-1)
-        predicate_query = F.normalize(self.predicate_projection(tokens), dim=-1)
+        predicate_query = F.normalize(
+            self.predicate_projection(tokens), dim=-1
+        )
+        if encoder_only:
+            # Phase-1 open-vocabulary ABI reserves independent semantic and
+            # spatial query outputs. Until the dual-expert model lands they
+            # intentionally carry the same learned text-space query.
+            encoder_runtime = (
+                predicate_query,
+                predicate_query.clone(),
+                pair_logits,
+                subject_index.to(torch.int64),
+                object_index.to(torch.int64),
+                selected_valid.to(torch.bool),
+            )
+            return (
+                encoder_runtime,
+                sampler_logits,
+                flat_valid.to(torch.bool),
+            )
+
         scale = self.logit_scale.exp().clamp(max=100.0)
         pred_logits = scale * torch.matmul(
             predicate_query,
@@ -882,6 +903,21 @@ class KFRelationModel(nn.Module):
             selected_valid.to(torch.bool),
         )
         return runtime, sampler_logits, flat_valid.to(torch.bool)
+
+    def forward_encoder(
+        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        runtime, _, _ = self._forward_impl(
+            image,
+            boxes,
+            box_counts,
+            encoder_only=True,
+        )
+        if len(runtime) != 6:
+            raise RuntimeError(
+                "open-vocabulary encoder returned the wrong output count"
+            )
+        return runtime  # type: ignore[return-value]
 
     def forward(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
