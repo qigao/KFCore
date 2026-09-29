@@ -192,6 +192,7 @@ class PredicateWeighting:
     mode: str
     positive_pair_count: int
     predicate_positive_counts: tuple[int, ...]
+    zero_support_predicate_indices: tuple[int, ...]
     positive_weights: tuple[float, ...]
     cap: float
 
@@ -235,18 +236,17 @@ def build_predicate_weighting(
         raise ValueError(
             "predicate weighting requires positive relation pairs"
         )
-    missing = [
+    zero_support = tuple(
         index for index, count in enumerate(counts)
-        if count <= 0
-    ]
-    if missing:
-        raise ValueError(
-            f"predicate {missing[0]} has no positive train support"
-        )
+        if count == 0
+    )
 
     weights: list[float] = []
     for count in counts:
-        if mode == "none":
+        if mode == "none" or count == 0:
+            # A zero-support predicate has no positive BCE terms in this
+            # training split, so pos_weight cannot create supervision.
+            # Keep it neutral and report the unsupported index explicitly.
             weight = 1.0
         else:
             ratio = (positive_pair_count - count) / count
@@ -269,6 +269,7 @@ def build_predicate_weighting(
         mode=mode,
         positive_pair_count=positive_pair_count,
         predicate_positive_counts=tuple(counts),
+        zero_support_predicate_indices=zero_support,
         positive_weights=tuple(weights),
         cap=float(cap),
     )
