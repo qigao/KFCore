@@ -84,7 +84,6 @@ jobs:
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DINOV3_REPO_COMMIT: 6876159a11b4df116f30f667f8c9888617df0751
-      DINOV3_WEIGHTS_URL: https://dl.fbaipublicfiles.com/dinov3/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,9 +126,12 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/dinov3" rev-parse HEAD)" = "$DINOV3_REPO_COMMIT"
 
       - name: Download official DINOv3 ViT-S/16 weights
+        env:
+          DINOV3_WEIGHTS_URL: ${{ secrets.DINOV3_WEIGHTS_URL }}
         shell: bash
         run: |
           set -euxo pipefail
+          test -n "${DINOV3_WEIGHTS_URL:-}"
           WEIGHTS="$RUNNER_TEMP/dinov3_vits16_pretrain_lvd1689m-08c60483.pth"
           curl --fail --location --retry 3 --retry-delay 2 \
             --output "$WEIGHTS" \
