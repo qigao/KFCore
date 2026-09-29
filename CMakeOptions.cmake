@@ -25,6 +25,11 @@ option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
 option(KFCORE_ENABLE_TEMPORAL_GESTURE_GRU
        "Build the experimental temporal gesture GRU library and smoke tool"
        OFF)
+option(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER
+       "Build the optional HuggingFace tokenizer.json provider for relation predicates"
+       OFF)
+set(KFCORE_TOKENIZERS_CPP_SOURCE_DIR "" CACHE PATH
+    "Path to a pinned mlc-ai/tokenizers-cpp source checkout when KFCORE_ENABLE_HF_TOKENIZER_PROVIDER=ON")
 option(KFCORE_ONNXRUNTIME_ENABLE_CUDA
        "Expose CUDA devices from the ONNX Runtime backend when the installed ORT SDK provides CUDA EP"
        OFF)
