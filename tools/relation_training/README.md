@@ -285,6 +285,54 @@ This is an attribution experiment. If whitening recovers the orthogonal
 control, the next useful model change is a relation-specific shared text
 adapter rather than generic raw CLIP prototypes.
 
+## Relation-specific shared predicate adapter
+
+Static whitening fixes most of the correlation problem in raw CLIP prototypes,
+but the remaining low-K/long-tail trade-off motivates a small relation-specific
+alignment layer.
+
+The optional model adapter is one shared low-rank residual mapping over the
+entire predicate bank:
+
+```text
+W_eff = normalize(W + Up(GELU(Down(W))))
+```
+
+It is controlled by `RelationModelConfig.predicate_adapter_rank` and
+`--predicate-adapter-rank` in the baseline runner.
+
+Properties:
+
+- rank 0 is the exact legacy behavior;
+- no bias terms;
+- `Up` is zero-initialized, so the adapter starts numerically at the source
+  predicate bank;
+- the mapping is shared across every predicate, including train-zero-support
+  predicates;
+- no predicate gets an individual trainable embedding;
+- runtime tensor names/shapes and native ONNX ABI are unchanged.
+
+Example:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  ... ^
+  --predicate-adapter-rank 16 ^
+  --predicate-positive-weight-mode sqrt-balanced ^
+  --predicate-positive-weight-cap 20
+```
+
+Training reports record adapter rank/parameter count plus source/effective
+predicate-bank hashes, Gram diagnostics and row cosine drift. Checkpoints retain
+the adapter config and weights so ONNX export reconstructs the same effective
+bank.
+
+The controlled experiment in
+`.github/workflows/openimages-predicate-adapter.yml` compares rank 0 against a
+rank-16 adapter on the exact same K=48, frozen-DINOv3, shared whitened-CLIP,
+sqrt-balanced Open Images baseline. It reports overall, seen and
+train-zero-support recall separately.
+
 ## Train-zero-support predicate supervision mask
 
 A shared train+validation vocabulary can contain predicates that have validation

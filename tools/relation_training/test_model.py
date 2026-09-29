@@ -134,6 +134,21 @@ def config() -> RelationModelConfig:
     )
 
 
+def adapter_config() -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+        predicate_adapter_rank=4,
+    )
+
+
 def boxes() -> tuple[torch.Tensor, torch.Tensor]:
     value = torch.tensor(
         [
@@ -201,6 +216,106 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(len(taps), 3)
         for tap in taps:
             self.assertEqual(tuple(tap.shape), (1, 8, 4, 4))
+
+    def test_predicate_adapter_starts_as_exact_residual_identity(self):
+        torch.manual_seed(29)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            adapter_config(),
+        )
+        self.assertEqual(model.predicate_adapter_parameter_count(), 48)
+        self.assertIsNotNone(model.predicate_adapter_down)
+        self.assertIsNotNone(model.predicate_adapter_up)
+        self.assertTrue(
+            torch.allclose(
+                model.effective_predicate_bank(),
+                model.predicate_bank,
+                atol=1.0e-7,
+                rtol=1.0e-7,
+            )
+        )
+        self.assertEqual(
+            float(model.predicate_adapter_up.weight.abs().sum()),
+            0.0,
+        )
+
+    def test_predicate_adapter_receives_finite_gradients_after_zero_init(self):
+        torch.manual_seed(31)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            adapter_config(),
+        )
+        box_tensor, box_counts = boxes()
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+
+        first = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        _, _, sub_idx, obj_idx, valid_mask = first.runtime
+        slot = int(torch.nonzero(valid_mask[0], as_tuple=False)[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 0] = 1.0
+
+        first_loss = supervised_relation_loss(
+            first,
+            pair_targets,
+            predicate_targets,
+        )["loss"]
+        first_loss.backward()
+        up_grad = model.predicate_adapter_up.weight.grad
+        down_grad = model.predicate_adapter_down.weight.grad
+        self.assertIsNotNone(up_grad)
+        self.assertIsNotNone(down_grad)
+        self.assertTrue(torch.isfinite(up_grad).all())
+        self.assertTrue(torch.isfinite(down_grad).all())
+        self.assertGreater(float(up_grad.abs().sum()), 0.0)
+        # Up is zero-initialized, so the first backward cannot yet reach Down.
+        self.assertEqual(float(down_grad.abs().sum()), 0.0)
+
+        optimizer = torch.optim.SGD(
+            [
+                model.predicate_adapter_down.weight,
+                model.predicate_adapter_up.weight,
+            ],
+            lr=0.1,
+        )
+        optimizer.step()
+        model.zero_grad(set_to_none=True)
+
+        second = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        second_loss = supervised_relation_loss(
+            second,
+            pair_targets,
+            predicate_targets,
+        )["loss"]
+        second_loss.backward()
+        down_grad = model.predicate_adapter_down.weight.grad
+        up_grad = model.predicate_adapter_up.weight.grad
+        self.assertIsNotNone(down_grad)
+        self.assertIsNotNone(up_grad)
+        self.assertTrue(torch.isfinite(down_grad).all())
+        self.assertTrue(torch.isfinite(up_grad).all())
+        self.assertGreater(float(down_grad.abs().sum()), 0.0)
+        self.assertGreater(float(up_grad.abs().sum()), 0.0)
+
+    def test_predicate_adapter_rank_validates_against_embedding_dimension(self):
+        with self.assertRaises(ValueError):
+            KFRelationModel(
+                ToyBackbone(),
+                torch.randn(3, 3),
+                adapter_config(),
+            )
 
     def test_runtime_shapes_and_valid_pair_indices(self):
         torch.manual_seed(3)
@@ -578,6 +693,64 @@ class RelationModelTest(unittest.TestCase):
                 [item.name for item in session.get_outputs()],
                 OUTPUT_NAMES,
             )
+
+    def test_adapter_enabled_onnx_matches_native_runtime_contract(self):
+        torch.manual_seed(37)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), adapter_config()
+        )
+        with torch.no_grad():
+            model.predicate_adapter_up.weight.normal_(0.0, 0.01)
+
+        box_tensor, box_counts = boxes()
+        image = torch.rand(1, 3, 8, 8)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "relation-adapter.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                reference,
+            )
+        self.assertLessEqual(delta, 1.0e-3)
+
+    def test_adapter_checkpoint_round_trip_preserves_rank_and_state(self):
+        torch.manual_seed(41)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), adapter_config()
+        )
+        with torch.no_grad():
+            model.predicate_adapter_up.weight.normal_(0.0, 0.01)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "adapter.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored_config = config_from_payload(payload)
+
+        self.assertEqual(restored_config.predicate_adapter_rank, 4)
+        self.assertIn("predicate_adapter_down.weight", payload["state_dict"])
+        self.assertIn("predicate_adapter_up.weight", payload["state_dict"])
+        self.assertTrue(
+            torch.equal(
+                payload["state_dict"]["predicate_adapter_up.weight"],
+                model.predicate_adapter_up.weight.detach().cpu(),
+            )
+        )
 
     def test_checkpoint_round_trip_preserves_runtime_configuration(self):
         torch.manual_seed(9)

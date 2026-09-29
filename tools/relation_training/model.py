@@ -22,6 +22,7 @@ class RelationModelConfig:
     num_layers: int = 2
     dropout: float = 0.0
     tap_indices: tuple[int, ...] = (-6, -3, -1)
+    predicate_adapter_rank: int = 0
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -40,6 +41,14 @@ class RelationModelConfig:
             raise ValueError("dropout must be within [0,1)")
         if not self.tap_indices:
             raise ValueError("at least one backbone tap is required")
+        if (
+            isinstance(self.predicate_adapter_rank, bool)
+            or not isinstance(self.predicate_adapter_rank, int)
+            or self.predicate_adapter_rank < 0
+        ):
+            raise ValueError(
+                "predicate_adapter_rank must be a non-negative integer"
+            )
 
 
 @dataclass(frozen=True)
@@ -581,6 +590,31 @@ class KFRelationModel(nn.Module):
         normalized_bank = F.normalize(predicate_embeddings.float(), dim=-1)
         self.register_buffer("predicate_bank", normalized_bank, persistent=True)
 
+        if config.predicate_adapter_rank > self.predicate_dim:
+            raise ValueError(
+                "predicate_adapter_rank must not exceed predicate embedding dimension"
+            )
+        if config.predicate_adapter_rank > 0:
+            self.predicate_adapter_down: nn.Linear | None = nn.Linear(
+                self.predicate_dim,
+                config.predicate_adapter_rank,
+                bias=False,
+            )
+            self.predicate_adapter_up: nn.Linear | None = nn.Linear(
+                config.predicate_adapter_rank,
+                self.predicate_dim,
+                bias=False,
+            )
+            nn.init.normal_(
+                self.predicate_adapter_down.weight,
+                mean=0.0,
+                std=0.02,
+            )
+            nn.init.zeros_(self.predicate_adapter_up.weight)
+        else:
+            self.predicate_adapter_down = None
+            self.predicate_adapter_up = None
+
         self.tap_norms = nn.ModuleList(
             nn.LayerNorm(backbone.hidden_size) for _ in config.tap_indices
         )
@@ -621,6 +655,25 @@ class KFRelationModel(nn.Module):
             config.hidden_dim, self.predicate_dim, bias=False
         )
         self.logit_scale = nn.Parameter(torch.tensor(2.6592600369))
+
+    def effective_predicate_bank(self) -> Tensor:
+        bank = self.predicate_bank
+        if (
+            self.predicate_adapter_down is None
+            or self.predicate_adapter_up is None
+        ):
+            return bank
+        residual = self.predicate_adapter_up(
+            F.gelu(self.predicate_adapter_down(bank))
+        )
+        return F.normalize(bank + residual, dim=-1)
+
+    def predicate_adapter_parameter_count(self) -> int:
+        return sum(
+            parameter.numel()
+            for name, parameter in self.named_parameters()
+            if name.startswith("predicate_adapter_")
+        )
 
     def _fused_patch_features(self, image: Tensor) -> Tensor:
         taps = self.backbone.forward_taps(image, self.config.tap_indices)
@@ -815,7 +868,8 @@ class KFRelationModel(nn.Module):
         predicate_query = F.normalize(self.predicate_projection(tokens), dim=-1)
         scale = self.logit_scale.exp().clamp(max=100.0)
         pred_logits = scale * torch.matmul(
-            predicate_query, self.predicate_bank.transpose(0, 1)
+            predicate_query,
+            self.effective_predicate_bank().transpose(0, 1),
         )
         runtime = (
             pred_logits,
