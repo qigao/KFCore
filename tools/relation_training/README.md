@@ -377,6 +377,39 @@ identity matrix. Its purpose is to establish a reproducible optimization and
 sampling anchor before introducing a semantic text embedding bank or backbone
 fine-tuning.
 
+## Open Images semantic predicate baseline v2
+
+After the identity-prototype v1 anchor, v2 keeps the Open Images split and all
+training/model hyperparameters fixed and changes only the predicate bank.
+
+```text
+v1: identity matrix [V,V]
+v2: frozen CLIP text prototypes [V,D]
+```
+
+The semantic bank uses the public `openai/clip-vit-base-patch32` text encoder
+with projection. Predicate underscores are replaced by spaces and three fixed
+prompts are encoded:
+
+```text
+{predicate}
+a photo of one object {predicate} another object
+the relation between two objects is {predicate}
+```
+
+Each prompt embedding is L2-normalized, the per-predicate prompts are averaged,
+and the final predicate vector is normalized again. The text model is used only
+offline to create the fixed bank; native KFCore inference still requires no text
+encoder.
+
+`openimages-relation-baseline-v2.yml` verifies the exact v1 train subset,
+validation subset and vocabulary SHA-256 before training. It then repeats the
+same 256/64, 4..12-box, pair-budget-24, 3-epoch frozen-DINOv3 experiment.
+
+The evidence bundle additionally records the text model ID, prompt templates,
+predicate-bank shape and tensor SHA-256. CLIP weights, DINOv3 weights, pixels,
+source annotation CSVs and the trained checkpoint are not uploaded.
+
 ## Frozen DINOv3 baseline runner
 
 The first reproducible training recipe keeps the DINOv3 backbone frozen and
