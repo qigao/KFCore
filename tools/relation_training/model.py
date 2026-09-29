@@ -590,31 +590,6 @@ class KFRelationModel(nn.Module):
         normalized_bank = F.normalize(predicate_embeddings.float(), dim=-1)
         self.register_buffer("predicate_bank", normalized_bank, persistent=True)
 
-        if config.predicate_adapter_rank > self.predicate_dim:
-            raise ValueError(
-                "predicate_adapter_rank must not exceed predicate embedding dimension"
-            )
-        if config.predicate_adapter_rank > 0:
-            self.predicate_adapter_down: nn.Linear | None = nn.Linear(
-                self.predicate_dim,
-                config.predicate_adapter_rank,
-                bias=False,
-            )
-            self.predicate_adapter_up: nn.Linear | None = nn.Linear(
-                config.predicate_adapter_rank,
-                self.predicate_dim,
-                bias=False,
-            )
-            nn.init.normal_(
-                self.predicate_adapter_down.weight,
-                mean=0.0,
-                std=0.02,
-            )
-            nn.init.zeros_(self.predicate_adapter_up.weight)
-        else:
-            self.predicate_adapter_down = None
-            self.predicate_adapter_up = None
-
         self.tap_norms = nn.ModuleList(
             nn.LayerNorm(backbone.hidden_size) for _ in config.tap_indices
         )
@@ -655,6 +630,34 @@ class KFRelationModel(nn.Module):
             config.hidden_dim, self.predicate_dim, bias=False
         )
         self.logit_scale = nn.Parameter(torch.tensor(2.6592600369))
+
+        # Optional modules are initialized only after every common stochastic
+        # module. This keeps rank=0 and rank>0 common parameter initialization
+        # bitwise-identical under the same global RNG seed.
+        if config.predicate_adapter_rank > self.predicate_dim:
+            raise ValueError(
+                "predicate_adapter_rank must not exceed predicate embedding dimension"
+            )
+        if config.predicate_adapter_rank > 0:
+            self.predicate_adapter_down: nn.Linear | None = nn.Linear(
+                self.predicate_dim,
+                config.predicate_adapter_rank,
+                bias=False,
+            )
+            self.predicate_adapter_up: nn.Linear | None = nn.Linear(
+                config.predicate_adapter_rank,
+                self.predicate_dim,
+                bias=False,
+            )
+            nn.init.normal_(
+                self.predicate_adapter_down.weight,
+                mean=0.0,
+                std=0.02,
+            )
+            nn.init.zeros_(self.predicate_adapter_up.weight)
+        else:
+            self.predicate_adapter_down = None
+            self.predicate_adapter_up = None
 
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
