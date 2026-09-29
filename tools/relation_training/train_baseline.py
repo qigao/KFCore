@@ -266,7 +266,7 @@ def main() -> None:
         ),
         zero_support_negative_weight=args.zero_support_negative_weight,
     )
-    allow_masked_positive_targets = False
+    explicit_holdout_mask = None
     if holdout_indices:
         predicate_supervision_mask = torch.ones(
             len(vocabulary.predicates),
@@ -275,8 +275,8 @@ def main() -> None:
         predicate_supervision_mask[
             list(holdout_indices)
         ] = False
+        explicit_holdout_mask = ~predicate_supervision_mask
         predicate_supervision_mode = "explicit-holdout"
-        allow_masked_positive_targets = True
     elif args.mask_zero_support_predicates:
         predicate_supervision_mask = torch.tensor(
             [
@@ -354,7 +354,7 @@ def main() -> None:
             predicate_positive_weights=predicate_positive_weights,
             predicate_supervision_mask=predicate_supervision_mask,
             predicate_negative_weights=predicate_negative_weights,
-            allow_masked_positive_targets=allow_masked_positive_targets,
+            explicit_holdout_mask=explicit_holdout_mask,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
