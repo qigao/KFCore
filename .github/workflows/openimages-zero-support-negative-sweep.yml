@@ -555,12 +555,59 @@ jobs:
                   "vocabulary_sha256",
                   "predicate_weighting",
                   "predicate_supervision",
-                  "predicate_adapter",
               ):
                   if row[key] != anchor[key]:
                       raise RuntimeError(
                           f"A/B contract mismatch for {name} {key}"
                       )
+
+              adapter = row["predicate_adapter"]
+              anchor_adapter = anchor["predicate_adapter"]
+              for key in (
+                  "rank",
+                  "parameter_count",
+                  "source_tensor_sha256",
+                  "effective_tensor_sha256",
+              ):
+                  if adapter[key] != anchor_adapter[key]:
+                      raise RuntimeError(
+                          f"adapter contract mismatch for {name} {key}"
+                      )
+
+              import math
+
+              for key in (
+                  "mean_row_cosine_to_source",
+                  "min_row_cosine_to_source",
+              ):
+                  if not math.isclose(
+                      float(adapter[key]),
+                      float(anchor_adapter[key]),
+                      rel_tol=1.0e-6,
+                      abs_tol=1.0e-8,
+                  ):
+                      raise RuntimeError(
+                          f"adapter diagnostic mismatch for {name} {key}"
+                      )
+
+              for gram_name in ("source_gram", "effective_gram"):
+                  left = adapter[gram_name]
+                  right = anchor_adapter[gram_name]
+                  if set(left) != set(right):
+                      raise RuntimeError(
+                          f"adapter Gram fields drifted for {name} {gram_name}"
+                      )
+                  for key in sorted(left):
+                      if not math.isclose(
+                          float(left[key]),
+                          float(right[key]),
+                          rel_tol=1.0e-6,
+                          abs_tol=1.0e-8,
+                      ):
+                          raise RuntimeError(
+                              f"adapter Gram mismatch for {name} "
+                              f"{gram_name}.{key}"
+                          )
 
               negative = row["predicate_negative_weighting"]
               if negative["zero_support_negative_weight"] != alpha:
