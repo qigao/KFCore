@@ -308,8 +308,11 @@ balanced       pos_weight_i = r_i
 ```
 
 Non-control weights are capped by
-`--predicate-positive-weight-cap` (20 in the experiment). Every predicate must
-have positive train support; missing classes fail fast.
+`--predicate-positive-weight-cap` (20 in the experiment). A predicate with
+zero positive support in the fixed train split receives neutral
+`pos_weight=1`; this does not invent supervision because no positive BCE term
+exists for that class. Its index is recorded explicitly as train-zero-support
+evidence.
 
 CLI:
 
@@ -324,6 +327,7 @@ The train manifest alone determines the weights. `training.json` records:
 - weighting mode/cap;
 - total positive pair count;
 - per-predicate positive counts;
+- train-zero-support predicate indices;
 - final positive weights.
 
 `.github/workflows/openimages-predicate-balance.yml` runs
