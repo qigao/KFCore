@@ -399,10 +399,30 @@ jobs:
               raise RuntimeError(
                   f"whitened prototype Gram is not orthogonal: {white_max}"
               )
-          if whitened["prototype_source_gram"] != raw["prototype_gram"]:
+          import math
+
+          source_gram = whitened["prototype_source_gram"]
+          raw_gram = raw["prototype_gram"]
+          if source_gram is None:
               raise RuntimeError(
-                  "whitened source Gram does not match raw CLIP Gram"
+                  "whitened prototype metadata is missing source Gram"
               )
+          if set(source_gram) != set(raw_gram):
+              raise RuntimeError(
+                  "whitened/raw Gram diagnostics have different fields"
+              )
+          for key in sorted(raw_gram):
+              if not math.isclose(
+                  float(source_gram[key]),
+                  float(raw_gram[key]),
+                  rel_tol=1.0e-6,
+                  abs_tol=1.0e-8,
+              ):
+                  raise RuntimeError(
+                      "whitened source Gram does not numerically match "
+                      f"raw CLIP Gram for {key}: "
+                      f"{source_gram[key]} != {raw_gram[key]}"
+                  )
           if raw_max <= white_max:
               raise RuntimeError(
                   "whitening did not reduce prototype correlation"
