@@ -163,11 +163,16 @@ it reads them from the adapter.
 ```python
 from losses import supervised_relation_loss
 
-outputs = model(image, boxes, box_counts)
+outputs = model.forward_training(image, boxes, box_counts)
 losses = supervised_relation_loss(outputs, pair_targets, predicate_targets)
 losses["loss"].backward()
 optimizer.step()
 ```
+
+The training path adds an explicit dense ordered-pair sampler BCE before the
+non-differentiable top-K selection. This is required because gradients through
+the selected relation head cannot train the discrete top-K indices themselves.
+The inference/export `forward()` contract remains unchanged.
 
 This baseline treats unannotated valid pairs as down-weighted negatives. That is
 **not** yet a positive-unlabeled objective and should not be presented as
