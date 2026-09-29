@@ -290,14 +290,21 @@ class RelationBenchmarkMetricTest(unittest.TestCase):
             relations=[
                 (0, 0, 1),
                 (1, 1, 0),
+                (0, 2, 1),
             ],
         )
         report = benchmark.report(
-            train_predicate_support=(10, 0, 0),
+            train_predicate_support=(10, 5, 0),
             explicit_holdout_predicate_indices=(1,),
         )
-        group = report["predicate_groups"]["explicit_holdout"]
+        groups = report["predicate_groups"]
+        group = groups["explicit_holdout"]
 
+        self.assertEqual(groups["seen"]["predicate_indices"], [0])
+        self.assertEqual(
+            groups["train_zero_support"]["predicate_indices"],
+            [2],
+        )
         self.assertEqual(group["predicate_indices"], [1])
         self.assertEqual(group["predicate_count"], 1)
         self.assertEqual(group["validation_triplet_support"], 1)
@@ -307,7 +314,7 @@ class RelationBenchmarkMetricTest(unittest.TestCase):
         for invalid in ((1, 1), (3,), (2,), ()):
             with self.assertRaises(ValueError):
                 benchmark.report(
-                    train_predicate_support=(10, 0, 0),
+                    train_predicate_support=(10, 5, 0),
                     explicit_holdout_predicate_indices=invalid,
                 )
 
