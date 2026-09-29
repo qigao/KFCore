@@ -23,6 +23,7 @@ class RelationModelConfig:
     dropout: float = 0.0
     tap_indices: tuple[int, ...] = (-6, -3, -1)
     predicate_adapter_rank: int = 0
+    pair_visual_evidence: str = "endpoint"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -48,6 +49,15 @@ class RelationModelConfig:
         ):
             raise ValueError(
                 "predicate_adapter_rank must be a non-negative integer"
+            )
+        if self.pair_visual_evidence not in {
+            "endpoint",
+            "union",
+            "union-contact",
+        }:
+            raise ValueError(
+                "pair_visual_evidence must be "
+                "endpoint/union/union-contact"
             )
 
 
@@ -546,6 +556,86 @@ class TimmDinoV3Backbone(BackboneAdapter):
         return result
 
 
+def _pair_union_contact_boxes(
+    subject_boxes: Tensor,
+    object_boxes: Tensor,
+    valid_pairs: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    if (
+        subject_boxes.ndim != 3
+        or subject_boxes.shape != object_boxes.shape
+        or subject_boxes.shape[-1] != 4
+    ):
+        raise ValueError(
+            "subject/object pair boxes must both be [B,K,4]"
+        )
+    if (
+        valid_pairs.ndim != 2
+        or valid_pairs.shape != subject_boxes.shape[:2]
+    ):
+        raise ValueError("valid_pairs must be [B,K]")
+
+    scx, scy, sw, sh = subject_boxes.unbind(dim=-1)
+    ocx, ocy, ow, oh = object_boxes.unbind(dim=-1)
+
+    s_left = scx - sw * 0.5
+    s_top = scy - sh * 0.5
+    s_right = scx + sw * 0.5
+    s_bottom = scy + sh * 0.5
+    o_left = ocx - ow * 0.5
+    o_top = ocy - oh * 0.5
+    o_right = ocx + ow * 0.5
+    o_bottom = ocy + oh * 0.5
+
+    union_left = torch.minimum(s_left, o_left)
+    union_top = torch.minimum(s_top, o_top)
+    union_right = torch.maximum(s_right, o_right)
+    union_bottom = torch.maximum(s_bottom, o_bottom)
+    union_width = (union_right - union_left).clamp_min(0.0)
+    union_height = (union_bottom - union_top).clamp_min(0.0)
+    union_boxes = torch.stack(
+        (
+            (union_left + union_right) * 0.5,
+            (union_top + union_bottom) * 0.5,
+            union_width,
+            union_height,
+        ),
+        dim=-1,
+    )
+    union_boxes = torch.where(
+        valid_pairs.unsqueeze(-1),
+        union_boxes,
+        torch.zeros_like(union_boxes),
+    )
+
+    contact_left = torch.maximum(s_left, o_left)
+    contact_top = torch.maximum(s_top, o_top)
+    contact_right = torch.minimum(s_right, o_right)
+    contact_bottom = torch.minimum(s_bottom, o_bottom)
+    contact_width = (contact_right - contact_left).clamp_min(0.0)
+    contact_height = (contact_bottom - contact_top).clamp_min(0.0)
+    contact_valid = (
+        valid_pairs
+        & (contact_width > 0.0)
+        & (contact_height > 0.0)
+    )
+    contact_boxes = torch.stack(
+        (
+            (contact_left + contact_right) * 0.5,
+            (contact_top + contact_bottom) * 0.5,
+            contact_width,
+            contact_height,
+        ),
+        dim=-1,
+    )
+    contact_boxes = torch.where(
+        contact_valid.unsqueeze(-1),
+        contact_boxes,
+        torch.zeros_like(contact_boxes),
+    )
+    return union_boxes, contact_boxes, contact_valid
+
+
 def _batch_gather(values: Tensor, indices: Tensor) -> Tensor:
     if values.ndim != 3 or indices.ndim != 2:
         raise ValueError("batch gather expects [B,N,C] values and [B,K] indices")
@@ -661,6 +751,30 @@ class KFRelationModel(nn.Module):
         else:
             self.predicate_adapter_down = None
             self.predicate_adapter_up = None
+
+        # Visual-evidence residuals are initialized after every common
+        # stochastic module so endpoint/union/union-contact share identical
+        # common parameters under one seed. Zero initialization makes all
+        # modes start from the exact endpoint behavior.
+        if config.pair_visual_evidence in {"union", "union-contact"}:
+            self.union_projection: nn.Linear | None = nn.Linear(
+                backbone.hidden_size,
+                config.hidden_dim,
+                bias=False,
+            )
+            nn.init.zeros_(self.union_projection.weight)
+        else:
+            self.union_projection = None
+
+        if config.pair_visual_evidence == "union-contact":
+            self.contact_projection: nn.Linear | None = nn.Linear(
+                backbone.hidden_size,
+                config.hidden_dim,
+                bias=False,
+            )
+            nn.init.zeros_(self.contact_projection.weight)
+        else:
+            self.contact_projection = None
 
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
@@ -867,6 +981,38 @@ class KFRelationModel(nn.Module):
             dim=-1,
         )
         tokens = self.pair_projection(pair_features)
+
+        if self.union_projection is not None:
+            subject_boxes = _batch_gather(boxes, subject_index)
+            object_boxes = _batch_gather(boxes, object_index)
+            (
+                union_boxes,
+                contact_boxes,
+                contact_valid,
+            ) = _pair_union_contact_boxes(
+                subject_boxes,
+                object_boxes,
+                selected_valid,
+            )
+            union_features = self._pool_regions(
+                patch_features,
+                union_boxes,
+                selected_valid,
+            )
+            tokens = tokens + self.union_projection(
+                union_features
+            )
+
+            if self.contact_projection is not None:
+                contact_features = self._pool_regions(
+                    patch_features,
+                    contact_boxes,
+                    contact_valid,
+                )
+                tokens = tokens + self.contact_projection(
+                    contact_features
+                )
+
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)
         tokens = self.relation_transformer(tokens)
         tokens = tokens * selected_valid.to(tokens.dtype).unsqueeze(-1)

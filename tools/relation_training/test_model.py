@@ -27,6 +27,7 @@ from model import (
     RelationModelConfig,
     RelationTrainingOutputs,
     TimmDinoV3Backbone,
+    _pair_union_contact_boxes,
 )
 
 
@@ -142,6 +143,21 @@ def config() -> RelationModelConfig:
     )
 
 
+def visual_config(mode: str) -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+        pair_visual_evidence=mode,
+    )
+
+
 def adapter_config() -> RelationModelConfig:
     return RelationModelConfig(
         image_size=8,
@@ -179,6 +195,124 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_union_and_contact_box_geometry(self):
+        subject = torch.tensor(
+            [
+                [
+                    [0.25, 0.25, 0.20, 0.20],
+                    [0.20, 0.20, 0.20, 0.20],
+                    [0.25, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        object_ = torch.tensor(
+            [
+                [
+                    [0.35, 0.25, 0.20, 0.20],
+                    [0.80, 0.80, 0.20, 0.20],
+                    [0.45, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        valid = torch.tensor([[True, True, True]])
+
+        union, contact, contact_valid = _pair_union_contact_boxes(
+            subject, object_, valid
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                union[0, 0],
+                torch.tensor([0.30, 0.25, 0.30, 0.20]),
+                atol=1.0e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                contact[0, 0],
+                torch.tensor([0.30, 0.25, 0.10, 0.20]),
+                atol=1.0e-6,
+            )
+        )
+        self.assertTrue(bool(contact_valid[0, 0]))
+
+        self.assertFalse(bool(contact_valid[0, 1]))
+        self.assertTrue(torch.equal(
+            contact[0, 1], torch.zeros(4)
+        ))
+
+        # Pair 2 touches exactly at one vertical edge. Zero-area contact is
+        # deliberately represented as invalid/zero rather than a thin ROI.
+        self.assertFalse(bool(contact_valid[0, 2]))
+        self.assertTrue(torch.equal(
+            contact[0, 2], torch.zeros(4)
+        ))
+
+    def test_visual_evidence_modes_keep_common_initialization_identical(self):
+        def build(mode: str) -> KFRelationModel:
+            torch.manual_seed(61)
+            backbone = ToyBackbone()
+            embeddings = torch.randn(3, 6)
+            return KFRelationModel(
+                backbone,
+                embeddings,
+                visual_config(mode),
+            )
+
+        endpoint = build("endpoint")
+        union = build("union")
+        union_contact = build("union-contact")
+
+        endpoint_state = endpoint.state_dict()
+        for candidate in (union, union_contact):
+            state = candidate.state_dict()
+            for name, value in endpoint_state.items():
+                self.assertIn(name, state)
+                self.assertTrue(
+                    torch.equal(value, state[name]),
+                    msg=f"common parameter drift: {name}",
+                )
+
+        self.assertIsNone(endpoint.union_projection)
+        self.assertIsNone(endpoint.contact_projection)
+        self.assertIsNotNone(union.union_projection)
+        self.assertIsNone(union.contact_projection)
+        self.assertIsNotNone(union_contact.union_projection)
+        self.assertIsNotNone(union_contact.contact_projection)
+        self.assertEqual(
+            float(union.union_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(union_contact.union_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(union_contact.contact_projection.weight.abs().sum()),
+            0.0,
+        )
+
+        box_tensor, box_counts = boxes()
+        torch.manual_seed(62)
+        image = torch.rand(1, 3, 8, 8)
+        with torch.inference_mode():
+            expected = endpoint(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            union_output = union(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            contact_output = union_contact(
+                image, box_tensor[:1], box_counts[:1]
+            )
+        for left, right, final in zip(
+            expected, union_output, contact_output
+        ):
+            self.assertTrue(torch.equal(left, right))
+            self.assertTrue(torch.equal(left, final))
+
     def test_open_vocabulary_encoder_is_independent_of_predicate_count(self):
         torch.manual_seed(31)
         model = KFRelationModel(
@@ -1609,6 +1743,71 @@ class RelationModelTest(unittest.TestCase):
                 [item.name for item in session.get_outputs()],
                 OUTPUT_NAMES,
             )
+
+    def test_union_contact_onnx_matches_native_runtime_contract(self):
+        torch.manual_seed(63)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        # Exercise a non-zero learned residual rather than allowing the
+        # zero-initialized branch to become an export no-op.
+        with torch.no_grad():
+            model.union_projection.weight.normal_(0.0, 0.01)
+            model.contact_projection.weight.normal_(0.0, 0.01)
+
+        box_tensor, box_counts = boxes()
+        image = torch.rand(1, 3, 8, 8)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "relation-union-contact.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                reference,
+            )
+        self.assertLessEqual(delta, 1.0e-3)
+
+    def test_union_contact_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(64)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "union-contact.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_visual_evidence,
+            "union-contact",
+        )
+        self.assertIn(
+            "union_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "contact_projection.weight",
+            payload["state_dict"],
+        )
 
     def test_adapter_enabled_onnx_matches_native_runtime_contract(self):
         torch.manual_seed(37)
