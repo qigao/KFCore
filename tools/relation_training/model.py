@@ -111,6 +111,13 @@ class RelationModelConfig:
             raise ValueError(
                 "apache pair sampler requires apache pair evidence"
             )
+        if (
+            self.pair_sampler_contract == "apache"
+            and self.pair_budget > 400
+        ):
+            raise ValueError(
+                "apache pair sampler final budget must not exceed 400"
+            )
 
 
 @dataclass(frozen=True)
