@@ -447,54 +447,85 @@ RelateAnythingOptions decode_options(
 struct OpenVocabularyRelation::Impl final
 {
     Impl(runtime::ResolvedModel resolved_value,
-         OpenVocabularyRelationOptions options_value)
+         OpenVocabularyRelationOptions options_value,
+         ScoringMode mode_value)
         : resolved(std::move(resolved_value))
         , options(std::move(options_value))
+        , mode(mode_value)
         , context(resolved.model->create_context())
     {
-        validate_contract(
-            resolved.model->tensors(), options, input_size_value);
+        if (mode == ScoringMode::BackendLogits)
+        {
+            validate_backend_contract(
+                resolved.model->tensors(),
+                options,
+                input_size_value);
+        }
+        else
+        {
+            validate_encoder_contract(
+                resolved.model->tensors(),
+                options,
+                input_size_value);
+        }
 
-        const std::size_t query_values =
-            checked_multiply(options.max_pairs, options.query_dim,
-                             "relation query");
-        semantic_query.resize(query_values);
-        spatial_query.resize(query_values);
         pair_logits.resize(options.max_pairs);
         subject_indices.resize(options.max_pairs);
         object_indices.resize(options.max_pairs);
         valid_mask.resize(options.max_pairs);
 
         std::size_t bytes = checked_multiply(
-            query_values, sizeof(float) * 2U, "relation queries");
+            options.max_pairs,
+            sizeof(float),
+            "pair logits");
         bytes = checked_add(
             bytes,
-            checked_multiply(options.max_pairs, sizeof(float),
-                             "pair logits"),
-            "relation encoder outputs");
+            checked_multiply(
+                options.max_pairs,
+                sizeof(std::int64_t) * 2U,
+                "pair indices"),
+            "relation fixed outputs");
         bytes = checked_add(
             bytes,
-            checked_multiply(options.max_pairs,
-                             sizeof(std::int64_t) * 2U,
-                             "pair indices"),
-            "relation encoder outputs");
-        bytes = checked_add(
-            bytes,
-            checked_multiply(options.max_pairs, sizeof(std::uint8_t),
-                             "valid mask"),
-            "relation encoder outputs");
-        if (bytes > options.max_output_bytes)
+            checked_multiply(
+                options.max_pairs,
+                sizeof(std::uint8_t),
+                "valid mask"),
+            "relation fixed outputs");
+
+        if (mode == ScoringMode::HostQueries)
+        {
+            const std::size_t query_values =
+                checked_multiply(
+                    options.max_pairs,
+                    options.query_dim,
+                    "relation query");
+            semantic_query.resize(query_values);
+            spatial_query.resize(query_values);
+            bytes = checked_add(
+                bytes,
+                checked_multiply(
+                    query_values,
+                    sizeof(float) * 2U,
+                    "relation queries"),
+                "relation fixed outputs");
+        }
+
+        fixed_output_bytes = bytes;
+        if (fixed_output_bytes > options.max_output_bytes)
         {
             throw_resource(
-                "relation encoder outputs exceed configured byte limit");
+                "relation fixed outputs exceed configured byte limit");
         }
     }
 
     runtime::ResolvedModel resolved;
     OpenVocabularyRelationOptions options;
+    ScoringMode mode = ScoringMode::HostQueries;
     std::unique_ptr<runtime::ExecutionContext> context;
     PredicateVocabulary vocabulary;
     std::int32_t input_size_value = 0;
+    std::size_t fixed_output_bytes = 0U;
 
     std::vector<float> semantic_query;
     std::vector<float> spatial_query;
@@ -523,11 +554,18 @@ OpenVocabularyRelation::load(
     const OpenVocabularyRelationOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != kOpenVocabularyRelationModelType)
+
+    ScoringMode mode = ScoringMode::HostQueries;
+    if (package.model_type() == kDynamicOpenVocabularyRelationModelType)
+    {
+        mode = ScoringMode::BackendLogits;
+    }
+    else if (package.model_type() != kOpenVocabularyRelationModelType)
     {
         throw_contract(
             "ModelPackage model_type must be "
-            "'relation.open-vocabulary-encoder'");
+            "'relation.open-vocabulary-encoder' or "
+            "'relation.open-vocabulary'");
     }
 
     try
@@ -536,7 +574,7 @@ OpenVocabularyRelation::load(
         return std::unique_ptr<OpenVocabularyRelation>(
             new OpenVocabularyRelation(
                 std::make_unique<Impl>(
-                    std::move(resolved), options)));
+                    std::move(resolved), options, mode)));
     }
     catch (const RelationError&)
     {
@@ -560,6 +598,18 @@ void OpenVocabularyRelation::set_vocabulary(
         throw_invalid("model state is unavailable");
     }
     UseGuard guard(impl_->in_use);
+
+    const bool complete_alpha =
+        !vocabulary.predicates.empty() &&
+        vocabulary.spatial_weights.size() ==
+            vocabulary.predicates.size();
+    if (impl_->mode == ScoringMode::BackendLogits &&
+        !complete_alpha)
+    {
+        throw_invalid(
+            "backend-scoring vocabulary requires one alpha value per predicate");
+    }
+
     impl_->vocabulary = normalize_predicate_vocabulary(
         std::move(vocabulary),
         impl_->options.query_dim,
@@ -571,7 +621,11 @@ void OpenVocabularyRelation::set_vocabulary(
         "predicate logits");
     const std::size_t pred_bytes = checked_multiply(
         pred_values, sizeof(float), "predicate logits");
-    if (pred_bytes > impl_->options.max_output_bytes)
+    const std::size_t total_output_bytes = checked_add(
+        impl_->fixed_output_bytes,
+        pred_bytes,
+        "relation outputs");
+    if (total_output_bytes > impl_->options.max_output_bytes)
     {
         throw_resource(
             "dynamic predicate logits exceed configured output byte limit");
