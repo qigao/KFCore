@@ -52,6 +52,49 @@ def _weighted_pair_bce(
     return (raw * weights).sum() / weights.sum().clamp_min(1.0)
 
 
+def _validate_targets(
+    pair_targets: Tensor,
+    predicate_targets: Tensor,
+    pred_logits: Tensor,
+) -> None:
+    if pair_targets.ndim != 3:
+        raise ValueError("pair_targets must be [B,N,N]")
+    if pair_targets.shape[1] != pair_targets.shape[2]:
+        raise ValueError("relation target object dimensions must be square")
+    if predicate_targets.ndim != 4:
+        raise ValueError("predicate_targets must be [B,N,N,V]")
+    if predicate_targets.shape[:3] != pair_targets.shape:
+        raise ValueError(
+            "predicate target batch/object dimensions must match pair targets"
+        )
+    if predicate_targets.shape[3] != pred_logits.shape[2]:
+        raise ValueError(
+            "predicate target vocabulary width does not match pred_logits"
+        )
+    if pair_targets.shape[0] != pred_logits.shape[0]:
+        raise ValueError("target and output batch sizes must match")
+    if not torch.isfinite(pair_targets).all():
+        raise ValueError("pair_targets must be finite")
+    if not torch.isfinite(predicate_targets).all():
+        raise ValueError("predicate_targets must be finite")
+    if ((pair_targets < 0) | (pair_targets > 1)).any():
+        raise ValueError("pair_targets must be within [0,1]")
+    if ((predicate_targets < 0) | (predicate_targets > 1)).any():
+        raise ValueError("predicate_targets must be within [0,1]")
+
+    positive_pairs = pair_targets > 0.5
+    predicate_positive = predicate_targets > 0.5
+    predicate_count = predicate_positive.sum(dim=-1)
+    if (positive_pairs & (predicate_count == 0)).any():
+        raise ValueError(
+            "every positive pair must have at least one predicate label"
+        )
+    if ((~positive_pairs) & (predicate_count > 0)).any():
+        raise ValueError(
+            "negative pairs must not carry positive predicate labels"
+        )
+
+
 def supervised_relation_loss(
     outputs: RelationTrainingOutputs
     | tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
@@ -59,15 +102,20 @@ def supervised_relation_loss(
     predicate_targets: Tensor,
     config: RelationLossConfig = RelationLossConfig(),
 ) -> dict[str, Tensor]:
-    """Supervised relation baseline with an explicit sampler objective.
+    """Exhaustive supervised multi-label relation baseline.
 
     pair_targets is [B,N,N] with 1 for annotated related pairs and 0 otherwise.
-    predicate_targets is [B,N,N] with a predicate index for positive pairs and
-    -1 where predicate identity is unavailable.
+    predicate_targets is [B,N,N,V] multi-hot over the complete benchmark
+    predicate vocabulary for each ordered pair.
+
+    Predicate BCE is evaluated only on positive related pairs. Zeros in their
+    multi-hot predicate vectors are supervised negatives, so this objective
+    assumes exhaustive pair-level predicate labels. Incomplete/open-world labels
+    require a separate PU-aware objective.
 
     The dense sampler loss is training-only. Runtime/export keeps the existing
     five-output ABI. Unannotated valid pairs are down-weighted negatives through
-    negative_pair_weight; this is intentionally not a PU objective.
+    negative_pair_weight.
     """
     training_outputs = (
         outputs if isinstance(outputs, RelationTrainingOutputs) else None
@@ -82,12 +130,7 @@ def supervised_relation_loss(
         runtime = training_outputs.runtime
 
     pred_logits, pair_logits, sub_idx, obj_idx, valid_mask = runtime
-    if pair_targets.ndim != 3 or predicate_targets.shape != pair_targets.shape:
-        raise ValueError("relation targets must both be [B,N,N]")
-    if pair_targets.shape[1] != pair_targets.shape[2]:
-        raise ValueError("relation target object dimensions must be square")
-    if pair_targets.shape[0] != pred_logits.shape[0]:
-        raise ValueError("target and output batch sizes must match")
+    _validate_targets(pair_targets, predicate_targets, pred_logits)
     if pair_logits.shape != sub_idx.shape or pair_logits.shape != obj_idx.shape:
         raise ValueError("pair output shapes do not match")
     if valid_mask.shape != pair_logits.shape:
@@ -100,8 +143,8 @@ def supervised_relation_loss(
         batch, sub_idx.to(torch.int64), obj_idx.to(torch.int64)
     ].to(pair_logits.dtype)
     selected_predicate_targets = predicate_targets[
-        batch, sub_idx.to(torch.int64), obj_idx.to(torch.int64)
-    ].to(torch.int64)
+        batch, sub_idx.to(torch.int64), obj_idx.to(torch.int64), :
+    ].to(pred_logits.dtype)
 
     valid = valid_mask.to(torch.bool)
     pair_loss = _weighted_pair_bce(
@@ -111,13 +154,9 @@ def supervised_relation_loss(
         negative_pair_weight=config.negative_pair_weight,
     )
 
-    positive = (
-        valid
-        & (selected_pair_targets > 0.5)
-        & (selected_predicate_targets >= 0)
-    )
+    positive = valid & (selected_pair_targets > 0.5)
     if positive.any():
-        predicate_loss = F.cross_entropy(
+        predicate_loss = F.binary_cross_entropy_with_logits(
             pred_logits[positive],
             selected_predicate_targets[positive],
         )

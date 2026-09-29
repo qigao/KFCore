@@ -158,7 +158,8 @@ it reads them from the adapter.
 `supervised_relation_loss()` expects:
 
 - `pair_targets [B,N,N]`: 1 for an annotated related ordered pair, else 0;
-- `predicate_targets [B,N,N]`: predicate ID for labeled positives, otherwise -1.
+- `predicate_targets [B,N,N,V]`: exhaustive multi-hot predicate labels for
+  each ordered pair.
 
 ```python
 from losses import supervised_relation_loss
@@ -174,7 +175,13 @@ non-differentiable top-K selection. This is required because gradients through
 the selected relation head cannot train the discrete top-K indices themselves.
 The inference/export `forward()` contract remains unchanged.
 
-This baseline treats unannotated valid pairs as down-weighted negatives. That is
+Predicate logits are independent at runtime, so the supervised baseline uses
+BCE-with-logits rather than single-class cross-entropy. A positive ordered pair
+must have at least one predicate bit set and may have several. On positive
+pairs, zero predicate bits are treated as supervised negatives.
+
+This baseline treats unannotated valid pairs as down-weighted negatives and
+assumes exhaustive predicate labels on annotated positive pairs. That is
 **not** yet a positive-unlabeled objective and should not be presented as
 equivalent to RelateAnything training.
 
