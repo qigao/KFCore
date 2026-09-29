@@ -101,6 +101,7 @@ def supervised_relation_loss(
     pair_targets: Tensor,
     predicate_targets: Tensor,
     config: RelationLossConfig = RelationLossConfig(),
+    predicate_positive_weights: Tensor | None = None,
 ) -> dict[str, Tensor]:
     """Exhaustive supervised multi-label relation baseline.
 
@@ -155,10 +156,34 @@ def supervised_relation_loss(
     )
 
     positive = valid & (selected_pair_targets > 0.5)
+    pos_weight = None
+    if predicate_positive_weights is not None:
+        if predicate_positive_weights.ndim != 1:
+            raise ValueError(
+                "predicate_positive_weights must be [V]"
+            )
+        if predicate_positive_weights.shape[0] != pred_logits.shape[2]:
+            raise ValueError(
+                "predicate_positive_weights width does not match pred_logits"
+            )
+        if not torch.isfinite(predicate_positive_weights).all():
+            raise ValueError(
+                "predicate_positive_weights must be finite"
+            )
+        if (predicate_positive_weights <= 0).any():
+            raise ValueError(
+                "predicate_positive_weights must be positive"
+            )
+        pos_weight = predicate_positive_weights.to(
+            device=pred_logits.device,
+            dtype=pred_logits.dtype,
+        )
+
     if positive.any():
         predicate_loss = F.binary_cross_entropy_with_logits(
             pred_logits[positive],
             selected_predicate_targets[positive],
+            pos_weight=pos_weight,
         )
     else:
         predicate_loss = pred_logits.sum() * 0.0

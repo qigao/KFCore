@@ -187,6 +187,93 @@ class RelationTrainingDataset(Dataset):
         )
 
 
+@dataclass(frozen=True)
+class PredicateWeighting:
+    mode: str
+    positive_pair_count: int
+    predicate_positive_counts: tuple[int, ...]
+    positive_weights: tuple[float, ...]
+    cap: float
+
+    def tensor(self) -> Tensor:
+        return torch.tensor(
+            self.positive_weights,
+            dtype=torch.float32,
+        )
+
+
+def build_predicate_weighting(
+    manifest: DatasetManifest,
+    *,
+    predicate_count: int,
+    mode: str = "none",
+    cap: float = 20.0,
+) -> PredicateWeighting:
+    if predicate_count <= 0:
+        raise ValueError("predicate_count must be positive")
+    if mode not in {"none", "sqrt-balanced", "balanced"}:
+        raise ValueError(
+            "predicate weighting mode must be none/sqrt-balanced/balanced"
+        )
+    if not np.isfinite(cap) or cap <= 0.0:
+        raise ValueError("predicate weight cap must be finite and positive")
+
+    positive_pair_count = 0
+    counts = [0 for _ in range(predicate_count)]
+    for example in manifest.examples:
+        pairs: set[tuple[int, int]] = set()
+        for subject, predicate, object_ in example.relations:
+            if predicate < 0 or predicate >= predicate_count:
+                raise ValueError(
+                    "relation predicate exceeds weighting vocabulary"
+                )
+            pairs.add((subject, object_))
+            counts[predicate] += 1
+        positive_pair_count += len(pairs)
+
+    if positive_pair_count <= 0:
+        raise ValueError(
+            "predicate weighting requires positive relation pairs"
+        )
+    missing = [
+        index for index, count in enumerate(counts)
+        if count <= 0
+    ]
+    if missing:
+        raise ValueError(
+            f"predicate {missing[0]} has no positive train support"
+        )
+
+    weights: list[float] = []
+    for count in counts:
+        if mode == "none":
+            weight = 1.0
+        else:
+            ratio = (positive_pair_count - count) / count
+            if not np.isfinite(ratio) or ratio <= 0.0:
+                raise ValueError(
+                    "predicate balance ratio must be finite and positive"
+                )
+            if mode == "sqrt-balanced":
+                weight = float(np.sqrt(ratio))
+            else:
+                weight = float(ratio)
+            weight = min(weight, cap)
+        if not np.isfinite(weight) or weight <= 0.0:
+            raise ValueError(
+                "predicate positive weight must be finite and positive"
+            )
+        weights.append(weight)
+
+    return PredicateWeighting(
+        mode=mode,
+        positive_pair_count=positive_pair_count,
+        predicate_positive_counts=tuple(counts),
+        positive_weights=tuple(weights),
+        cap=float(cap),
+    )
+
+
 def freeze_backbone(model: KFRelationModel) -> None:
     model.backbone.requires_grad_(False)
     model.backbone.eval()
@@ -226,6 +313,7 @@ def train_epoch(
     *,
     device: torch.device,
     loss_config: RelationLossConfig = RelationLossConfig(),
+    predicate_positive_weights: Tensor | None = None,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -255,6 +343,7 @@ def train_epoch(
             pair_targets,
             predicate_targets,
             loss_config,
+            predicate_positive_weights=predicate_positive_weights,
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")

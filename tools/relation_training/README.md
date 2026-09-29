@@ -285,6 +285,52 @@ This is an attribution experiment. If whitening recovers the orthogonal
 control, the next useful model change is a relation-specific shared text
 adapter rather than generic raw CLIP prototypes.
 
+## Predicate class-balance ablation
+
+After CLIP prototype whitening, medium/high-K metrics are close to the
+orthogonal control, while low-K mean recall remains weak. The next controlled
+experiment therefore changes only predicate-positive weighting.
+
+For the canonical train split:
+
+```text
+P   = number of unique positive ordered relation pairs
+c_i = positive pairs carrying predicate i
+r_i = (P - c_i) / c_i
+```
+
+The runner supports:
+
+```text
+none           pos_weight_i = 1
+sqrt-balanced  pos_weight_i = sqrt(r_i)
+balanced       pos_weight_i = r_i
+```
+
+Non-control weights are capped by
+`--predicate-positive-weight-cap` (20 in the experiment). Every predicate must
+have positive train support; missing classes fail fast.
+
+CLI:
+
+```powershell
+python tools/relation_training/train_baseline.py ^
+  ... ^
+  --predicate-positive-weight-mode sqrt-balanced ^
+  --predicate-positive-weight-cap 20
+```
+
+The train manifest alone determines the weights. `training.json` records:
+- weighting mode/cap;
+- total positive pair count;
+- per-predicate positive counts;
+- final positive weights.
+
+`.github/workflows/openimages-predicate-balance.yml` runs
+`none / sqrt-balanced / balanced` on the exact same 256/64 Open Images split,
+K=48 and whitened CLIP prototypes. The final compare job rejects any
+dataset/prototype/parameter-count drift before reporting metric deltas.
+
 ## CLIP whitening evidence tolerance
 
 The raw CLIP and whitened-CLIP arms encode the same text prototypes in

@@ -15,6 +15,7 @@ from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from training import (
     FrozenBaselineConfig,
     RelationTrainingDataset,
+    build_predicate_weighting,
     evaluate_gt_boxes,
     freeze_backbone,
     make_training_loader,
@@ -136,6 +137,77 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
             prepared["predicate_targets"][0, 1].tolist(),
             [1.0, 1.0],
         )
+
+    def test_predicate_weighting_uses_unique_positive_pairs_and_support(self):
+        examples = []
+        relations_by_example = (
+            ((0, 0, 1),),
+            ((0, 0, 1),),
+            ((0, 0, 1),),
+            ((0, 1, 1),),
+        )
+        for index, relations in enumerate(relations_by_example):
+            examples.append(
+                RelationExample(
+                    image=f"weight-{index}.png",
+                    width=8,
+                    height=8,
+                    boxes_xyxy=(
+                        (0.0, 0.0, 4.0, 8.0),
+                        (4.0, 0.0, 8.0, 8.0),
+                    ),
+                    object_labels=("left", "right"),
+                    relations=relations,
+                )
+            )
+        manifest = DatasetManifest(
+            examples=tuple(examples),
+            annotations_sha256="a" * 64,
+            vocabulary_sha256=self.vocabulary.sha256(),
+        )
+
+        none = build_predicate_weighting(
+            manifest,
+            predicate_count=2,
+            mode="none",
+            cap=20.0,
+        )
+        balanced = build_predicate_weighting(
+            manifest,
+            predicate_count=2,
+            mode="balanced",
+            cap=2.0,
+        )
+        sqrt_balanced = build_predicate_weighting(
+            manifest,
+            predicate_count=2,
+            mode="sqrt-balanced",
+            cap=20.0,
+        )
+
+        self.assertEqual(none.positive_pair_count, 4)
+        self.assertEqual(none.predicate_positive_counts, (3, 1))
+        self.assertEqual(none.positive_weights, (1.0, 1.0))
+        self.assertAlmostEqual(
+            balanced.positive_weights[0],
+            1.0 / 3.0,
+        )
+        self.assertEqual(balanced.positive_weights[1], 2.0)
+        self.assertAlmostEqual(
+            sqrt_balanced.positive_weights[0],
+            math.sqrt(1.0 / 3.0),
+        )
+        self.assertAlmostEqual(
+            sqrt_balanced.positive_weights[1],
+            math.sqrt(3.0),
+        )
+
+        with self.assertRaises(ValueError):
+            build_predicate_weighting(
+                manifest,
+                predicate_count=3,
+                mode="balanced",
+            )
 
     def test_frozen_baseline_updates_head_not_backbone_and_evaluates(self):
         seed_everything(17)
