@@ -15,7 +15,123 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-prototype:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      TRAIN_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-vrd.csv
+      VALIDATION_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-validation-annotations-vrd.csv
+      CLASS_DESCRIPTIONS_URL: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
+      CLIP_MODEL: openai/clip-vit-base-patch32
+      EXPECTED_VOCAB_SHA: d440fd6029cbae6d6b791717fea6125212b0f40998e57618f1f01388d1e8e990
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-openimages-baseline.txt
+            tools/relation_training/requirements-clip-prototypes.txt
+
+      - name: Install prototype dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-openimages-baseline.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-clip-prototypes.txt
+
+      - name: Recreate exact vocabulary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          mkdir -p "$DATA" "$SUBSET"
+          curl --fail --location --retry 3 "$TRAIN_VRD_URL" -o "$DATA/train-vrd.csv"
+          curl --fail --location --retry 3 "$VALIDATION_VRD_URL" -o "$DATA/validation-vrd.csv"
+          curl --fail --location --retry 3 "$CLASS_DESCRIPTIONS_URL" -o "$DATA/classes.csv"
+          python tools/relation_training/convert_openimages.py subset \
+            --split train \
+            --relationships "$DATA/train-vrd.csv" \
+            --max-images 256 \
+            --min-boxes 4 \
+            --max-boxes 12 \
+            --output-csv "$SUBSET/train.csv"
+          python tools/relation_training/convert_openimages.py subset \
+            --split validation \
+            --relationships "$DATA/validation-vrd.csv" \
+            --max-images 64 \
+            --min-boxes 4 \
+            --max-boxes 12 \
+            --output-csv "$SUBSET/validation.csv"
+          python tools/relation_training/convert_openimages.py scan \
+            --source "train=$SUBSET/train.csv" \
+            --source "validation=$SUBSET/validation.csv" \
+            --class-descriptions "$DATA/classes.csv" \
+            --output-dir "$SCAN"
+          python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools/relation_training")
+          from benchmark import RelationVocabulary
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "openimages-scan" / "vocabulary.json"
+          actual = RelationVocabulary.load(path).sha256()
+          expected = os.environ["EXPECTED_VOCAB_SHA"]
+          if actual != expected:
+              raise RuntimeError(
+                  f"prototype vocabulary drift: {actual} != {expected}"
+              )
+          print(f"vocabulary_sha256={actual}")
+          PY
+
+      - name: Build one shared whitened CLIP prototype tensor
+        env:
+          HF_HOME: ${{ runner.temp }}/clip-hf-home
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SHARED="$RUNNER_TEMP/shared-prototype"
+          mkdir -p "$SHARED"
+          python tools/relation_training/make_predicate_embeddings.py \
+            --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
+            --out "$SHARED/predicate-prototypes.pt" \
+            --mode clip-whitened \
+            --clip-model "$CLIP_MODEL" \
+            --device cpu
+          cp "$RUNNER_TEMP/openimages-scan/vocabulary.json" "$SHARED/vocabulary.json"
+          cat "$SHARED/predicate-prototypes.pt.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: predicate-balance-shared-prototype-${{ github.run_id }}
+          retention-days: 2
+          path: ${{ runner.temp }}/shared-prototype/
+
   arm:
+    needs: prepare-prototype
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -63,7 +179,6 @@ jobs:
           cache-dependency-path: |
             tools/relation_training/requirements-real-smoke-torch.txt
             tools/relation_training/requirements-openimages-baseline.txt
-            tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Install focused experiment dependencies
         shell: bash
@@ -74,8 +189,6 @@ jobs:
             -r tools/relation_training/requirements-real-smoke-torch.txt
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-openimages-baseline.txt
-          python -m pip install --disable-pip-version-check \
-            -r tools/relation_training/requirements-clip-prototypes.txt
 
       - name: Download public Open Images annotations
         shell: bash
@@ -200,19 +313,57 @@ jobs:
           print(json.dumps(actual, indent=2, sort_keys=True))
           PY
 
-      - name: Build whitened CLIP predicate prototypes
-        env:
-          HF_HOME: ${{ runner.temp }}/clip-hf-home
+      - name: Download shared predicate prototypes
+        uses: actions/download-artifact@v4
+        with:
+          name: predicate-balance-shared-prototype-${{ github.run_id }}
+          path: ${{ runner.temp }}/shared-prototype
+
+      - name: Verify shared predicate prototype contract
         shell: bash
         run: |
           set -euxo pipefail
-          python tools/relation_training/make_predicate_embeddings.py \
-            --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
-            --out "$RUNNER_TEMP/predicate-prototypes.pt" \
-            --mode clip-whitened \
-            --clip-model "$CLIP_MODEL" \
-            --device cpu
-          cat "$RUNNER_TEMP/predicate-prototypes.pt.json"
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools/relation_training")
+          from benchmark import RelationVocabulary
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          shared = root / "shared-prototype"
+          current_vocab = RelationVocabulary.load(
+              root / "openimages-scan" / "vocabulary.json"
+          ).sha256()
+          shared_vocab = RelationVocabulary.load(
+              shared / "vocabulary.json"
+          ).sha256()
+          metadata = json.loads(
+              (shared / "predicate-prototypes.pt.json").read_text()
+          )
+          if shared_vocab != current_vocab:
+              raise RuntimeError(
+                  f"shared/current vocabulary mismatch: "
+                  f"{shared_vocab} != {current_vocab}"
+              )
+          if metadata["vocabulary_sha256"] != current_vocab:
+              raise RuntimeError(
+                  "prototype metadata vocabulary hash mismatch"
+              )
+          if metadata["mode"] != "clip-whitened":
+              raise RuntimeError(
+                  f"unexpected shared prototype mode: {metadata['mode']}"
+              )
+          if metadata["shape"] != [17, 512]:
+              raise RuntimeError(
+                  f"unexpected shared prototype shape: {metadata['shape']}"
+              )
+          print(
+              f"prototype_tensor_sha256={metadata['tensor_sha256']}"
+          )
+          PY
 
       - name: Train class-balance arm
         env:
@@ -228,7 +379,7 @@ jobs:
             --validation-annotations "$RUNNER_TEMP/openimages-validation/validation.jsonl" \
             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
             --image-root "$RUNNER_TEMP/openimages-images" \
-            --predicate-embeddings "$RUNNER_TEMP/predicate-prototypes.pt" \
+            --predicate-embeddings "$RUNNER_TEMP/shared-prototype/predicate-prototypes.pt" \
             --output-dir "$OUT" \
             --backbone "$DINOV3_MODEL" \
             --image-size 224 \
@@ -261,7 +412,7 @@ jobs:
           mkdir -p "$EVIDENCE"
           cp "$OUT/training.json" "$EVIDENCE/"
           cp "$OUT/benchmark.json" "$EVIDENCE/"
-          cp "$RUNNER_TEMP/predicate-prototypes.pt.json" "$EVIDENCE/prototypes.json"
+          cp "$RUNNER_TEMP/shared-prototype/predicate-prototypes.pt.json" "$EVIDENCE/prototypes.json"
           cp "$RUNNER_TEMP/openimages-scan/vocabulary.json" "$EVIDENCE/"
           python - <<'PY'
           import json
