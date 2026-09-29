@@ -1,0 +1,448 @@
+name: Open Images CLIP prototype whitening
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/openimages-clip-whitening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openimages-clip-whitening
+  cancel-in-progress: false
+
+jobs:
+  arm:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: identity512
+            mode: identity
+          - name: clip
+            mode: clip
+          - name: clip-whitened
+            mode: clip-whitened
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      TRAIN_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-vrd.csv
+      VALIDATION_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-validation-annotations-vrd.csv
+      CLASS_DESCRIPTIONS_URL: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
+      DOWNLOADER_URL: https://raw.githubusercontent.com/openimages/dataset/main/downloader.py
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+      CLIP_MODEL: openai/clip-vit-base-patch32
+      EXPECTED_TRAIN_SHA: 6ed91bd451eea843b9a7cd9f60b9de58666eae3771fadfdb16fbab7ff9113c91
+      EXPECTED_VALIDATION_SHA: 3281753dee803f67edb6a2f4868fa35c9cfdb40bb7da5b12fd3ec827401b72ce
+      EXPECTED_VOCAB_SHA: d440fd6029cbae6d6b791717fea6125212b0f40998e57618f1f01388d1e8e990
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-openimages-baseline.txt
+            tools/relation_training/requirements-clip-prototypes.txt
+
+      - name: Install focused experiment dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-openimages-baseline.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-clip-prototypes.txt
+
+      - name: Download public Open Images annotations
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          mkdir -p "$DATA"
+          curl --fail --location --retry 3 "$TRAIN_VRD_URL" -o "$DATA/train-vrd.csv"
+          curl --fail --location --retry 3 "$VALIDATION_VRD_URL" -o "$DATA/validation-vrd.csv"
+          curl --fail --location --retry 3 "$CLASS_DESCRIPTIONS_URL" -o "$DATA/classes.csv"
+
+      - name: Recreate exact sampler-v1 slices
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          mkdir -p "$SUBSET"
+          python tools/relation_training/convert_openimages.py subset \
+            --split train \
+            --relationships "$DATA/train-vrd.csv" \
+            --max-images 256 \
+            --min-boxes 4 \
+            --max-boxes 12 \
+            --output-csv "$SUBSET/train.csv"
+          python tools/relation_training/convert_openimages.py subset \
+            --split validation \
+            --relationships "$DATA/validation-vrd.csv" \
+            --max-images 64 \
+            --min-boxes 4 \
+            --max-boxes 12 \
+            --output-csv "$SUBSET/validation.csv"
+
+      - name: Build shared vocabulary and downloader lists
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          python tools/relation_training/convert_openimages.py scan \
+            --source "train=$SUBSET/train.csv" \
+            --source "validation=$SUBSET/validation.csv" \
+            --class-descriptions "$DATA/classes.csv" \
+            --output-dir "$RUNNER_TEMP/openimages-scan"
+
+      - name: Download exact real pixels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          curl --fail --location --retry 3 "$DOWNLOADER_URL" -o "$RUNNER_TEMP/openimages-downloader.py"
+          python "$RUNNER_TEMP/openimages-downloader.py" \
+            "$SCAN/train.image_ids.txt" \
+            --download_folder="$IMAGES" \
+            --num_processes=8
+          python "$RUNNER_TEMP/openimages-downloader.py" \
+            "$SCAN/validation.image_ids.txt" \
+            --download_folder="$IMAGES" \
+            --num_processes=8
+          test "$(find "$IMAGES" -maxdepth 1 -type f -name '*.jpg' | wc -l)" -eq 320
+
+      - name: Convert canonical splits
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          python tools/relation_training/convert_openimages.py convert \
+            --split train \
+            --relationships "$SUBSET/train.csv" \
+            --class-descriptions "$DATA/classes.csv" \
+            --vocabulary "$SCAN/vocabulary.json" \
+            --image-root "$IMAGES" \
+            --output-dir "$RUNNER_TEMP/openimages-train"
+          python tools/relation_training/convert_openimages.py convert \
+            --split validation \
+            --relationships "$SUBSET/validation.csv" \
+            --class-descriptions "$DATA/classes.csv" \
+            --vocabulary "$SCAN/vocabulary.json" \
+            --image-root "$IMAGES" \
+            --output-dir "$RUNNER_TEMP/openimages-validation"
+
+      - name: Assert exact experiment fingerprints
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "tools/relation_training")
+          from benchmark import RelationVocabulary
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          train = root / "openimages-train" / "train.jsonl"
+          validation = root / "openimages-validation" / "validation.jsonl"
+          vocab_path = root / "openimages-scan" / "vocabulary.json"
+
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          actual = {
+              "train": sha(train),
+              "validation": sha(validation),
+              "vocabulary": RelationVocabulary.load(vocab_path).sha256(),
+          }
+          expected = {
+              "train": os.environ["EXPECTED_TRAIN_SHA"],
+              "validation": os.environ["EXPECTED_VALIDATION_SHA"],
+              "vocabulary": os.environ["EXPECTED_VOCAB_SHA"],
+          }
+          if actual != expected:
+              raise RuntimeError(
+                  f"dataset fingerprint drift: actual={actual} expected={expected}"
+              )
+          print(json.dumps(actual, indent=2, sort_keys=True))
+          PY
+
+      - name: Build dimension-matched predicate prototypes
+        env:
+          HF_HOME: ${{ runner.temp }}/clip-hf-home
+          ARM_MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/predicate-prototypes.pt"
+          if [ "$ARM_MODE" = "identity" ]; then
+            python tools/relation_training/make_predicate_embeddings.py \
+              --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
+              --out "$OUT" \
+              --mode identity \
+              --dimension 512
+          else
+            python tools/relation_training/make_predicate_embeddings.py \
+              --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
+              --out "$OUT" \
+              --mode "$ARM_MODE" \
+              --clip-model "$CLIP_MODEL" \
+              --device cpu
+          fi
+          cat "$OUT.json"
+
+      - name: Train prototype arm
+        env:
+          HF_HOME: ${{ runner.temp }}/dino-hf-home
+          ARM_NAME: ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/arm-$ARM_NAME"
+          python tools/relation_training/train_baseline.py \
+            --train-annotations "$RUNNER_TEMP/openimages-train/train.jsonl" \
+            --validation-annotations "$RUNNER_TEMP/openimages-validation/validation.jsonl" \
+            --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json" \
+            --image-root "$RUNNER_TEMP/openimages-images" \
+            --predicate-embeddings "$RUNNER_TEMP/predicate-prototypes.pt" \
+            --output-dir "$OUT" \
+            --backbone "$DINOV3_MODEL" \
+            --image-size 224 \
+            --max-boxes 12 \
+            --pair-budget 48 \
+            --hidden-dim 128 \
+            --geometry-dim 32 \
+            --num-heads 4 \
+            --num-layers 2 \
+            --epochs 3 \
+            --batch-size 8 \
+            --learning-rate 0.001 \
+            --weight-decay 0.0001 \
+            --sampler-loss-weight 1.0 \
+            --pair-loss-weight 1.0 \
+            --predicate-loss-weight 1.0 \
+            --device cpu
+
+      - name: Build arm evidence
+        env:
+          ARM_NAME: ${{ matrix.name }}
+          ARM_MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/arm-$ARM_NAME"
+          EVIDENCE="$RUNNER_TEMP/evidence-$ARM_NAME"
+          mkdir -p "$EVIDENCE"
+          cp "$OUT/training.json" "$EVIDENCE/"
+          cp "$OUT/benchmark.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/predicate-prototypes.pt.json" "$EVIDENCE/prototypes.json"
+          cp "$RUNNER_TEMP/openimages-scan/vocabulary.json" "$EVIDENCE/"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          arm = os.environ["ARM_NAME"]
+          evidence = Path(os.environ["RUNNER_TEMP"]) / f"evidence-{arm}"
+          payload = {
+              "schema": "kfcore.predicate-prototype-ablation-arm/1",
+              "exact_head": os.environ["EXPECTED_SHA"],
+              "arm": arm,
+              "mode": os.environ["ARM_MODE"],
+              "pair_budget": 48,
+              "prototype_dimension": 512,
+              "train_images": 256,
+              "validation_images": 64,
+              "epochs": 3,
+              "seed": 20260929,
+              "checkpoint_uploaded": False,
+              "images_uploaded": False,
+              "annotations_uploaded": False,
+          }
+          (evidence / "arm.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip-whitening-${{ matrix.name }}-${{ github.run_id }}
+          retention-days: 14
+          path: ${{ runner.temp }}/evidence-${{ matrix.name }}/
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+  compare:
+    runs-on: ubuntu-24.04
+    needs: arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clip-whitening-*
+          path: arms
+          merge-multiple: false
+
+      - name: Compare raw and whitened CLIP geometry
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = {}
+          for arm_json in sorted(Path("arms").glob("*/arm.json")):
+              root = arm_json.parent
+              arm = json.loads(arm_json.read_text())
+              training = json.loads((root / "training.json").read_text())
+              benchmark = json.loads((root / "benchmark.json").read_text())
+              prototypes = json.loads((root / "prototypes.json").read_text())
+              row = {
+                  "arm": arm["arm"],
+                  "mode": arm["mode"],
+                  "prototype_tensor_sha256": prototypes["tensor_sha256"],
+                  "prototype_shape": prototypes["shape"],
+                  "prototype_model_id": prototypes["model_id"],
+                  "prototype_templates": prototypes["templates"],
+                  "prototype_gram": prototypes["gram"],
+                  "prototype_source_gram": prototypes["source_gram"],
+                  "trainable_parameter_count": training["trainable_parameter_count"],
+                  "predicate_embedding_shape": training["predicate_embedding_shape"],
+                  "train_annotations_sha256": training["train_annotations_sha256"],
+                  "validation_annotations_sha256": training["validation_annotations_sha256"],
+                  "vocabulary_sha256": training["vocabulary_sha256"],
+                  "sampler_recall": benchmark["sampler_recall"],
+                  "pair_ap": benchmark["pair_ap"],
+                  "predicate_top1_accuracy": benchmark[
+                      "predicate_top1_accuracy_on_sampled_pairs"
+                  ],
+                  "r20": benchmark["recall_at_k"]["20"],
+                  "r50": benchmark["recall_at_k"]["50"],
+                  "r100": benchmark["recall_at_k"]["100"],
+                  "mr20": benchmark["mean_recall_at_k"]["20"],
+                  "mr50": benchmark["mean_recall_at_k"]["50"],
+                  "mr100": benchmark["mean_recall_at_k"]["100"],
+              }
+              rows[arm["arm"]] = row
+
+          expected_arms = {"identity512", "clip", "clip-whitened"}
+          if set(rows) != expected_arms:
+              raise RuntimeError(
+                  f"unexpected whitening arms: {sorted(rows)}"
+              )
+
+          identity = rows["identity512"]
+          raw = rows["clip"]
+          whitened = rows["clip-whitened"]
+          for candidate in (raw, whitened):
+              for key in (
+                  "trainable_parameter_count",
+                  "predicate_embedding_shape",
+                  "train_annotations_sha256",
+                  "validation_annotations_sha256",
+                  "vocabulary_sha256",
+              ):
+                  if identity[key] != candidate[key]:
+                      raise RuntimeError(
+                          f"A/B contract mismatch for {candidate['arm']} {key}: "
+                          f"{identity[key]} != {candidate[key]}"
+                      )
+
+          if identity["predicate_embedding_shape"] != [17, 512]:
+              raise RuntimeError(
+                  f"unexpected prototype shape: "
+                  f"{identity['predicate_embedding_shape']}"
+              )
+
+          raw_max = raw["prototype_gram"]["max_abs_off_diagonal"]
+          white_max = whitened["prototype_gram"]["max_abs_off_diagonal"]
+          if white_max >= 1.0e-5:
+              raise RuntimeError(
+                  f"whitened prototype Gram is not orthogonal: {white_max}"
+              )
+          if whitened["prototype_source_gram"] != raw["prototype_gram"]:
+              raise RuntimeError(
+                  "whitened source Gram does not match raw CLIP Gram"
+              )
+          if raw_max <= white_max:
+              raise RuntimeError(
+                  "whitening did not reduce prototype correlation"
+              )
+
+          metric_keys = (
+              "sampler_recall",
+              "pair_ap",
+              "predicate_top1_accuracy",
+              "r20",
+              "r50",
+              "r100",
+              "mr20",
+              "mr50",
+              "mr100",
+          )
+
+          def delta(left, right):
+              return {
+                  key: left[key] - right[key]
+                  for key in metric_keys
+              }
+
+          payload = {
+              "schema": "kfcore.clip-prototype-whitening/1",
+              "identity": identity,
+              "raw_clip": raw,
+              "whitened_clip": whitened,
+              "raw_minus_identity": delta(raw, identity),
+              "whitened_minus_identity": delta(whitened, identity),
+              "whitened_minus_raw": delta(whitened, raw),
+          }
+          Path("comparison.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip-whitening-comparison-${{ github.run_id }}
+          retention-days: 30
+          path: comparison.json
