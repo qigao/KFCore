@@ -16,6 +16,7 @@ from model import (
     HFDinoV3Backbone,
     KFRelationModel,
     MetaDinoV3Backbone,
+    OfficialDinoV3Backbone,
     RelationModelConfig,
     TimmDinoV3Backbone,
 )
