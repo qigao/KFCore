@@ -8,7 +8,12 @@ from pathlib import Path
 import torch
 from huggingface_hub import hf_hub_download
 
-from export_onnx import check_onnx_parity, export_graph
+from export_onnx import (
+    ENCODER_OUTPUT_NAMES,
+    check_onnx_parity,
+    export_encoder_graph,
+    export_graph,
+)
 from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 
 
@@ -46,6 +51,9 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     onnx_path = output_dir / "real-dinov3-relation-smoke.onnx"
+    encoder_onnx_path = (
+        output_dir / "real-dinov3-relation-encoder-smoke.onnx"
+    )
     report_path = output_dir / "real-dinov3-smoke.json"
 
     downloaded = Path(
@@ -155,8 +163,50 @@ def main() -> None:
         reference,
     )
 
+    encoder_reference = export_encoder_graph(
+        model,
+        encoder_onnx_path,
+        image,
+        boxes,
+        box_counts,
+        opset=args.opset,
+    )
+    expected_encoder_shapes = [
+        (1, config.pair_budget, predicate_embeddings.shape[1]),
+        (1, config.pair_budget, predicate_embeddings.shape[1]),
+        (1, config.pair_budget),
+        (1, config.pair_budget),
+        (1, config.pair_budget),
+        (1, config.pair_budget),
+    ]
+    for value, shape in zip(
+        encoder_reference, expected_encoder_shapes
+    ):
+        if tuple(value.shape) != shape:
+            raise RuntimeError(
+                "open-vocabulary encoder output shape "
+                f"{tuple(value.shape)} != {shape}"
+            )
+    if not torch.allclose(
+        encoder_reference[0],
+        encoder_reference[1],
+        atol=0.0,
+        rtol=0.0,
+    ):
+        raise RuntimeError(
+            "phase-1 semantic/spatial relation queries diverged"
+        )
+    encoder_max_abs_delta = check_onnx_parity(
+        encoder_onnx_path,
+        image,
+        boxes,
+        box_counts,
+        encoder_reference,
+        output_names=ENCODER_OUTPUT_NAMES,
+    )
+
     report = {
-        "schema": "kfcore.real-dinov3-relation-smoke/5",
+        "schema": "kfcore.real-dinov3-relation-smoke/6",
         "weights_repo": args.repo,
         "weights_filename": args.filename,
         "weights_sha256": weights_sha256,
@@ -174,6 +224,10 @@ def main() -> None:
         "onnx_sha256": file_sha256(onnx_path),
         "onnx_bytes": onnx_path.stat().st_size,
         "ort_max_abs_delta": max_abs_delta,
+        "encoder_onnx_sha256": file_sha256(encoder_onnx_path),
+        "encoder_onnx_bytes": encoder_onnx_path.stat().st_size,
+        "encoder_ort_max_abs_delta": encoder_max_abs_delta,
+        "encoder_query_dim": int(predicate_embeddings.shape[1]),
         "valid_pair_count": int(valid_mask.sum().item()),
     }
     report_path.write_text(
