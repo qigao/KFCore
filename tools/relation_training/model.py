@@ -327,6 +327,8 @@ class KFRelationModel(nn.Module):
         intersection = inter_w * inter_h
         union = (subject_area + object_area - intersection).clamp_min(1.0e-6)
         iou = intersection / union
+        subject_area_feature = subject_area.expand_as(intersection)
+        object_area_feature = object_area.expand_as(intersection)
 
         return torch.stack(
             (
@@ -335,8 +337,8 @@ class KFRelationModel(nn.Module):
                 distance,
                 log_w_ratio,
                 log_h_ratio,
-                subject_area,
-                object_area,
+                subject_area_feature,
+                object_area_feature,
                 iou,
             ),
             dim=-1,
