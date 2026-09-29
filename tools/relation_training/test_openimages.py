@@ -62,10 +62,12 @@ def relationship(
     ]
 
 
-def write_csv(path: Path, rows) -> None:
+def write_csv(path: Path, rows, *, relationship_header: str = "RelationLabel") -> None:
+    header = list(HEADER)
+    header[-1] = relationship_header
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
-        writer.writerow(HEADER)
+        writer.writerow(header)
         writer.writerows(rows)
 
 
@@ -145,6 +147,30 @@ class OpenImagesConversionTest(unittest.TestCase):
         )
         payload = json.loads(vocabulary_payload(vocabulary))
         self.assertEqual(payload["schema"], "kfcore.relation-vocab/1")
+
+    def test_real_relationshiplabel_header_is_accepted_and_normalized(self):
+        source = self.root / "real-header.csv"
+        write_csv(
+            source,
+            self.rows(),
+            relationship_header="RelationshipLabel",
+        )
+        summary = scan_relationship_files([source])
+        self.assertEqual(summary.object_relationships, 3)
+        selected = select_subset_image_ids(
+            source,
+            max_images=2,
+            max_boxes=2,
+        )
+        subset = subset_relationship_csv(source, selected)
+        self.assertTrue(subset.startswith(
+            "ImageID,LabelName1,LabelName2,XMin1,XMax1,YMin1,YMax1,"
+            "XMin2,XMax2,YMin2,YMax2,RelationLabel\n"
+        ))
+        subset_path = self.root / "normalized.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        normalized = scan_relationship_files([subset_path])
+        self.assertEqual(normalized.object_relationships, 3)
 
     def test_conversion_preserves_multi_label_pair_and_validates_manifest(self):
         csv_path = self.root / "train.csv"
