@@ -294,6 +294,130 @@ class MetaDinoV3Backbone(BackboneAdapter):
         return result
 
 
+class TimmDinoV3Backbone(BackboneAdapter):
+    """Adapter for the public timm DINOv3 ViT implementation."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        *,
+        image_mean: Sequence[float] = (0.485, 0.456, 0.406),
+        image_std: Sequence[float] = (0.229, 0.224, 0.225),
+    ) -> None:
+        super().__init__()
+        hidden_size = getattr(model, "num_features", None)
+        if not isinstance(hidden_size, int) or hidden_size <= 0:
+            hidden_size = getattr(model, "embed_dim", None)
+        patch_embed = getattr(model, "patch_embed", None)
+        patch_size_value = getattr(patch_embed, "patch_size", None)
+        if isinstance(patch_size_value, (tuple, list)):
+            if len(patch_size_value) != 2 or patch_size_value[0] != patch_size_value[1]:
+                raise ValueError("timm DINOv3 requires square patch size")
+            patch_size = int(patch_size_value[0])
+        elif patch_size_value is not None:
+            patch_size = int(patch_size_value)
+        else:
+            patch_size = 0
+        blocks = getattr(model, "blocks", None)
+        depth = len(blocks) if blocks is not None else 0
+
+        if not isinstance(hidden_size, int) or hidden_size <= 0:
+            raise ValueError("timm DINOv3 model is missing a valid hidden size")
+        if patch_size <= 0:
+            raise ValueError("timm DINOv3 model is missing a valid patch size")
+        if depth <= 0:
+            raise ValueError("timm DINOv3 model is missing transformer blocks")
+        if not callable(getattr(model, "get_intermediate_layers", None)):
+            raise ValueError("timm DINOv3 model lacks get_intermediate_layers")
+        if len(image_mean) != 3 or len(image_std) != 3:
+            raise ValueError("timm DINOv3 normalization must have three channels")
+
+        self.model = model
+        self.hidden_size = hidden_size
+        self.patch_size = patch_size
+        self.depth = depth
+        self.register_buffer(
+            "_mean",
+            torch.tensor(image_mean, dtype=torch.float32).reshape(1, 3, 1, 1),
+            persistent=True,
+        )
+        self.register_buffer(
+            "_std",
+            torch.tensor(image_std, dtype=torch.float32).reshape(1, 3, 1, 1),
+            persistent=True,
+        )
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_name: str = "hf_hub:timm/vit_small_patch16_dinov3.lvd1689m",
+        *,
+        train_backbone: bool = True,
+    ) -> "TimmDinoV3Backbone":
+        import timm
+
+        model = timm.create_model(model_name, pretrained=True)
+        cfg = getattr(model, "pretrained_cfg", {}) or {}
+        image_mean = tuple(cfg.get("mean", cls.IMAGENET_MEAN if hasattr(cls, "IMAGENET_MEAN") else (0.485, 0.456, 0.406)))
+        image_std = tuple(cfg.get("std", cls.IMAGENET_STD if hasattr(cls, "IMAGENET_STD") else (0.229, 0.224, 0.225)))
+        backbone = cls(
+            model,
+            image_mean=image_mean,
+            image_std=image_std,
+        )
+        backbone.model.requires_grad_(train_backbone)
+        return backbone
+
+    def forward_taps(self, image: Tensor, taps: Sequence[int]) -> list[Tensor]:
+        if image.ndim != 4 or image.shape[1] != 3:
+            raise ValueError(
+                "DINOv3 image input must be NCHW with three channels"
+            )
+        height = int(image.shape[2])
+        width = int(image.shape[3])
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
+            raise ValueError(
+                "image dimensions must be divisible by DINOv3 patch size"
+            )
+
+        absolute: list[int] = []
+        for tap in taps:
+            index = self.depth + int(tap) if int(tap) < 0 else int(tap)
+            if index < 0 or index >= self.depth:
+                raise ValueError(
+                    f"DINOv3 tap {tap} resolves outside [0,{self.depth})"
+                )
+            absolute.append(index)
+
+        mean = self._mean.to(dtype=image.dtype, device=image.device)
+        std = self._std.to(dtype=image.dtype, device=image.device)
+        normalized = (image - mean) / std
+        outputs = self.model.get_intermediate_layers(
+            normalized,
+            n=absolute,
+            reshape=True,
+            return_prefix_tokens=False,
+            norm=False,
+        )
+        if len(outputs) != len(absolute):
+            raise RuntimeError(
+                "timm DINOv3 returned the wrong number of intermediate taps"
+            )
+        result: list[Tensor] = []
+        for feature in outputs:
+            if (
+                feature.ndim != 4
+                or int(feature.shape[1]) != self.hidden_size
+                or int(feature.shape[2]) != height // self.patch_size
+                or int(feature.shape[3]) != width // self.patch_size
+            ):
+                raise RuntimeError(
+                    "timm DINOv3 intermediate feature contract mismatch"
+                )
+            result.append(feature)
+        return result
+
+
 def _batch_gather(values: Tensor, indices: Tensor) -> Tensor:
     if values.ndim != 3 or indices.ndim != 2:
         raise ValueError("batch gather expects [B,N,C] values and [B,K] indices")
