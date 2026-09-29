@@ -1375,6 +1375,165 @@ class RelationModelTest(unittest.TestCase):
                 predicate_negative_weights=torch.tensor([1.0, 0.1]),
             )
 
+    def test_infonce_calibration_uses_safe_seen_columns_only(self):
+        pred_logits = torch.tensor(
+            [[[2.0, -2.0, 10.0]]],
+            requires_grad=True,
+        )
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]], requires_grad=True
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_calibration_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [True, True, True]
+            ),
+        )
+
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, 0, :2],
+            torch.tensor([1.0, 0.0]),
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_calibration_loss"], expected)
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows"]),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_calibration_column_fraction"]),
+            2.0 / 3.0,
+            places=6,
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(pred_logits.grad)
+        self.assertGreater(
+            float(pred_logits.grad[0, 0, :2].abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(pred_logits.grad[0, 0, 2].abs()),
+            0.0,
+        )
+
+    def test_infonce_calibration_skips_holdout_only_rows(self):
+        pred_logits = torch.tensor(
+            [[[0.0, 0.0, 2.0]]],
+            requires_grad=True,
+        )
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]], requires_grad=True
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 2] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_calibration_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [True, True, False]
+            ),
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+        self.assertEqual(
+            float(losses["predicate_calibration_loss"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows_skipped"]),
+            1.0,
+        )
+
+    def test_predicate_calibration_requires_infonce(self):
+        with self.assertRaises(ValueError):
+            RelationLossConfig(
+                predicate_objective="bce",
+                predicate_calibration_loss_weight=0.25,
+            )
+
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
         model = KFRelationModel(
             ToyBackbone(), torch.randn(3, 6), config()
