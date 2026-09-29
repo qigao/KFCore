@@ -40,6 +40,7 @@ def save_checkpoint(
             "pair_visual_evidence": model.config.pair_visual_evidence,
             "pair_geometry_evidence": model.config.pair_geometry_evidence,
             "pair_evidence_contract": model.config.pair_evidence_contract,
+            "pair_sampler_contract": model.config.pair_sampler_contract,
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),
