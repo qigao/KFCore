@@ -477,10 +477,41 @@ class RelationBenchmark:
                     "mean_recall_at_k": group_mean,
                 }
 
+            holdout: list[int] = []
+            holdout_set: set[int] = set()
+            if explicit_holdout_predicate_indices is not None:
+                for value in explicit_holdout_predicate_indices:
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        raise ValueError(
+                            "explicit holdout predicate indices must be integers"
+                        )
+                    if value < 0 or value >= self.predicate_count:
+                        raise ValueError(
+                            "explicit holdout predicate index is outside vocabulary"
+                        )
+                    if value in holdout_set:
+                        raise ValueError(
+                            "explicit holdout predicate indices must be unique"
+                        )
+                    if train_support[value] <= 0:
+                        raise ValueError(
+                            "explicit holdout predicate must have positive train support"
+                        )
+                    if self.predicate_support[value] <= 0:
+                        raise ValueError(
+                            "explicit holdout predicate must have validation support"
+                        )
+                    holdout_set.add(value)
+                    holdout.append(value)
+                if not holdout:
+                    raise ValueError(
+                        "explicit holdout predicate indices must not be empty"
+                    )
+
             seen_indices = [
                 index
                 for index in supported_predicates
-                if train_support[index] > 0
+                if train_support[index] > 0 and index not in holdout_set
             ]
             zero_shot_indices = [
                 index
@@ -493,33 +524,7 @@ class RelationBenchmark:
                     zero_shot_indices
                 ),
             }
-
-            if explicit_holdout_predicate_indices is not None:
-                holdout: list[int] = []
-                seen_holdout: set[int] = set()
-                for value in explicit_holdout_predicate_indices:
-                    if isinstance(value, bool) or not isinstance(value, int):
-                        raise ValueError(
-                            "explicit holdout predicate indices must be integers"
-                        )
-                    if value < 0 or value >= self.predicate_count:
-                        raise ValueError(
-                            "explicit holdout predicate index is outside vocabulary"
-                        )
-                    if value in seen_holdout:
-                        raise ValueError(
-                            "explicit holdout predicate indices must be unique"
-                        )
-                    seen_holdout.add(value)
-                    if self.predicate_support[value] <= 0:
-                        raise ValueError(
-                            "explicit holdout predicate must have validation support"
-                        )
-                    holdout.append(value)
-                if not holdout:
-                    raise ValueError(
-                        "explicit holdout predicate indices must not be empty"
-                    )
+            if holdout:
                 predicate_groups["explicit_holdout"] = group_payload(
                     sorted(holdout)
                 )
