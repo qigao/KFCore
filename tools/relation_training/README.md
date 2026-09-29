@@ -285,6 +285,18 @@ This is an attribution experiment. If whitening recovers the orthogonal
 control, the next useful model change is a relation-specific shared text
 adapter rather than generic raw CLIP prototypes.
 
+## CLIP whitening evidence tolerance
+
+The raw CLIP and whitened-CLIP arms encode the same text prototypes in
+independent processes. Their diagnostic Gram statistics can therefore differ
+at floating-point tail precision even when the source prototype geometry is
+equivalent. The whitening comparison checks every Gram diagnostic field with
+`rel_tol=1e-6` and `abs_tol=1e-8` rather than requiring byte-for-byte JSON
+float equality.
+
+The whitened output still has a separate strict geometry requirement:
+`max_abs_off_diagonal < 1e-5`.
+
 ## Predicate prototype semantic A/B
 
 After the sampler ablation, K=48 is the practical baseline for the next
