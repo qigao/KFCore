@@ -758,10 +758,8 @@ def supervised_relation_loss(
 
     if training_outputs is not None:
         if (
-            training_outputs.sampler_geo_loss is None
-            != (
-                training_outputs.sampler_relatedness_loss is None
-            )
+            (training_outputs.sampler_geo_loss is None)
+            != (training_outputs.sampler_relatedness_loss is None)
         ):
             raise ValueError(
                 "reference sampler losses must be provided together"
