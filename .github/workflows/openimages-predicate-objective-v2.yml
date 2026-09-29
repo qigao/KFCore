@@ -537,10 +537,21 @@ jobs:
           if [ -n "${REQUESTED_RUN_ID:-}" ]; then
             run_id="$REQUESTED_RUN_ID"
           else
-            run_id="$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/openimages-predicate-objective-v2.yml/runs?branch=master&status=completed&per_page=20" \
-              --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' \
-              | head -n 1)"
+            run_id=""
+            while read -r candidate; do
+              [ -n "$candidate" ] || continue
+              count="$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/runs/$candidate/artifacts?per_page=100" \
+                --jq '[.artifacts[] | select(.name | startswith("predicate-objective-v2-arm-"))] | length')"
+              if [ "$count" -ge 4 ]; then
+                run_id="$candidate"
+                break
+              fi
+            done < <(
+              gh api \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/openimages-predicate-objective-v2.yml/runs?branch=master&status=completed&per_page=20" \
+                --jq '.workflow_runs[] | select(.conclusion == "failure") | .id'
+            )
           fi
           test -n "$run_id"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
