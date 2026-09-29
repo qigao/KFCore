@@ -297,6 +297,9 @@ class MetaDinoV3Backbone(BackboneAdapter):
 class TimmDinoV3Backbone(BackboneAdapter):
     """Adapter for the public timm DINOv3 ViT implementation."""
 
+    IMAGENET_MEAN = (0.485, 0.456, 0.406)
+    IMAGENET_STD = (0.229, 0.224, 0.225)
+
     def __init__(
         self,
         model: nn.Module,
@@ -358,8 +361,8 @@ class TimmDinoV3Backbone(BackboneAdapter):
 
         model = timm.create_model(model_name, pretrained=True)
         cfg = getattr(model, "pretrained_cfg", {}) or {}
-        image_mean = tuple(cfg.get("mean", cls.IMAGENET_MEAN if hasattr(cls, "IMAGENET_MEAN") else (0.485, 0.456, 0.406)))
-        image_std = tuple(cfg.get("std", cls.IMAGENET_STD if hasattr(cls, "IMAGENET_STD") else (0.229, 0.224, 0.225)))
+        image_mean = tuple(cfg.get("mean", cls.IMAGENET_MEAN))
+        image_std = tuple(cfg.get("std", cls.IMAGENET_STD))
         backbone = cls(
             model,
             image_mean=image_mean,
