@@ -560,6 +560,39 @@ with bounded train-supported negatives restores global text-space ranking and
 strict held-out predicate transfer before adding ontology/source-aware
 negative weighting.
 
+## Contact-only visual evidence attribution
+
+The first endpoint/union/union-contact A/B showed that union pooling alone was
+nearly neutral, while adding contact evidence produced the large gain in pair
+AP and predicate top-1.
+
+KFCore therefore exposes a fourth research mode:
+
+```text
+--pair-visual-evidence contact
+```
+
+The mode adds only the zero-initialized contact residual projection. It does
+not allocate or apply the union projection.
+
+All visual-evidence modes share identical common parameter initialization:
+
+```text
+endpoint
+union
+contact
+union-contact
+```
+
+A zero-initialized optional residual makes every mode start from the exact
+endpoint behavior. Union-only and contact-only add the same number of trainable
+parameters; union-contact adds exactly twice that projection delta.
+
+`.github/workflows/openimages-pair-visual-evidence.yml` now compares all four
+modes under the same hard8 InfoNCE + calibration=0.10 contract. This isolates
+whether the previous union-contact gain is primarily attributable to contact
+evidence or to the combination.
+
 ## Source-aware predicate calibration auxiliary
 
 Bounded hard negatives broaden the InfoNCE contrast set and improve retained

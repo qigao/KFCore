@@ -263,10 +263,11 @@ class RelationModelTest(unittest.TestCase):
 
         endpoint = build("endpoint")
         union = build("union")
+        contact = build("contact")
         union_contact = build("union-contact")
 
         endpoint_state = endpoint.state_dict()
-        for candidate in (union, union_contact):
+        for candidate in (union, contact, union_contact):
             state = candidate.state_dict()
             for name, value in endpoint_state.items():
                 self.assertIn(name, state)
@@ -279,10 +280,16 @@ class RelationModelTest(unittest.TestCase):
         self.assertIsNone(endpoint.contact_projection)
         self.assertIsNotNone(union.union_projection)
         self.assertIsNone(union.contact_projection)
+        self.assertIsNone(contact.union_projection)
+        self.assertIsNotNone(contact.contact_projection)
         self.assertIsNotNone(union_contact.union_projection)
         self.assertIsNotNone(union_contact.contact_projection)
         self.assertEqual(
             float(union.union_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(contact.contact_projection.weight.abs().sum()),
             0.0,
         )
         self.assertEqual(
@@ -304,13 +311,20 @@ class RelationModelTest(unittest.TestCase):
             union_output = union(
                 image, box_tensor[:1], box_counts[:1]
             )
-            contact_output = union_contact(
+            contact_output = contact(
                 image, box_tensor[:1], box_counts[:1]
             )
-        for left, right, final in zip(
-            expected, union_output, contact_output
+            union_contact_output = union_contact(
+                image, box_tensor[:1], box_counts[:1]
+            )
+        for left, union_value, contact_value, final in zip(
+            expected,
+            union_output,
+            contact_output,
+            union_contact_output,
         ):
-            self.assertTrue(torch.equal(left, right))
+            self.assertTrue(torch.equal(left, union_value))
+            self.assertTrue(torch.equal(left, contact_value))
             self.assertTrue(torch.equal(left, final))
 
     def test_open_vocabulary_encoder_is_independent_of_predicate_count(self):
@@ -1777,6 +1791,37 @@ class RelationModelTest(unittest.TestCase):
                 reference,
             )
         self.assertLessEqual(delta, 1.0e-3)
+
+    def test_contact_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(63)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("contact"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "contact.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_visual_evidence,
+            "contact",
+        )
+        self.assertNotIn(
+            "union_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "contact_projection.weight",
+            payload["state_dict"],
+        )
 
     def test_union_contact_checkpoint_round_trip_preserves_mode(self):
         torch.manual_seed(64)
