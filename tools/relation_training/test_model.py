@@ -895,6 +895,91 @@ class RelationModelTest(unittest.TestCase):
             0.0,
         )
 
+    def test_holdout_only_row_policy_skips_only_unknown_predicate_rows(self):
+        torch.manual_seed(25)
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        output = model.forward_training(
+            torch.rand(1, 3, 8, 8),
+            box_tensor[:1],
+            box_counts[:1],
+        )
+        pred_logits, _, sub_idx, obj_idx, valid_mask = output.runtime
+        slot = int(torch.nonzero(valid_mask[0], as_tuple=False)[0, 0])
+        subject = int(sub_idx[0, slot])
+        object_ = int(obj_idx[0, slot])
+
+        pair_targets = torch.zeros(1, 4, 4)
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        pair_targets[0, subject, object_] = 1.0
+        predicate_targets[0, subject, object_, 2] = 1.0
+        supervision = torch.tensor([True, True, False])
+        holdout = torch.tensor([False, False, True])
+        loss_config = RelationLossConfig(
+            sampler_loss_weight=0.0,
+            pair_loss_weight=0.0,
+            predicate_loss_weight=1.0,
+        )
+
+        skipped = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            loss_config,
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=holdout,
+            explicit_holdout_row_policy="skip-holdout-only",
+        )
+        self.assertEqual(float(skipped["predicate_rows"]), 1.0)
+        self.assertEqual(
+            float(skipped["predicate_rows_skipped"]),
+            1.0,
+        )
+        self.assertEqual(float(skipped["predicate_loss"]), 0.0)
+
+        predicate_targets[0, subject, object_, 0] = 1.0
+        mixed = supervised_relation_loss(
+            output,
+            pair_targets,
+            predicate_targets,
+            loss_config,
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=holdout,
+            explicit_holdout_row_policy="skip-holdout-only",
+        )
+        self.assertEqual(float(mixed["predicate_rows"]), 1.0)
+        self.assertEqual(
+            float(mixed["predicate_rows_skipped"]),
+            0.0,
+        )
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, slot, :2],
+            torch.tensor([1.0, 0.0]),
+        )
+        self.assertTrue(
+            torch.allclose(mixed["predicate_loss"], expected)
+        )
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                pair_targets,
+                predicate_targets,
+                loss_config,
+                predicate_supervision_mask=supervision,
+                explicit_holdout_row_policy="skip-holdout-only",
+            )
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                output,
+                pair_targets,
+                predicate_targets,
+                loss_config,
+                explicit_holdout_row_policy="unsupported",
+            )
+
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
         model = KFRelationModel(
             ToyBackbone(), torch.randn(3, 6), config()
