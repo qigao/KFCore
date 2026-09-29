@@ -217,6 +217,44 @@ class RelationModelTest(unittest.TestCase):
         for tap in taps:
             self.assertEqual(tuple(tap.shape), (1, 8, 4, 4))
 
+    def test_adapter_rank_does_not_change_common_initialization(self):
+        predicate_bank = torch.randn(3, 6)
+
+        torch.manual_seed(20260929)
+        control = KFRelationModel(
+            ToyBackbone(),
+            predicate_bank.clone(),
+            config(),
+        )
+        torch.manual_seed(20260929)
+        adapted = KFRelationModel(
+            ToyBackbone(),
+            predicate_bank.clone(),
+            adapter_config(),
+        )
+
+        control_state = control.state_dict()
+        adapted_state = adapted.state_dict()
+        common_keys = sorted(
+            key
+            for key in control_state
+            if not key.startswith("predicate_adapter_")
+        )
+        self.assertTrue(common_keys)
+        self.assertEqual(
+            common_keys,
+            sorted(
+                key
+                for key in adapted_state
+                if not key.startswith("predicate_adapter_")
+            ),
+        )
+        for key in common_keys:
+            self.assertTrue(
+                torch.equal(control_state[key], adapted_state[key]),
+                msg=f"common initialization drifted for {key}",
+            )
+
     def test_predicate_adapter_starts_as_exact_residual_identity(self):
         torch.manual_seed(29)
         model = KFRelationModel(
