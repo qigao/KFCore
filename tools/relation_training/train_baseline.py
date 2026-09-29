@@ -110,6 +110,21 @@ def main() -> None:
     parser.add_argument("--pair-loss-weight", type=float, default=1.0)
     parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
     parser.add_argument(
+        "--predicate-objective",
+        choices=("bce", "batch-local-infonce"),
+        default="bce",
+        help=(
+            "Predicate training objective. bce preserves the historical "
+            "exhaustive baseline; batch-local-infonce contrasts only "
+            "supervised predicate directions observed in the current batch."
+        ),
+    )
+    parser.add_argument(
+        "--predicate-contrastive-temperature",
+        type=float,
+        default=0.07,
+    )
+    parser.add_argument(
         "--predicate-positive-weight-mode",
         choices=("none", "sqrt-balanced", "balanced"),
         default="none",
@@ -204,6 +219,10 @@ def main() -> None:
         pair_loss_weight=args.pair_loss_weight,
         predicate_loss_weight=args.predicate_loss_weight,
         negative_pair_weight=args.negative_pair_weight,
+        predicate_objective=args.predicate_objective,
+        predicate_contrastive_temperature=(
+            args.predicate_contrastive_temperature
+        ),
     )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
@@ -238,6 +257,14 @@ def main() -> None:
         raise ValueError(
             "--holdout-row-policy skip-holdout-only requires "
             "--holdout-predicate"
+        )
+    if (
+        args.predicate_objective == "batch-local-infonce"
+        and args.zero_support_negative_weight != 1.0
+    ):
+        raise ValueError(
+            "--zero-support-negative-weight is BCE-only; "
+            "batch-local-infonce does not consume BCE negative weights"
         )
 
     predicate_index = {
@@ -518,6 +545,10 @@ def main() -> None:
             "pair_loss_weight": loss_config.pair_loss_weight,
             "predicate_loss_weight": loss_config.predicate_loss_weight,
             "negative_pair_weight": loss_config.negative_pair_weight,
+            "predicate_objective": loss_config.predicate_objective,
+            "predicate_contrastive_temperature": (
+                loss_config.predicate_contrastive_temperature
+            ),
         },
         "benchmark_config": {
             "pair_weight": benchmark_config.pair_weight,
