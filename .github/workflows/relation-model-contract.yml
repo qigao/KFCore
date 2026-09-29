@@ -1,0 +1,185 @@
+name: DINO relation model contract
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/relation_training/**'
+      - 'THIRD_PARTY_NOTICES.md'
+      - '.github/workflows/relation-model-contract.yml'
+      - '.github/workflows/real-dinov3-relation-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relation-model-contract-onnx-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-ci.txt
+
+      - name: Install focused CPU dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-ci-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-ci.txt
+
+      - name: Compile Python contracts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m py_compile \
+            tools/relation_training/model.py \
+            tools/relation_training/losses.py \
+            tools/relation_training/checkpoint.py \
+            tools/relation_training/export_onnx.py \
+            tools/relation_training/real_dinov3_smoke.py \
+            tools/relation_training/benchmark.py \
+            tools/relation_training/training.py \
+            tools/relation_training/train_baseline.py \
+            tools/relation_training/compare_zero_support_sweep.py \
+            tools/relation_training/openimages.py \
+            tools/relation_training/convert_openimages.py \
+            tools/relation_training/make_predicate_embeddings.py \
+            tools/relation_training/test_predicate_embeddings.py \
+            tools/relation_training/test_model.py \
+            tools/relation_training/test_benchmark.py \
+            tools/relation_training/test_training.py \
+            tools/relation_training/test_openimages.py
+
+      - name: Run synthetic forward/backward and ONNX contract
+        shell: bash
+        working-directory: tools/relation_training
+        run: |
+          set -euxo pipefail
+          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+
+  real-vits16:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
+      DINOV3_FILENAME: model.safetensors
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-real-smoke.txt
+
+      - name: Install real-smoke dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-real-smoke.txt
+
+      - name: Download public DINOv3 ViT-S/16 weights
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf "$HF_HOME"
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          from huggingface_hub import hf_hub_download
+
+          path = Path(hf_hub_download(
+              repo_id=os.environ["DINOV3_REPO"],
+              filename=os.environ["DINOV3_FILENAME"],
+              force_download=True,
+          )).resolve()
+          digest = hashlib.sha256(path.read_bytes()).hexdigest()
+          print(f"downloaded={path}")
+          print(f"sha256={digest}")
+          print(f"bytes={path.stat().st_size}")
+          PY
+
+      - name: Run real DINOv3 ViT-S/16 forward and export smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --output-dir "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-dinov3-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 1
+          path: ${{ runner.temp }}/real-dinov3-smoke/real-dinov3-smoke.json
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+

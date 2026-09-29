@@ -1,0 +1,467 @@
+from __future__ import annotations
+
+import csv
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from PIL import Image
+
+from benchmark import DatasetManifest, RelationVocabulary
+from openimages import (
+    build_vocabulary,
+    convert_relationship_file,
+    image_id_payload,
+    load_class_descriptions,
+    scan_relationship_files,
+    select_subset_image_ids,
+    stable_manifest_json,
+    subset_relationship_csv,
+    vocabulary_payload,
+)
+
+
+HEADER = [
+    "ImageID",
+    "LabelName1",
+    "LabelName2",
+    "XMin1",
+    "XMax1",
+    "YMin1",
+    "YMax1",
+    "XMin2",
+    "XMax2",
+    "YMin2",
+    "YMax2",
+    "RelationLabel",
+]
+
+
+def relationship(
+    image_id: str,
+    subject_mid: str,
+    object_mid: str,
+    predicate: str,
+    subject_box=(0.0, 0.4, 0.0, 1.0),
+    object_box=(0.5, 1.0, 0.0, 1.0),
+):
+    return [
+        image_id,
+        subject_mid,
+        object_mid,
+        str(subject_box[0]),
+        str(subject_box[1]),
+        str(subject_box[2]),
+        str(subject_box[3]),
+        str(object_box[0]),
+        str(object_box[1]),
+        str(object_box[2]),
+        str(object_box[3]),
+        predicate,
+    ]
+
+
+def write_csv(path: Path, rows, *, relationship_header: str = "RelationLabel") -> None:
+    header = list(HEADER)
+    header[-1] = relationship_header
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+
+class OpenImagesConversionTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.classes = self.root / "classes.csv"
+        self.classes.write_text(
+            "/m/person,Person\n"
+            "/m/bike,Bicycle\n"
+            "/m/red,Red\n",
+            encoding="utf-8",
+        )
+        Image.new("RGB", (100, 50), (10, 20, 30)).save(
+            self.root / "abc123.jpg"
+        )
+        Image.new("RGB", (80, 40), (30, 20, 10)).save(
+            self.root / "def456.jpg"
+        )
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def rows(self):
+        return [
+            relationship(
+                "abc123", "/m/person", "/m/bike", "on"
+            ),
+            relationship(
+                "abc123", "/m/person", "/m/bike", "near"
+            ),
+            relationship(
+                "abc123",
+                "/m/person",
+                "/m/red",
+                "is",
+                subject_box=(0.0, 0.4, 0.0, 1.0),
+                object_box=(0.0, 0.4, 0.0, 1.0),
+            ),
+            relationship(
+                "def456",
+                "/m/bike",
+                "/m/person",
+                "behind",
+                subject_box=(0.1, 0.5, 0.2, 0.8),
+                object_box=(0.55, 0.95, 0.1, 0.9),
+            ),
+        ]
+
+    def shared_vocabulary(self, csv_path: Path):
+        classes = load_class_descriptions(self.classes)
+        summary = scan_relationship_files([csv_path])
+        return build_vocabulary([summary], classes), summary
+
+    def test_scan_builds_downloader_ids_and_skips_attributes(self):
+        csv_path = self.root / "train.csv"
+        write_csv(csv_path, self.rows())
+        vocabulary, summary = self.shared_vocabulary(csv_path)
+
+        self.assertEqual(summary.relationships, 4)
+        self.assertEqual(summary.object_relationships, 3)
+        self.assertEqual(summary.skipped_attributes, 1)
+        self.assertEqual(summary.skipped_self_relations, 0)
+        self.assertEqual(summary.images, ("abc123", "def456"))
+        self.assertEqual(
+            summary.predicates, ("behind", "near", "on")
+        )
+        self.assertEqual(
+            vocabulary.predicates, ("behind", "near", "on")
+        )
+        self.assertEqual(
+            vocabulary.object_labels, ("Bicycle", "Person")
+        )
+        self.assertEqual(
+            image_id_payload("train", summary.images),
+            "train/abc123\ntrain/def456\n",
+        )
+        payload = json.loads(vocabulary_payload(vocabulary))
+        self.assertEqual(payload["schema"], "kfcore.relation-vocab/1")
+
+    def test_real_relationshiplabel_header_is_accepted_and_normalized(self):
+        source = self.root / "real-header.csv"
+        write_csv(
+            source,
+            self.rows(),
+            relationship_header="RelationshipLabel",
+        )
+        summary = scan_relationship_files([source])
+        self.assertEqual(summary.object_relationships, 3)
+        selected = select_subset_image_ids(
+            source,
+            max_images=2,
+            max_boxes=2,
+        )
+        subset = subset_relationship_csv(source, selected)
+        self.assertTrue(subset.startswith(
+            "ImageID,LabelName1,LabelName2,XMin1,XMax1,YMin1,YMax1,"
+            "XMin2,XMax2,YMin2,YMax2,RelationLabel\n"
+        ))
+        subset_path = self.root / "normalized.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        normalized = scan_relationship_files([subset_path])
+        self.assertEqual(normalized.object_relationships, 3)
+
+    def test_conversion_preserves_multi_label_pair_and_validates_manifest(self):
+        csv_path = self.root / "train.csv"
+        write_csv(csv_path, self.rows())
+        classes = load_class_descriptions(self.classes)
+        vocabulary, _ = self.shared_vocabulary(csv_path)
+
+        output, manifest = convert_relationship_file(
+            csv_path,
+            split="train",
+            image_root=self.root,
+            class_descriptions=classes,
+            vocabulary=vocabulary,
+        )
+        records = [
+            json.loads(line)
+            for line in output.splitlines()
+        ]
+        self.assertEqual(len(records), 2)
+        first = records[0]
+        self.assertEqual(first["image"], "abc123.jpg")
+        self.assertEqual(first["width"], 100)
+        self.assertEqual(first["height"], 50)
+        self.assertEqual(first["object_labels"], ["Bicycle", "Person"])
+        self.assertEqual(
+            first["boxes_xyxy"],
+            [
+                [50.0, 0.0, 100.0, 50.0],
+                [0.0, 0.0, 40.0, 50.0],
+            ],
+        )
+
+        # The same ordered object pair carries both near and on.
+        pair = (1, 0)
+        predicates = {
+            relation[1]
+            for relation in first["relations"]
+            if (relation[0], relation[2]) == pair
+        }
+        self.assertEqual(
+            predicates,
+            {
+                vocabulary.predicates.index("near"),
+                vocabulary.predicates.index("on"),
+            },
+        )
+        self.assertEqual(manifest["source_rows"], 4)
+        self.assertEqual(manifest["skipped_attribute_rows"], 1)
+        self.assertEqual(manifest["skipped_self_relation_rows"], 0)
+        self.assertEqual(manifest["relations"], 3)
+
+        validation_path = self.root / "converted.jsonl"
+        validation_path.write_text(output, encoding="utf-8")
+        loaded = DatasetManifest.load(
+            validation_path, vocabulary
+        )
+        self.assertEqual(len(loaded.examples), 2)
+
+    def test_row_order_permutation_is_byte_identical(self):
+        first_path = self.root / "first.csv"
+        second_path = self.root / "second.csv"
+        rows = self.rows()
+        write_csv(first_path, rows)
+        write_csv(second_path, list(reversed(rows)))
+        classes = load_class_descriptions(self.classes)
+
+        first_summary = scan_relationship_files([first_path])
+        second_summary = scan_relationship_files([second_path])
+        vocabulary = build_vocabulary(
+            [first_summary, second_summary], classes
+        )
+
+        first, first_manifest = convert_relationship_file(
+            first_path,
+            split="train",
+            image_root=self.root,
+            class_descriptions=classes,
+            vocabulary=vocabulary,
+        )
+        second, second_manifest = convert_relationship_file(
+            second_path,
+            split="train",
+            image_root=self.root,
+            class_descriptions=classes,
+            vocabulary=vocabulary,
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first_manifest["output_sha256"],
+            second_manifest["output_sha256"],
+        )
+
+        # Source hashes differ, while stable manifest serialization itself is valid.
+        self.assertNotEqual(
+            first_manifest["source_sha256"],
+            second_manifest["source_sha256"],
+        )
+        self.assertTrue(
+            stable_manifest_json(first_manifest).endswith("\n")
+        )
+
+    def test_subset_selection_is_deterministic_and_respects_box_budget(self):
+        path = self.root / "full.csv"
+        rows = self.rows() + [
+            relationship(
+                "aaa000",
+                "/m/person",
+                "/m/bike",
+                "on",
+            ),
+            relationship(
+                "zzz999",
+                "/m/person",
+                "/m/bike",
+                "near",
+            ),
+        ]
+        Image.new("RGB", (20, 20), (1, 2, 3)).save(
+            self.root / "aaa000.jpg"
+        )
+        Image.new("RGB", (20, 20), (3, 2, 1)).save(
+            self.root / "zzz999.jpg"
+        )
+        write_csv(path, list(reversed(rows)))
+
+        selected = select_subset_image_ids(
+            path,
+            max_images=2,
+            max_boxes=2,
+        )
+        self.assertEqual(selected, ("aaa000", "abc123"))
+
+        subset = subset_relationship_csv(path, selected)
+        subset_path = self.root / "subset.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        summary = scan_relationship_files([subset_path])
+
+        self.assertEqual(summary.images, ("aaa000", "abc123"))
+        self.assertEqual(summary.skipped_attributes, 0)
+        self.assertNotIn(",is\n", subset)
+
+        # Reversing source rows does not change deterministic subset bytes.
+        second_path = self.root / "full-second.csv"
+        write_csv(second_path, rows)
+        second_selected = select_subset_image_ids(
+            second_path,
+            max_images=2,
+            max_boxes=2,
+        )
+        second_subset = subset_relationship_csv(
+            second_path, second_selected
+        )
+        self.assertEqual(selected, second_selected)
+        self.assertEqual(subset, second_subset)
+
+    def test_subset_minimum_object_count_filters_easy_images(self):
+        path = self.root / "minimum.csv"
+        rows = [
+            relationship(
+                "abc123", "/m/person", "/m/bike", "on"
+            ),
+            relationship(
+                "def456",
+                "/m/person",
+                "/m/bike",
+                "near",
+                subject_box=(0.0, 0.3, 0.0, 1.0),
+                object_box=(0.4, 0.7, 0.0, 1.0),
+            ),
+            relationship(
+                "def456",
+                "/m/person",
+                "/m/person",
+                "behind",
+                subject_box=(0.0, 0.3, 0.0, 1.0),
+                object_box=(0.75, 1.0, 0.0, 1.0),
+            ),
+        ]
+        write_csv(path, rows)
+
+        selected = select_subset_image_ids(
+            path,
+            max_images=1,
+            min_boxes=3,
+            max_boxes=4,
+        )
+        self.assertEqual(selected, ("def456",))
+
+        with self.assertRaises(ValueError):
+            select_subset_image_ids(
+                path,
+                max_images=1,
+                min_boxes=5,
+                max_boxes=4,
+            )
+
+    def test_missing_image_and_invalid_box_fail_fast(self):
+        classes = load_class_descriptions(self.classes)
+        vocabulary = RelationVocabulary(
+            predicates=("on",),
+            object_labels=("Bicycle", "Person"),
+        )
+
+        missing = self.root / "missing.csv"
+        write_csv(
+            missing,
+            [relationship("not_here", "/m/person", "/m/bike", "on")],
+        )
+        with self.assertRaises(FileNotFoundError):
+            convert_relationship_file(
+                missing,
+                split="train",
+                image_root=self.root,
+                class_descriptions=classes,
+                vocabulary=vocabulary,
+            )
+
+        invalid = self.root / "invalid.csv"
+        write_csv(
+            invalid,
+            [
+                relationship(
+                    "abc123",
+                    "/m/person",
+                    "/m/bike",
+                    "on",
+                    object_box=(0.5, 1.2, 0.0, 1.0),
+                )
+            ],
+        )
+        with self.assertRaises(ValueError):
+            scan_relationship_files([invalid])
+
+    def test_self_relations_are_explicitly_skipped_and_counted(self):
+        classes = load_class_descriptions(self.classes)
+        source = self.root / "self-with-valid.csv"
+        rows = [
+            relationship(
+                "abc123",
+                "/m/person",
+                "/m/person",
+                "on",
+                subject_box=(0.0, 0.4, 0.0, 1.0),
+                object_box=(0.0, 0.4, 0.0, 1.0),
+            ),
+            relationship(
+                "abc123",
+                "/m/person",
+                "/m/bike",
+                "on",
+            ),
+        ]
+        write_csv(source, rows)
+
+        summary = scan_relationship_files([source])
+        self.assertEqual(summary.relationships, 2)
+        self.assertEqual(summary.object_relationships, 1)
+        self.assertEqual(summary.skipped_attributes, 0)
+        self.assertEqual(summary.skipped_self_relations, 1)
+        self.assertEqual(summary.images, ("abc123",))
+
+        vocabulary = build_vocabulary([summary], classes)
+        output, manifest = convert_relationship_file(
+            source,
+            split="train",
+            image_root=self.root,
+            class_descriptions=classes,
+            vocabulary=vocabulary,
+        )
+        record = json.loads(output.strip())
+        self.assertEqual(len(record["relations"]), 1)
+        self.assertNotEqual(
+            record["relations"][0][0],
+            record["relations"][0][2],
+        )
+        self.assertEqual(manifest["skipped_self_relation_rows"], 1)
+
+        selected = select_subset_image_ids(
+            source,
+            max_images=1,
+            max_boxes=2,
+        )
+        subset = subset_relationship_csv(source, selected)
+        self.assertEqual(subset.count("\n"), 2)
+        subset_path = self.root / "self-normalized.csv"
+        subset_path.write_text(subset, encoding="utf-8")
+        normalized = scan_relationship_files([subset_path])
+        self.assertEqual(normalized.object_relationships, 1)
+        self.assertEqual(normalized.skipped_self_relations, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
