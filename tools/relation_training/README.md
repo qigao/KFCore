@@ -79,17 +79,15 @@ Those can be evaluated independently after the baseline has a measured metric.
 
 ## DINOv3 dependency boundary
 
-The default adapter loads
-`facebook/dinov3-vits16-pretrain-lvd1689m` through Hugging Face Transformers.
-A local model directory can be supplied instead.
+The relation core is independent of one DINOv3 packaging surface. Three thin
+adapters are available:
 
-DINOv3 model/source materials are governed by Meta's **DINOv3 License
-Agreement**, not the KFCore Apache-2.0 license. KFCore does not redistribute
-those materials. Obtain model access directly from Meta/Hugging Face and review
-the applicable terms before training, creating derivative checkpoints, or
-redistributing weights.
+- `HFDinoV3Backbone` for a Transformers model ID or local model directory;
+- `MetaDinoV3Backbone` for an official Meta DINOv3 source checkout plus an
+  explicitly supplied official weight file/URL;
+- `TimmDinoV3Backbone` for the public timm DINOv3 ViT implementation.
 
-The adapter uses only the public Transformers model interface:
+The default training example still uses the Transformers adapter:
 
 ```python
 backbone = HFDinoV3Backbone.from_pretrained(
@@ -98,9 +96,20 @@ backbone = HFDinoV3Backbone.from_pretrained(
 )
 ```
 
-DINOv3 may prepend CLS/storage tokens. The adapter derives the expected patch
-count from image size / patch size and uses the tail patch tokens, so the
-relation core is independent of Transformers-specific output classes.
+The token-free real CI qualification uses the public
+`timm/vit_small_patch16_dinov3.lvd1689m` weights. CI starts from an empty
+Hugging Face cache, downloads `model.safetensors`, records its SHA-256, then
+runs the real backbone through KFRelationModel, ONNX export, ONNX checker and
+ONNX Runtime parity.
+
+DINOv3 model/source materials are governed by Meta's **DINOv3 License
+Agreement**, not the KFCore Apache-2.0 license. KFCore does not commit or
+redistribute those weights. Review the applicable DINOv3 terms before training,
+creating derivative checkpoints, or redistributing DINOv3-derived materials.
+
+DINOv3 variants may expose prefix/storage tokens or different intermediate
+feature APIs. The adapters normalize those differences into the same BCHW
+multi-tap `BackboneAdapter` contract consumed by KFRelationModel.
 
 ## Environment
 
@@ -206,14 +215,30 @@ so thresholds and pair weighting stay runtime knobs.
 
 ## Validation philosophy
 
-Repository CI intentionally does **not** download DINOv3 weights. It uses a
-small synthetic dense-feature backbone to verify:
+Repository CI has two complementary jobs.
 
-- multi-tap adapter token extraction;
+The synthetic contract uses tiny fake backbones and verifies:
+
+- HF/Meta/timm multi-tap adapter contracts;
 - exact native runtime output shapes;
 - padded/self pairs never become valid;
 - supervised loss backpropagates into backbone and relation heads;
-- checkpoint configuration round-trips.
+- checkpoint configuration round-trips;
+- ONNX checker, tensor descriptors and PyTorch-to-ORT numerical parity.
 
-A real DINOv3 run and ONNX parity check require model access and are release
-evidence, not a source-level unit test.
+The real `real-vits16` job is blocking. It anonymously downloads the public
+`timm/vit_small_patch16_dinov3.lvd1689m/model.safetensors` into a fresh cache
+and executes:
+
+```text
+real DINOv3 ViT-S/16
+  -> multi-tap [-6,-3,-1]
+  -> KFRelationModel
+  -> native-contract ONNX
+  -> ONNX checker
+  -> ONNX Runtime parity
+```
+
+The job uploads only a short-lived JSON evidence artifact containing provenance,
+hashes, tensor/model dimensions and ORT parity. It does not upload the DINOv3
+weights or generated ONNX model.
