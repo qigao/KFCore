@@ -72,6 +72,7 @@ jobs:
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
+            tools/relation_training/semantic_ontology.py \
             tools/relation_training/test_predicate_embeddings.py \
             tools/relation_training/test_model.py \
             tools/relation_training/test_benchmark.py \
