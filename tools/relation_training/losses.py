@@ -199,6 +199,10 @@ def _batch_local_predicate_infonce(
         candidates = negative_candidate_mask.to(
             device=query.device
         ) & ~contrast_mask
+        if supervision_mask is not None:
+            candidates = candidates & supervision_mask.to(
+                device=query.device
+            )
         candidate_indices = torch.nonzero(
             candidates, as_tuple=False
         ).flatten()
