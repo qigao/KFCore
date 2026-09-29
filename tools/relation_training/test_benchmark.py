@@ -268,6 +268,49 @@ class RelationBenchmarkMetricTest(unittest.TestCase):
             groups["train_zero_support"]["predicate_indices"],
         )
 
+    def test_explicit_holdout_group_is_reported_independently(self):
+        benchmark = RelationBenchmark(
+            predicate_count=3,
+            config=BenchmarkConfig(top_ks=(1, 3)),
+        )
+        outputs = (
+            torch.tensor(
+                [[
+                    [5.0, 0.0, 0.0],
+                    [0.0, 4.0, 0.0],
+                ]]
+            ),
+            torch.tensor([[2.0, 1.0]]),
+            torch.tensor([[0, 1]], dtype=torch.int64),
+            torch.tensor([[1, 0]], dtype=torch.int64),
+            torch.tensor([[True, True]]),
+        )
+        benchmark.add(
+            outputs,
+            relations=[
+                (0, 0, 1),
+                (1, 1, 0),
+            ],
+        )
+        report = benchmark.report(
+            train_predicate_support=(10, 0, 0),
+            explicit_holdout_predicate_indices=(1,),
+        )
+        group = report["predicate_groups"]["explicit_holdout"]
+
+        self.assertEqual(group["predicate_indices"], [1])
+        self.assertEqual(group["predicate_count"], 1)
+        self.assertEqual(group["validation_triplet_support"], 1)
+        self.assertEqual(group["mean_recall_at_k"]["1"], 0.0)
+        self.assertEqual(group["mean_recall_at_k"]["3"], 1.0)
+
+        for invalid in ((1, 1), (3,), (2,), ()):
+            with self.assertRaises(ValueError):
+                benchmark.report(
+                    train_predicate_support=(10, 0, 0),
+                    explicit_holdout_predicate_indices=invalid,
+                )
+
     def test_predicate_group_with_no_validation_support_reports_null(self):
         benchmark = RelationBenchmark(
             predicate_count=2,
