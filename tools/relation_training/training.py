@@ -349,6 +349,7 @@ def train_epoch(
     predicate_supervision_mask: Tensor | None = None,
     predicate_negative_weights: Tensor | None = None,
     explicit_holdout_mask: Tensor | None = None,
+    explicit_holdout_row_policy: str = "dimension-only",
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -360,6 +361,8 @@ def train_epoch(
         "predicate_loss": 0.0,
     }
     examples = 0
+    predicate_rows = 0
+    predicate_rows_skipped = 0
 
     for batch in loader:
         image = batch["image"].to(device)
@@ -382,6 +385,7 @@ def train_epoch(
             predicate_supervision_mask=predicate_supervision_mask,
             predicate_negative_weights=predicate_negative_weights,
             explicit_holdout_mask=explicit_holdout_mask,
+            explicit_holdout_row_policy=explicit_holdout_row_policy,
         )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
@@ -395,12 +399,26 @@ def train_epoch(
 
         optimizer.step()
         examples += batch_size
+        predicate_rows += int(
+            losses["predicate_rows"].detach().cpu().item()
+        )
+        predicate_rows_skipped += int(
+            losses["predicate_rows_skipped"].detach().cpu().item()
+        )
         for key in sums:
             sums[key] += float(losses[key].detach().cpu()) * batch_size
 
     if examples == 0:
         raise ValueError("training loader produced no examples")
-    return {key: value / examples for key, value in sums.items()}
+    report = {
+        key: value / examples
+        for key, value in sums.items()
+    }
+    report["predicate_rows"] = float(predicate_rows)
+    report["predicate_rows_skipped"] = float(
+        predicate_rows_skipped
+    )
+    return report
 
 
 def evaluate_gt_boxes(
