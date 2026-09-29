@@ -4,14 +4,17 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import torch
+from torch import Tensor, nn
 
 from checkpoint import config_from_payload, load_payload
 from model import HFDinoV3Backbone, KFRelationModel
 
 
+INPUT_NAMES = ["image", "boxes", "box_counts"]
 OUTPUT_NAMES = [
     "pred_logits",
     "pair_logits",
@@ -32,11 +35,101 @@ def sha256(path: Path) -> str:
 def dummy_boxes(max_boxes: int) -> torch.Tensor:
     boxes = torch.zeros((1, max_boxes, 4), dtype=torch.float32)
     columns = max(1, int(max_boxes**0.5))
+    rows = max(1, (max_boxes + columns - 1) // columns)
     for index in range(max_boxes):
         x = (index % columns + 0.5) / columns
-        y = (index // columns + 0.5) / max(1, (max_boxes + columns - 1) // columns)
+        y = (index // columns + 0.5) / rows
         boxes[0, index] = torch.tensor((x, y, 0.2, 0.2))
     return boxes.clamp(0.01, 0.99)
+
+
+def export_graph(
+    model: nn.Module,
+    output_path: str | Path,
+    image: Tensor,
+    boxes: Tensor,
+    box_counts: Tensor,
+    *,
+    opset: int = 18,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Export the exact native batch-1 relation contract.
+
+    Native kfcore::relation::RelateAnything executes one frame per call.
+    Keeping batch=1 static makes the ONNX/TensorRT contract smaller and avoids
+    advertising a dynamic-batch capability the C++ API does not consume.
+    """
+    if image.ndim != 4 or image.shape[0] != 1 or image.shape[1] != 3:
+        raise ValueError("ONNX export image must be [1,3,H,W]")
+    if boxes.ndim != 3 or boxes.shape[0] != 1 or boxes.shape[2] != 4:
+        raise ValueError("ONNX export boxes must be [1,N,4]")
+    if box_counts.shape != (1,):
+        raise ValueError("ONNX export box_counts must be [1]")
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.eval()
+    with torch.inference_mode():
+        reference = model(image, boxes, box_counts)
+
+    torch.onnx.export(
+        model,
+        (image, boxes, box_counts),
+        str(path),
+        input_names=INPUT_NAMES,
+        output_names=OUTPUT_NAMES,
+        opset_version=opset,
+        do_constant_folding=True,
+        dynamo=False,
+    )
+    return reference
+
+
+def check_onnx_parity(
+    output_path: str | Path,
+    image: Tensor,
+    boxes: Tensor,
+    box_counts: Tensor,
+    reference: Sequence[Tensor],
+    *,
+    tolerance: float = 1.0e-3,
+) -> float:
+    import onnx
+    import onnxruntime as ort
+
+    path = Path(output_path)
+    graph = onnx.load(str(path))
+    onnx.checker.check_model(graph)
+
+    session = ort.InferenceSession(
+        str(path), providers=["CPUExecutionProvider"]
+    )
+    if [item.name for item in session.get_inputs()] != INPUT_NAMES:
+        raise RuntimeError("ONNX input names do not match native runtime contract")
+    if [item.name for item in session.get_outputs()] != OUTPUT_NAMES:
+        raise RuntimeError("ONNX output names do not match native runtime contract")
+
+    feed = {
+        "image": image.detach().cpu().numpy(),
+        "boxes": boxes.detach().cpu().numpy(),
+        "box_counts": box_counts.detach().cpu().numpy(),
+    }
+    actual = session.run(OUTPUT_NAMES, feed)
+    worst = 0.0
+    for name, expected, got in zip(OUTPUT_NAMES, reference, actual):
+        expected_np = expected.detach().cpu().numpy()
+        if expected_np.dtype == np.bool_ or np.issubdtype(
+            expected_np.dtype, np.integer
+        ):
+            if not np.array_equal(expected_np, got):
+                raise RuntimeError(f"ONNX parity failed for {name}")
+        else:
+            delta = float(np.max(np.abs(expected_np - got)))
+            worst = max(worst, delta)
+            if delta > tolerance:
+                raise RuntimeError(
+                    f"ONNX parity failed for {name}: max abs delta {delta}"
+                )
+    return worst
 
 
 def main() -> None:
@@ -70,7 +163,6 @@ def main() -> None:
         config,
     )
     model.load_state_dict(payload["state_dict"], strict=True)
-    model.eval()
 
     image = torch.rand(
         1, 3, config.image_size, config.image_size, dtype=torch.float32
@@ -78,28 +170,13 @@ def main() -> None:
     boxes = dummy_boxes(config.max_boxes)
     box_counts = torch.tensor([config.max_boxes], dtype=torch.int64)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with torch.inference_mode():
-        reference = model(image, boxes, box_counts)
-
-    torch.onnx.export(
+    reference = export_graph(
         model,
-        (image, boxes, box_counts),
-        str(output_path),
-        input_names=["image", "boxes", "box_counts"],
-        output_names=OUTPUT_NAMES,
-        dynamic_axes={
-            "image": {0: "batch"},
-            "boxes": {0: "batch"},
-            "box_counts": {0: "batch"},
-            "pred_logits": {0: "batch"},
-            "pair_logits": {0: "batch"},
-            "sub_idx": {0: "batch"},
-            "obj_idx": {0: "batch"},
-            "valid_mask": {0: "batch"},
-        },
-        opset_version=args.opset,
-        do_constant_folding=True,
+        output_path,
+        image,
+        boxes,
+        box_counts,
+        opset=args.opset,
     )
 
     metadata = {
@@ -107,6 +184,7 @@ def main() -> None:
         "model_type": "relation.relate-anything",
         "implementation": "kfcore-relation-v1",
         "output_kind": "logits",
+        "batch_size": 1,
         "score_contract": "sigmoid(a * (pred + w * pair) + b)",
         "image_size": config.image_size,
         "max_boxes": config.max_boxes,
@@ -123,31 +201,13 @@ def main() -> None:
     }
 
     if args.check:
-        import onnxruntime as ort
-
-        session = ort.InferenceSession(
-            str(output_path), providers=["CPUExecutionProvider"]
+        metadata["check_max_abs_delta"] = check_onnx_parity(
+            output_path,
+            image,
+            boxes,
+            box_counts,
+            reference,
         )
-        feed = {
-            "image": image.numpy(),
-            "boxes": boxes.numpy(),
-            "box_counts": box_counts.numpy(),
-        }
-        actual = session.run(OUTPUT_NAMES, feed)
-        worst = 0.0
-        for name, expected, got in zip(OUTPUT_NAMES, reference, actual):
-            expected_np = expected.detach().cpu().numpy()
-            if expected_np.dtype == np.bool_ or np.issubdtype(expected_np.dtype, np.integer):
-                if not np.array_equal(expected_np, got):
-                    raise RuntimeError(f"ONNX parity failed for {name}")
-            else:
-                delta = float(np.max(np.abs(expected_np - got)))
-                worst = max(worst, delta)
-                if delta > 1.0e-3:
-                    raise RuntimeError(
-                        f"ONNX parity failed for {name}: max abs delta {delta}"
-                    )
-        metadata["check_max_abs_delta"] = worst
 
     metadata_path = output_path.with_suffix(".json")
     metadata_path.write_text(
