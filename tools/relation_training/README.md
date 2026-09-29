@@ -238,6 +238,39 @@ Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
 cannot increase recall or AP. GT-box evaluation does not use detector
 confidence.
 
+## Pair-sampler ablation
+
+The first sampler-stressing frozen baseline established a non-trivial pair
+selection bottleneck: sampler recall is below 1.0 with a 24-pair budget.
+
+`.github/workflows/openimages-sampler-ablation.yml` therefore runs a controlled
+five-arm experiment on the exact same deterministic 256/64 Open Images slice:
+
+```text
+p24-w1   pair budget 24,  sampler loss weight 1
+p48-w1   pair budget 48,  sampler loss weight 1
+p132-w1  pair budget 132, sampler loss weight 1
+p24-w2   pair budget 24,  sampler loss weight 2
+p24-w4   pair budget 24,  sampler loss weight 4
+```
+
+All arms keep the same frozen DINOv3 backbone, identity predicate prototypes,
+seed, model width/depth, optimizer and three-epoch training schedule. The matrix
+jobs execute in parallel and upload JSON-only evidence. A final comparison job
+verifies that dataset/vocabulary hashes match across arms and records metric
+deltas relative to `p24-w1`.
+
+`train_baseline.py` exposes the three loss-component weights explicitly:
+
+```text
+--sampler-loss-weight
+--pair-loss-weight
+--predicate-loss-weight
+```
+
+This experiment is diagnostic. It is used to attribute recall loss to pair
+sampling before changing predicate representations or unfreezing DINOv3.
+
 ## Open Images V7 visual-relationship baseline data
 
 The first real supervised baseline uses Open Images V7 Visual Relationships.
