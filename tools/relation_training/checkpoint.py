@@ -37,6 +37,7 @@ def save_checkpoint(
             "dropout": model.config.dropout,
             "tap_indices": tuple(model.config.tap_indices),
             "predicate_adapter_rank": model.config.predicate_adapter_rank,
+            "pair_visual_evidence": model.config.pair_visual_evidence,
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),
