@@ -1,0 +1,230 @@
+name: Open Images relation baseline v2 semantic
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/openimages-relation-baseline-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openimages-relation-baseline-v2
+  cancel-in-progress: false
+
+jobs:
+  frozen-baseline-v2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      TRAIN_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-vrd.csv
+      VALIDATION_VRD_URL: https://storage.googleapis.com/openimages/v6/oidv6-validation-annotations-vrd.csv
+      CLASS_DESCRIPTIONS_URL: https://storage.googleapis.com/openimages/v7/oidv7-class-descriptions-boxable.csv
+      DOWNLOADER_URL: https://raw.githubusercontent.com/openimages/dataset/main/downloader.py
+      DINOV3_MODEL: hf_hub:timm/vit_small_patch16_dinov3.lvd1689m
+      TEXT_MODEL: openai/clip-vit-base-patch32
+      EXPECTED_TRAIN_SUBSET_SHA: fd0dc58f1219e29f0136d9f947e308c7aada424b49c4d36f245cd67442417a80
+      EXPECTED_VALIDATION_SUBSET_SHA: 05a40622513ab3a38a8967a6e181ced7d3896a5c8009d9fc77df94c3becd5d5a
+      EXPECTED_VOCABULARY_SHA: d440fd6029cbae6d6b791717fea6125212b0f40998e57618f1f01388d1e8e990
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-real-smoke-torch.txt
+            tools/relation_training/requirements-openimages-baseline.txt
+            tools/relation_training/requirements-openimages-semantic.txt
+
+      - name: Install focused baseline dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-real-smoke-torch.txt
+          python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-openimages-baseline.txt
+          python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-openimages-semantic.txt
+
+      - name: Download public Open Images annotations
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          mkdir -p "$DATA"
+          curl --fail --location --retry 3             "$TRAIN_VRD_URL" -o "$DATA/train-vrd.csv"
+          curl --fail --location --retry 3             "$VALIDATION_VRD_URL" -o "$DATA/validation-vrd.csv"
+          curl --fail --location --retry 3             "$CLASS_DESCRIPTIONS_URL" -o "$DATA/classes.csv"
+
+      - name: Reproduce exact v1 sampler-stressing slices
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          mkdir -p "$SUBSET"
+          python tools/relation_training/convert_openimages.py subset             --split train             --relationships "$DATA/train-vrd.csv"             --max-images 256             --min-boxes 4             --max-boxes 12             --output-csv "$SUBSET/train.csv"
+          python tools/relation_training/convert_openimages.py subset             --split validation             --relationships "$DATA/validation-vrd.csv"             --max-images 64             --min-boxes 4             --max-boxes 12             --output-csv "$SUBSET/validation.csv"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "openimages-subset"
+          train = json.loads((root / "train.manifest.json").read_text())
+          validation = json.loads((root / "validation.manifest.json").read_text())
+          if train["output_sha256"] != os.environ["EXPECTED_TRAIN_SUBSET_SHA"]:
+              raise SystemExit("train subset fingerprint drift")
+          if validation["output_sha256"] != os.environ["EXPECTED_VALIDATION_SUBSET_SHA"]:
+              raise SystemExit("validation subset fingerprint drift")
+          PY
+
+      - name: Build and verify shared v1 vocabulary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          python tools/relation_training/convert_openimages.py scan             --source "train=$SUBSET/train.csv"             --source "validation=$SUBSET/validation.csv"             --class-descriptions "$DATA/classes.csv"             --output-dir "$SCAN"
+          python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "tools/relation_training")
+          from benchmark import RelationVocabulary
+
+          vocabulary = RelationVocabulary.load(
+              Path(os.environ["RUNNER_TEMP"])
+              / "openimages-scan"
+              / "vocabulary.json"
+          )
+          actual = vocabulary.sha256()
+          expected = os.environ["EXPECTED_VOCABULARY_SHA"]
+          if actual != expected:
+              raise SystemExit(
+                  f"vocabulary fingerprint drift: {actual} != {expected}"
+              )
+          print(f"vocabulary_sha256={actual}")
+          PY
+
+      - name: Download selected Open Images pixels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          curl --fail --location --retry 3             "$DOWNLOADER_URL" -o "$RUNNER_TEMP/openimages-downloader.py"
+          python "$RUNNER_TEMP/openimages-downloader.py"             "$SCAN/train.image_ids.txt"             --download_folder="$IMAGES"             --num_processes=8
+          python "$RUNNER_TEMP/openimages-downloader.py"             "$SCAN/validation.image_ids.txt"             --download_folder="$IMAGES"             --num_processes=8
+          test "$(find "$IMAGES" -maxdepth 1 -type f -name '*.jpg' | wc -l)" -eq 320
+
+      - name: Convert canonical real-data splits
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DATA="$RUNNER_TEMP/openimages-source"
+          SUBSET="$RUNNER_TEMP/openimages-subset"
+          SCAN="$RUNNER_TEMP/openimages-scan"
+          IMAGES="$RUNNER_TEMP/openimages-images"
+          python tools/relation_training/convert_openimages.py convert             --split train             --relationships "$SUBSET/train.csv"             --class-descriptions "$DATA/classes.csv"             --vocabulary "$SCAN/vocabulary.json"             --image-root "$IMAGES"             --output-dir "$RUNNER_TEMP/openimages-train"
+          python tools/relation_training/convert_openimages.py convert             --split validation             --relationships "$SUBSET/validation.csv"             --class-descriptions "$DATA/classes.csv"             --vocabulary "$SCAN/vocabulary.json"             --image-root "$IMAGES"             --output-dir "$RUNNER_TEMP/openimages-validation"
+
+      - name: Build frozen CLIP semantic predicate prototypes
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home-text
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/make_predicate_embeddings.py             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json"             --out "$RUNNER_TEMP/predicate-embeddings.pt"             --mode clip             --text-model "$TEXT_MODEL"
+          cat "$RUNNER_TEMP/predicate-embeddings.pt.json"
+
+      - name: Train frozen-DINOv3 semantic baseline v2
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home-dino
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/train_baseline.py             --train-annotations "$RUNNER_TEMP/openimages-train/train.jsonl"             --validation-annotations "$RUNNER_TEMP/openimages-validation/validation.jsonl"             --vocabulary "$RUNNER_TEMP/openimages-scan/vocabulary.json"             --image-root "$RUNNER_TEMP/openimages-images"             --predicate-embeddings "$RUNNER_TEMP/predicate-embeddings.pt"             --output-dir "$RUNNER_TEMP/relation-baseline-v2"             --backbone "$DINOV3_MODEL"             --image-size 224             --max-boxes 12             --pair-budget 24             --hidden-dim 128             --geometry-dim 32             --num-heads 4             --num-layers 2             --epochs 3             --batch-size 8             --learning-rate 0.001             --weight-decay 0.0001             --device cpu
+          cat "$RUNNER_TEMP/relation-baseline-v2/training.json"
+          cat "$RUNNER_TEMP/relation-baseline-v2/benchmark.json"
+
+      - name: Build JSON-only semantic evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          EVIDENCE="$RUNNER_TEMP/openimages-baseline-v2-evidence"
+          mkdir -p "$EVIDENCE"
+          cp "$RUNNER_TEMP/openimages-subset/train.manifest.json" "$EVIDENCE/subset-train.manifest.json"
+          cp "$RUNNER_TEMP/openimages-subset/validation.manifest.json" "$EVIDENCE/subset-validation.manifest.json"
+          cp "$RUNNER_TEMP/openimages-scan/scan.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-scan/vocabulary.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-train/train.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/openimages-validation/validation.manifest.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/predicate-embeddings.pt.json" "$EVIDENCE/predicate-embeddings.json"
+          cp "$RUNNER_TEMP/relation-baseline-v2/training.json" "$EVIDENCE/"
+          cp "$RUNNER_TEMP/relation-baseline-v2/benchmark.json" "$EVIDENCE/"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = Path(os.environ["RUNNER_TEMP"]) / "openimages-baseline-v2-evidence"
+          payload = {
+              "schema": "kfcore.openimages-frozen-baseline-v2-semantic/1",
+              "exact_head": os.environ["EXPECTED_SHA"],
+              "train_images": 256,
+              "validation_images": 64,
+              "min_boxes": 4,
+              "max_boxes": 12,
+              "pair_budget": 24,
+              "epochs": 3,
+              "image_size": 224,
+              "hidden_dim": 128,
+              "geometry_dim": 32,
+              "num_layers": 2,
+              "backbone": os.environ["DINOV3_MODEL"],
+              "predicate_prototypes": "clip",
+              "text_model": os.environ["TEXT_MODEL"],
+              "v1_train_subset_sha256": os.environ["EXPECTED_TRAIN_SUBSET_SHA"],
+              "v1_validation_subset_sha256": os.environ["EXPECTED_VALIDATION_SUBSET_SHA"],
+              "v1_vocabulary_sha256": os.environ["EXPECTED_VOCABULARY_SHA"],
+              "checkpoint_uploaded": False,
+              "images_uploaded": False,
+              "annotations_uploaded": False,
+              "text_model_weights_uploaded": False,
+          }
+          (evidence / "experiment.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openimages-relation-baseline-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: ${{ runner.temp }}/openimages-baseline-v2-evidence/
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
