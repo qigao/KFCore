@@ -63,14 +63,16 @@ jobs:
             tools/relation_training/checkpoint.py \
             tools/relation_training/export_onnx.py \
             tools/relation_training/real_dinov3_smoke.py \
-            tools/relation_training/test_model.py
+            tools/relation_training/benchmark.py \
+            tools/relation_training/test_model.py \
+            tools/relation_training/test_benchmark.py
 
       - name: Run synthetic forward/backward and ONNX contract
         shell: bash
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py
+          python -m unittest -v test_model.py test_benchmark.py
 
       - name: Verify unchanged tracked sources
         if: always()

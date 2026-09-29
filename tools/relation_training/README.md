@@ -178,6 +178,59 @@ This baseline treats unannotated valid pairs as down-weighted negatives. That is
 **not** yet a positive-unlabeled objective and should not be presented as
 equivalent to RelateAnything training.
 
+## Canonical GT-box benchmark
+
+Before comparing training recipes, freeze one JSONL split and one vocabulary.
+The benchmark intentionally uses ground-truth boxes first so detector errors do
+not contaminate model-training decisions.
+
+Vocabulary:
+
+```json
+{
+  "schema": "kfcore.relation-vocab/1",
+  "predicates": ["beside", "holding", "riding"],
+  "objects": ["person", "bicycle"]
+}
+```
+
+Annotation record:
+
+```json
+{
+  "image": "images/frame-001.jpg",
+  "width": 1280,
+  "height": 720,
+  "boxes_xyxy": [[10, 20, 200, 600], [250, 200, 700, 650]],
+  "object_labels": ["person", "bicycle"],
+  "relations": [[0, 2, 1]]
+}
+```
+
+`benchmark.py` validates image-relative paths, finite in-frame boxes, ordered
+object indices, predicate indices and duplicate GT relations. The vocabulary
+and raw JSONL bytes are SHA-256 fingerprinted.
+
+The baseline report fixes the initial metrics:
+
+- sampler recall over unique GT ordered pairs;
+- pair AP from `sigmoid(pair_logits)`, with unsampled GT pairs still in the
+  recall denominator;
+- predicate top-1 accuracy on sampled GT pairs;
+- triplet Recall@20/50/100;
+- mean Recall@20/50/100 over predicates with non-zero GT support;
+- per-predicate support and recall.
+
+Triplets are ranked with the same logit-space rule used by native inference:
+
+```text
+predicate_logit + pair_weight * pair_logit
+```
+
+Predicted pairs/triplets are de-duplicated before scoring, so duplicate outputs
+cannot increase recall or AP. GT-box evaluation does not use detector
+confidence.
+
 ## Checkpoint
 
 ```python
