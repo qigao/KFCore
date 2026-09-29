@@ -10,7 +10,9 @@ from huggingface_hub import hf_hub_download
 
 from export_onnx import (
     ENCODER_OUTPUT_NAMES,
+    check_dynamic_vocabulary_parity,
     check_onnx_parity,
+    export_dynamic_vocabulary_graph,
     export_encoder_graph,
     export_graph,
 )
@@ -73,6 +75,9 @@ def main() -> None:
     onnx_path = output_dir / "real-dinov3-relation-smoke.onnx"
     encoder_onnx_path = (
         output_dir / "real-dinov3-relation-encoder-smoke.onnx"
+    )
+    dynamic_onnx_path = (
+        output_dir / "real-dinov3-relation-dynamic-vocab-smoke.onnx"
     )
     report_path = output_dir / "real-dinov3-smoke.json"
 
@@ -237,6 +242,60 @@ def main() -> None:
         output_names=ENCODER_OUTPUT_NAMES,
     )
 
+    dynamic_report = None
+    if args.predicate_head_contract == "apache":
+        assert model.apache_vocab_head is not None
+        W3 = torch.nn.functional.normalize(
+            predicate_embeddings.float(),
+            dim=-1,
+        )
+        with torch.inference_mode():
+            alpha3 = model.apache_vocab_head.routing_alpha(W3)
+        dynamic_reference = export_dynamic_vocabulary_graph(
+            model,
+            dynamic_onnx_path,
+            image,
+            boxes,
+            box_counts,
+            W3,
+            alpha3,
+            opset=args.opset,
+        )
+        W1 = W3[:1].clone()
+        alpha1 = alpha3[:1].clone()
+        W5 = torch.nn.functional.normalize(
+            torch.randn(5, predicate_embeddings.shape[1]),
+            dim=-1,
+        )
+        with torch.inference_mode():
+            alpha5 = model.apache_vocab_head.routing_alpha(W5)
+        dynamic_delta = check_dynamic_vocabulary_parity(
+            dynamic_onnx_path,
+            model,
+            image,
+            boxes,
+            box_counts,
+            [
+                (W1, alpha1),
+                (W3, alpha3),
+                (W5, alpha5),
+            ],
+        )
+        if tuple(dynamic_reference[0].shape) != (
+            1,
+            config.pair_budget,
+            3,
+        ):
+            raise RuntimeError(
+                "dynamic-vocabulary reference output shape drifted"
+            )
+        dynamic_report = {
+            "onnx_sha256": file_sha256(dynamic_onnx_path),
+            "onnx_bytes": dynamic_onnx_path.stat().st_size,
+            "ort_max_abs_delta": dynamic_delta,
+            "tested_vocabulary_sizes": [1, 3, 5],
+        }
+
     report = {
         "schema": "kfcore.real-dinov3-relation-smoke/7",
         "pair_evidence_contract": args.pair_evidence_contract,
@@ -268,6 +327,7 @@ def main() -> None:
             (semantic_query - spatial_query).abs().mean().item()
         ),
         "valid_pair_count": int(valid_mask.sum().item()),
+        "dynamic_vocabulary": dynamic_report,
     }
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
