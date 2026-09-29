@@ -122,6 +122,16 @@ def main() -> None:
             "and direction without changing the historical basic path."
         ),
     )
+    parser.add_argument(
+        "--pair-evidence-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+        help=(
+            "Pair evidence implementation. apache enables the Apache-2.0 "
+            "RelateAnything reference SoftSpatialPool, BoxPromptEncoder, "
+            "19-D geometry and [sub,obj,union,contact,geo] pair fusion."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -256,6 +266,7 @@ def main() -> None:
         predicate_adapter_rank=args.predicate_adapter_rank,
         pair_visual_evidence=args.pair_visual_evidence,
         pair_geometry_evidence=args.pair_geometry_evidence,
+        pair_evidence_contract=args.pair_evidence_contract,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -627,6 +638,7 @@ def main() -> None:
             "predicate_adapter_rank": model.config.predicate_adapter_rank,
             "pair_visual_evidence": model.config.pair_visual_evidence,
             "pair_geometry_evidence": model.config.pair_geometry_evidence,
+            "pair_evidence_contract": model.config.pair_evidence_contract,
         },
         "baseline_config": config_payload(baseline_config),
         "loss_config": {
