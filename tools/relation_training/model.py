@@ -24,6 +24,7 @@ class RelationModelConfig:
     tap_indices: tuple[int, ...] = (-6, -3, -1)
     predicate_adapter_rank: int = 0
     pair_visual_evidence: str = "endpoint"
+    pair_geometry_evidence: str = "basic"
 
     def __post_init__(self) -> None:
         if self.image_size <= 0:
@@ -59,6 +60,13 @@ class RelationModelConfig:
             raise ValueError(
                 "pair_visual_evidence must be "
                 "endpoint/union/contact/union-contact"
+            )
+        if self.pair_geometry_evidence not in {
+            "basic",
+            "rich",
+        }:
+            raise ValueError(
+                "pair_geometry_evidence must be basic/rich"
             )
 
 
@@ -661,6 +669,7 @@ class KFRelationModel(nn.Module):
     """
 
     geometry_feature_count = 8
+    rich_geometry_feature_count = 10
 
     def __init__(
         self,
@@ -776,6 +785,26 @@ class KFRelationModel(nn.Module):
             nn.init.zeros_(self.contact_projection.weight)
         else:
             self.contact_projection = None
+
+        # Rich-geometry evidence is an additive residual created after every
+        # common stochastic module. Zero initialization keeps basic/rich
+        # common parameters and initial outputs exactly aligned under one seed.
+        if config.pair_geometry_evidence == "rich":
+            self.rich_geometry_projection: nn.Linear | None = nn.Linear(
+                self.rich_geometry_feature_count,
+                config.geometry_dim,
+                bias=False,
+            )
+            self.rich_geometry_sampler: nn.Linear | None = nn.Linear(
+                self.rich_geometry_feature_count,
+                1,
+                bias=False,
+            )
+            nn.init.zeros_(self.rich_geometry_projection.weight)
+            nn.init.zeros_(self.rich_geometry_sampler.weight)
+        else:
+            self.rich_geometry_projection = None
+            self.rich_geometry_sampler = None
 
     def effective_predicate_bank(self) -> Tensor:
         bank = self.predicate_bank
@@ -901,6 +930,93 @@ class KFRelationModel(nn.Module):
             dim=-1,
         )
 
+    def _rich_pair_geometry(self, boxes: Tensor) -> Tensor:
+        subject = boxes.unsqueeze(2)
+        object_ = boxes.unsqueeze(1)
+        scx, scy, sw, sh = subject.unbind(dim=-1)
+        ocx, ocy, ow, oh = object_.unbind(dim=-1)
+
+        eps = 1.0e-4
+        dx = ocx - scx
+        dy = ocy - scy
+        distance = torch.sqrt(
+            dx.square() + dy.square() + 1.0e-8
+        ).clamp_min(eps)
+
+        dx_subject = (
+            dx / sw.clamp_min(eps)
+        ).clamp(-8.0, 8.0)
+        dy_subject = (
+            dy / sh.clamp_min(eps)
+        ).clamp(-8.0, 8.0)
+        dx_object = (
+            dx / ow.clamp_min(eps)
+        ).clamp(-8.0, 8.0)
+        dy_object = (
+            dy / oh.clamp_min(eps)
+        ).clamp(-8.0, 8.0)
+
+        s_left = scx - sw * 0.5
+        s_top = scy - sh * 0.5
+        s_right = scx + sw * 0.5
+        s_bottom = scy + sh * 0.5
+        o_left = ocx - ow * 0.5
+        o_top = ocy - oh * 0.5
+        o_right = ocx + ow * 0.5
+        o_bottom = ocy + oh * 0.5
+
+        inter_w = (
+            torch.minimum(s_right, o_right)
+            - torch.maximum(s_left, o_left)
+        ).clamp_min(0.0)
+        inter_h = (
+            torch.minimum(s_bottom, o_bottom)
+            - torch.maximum(s_top, o_top)
+        ).clamp_min(0.0)
+        intersection = inter_w * inter_h
+        subject_area = (sw * sh).clamp_min(1.0e-6)
+        object_area = (ow * oh).clamp_min(1.0e-6)
+        intersection_over_subject = (
+            intersection / subject_area
+        ).clamp(0.0, 1.0)
+        intersection_over_object = (
+            intersection / object_area
+        ).clamp(0.0, 1.0)
+
+        horizontal_gap = torch.maximum(
+            torch.maximum(
+                o_left - s_right,
+                s_left - o_right,
+            ),
+            torch.zeros_like(dx),
+        )
+        vertical_gap = torch.maximum(
+            torch.maximum(
+                o_top - s_bottom,
+                s_top - o_bottom,
+            ),
+            torch.zeros_like(dy),
+        )
+
+        direction_cos = dx / distance
+        direction_sin = dy / distance
+
+        return torch.stack(
+            (
+                dx_subject,
+                dy_subject,
+                dx_object,
+                dy_object,
+                intersection_over_subject,
+                intersection_over_object,
+                horizontal_gap,
+                vertical_gap,
+                direction_cos,
+                direction_sin,
+            ),
+            dim=-1,
+        )
+
     def _forward_impl(
         self,
         image: Tensor,
@@ -933,12 +1049,28 @@ class KFRelationModel(nn.Module):
         patch_features = self._fused_patch_features(image)
         region_features = self._pool_regions(patch_features, boxes, valid_boxes)
         geometry = self._pair_geometry(boxes)
+        rich_geometry = (
+            self._rich_pair_geometry(boxes)
+            if self.rich_geometry_projection is not None
+            else None
+        )
 
         flat_geometry = geometry.reshape(
             batch, self.config.max_boxes * self.config.max_boxes, self.geometry_feature_count
         )
         flat_valid = valid_pairs.reshape(batch, -1)
         sampler_logits = self.geometry_sampler(flat_geometry).squeeze(-1)
+        flat_rich_geometry = None
+        if rich_geometry is not None:
+            flat_rich_geometry = rich_geometry.reshape(
+                batch,
+                self.config.max_boxes * self.config.max_boxes,
+                self.rich_geometry_feature_count,
+            )
+            assert self.rich_geometry_sampler is not None
+            sampler_logits = sampler_logits + self.rich_geometry_sampler(
+                flat_rich_geometry
+            ).squeeze(-1)
         sampler_scores = sampler_logits.masked_fill(
             ~flat_valid, torch.finfo(sampler_logits.dtype).min
         )
@@ -970,6 +1102,23 @@ class KFRelationModel(nn.Module):
             ),
         )
         geometry_features = self.geometry_encoder(selected_geometry)
+        if flat_rich_geometry is not None:
+            selected_rich_geometry = torch.gather(
+                flat_rich_geometry,
+                1,
+                pair_slot.unsqueeze(-1).expand(
+                    -1,
+                    -1,
+                    self.rich_geometry_feature_count,
+                ),
+            )
+            assert self.rich_geometry_projection is not None
+            geometry_features = (
+                geometry_features
+                + self.rich_geometry_projection(
+                    selected_rich_geometry
+                )
+            )
 
         pair_features = torch.cat(
             (
