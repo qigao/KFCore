@@ -10,7 +10,7 @@ from torch import nn
 
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import INPUT_NAMES, OUTPUT_NAMES, check_onnx_parity, export_graph
-from losses import supervised_relation_loss
+from losses import RelationLossConfig, supervised_relation_loss
 from model import (
     BackboneAdapter,
     HFDinoV3Backbone,
@@ -238,11 +238,16 @@ class RelationModelTest(unittest.TestCase):
         backbone = ToyBackbone()
         model = KFRelationModel(backbone, torch.randn(3, 6), config())
         box_tensor, box_counts = boxes()
-        output = model(
+        output = model.forward_training(
             torch.rand(2, 3, 8, 8),
             box_tensor,
             box_counts,
         )
+
+        self.assertEqual(tuple(output.sampler_logits.shape), (2, 16))
+        self.assertEqual(tuple(output.sampler_valid.shape), (2, 16))
+        self.assertEqual(int(output.sampler_valid[0].sum()), 12)
+        self.assertEqual(int(output.sampler_valid[1].sum()), 2)
 
         pair_targets = torch.zeros(2, 4, 4)
         predicate_targets = torch.full(
@@ -267,6 +272,39 @@ class RelationModelTest(unittest.TestCase):
         self.assertIsNotNone(backbone.conv.weight.grad)
         self.assertIsNotNone(model.pair_head.weight.grad)
         self.assertIsNotNone(model.predicate_projection.weight.grad)
+        sampler_grad = model.geometry_sampler[0].weight.grad
+        self.assertIsNotNone(sampler_grad)
+        self.assertTrue(torch.isfinite(sampler_grad).all())
+        self.assertGreater(float(sampler_grad.abs().sum()), 0.0)
+        self.assertTrue(torch.isfinite(losses["sampler_loss"]))
+
+    def test_sampler_loss_rejects_inference_only_outputs(self):
+        model = KFRelationModel(
+            ToyBackbone(), torch.randn(3, 6), config()
+        )
+        box_tensor, box_counts = boxes()
+        runtime = model(
+            torch.rand(2, 3, 8, 8),
+            box_tensor,
+            box_counts,
+        )
+        pair_targets = torch.zeros(2, 4, 4)
+        predicate_targets = torch.full(
+            (2, 4, 4), -1, dtype=torch.int64
+        )
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                runtime, pair_targets, predicate_targets
+            )
+
+        losses = supervised_relation_loss(
+            runtime,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(sampler_loss_weight=0.0),
+        )
+        self.assertEqual(float(losses["sampler_loss"]), 0.0)
 
     def test_synthetic_onnx_matches_native_runtime_contract(self):
         torch.manual_seed(8)
