@@ -153,6 +153,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--predicate-head-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+        help=(
+            "Predicate head implementation. apache enables independent "
+            "semantic/spatial queries and text-conditioned routing."
+        ),
+    )
+    parser.add_argument(
         "--apache-context-dropout",
         type=float,
         default=0.2,
@@ -299,6 +308,7 @@ def main() -> None:
         pair_evidence_contract=args.pair_evidence_contract,
         pair_sampler_contract=args.pair_sampler_contract,
         relation_context_contract=args.relation_context_contract,
+        predicate_head_contract=args.predicate_head_contract,
         apache_context_dropout=args.apache_context_dropout,
         apache_box_token_dropout=args.apache_box_token_dropout,
     )
@@ -677,6 +687,7 @@ def main() -> None:
             "relation_context_contract": (
                 model.config.relation_context_contract
             ),
+            "predicate_head_contract": model.config.predicate_head_contract,
             "apache_context_dropout": model.config.apache_context_dropout,
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
