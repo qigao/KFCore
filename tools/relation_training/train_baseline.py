@@ -125,6 +125,17 @@ def main() -> None:
         default=0.07,
     )
     parser.add_argument(
+        "--predicate-contrastive-hard-negative-count",
+        type=int,
+        default=0,
+        help=(
+            "For batch-local InfoNCE, add up to this many hardest "
+            "train-supported supervised predicate directions to each "
+            "batch contrast set. Explicit holdouts and train-zero-support "
+            "predicates are excluded from the candidate pool."
+        ),
+    )
+    parser.add_argument(
         "--predicate-positive-weight-mode",
         choices=("none", "sqrt-balanced", "balanced"),
         default="none",
@@ -222,6 +233,9 @@ def main() -> None:
         predicate_objective=args.predicate_objective,
         predicate_contrastive_temperature=(
             args.predicate_contrastive_temperature
+        ),
+        predicate_contrastive_hard_negative_count=(
+            args.predicate_contrastive_hard_negative_count
         ),
     )
     benchmark_config = BenchmarkConfig(
@@ -349,6 +363,25 @@ def main() -> None:
         for index in range(len(vocabulary.predicates))
         if index not in supervised_predicate_indices
     ]
+    predicate_contrastive_negative_mask = torch.tensor(
+        [
+            count > 0
+            and index in supervised_predicate_indices
+            for index, count in enumerate(
+                predicate_weighting.predicate_positive_counts
+            )
+        ],
+        dtype=torch.bool,
+    )
+    if (
+        args.predicate_objective == "batch-local-infonce"
+        and args.predicate_contrastive_hard_negative_count > 0
+        and not predicate_contrastive_negative_mask.any()
+    ):
+        raise ValueError(
+            "hard-negative InfoNCE requires at least one "
+            "train-supported supervised predicate"
+        )
 
     seed_everything(baseline_config.seed)
     predicate_embeddings = load_predicate_embeddings(
@@ -402,6 +435,9 @@ def main() -> None:
             predicate_negative_weights=predicate_negative_weights,
             explicit_holdout_mask=explicit_holdout_mask,
             explicit_holdout_row_policy=args.holdout_row_policy,
+            predicate_contrastive_negative_mask=(
+                predicate_contrastive_negative_mask
+            ),
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -549,6 +585,9 @@ def main() -> None:
             "predicate_contrastive_temperature": (
                 loss_config.predicate_contrastive_temperature
             ),
+            "predicate_contrastive_hard_negative_count": (
+                loss_config.predicate_contrastive_hard_negative_count
+            ),
         },
         "benchmark_config": {
             "pair_weight": benchmark_config.pair_weight,
@@ -584,6 +623,13 @@ def main() -> None:
                 effective_train_predicate_support
             ),
             "holdout_row_policy": args.holdout_row_policy,
+            "contrastive_negative_candidate_indices": [
+                index
+                for index, enabled in enumerate(
+                    predicate_contrastive_negative_mask.tolist()
+                )
+                if enabled
+            ],
         },
         "predicate_negative_weighting": {
             "zero_support_negative_weight": (
