@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
+from pathlib import Path
+import sys
 from typing import Sequence
 
 import torch
@@ -195,24 +198,48 @@ class MetaDinoV3Backbone(BackboneAdapter):
         )
 
     @classmethod
-    def from_torch_hub(
+    def from_official_repo(
         cls,
         repo_dir: str,
         *,
         model_name: str = "dinov3_vits16",
         weights: str,
         train_backbone: bool = True,
+        check_hash: bool = True,
     ) -> "MetaDinoV3Backbone":
         if not repo_dir:
             raise ValueError("repo_dir must not be empty")
         if not weights:
             raise ValueError("weights URL/path must not be empty")
-        model = torch.hub.load(
-            repo_dir,
-            model_name,
-            source="local",
-            weights=weights,
-        )
+
+        root = Path(repo_dir).expanduser().resolve()
+        if not (root / "dinov3" / "hub" / "backbones.py").is_file():
+            raise ValueError(
+                "repo_dir must point to an official DINOv3 source checkout"
+            )
+
+        # Import only the official backbone module, not hubconf.py. hubconf also
+        # imports unrelated classifier/depth/text helpers with extra optional
+        # dependencies. The official builder still downloads weights through
+        # torch.hub.load_state_dict_from_url().
+        root_text = str(root)
+        sys.path.insert(0, root_text)
+        try:
+            module = importlib.import_module("dinov3.hub.backbones")
+            builder = getattr(module, model_name, None)
+            if not callable(builder):
+                raise ValueError(
+                    f"official DINOv3 repo has no backbone builder {model_name}"
+                )
+            model = builder(
+                pretrained=True,
+                weights=weights,
+                check_hash=check_hash,
+            )
+        finally:
+            if sys.path and sys.path[0] == root_text:
+                sys.path.pop(0)
+
         backbone = cls(model)
         backbone.model.requires_grad_(train_backbone)
         return backbone
