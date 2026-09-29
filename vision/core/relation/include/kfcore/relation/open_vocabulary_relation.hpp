@@ -25,6 +25,11 @@ struct PredicateVocabulary
     std::vector<float> embeddings;
     std::vector<float> spatial_weights;
     std::size_t embedding_dim = 0U;
+
+    // Optional provenance for vocabularies produced by a text encoder.
+    std::string text_encoder_provenance;
+    std::string tokenizer_provenance;
+    std::string template_provenance;
 };
 
 [[nodiscard]] PredicateVocabulary normalize_predicate_vocabulary(
