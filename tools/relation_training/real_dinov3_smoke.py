@@ -55,6 +55,11 @@ def main() -> None:
         choices=("legacy", "apache"),
         default="legacy",
     )
+    parser.add_argument(
+        "--predicate-head-contract",
+        choices=("legacy", "apache"),
+        default="legacy",
+    )
     args = parser.parse_args()
 
     if args.image_size <= 0:
@@ -111,6 +116,7 @@ def main() -> None:
         pair_evidence_contract=args.pair_evidence_contract,
         pair_sampler_contract=args.pair_sampler_contract,
         relation_context_contract=args.relation_context_contract,
+        predicate_head_contract=args.predicate_head_contract,
     )
     predicate_names = ["beside", "holding", "riding"]
     predicate_embeddings = torch.randn(len(predicate_names), 32)
@@ -228,6 +234,7 @@ def main() -> None:
         "pair_evidence_contract": args.pair_evidence_contract,
         "pair_sampler_contract": args.pair_sampler_contract,
         "relation_context_contract": args.relation_context_contract,
+        "predicate_head_contract": args.predicate_head_contract,
         "weights_repo": args.repo,
         "weights_filename": args.filename,
         "weights_sha256": weights_sha256,
