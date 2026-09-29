@@ -1744,6 +1744,71 @@ class RelationModelTest(unittest.TestCase):
                 OUTPUT_NAMES,
             )
 
+    def test_union_contact_onnx_matches_native_runtime_contract(self):
+        torch.manual_seed(63)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        # Exercise a non-zero learned residual rather than allowing the
+        # zero-initialized branch to become an export no-op.
+        with torch.no_grad():
+            model.union_projection.weight.normal_(0.0, 0.01)
+            model.contact_projection.weight.normal_(0.0, 0.01)
+
+        box_tensor, box_counts = boxes()
+        image = torch.rand(1, 3, 8, 8)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "relation-union-contact.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                reference,
+            )
+        self.assertLessEqual(delta, 1.0e-3)
+
+    def test_union_contact_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(64)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "union-contact.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_visual_evidence,
+            "union-contact",
+        )
+        self.assertIn(
+            "union_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "contact_projection.weight",
+            payload["state_dict"],
+        )
+
     def test_adapter_enabled_onnx_matches_native_runtime_contract(self):
         torch.manual_seed(37)
         model = KFRelationModel(
