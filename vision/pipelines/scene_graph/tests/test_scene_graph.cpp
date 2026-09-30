@@ -2,6 +2,7 @@
 
 #include "tinytest.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -207,6 +208,52 @@ spec("scene graph production engine")
         check(scene.relations.vocabulary_version == std::uint64_t{7U});
     }
 
+    it("reports production stage timings and cardinalities")
+    {
+        auto detector = std::make_unique<FakeDetector>();
+        auto relation_model = std::make_unique<FakeRelation>();
+        detector->frame = detector_frame();
+
+        pipelines::detail::SceneGraphEngine engine(
+            std::move(detector),
+            std::move(relation_model),
+            engine_options());
+
+        const auto timed =
+            engine.process_timed(image::ImageView{});
+
+        check(
+            timed.timing.detection_count ==
+            std::size_t{2U});
+        check(
+            timed.timing.tracked_object_count ==
+            std::size_t{2U});
+        check(
+            timed.timing.relation_edge_count ==
+            std::size_t{1U});
+        check(
+            timed.frame.objects.detections.size() ==
+            std::size_t{2U});
+        check(
+            timed.frame.relations.edges.size() ==
+            std::size_t{1U});
+
+        const double stages[] = {
+            timed.timing.detector_ms,
+            timed.timing.tracker_ms,
+            timed.timing.region_prepare_ms,
+            timed.timing.relation_ms,
+            timed.timing.assembly_ms,
+            timed.timing.total_ms,
+        };
+        for (const double value : stages)
+        {
+            check(std::isfinite(value));
+            check(value >= 0.0);
+            check(timed.timing.total_ms >= value);
+        }
+    }
+
     it("forwards dynamic and live vocabulary controls")
     {
         auto detector = std::make_unique<FakeDetector>();
@@ -290,6 +337,11 @@ spec("scene graph pipeline dynamic vocabulary API")
             std::is_same_v<
                 decltype(std::declval<const Pipeline&>().predicates()),
                 const std::vector<std::string>&>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>().process_timed(
+                    std::declval<const image::ImageView&>())),
+                pipelines::TimedSceneGraphFrame>);
         check(true);
     }
 }
