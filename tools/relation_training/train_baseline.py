@@ -915,7 +915,11 @@ def main() -> None:
         backbone_model=args.backbone,
         predicates=list(vocabulary.predicates),
         extra={
-            "training_schema": "kfcore.relation-frozen-baseline/1",
+            "training_schema": (
+                "kfcore.relation-apache-objective/1"
+                if apache_mode
+                else "kfcore.relation-frozen-baseline/1"
+            ),
             "frozen_backbone": True,
             "train_annotations_sha256": train_manifest.annotations_sha256,
             "validation_annotations_sha256": (
