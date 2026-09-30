@@ -98,6 +98,9 @@ def training() -> dict:
                 "ema_decay": 0.9998,
                 "augment": 0.3,
                 "text_dim": 512,
+                "image_size": 448,
+                "geo_budget": 400,
+                "final_budget": 128,
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
@@ -149,7 +152,9 @@ def training() -> dict:
             for epoch in range(1, 13)
         ],
         "model_config": {
+            "image_size": 448,
             "max_boxes": 40,
+            "pair_budget": 128,
             "hidden_dim": 512,
             "pair_evidence_contract": "apache",
             "pair_sampler_contract": "apache",
@@ -233,6 +238,18 @@ class ApacheReleaseQualificationTest(
             result["text_dim"],
             512,
         )
+        self.assertEqual(
+            result["image_size"],
+            448,
+        )
+        self.assertEqual(
+            result["geo_budget"],
+            400,
+        )
+        self.assertEqual(
+            result["final_budget"],
+            128,
+        )
 
     def test_unresolved_source_is_representable_but_blocks_qualification(self):
         value = corpus()
@@ -304,6 +321,53 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "max_boxes=40",
+        ):
+            validate_training_run(run)
+
+    def test_released_reference_requires_448_and_400_to_128_budgets(self):
+        run = training()
+        run["training_recipe"]["config"][
+            "image_size"
+        ] = 224
+        with self.assertRaisesRegex(
+            ValueError,
+            "image_size=448",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["config"][
+            "geo_budget"
+        ] = 200
+        with self.assertRaisesRegex(
+            ValueError,
+            "geo_budget=400",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["config"][
+            "final_budget"
+        ] = 64
+        with self.assertRaisesRegex(
+            ValueError,
+            "final_budget=128",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["model_config"]["image_size"] = 224
+        with self.assertRaisesRegex(
+            ValueError,
+            "image_size=448",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["model_config"]["pair_budget"] = 64
+        with self.assertRaisesRegex(
+            ValueError,
+            "pair_budget=128",
         ):
             validate_training_run(run)
 
