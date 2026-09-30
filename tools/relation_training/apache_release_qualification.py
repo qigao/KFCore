@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import hashlib
 import json
 import math
@@ -28,6 +29,21 @@ from apache_spatial_flags import (
     MAJORITY_COMPARATOR,
     MAJORITY_THRESHOLD,
     SPATIAL_BIT,
+)
+from apache_text_bank import (
+    NPZ_FORMAT as TEXT_BANK_NPZ_FORMAT,
+    PREDICATE_BANK_SCHEMA,
+    RELEASED_OBJECT_TEMPLATES,
+    RELEASED_PREDICATE_TEMPLATES,
+    RELEASED_TEXT_STUDENT_SHA256,
+    RELEASED_TOKENIZER_ID,
+    RELEASED_TRANSFORMERS_VERSION,
+    TEXT_BANK_DERIVATION_SCHEMA,
+    TOKENIZER_BUNDLE_SCHEMA,
+    TOKENIZER_LAYOUTS,
+)
+from apache_text_student import (
+    PredicateTextStudentConfig,
 )
 from apache_training_recipe import (
     RELEASED_AMP,
@@ -177,6 +193,225 @@ def _ordered_names_sha256(
         )
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _validate_tokenizer_bundle(
+    payload: object,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "text-bank tokenizer evidence must be an object"
+        )
+    if payload.get("schema") != TOKENIZER_BUNDLE_SCHEMA:
+        raise ValueError(
+            "unsupported text-bank tokenizer bundle schema"
+        )
+    if payload.get("tokenizer_id") != RELEASED_TOKENIZER_ID:
+        raise ValueError(
+            "released text-bank tokenizer id differs from CLIP B/32"
+        )
+    if payload.get("source_kind") != "local-bundle":
+        raise ValueError(
+            "released text-bank tokenizer must be a local bundle"
+        )
+    path = require_non_empty_string(
+        payload.get("path"),
+        "text-bank tokenizer path",
+    )
+    files = payload.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError(
+            "text-bank tokenizer file hashes are missing"
+        )
+    normalized_files: dict[str, str] = {}
+    for name, value in files.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                "text-bank tokenizer filenames must be strings"
+            )
+        normalized_files[name] = require_sha256(
+            value,
+            f"text-bank tokenizer {name} SHA-256",
+        )
+    if not any(
+        all(
+            filename in normalized_files
+            for filename in layout
+        )
+        for layout in TOKENIZER_LAYOUTS
+    ):
+        raise ValueError(
+            "text-bank tokenizer bundle lacks a released CLIP tokenizer layout"
+        )
+    expected_bundle = hashlib.sha256()
+    for filename in sorted(normalized_files):
+        expected_bundle.update(
+            filename.encode("utf-8")
+        )
+        expected_bundle.update(b"\0")
+        expected_bundle.update(
+            normalized_files[
+                filename
+            ].encode("ascii")
+        )
+        expected_bundle.update(b"\0")
+    bundle_sha = require_sha256(
+        payload.get("bundle_sha256"),
+        "text-bank tokenizer bundle_sha256",
+    )
+    if bundle_sha != expected_bundle.hexdigest():
+        raise ValueError(
+            "text-bank tokenizer bundle hash does not match file hashes"
+        )
+    return {
+        "schema": TOKENIZER_BUNDLE_SCHEMA,
+        "tokenizer_id": RELEASED_TOKENIZER_ID,
+        "source_kind": "local-bundle",
+        "path": path,
+        "files": normalized_files,
+        "bundle_sha256": bundle_sha,
+    }
+
+
+def _validate_text_bank_entry(
+    payload: object,
+    *,
+    name: str,
+    expected_templates: tuple[str, ...],
+    expected_artifact_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"{name} text-bank derivation must be an object"
+        )
+    templates = payload.get("templates")
+    if templates != list(expected_templates):
+        raise ValueError(
+            f"{name} text-bank templates differ from release"
+        )
+    label_order_sha = require_sha256(
+        payload.get("label_order_sha256"),
+        f"{name} text-bank label_order_sha256",
+    )
+    label_count = _require_positive_int(
+        payload.get("label_count"),
+        f"{name} text-bank label_count",
+    )
+    shape = payload.get("shape")
+    if shape != [
+        label_count,
+        RELEASED_TEXT_DIM,
+    ]:
+        raise ValueError(
+            f"{name} text-bank shape must be [N,512]"
+        )
+    tensor_sha = require_sha256(
+        payload.get("tensor_sha256"),
+        f"{name} text-bank tensor_sha256",
+    )
+    artifact_sha = require_sha256(
+        payload.get("artifact_sha256"),
+        f"{name} text-bank artifact_sha256",
+    )
+    if artifact_sha != expected_artifact_sha256:
+        raise ValueError(
+            f"{name} text-bank artifact hash does not match corpus"
+        )
+    if payload.get("npz_format") != TEXT_BANK_NPZ_FORMAT:
+        raise ValueError(
+            f"{name} text-bank NPZ format differs from released derivation contract"
+        )
+    return {
+        "templates": list(expected_templates),
+        "label_order_sha256": label_order_sha,
+        "label_count": label_count,
+        "shape": list(shape),
+        "tensor_sha256": tensor_sha,
+        "artifact_sha256": artifact_sha,
+        "npz_format": TEXT_BANK_NPZ_FORMAT,
+    }
+
+
+def _validate_text_bank_derivation(
+    payload: object,
+    *,
+    predicate_artifact_sha256: str,
+    object_artifact_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "text-bank derivation evidence must be an object"
+        )
+    if payload.get("schema") != TEXT_BANK_DERIVATION_SCHEMA:
+        raise ValueError(
+            "unsupported text-bank derivation schema"
+        )
+    student_sha = require_sha256(
+        payload.get(
+            "student_checkpoint_sha256"
+        ),
+        "text-bank student checkpoint SHA-256",
+    )
+    if student_sha != RELEASED_TEXT_STUDENT_SHA256:
+        raise ValueError(
+            "text-bank derivation must use the released text-student checkpoint"
+        )
+    expected_config = asdict(
+        PredicateTextStudentConfig()
+    )
+    if payload.get("student_config") != expected_config:
+        raise ValueError(
+            "text-bank derivation student config differs from release"
+        )
+    tokenizer = _validate_tokenizer_bundle(
+        payload.get("tokenizer")
+    )
+    if (
+        payload.get("transformers_version")
+        != RELEASED_TRANSFORMERS_VERSION
+    ):
+        raise ValueError(
+            "text-bank derivation requires transformers 5.14.1"
+        )
+    if (
+        payload.get("encoding_semantics")
+        != "encode-each-template,sum-template-vectors,l2-normalize-once"
+    ):
+        raise ValueError(
+            "text-bank encoding semantics differ from Apache"
+        )
+    predicate_bank = _validate_text_bank_entry(
+        payload.get("predicate_bank"),
+        name="predicate",
+        expected_templates=(
+            RELEASED_PREDICATE_TEMPLATES
+        ),
+        expected_artifact_sha256=(
+            predicate_artifact_sha256
+        ),
+    )
+    object_bank = _validate_text_bank_entry(
+        payload.get("object_bank"),
+        name="object",
+        expected_templates=(
+            RELEASED_OBJECT_TEMPLATES
+        ),
+        expected_artifact_sha256=(
+            object_artifact_sha256
+        ),
+    )
+    return {
+        "schema": TEXT_BANK_DERIVATION_SCHEMA,
+        "student_checkpoint_sha256": student_sha,
+        "student_config": expected_config,
+        "tokenizer": tokenizer,
+        "transformers_version": RELEASED_TRANSFORMERS_VERSION,
+        "encoding_semantics": (
+            "encode-each-template,sum-template-vectors,l2-normalize-once"
+        ),
+        "predicate_bank": predicate_bank,
+        "object_bank": object_bank,
+    }
 
 
 def _validate_pair_opportunity_rebuild(
@@ -846,6 +1081,19 @@ def validate_corpus(
             "predicate_spatial_flags_derivation"
         ],
     )
+    normalized_payload[
+        "text_bank_derivation"
+    ] = _validate_text_bank_derivation(
+        payload.get(
+            "text_bank_derivation"
+        ),
+        predicate_artifact_sha256=normalized_payload[
+            "predicate_embeddings_sha256"
+        ],
+        object_artifact_sha256=normalized_payload[
+            "object_embeddings_sha256"
+        ],
+    )
     return normalized_payload
 
 
@@ -1239,6 +1487,78 @@ def validate_training_run(
         payload.get("predicate_embeddings_sha256"),
         "predicate_embeddings_sha256",
     )
+    predicate_bank = payload.get(
+        "predicate_bank"
+    )
+    if not isinstance(predicate_bank, dict):
+        raise ValueError(
+            "released qualification requires named predicate-bank evidence"
+        )
+    if (
+        predicate_bank.get("schema")
+        != PREDICATE_BANK_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported predicate-bank provenance schema"
+        )
+    if (
+        predicate_bank.get("artifact_sha256")
+        != payload[
+            "predicate_embeddings_sha256"
+        ]
+    ):
+        raise ValueError(
+            "predicate-bank artifact hash does not match training input"
+        )
+    if predicate_bank.get("shape") != predicate_shape:
+        raise ValueError(
+            "predicate-bank shape does not match training embedding shape"
+        )
+    if (
+        predicate_bank.get("text_dim")
+        != RELEASED_TEXT_DIM
+    ):
+        raise ValueError(
+            "predicate-bank text_dim must be 512"
+        )
+    if (
+        predicate_bank.get("templates")
+        != list(
+            RELEASED_PREDICATE_TEMPLATES
+        )
+    ):
+        raise ValueError(
+            "predicate-bank templates differ from release"
+        )
+    predicate_order = predicate_bank.get(
+        "predicate_order"
+    )
+    if (
+        not isinstance(predicate_order, list)
+        or len(predicate_order)
+        != predicate_shape[0]
+        or any(
+            not isinstance(name, str)
+            or not name
+            for name in predicate_order
+        )
+        or len(set(predicate_order))
+        != len(predicate_order)
+    ):
+        raise ValueError(
+            "predicate-bank order must be unique non-empty strings"
+        )
+    if (
+        predicate_bank.get(
+            "predicate_order_sha256"
+        )
+        != _ordered_names_sha256(
+            predicate_order
+        )
+    ):
+        raise ValueError(
+            "predicate-bank order hash does not match predicate order"
+        )
     require_sha256(
         payload.get("vocabulary_sha256"),
         "vocabulary_sha256",
@@ -1340,6 +1660,17 @@ def validate_training_run(
     ):
         raise ValueError(
             "released qualification requires named object-bank provenance"
+        )
+    if (
+        object_bank.get(
+            "object_label_order_sha256"
+        )
+        != _ordered_names_sha256(
+            object_order
+        )
+    ):
+        raise ValueError(
+            "object-bank order hash does not match object-label order"
         )
 
     source_hashes = mixture.get(
@@ -1565,6 +1896,60 @@ def qualify_training_run(
         raise ValueError(
             "vocabulary asset does not match corpus manifest"
         )
+    text_derivation = corpus[
+        "text_bank_derivation"
+    ]
+    predicate_bank = training[
+        "predicate_bank"
+    ]
+    object_bank = objective_assets[
+        "object_bank"
+    ]
+    if (
+        predicate_bank[
+            "predicate_order_sha256"
+        ]
+        != text_derivation[
+            "predicate_bank"
+        ]["label_order_sha256"]
+    ):
+        raise ValueError(
+            "predicate-bank order does not match text-bank derivation"
+        )
+    if (
+        object_bank[
+            "object_label_order_sha256"
+        ]
+        != text_derivation[
+            "object_bank"
+        ]["label_order_sha256"]
+    ):
+        raise ValueError(
+            "object-bank order does not match text-bank derivation"
+        )
+    if (
+        text_derivation[
+            "predicate_bank"
+        ]["label_count"]
+        != training[
+            "predicate_embedding_shape"
+        ][0]
+    ):
+        raise ValueError(
+            "predicate-bank derivation count does not match training vocabulary"
+        )
+    if (
+        text_derivation[
+            "object_bank"
+        ]["label_count"]
+        != objective_assets[
+            "object_embeddings_shape"
+        ][0]
+    ):
+        raise ValueError(
+            "object-bank derivation count does not match training vocabulary"
+        )
+
     routing = training[
         "routing_warm_start"
     ]
@@ -1667,6 +2052,9 @@ def qualify_training_run(
         ],
         "pair_opportunity_rebuild": corpus[
             "pair_opportunity_rebuild"
+        ],
+        "text_bank_derivation": corpus[
+            "text_bank_derivation"
         ],
         "precision": training[
             "training_recipe"
