@@ -11,6 +11,13 @@ from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
 )
+from apache_pair_opportunity import (
+    NPZ_FORMAT as PAIR_OPPORTUNITY_NPZ_FORMAT,
+    REBUILD_SCHEMA as PAIR_OPPORTUNITY_REBUILD_SCHEMA,
+    RELEASED_MIN_SUPPORT as PAIR_OPPORTUNITY_MIN_SUPPORT,
+    RELEASED_SCAN_BOX_CAP as PAIR_OPPORTUNITY_SCAN_BOX_CAP,
+    RELEASED_SOURCE_NAME as PAIR_OPPORTUNITY_SOURCE_NAME,
+)
 from apache_released_contract import (
     validate_released_scalar_contract,
     validate_released_structure_report,
@@ -158,6 +165,309 @@ def _finite_number(
             f"{name} must be finite"
         )
     return float(value)
+
+
+def _ordered_names_sha256(
+    names: list[str],
+) -> str:
+    digest = hashlib.sha256()
+    for name in names:
+        digest.update(
+            name.encode("utf-8")
+        )
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _validate_pair_opportunity_rebuild(
+    payload: object,
+    *,
+    table_sha256: str,
+    spatial_derivation: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "pair-opportunity rebuild evidence must be an object"
+        )
+    if (
+        payload.get("schema")
+        != PAIR_OPPORTUNITY_REBUILD_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported pair-opportunity rebuild schema"
+        )
+    if (
+        payload.get("source_name")
+        != PAIR_OPPORTUNITY_SOURCE_NAME
+    ):
+        raise ValueError(
+            "pair-opportunity rebuild source must be megasg_clean"
+        )
+    if payload.get("scan_box_cap") != PAIR_OPPORTUNITY_SCAN_BOX_CAP:
+        raise ValueError(
+            "pair-opportunity rebuild requires scan_box_cap=400"
+        )
+    if payload.get("min_support") != PAIR_OPPORTUNITY_MIN_SUPPORT:
+        raise ValueError(
+            "pair-opportunity rebuild requires min_support=50"
+        )
+    if payload.get("full_scan") is not True:
+        raise ValueError(
+            "pair-opportunity rebuild requires a full scan"
+        )
+    if payload.get("extrapolated") is not False:
+        raise ValueError(
+            "pair-opportunity rebuild must not use extrapolation"
+        )
+    if (
+        payload.get("opportunity_semantics")
+        != "ordered-instance-pairs-minus-self-on-diagonal"
+    ):
+        raise ValueError(
+            "pair-opportunity denominator semantics differ from Apache"
+        )
+    if (
+        payload.get("numerator_semantics")
+        != "same-pack-relations-after-400-box-cap"
+    ):
+        raise ValueError(
+            "pair-opportunity numerator semantics differ from Apache"
+        )
+    if (
+        payload.get("rate_semantics")
+        != "min(1,relations/opportunities)"
+    ):
+        raise ValueError(
+            "pair-opportunity rate semantics differ from Apache"
+        )
+    if (
+        payload.get("npz_format")
+        != PAIR_OPPORTUNITY_NPZ_FORMAT
+    ):
+        raise ValueError(
+            "pair-opportunity deterministic NPZ format mismatch"
+        )
+    output_sha = require_sha256(
+        payload.get("output_sha256"),
+        "pair-opportunity output_sha256",
+    )
+    if output_sha != table_sha256:
+        raise ValueError(
+            "pair-opportunity rebuild output hash does not match corpus table"
+        )
+
+    components = payload.get(
+        "component_sha256"
+    )
+    required_components = (
+        "meta.json",
+        "img_meta.npy",
+        "box_cats.npy",
+        "rels.npy",
+    )
+    if not isinstance(components, dict):
+        raise ValueError(
+            "pair-opportunity component hashes are missing"
+        )
+    normalized_components: dict[
+        str,
+        str
+    ] = {}
+    for name in required_components:
+        normalized_components[
+            name
+        ] = require_sha256(
+            components.get(name),
+            f"pair-opportunity {name} SHA-256",
+        )
+
+    labels = payload.get(
+        "object_label_order"
+    )
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or any(
+            not isinstance(name, str)
+            or not name
+            for name in labels
+        )
+        or len(set(labels)) != len(labels)
+    ):
+        raise ValueError(
+            "pair-opportunity object-label order must be unique non-empty strings"
+        )
+    order_sha = require_sha256(
+        payload.get(
+            "object_label_order_sha256"
+        ),
+        "pair-opportunity object_label_order_sha256",
+    )
+    if order_sha != _ordered_names_sha256(
+        labels
+    ):
+        raise ValueError(
+            "pair-opportunity object-label order hash does not match labels"
+        )
+    num_cats = _require_positive_int(
+        payload.get("num_cats"),
+        "pair-opportunity num_cats",
+    )
+    if num_cats != len(labels):
+        raise ValueError(
+            "pair-opportunity num_cats does not match object-label order"
+        )
+
+    count_keys = (
+        "images_total",
+        "images_scanned",
+        "boxes_scanned",
+        "relations_scanned",
+        "relations_dropped_by_box_cap",
+        "category_pairs_with_opportunity",
+        "trusted_category_pairs",
+        "opportunity_sum",
+        "relation_sum",
+    )
+    counts = {
+        key: _require_non_negative_int(
+            payload.get(key),
+            f"pair-opportunity {key}",
+        )
+        for key in count_keys
+    }
+    if counts["images_total"] <= 0:
+        raise ValueError(
+            "pair-opportunity rebuild requires non-empty MegaSG pack"
+        )
+    if (
+        counts["images_scanned"]
+        != counts["images_total"]
+    ):
+        raise ValueError(
+            "pair-opportunity released rebuild must scan every packed image"
+        )
+    pair_capacity = (
+        num_cats
+        * num_cats
+    )
+    if (
+        counts[
+            "category_pairs_with_opportunity"
+        ]
+        > pair_capacity
+        or counts[
+            "trusted_category_pairs"
+        ]
+        > counts[
+            "category_pairs_with_opportunity"
+        ]
+    ):
+        raise ValueError(
+            "pair-opportunity category-pair summary counts are inconsistent"
+        )
+    if (
+        counts["relation_sum"]
+        != counts["relations_scanned"]
+    ):
+        raise ValueError(
+            "pair-opportunity relation summary does not match numerator"
+        )
+
+    spatial_sources = spatial_derivation.get(
+        "sources"
+    )
+    if not isinstance(
+        spatial_sources,
+        list,
+    ):
+        raise ValueError(
+            "spatial derivation sources are unavailable"
+        )
+    megasg_source = next(
+        (
+            source
+            for source in spatial_sources
+            if isinstance(source, dict)
+            and source.get(
+                "source_name"
+            )
+            == PAIR_OPPORTUNITY_SOURCE_NAME
+        ),
+        None,
+    )
+    if megasg_source is None:
+        raise ValueError(
+            "spatial derivation does not contain megasg_clean source"
+        )
+    if (
+        normalized_components[
+            "meta.json"
+        ]
+        != megasg_source.get(
+            "meta_sha256"
+        )
+        or normalized_components[
+            "rels.npy"
+        ]
+        != megasg_source.get(
+            "rels_sha256"
+        )
+    ):
+        raise ValueError(
+            "pair-opportunity rebuild does not use the same MegaSG pack as spatial derivation"
+        )
+
+    return {
+        "schema": (
+            PAIR_OPPORTUNITY_REBUILD_SCHEMA
+        ),
+        "source_name": (
+            PAIR_OPPORTUNITY_SOURCE_NAME
+        ),
+        "pack_split": (
+            require_non_empty_string(
+                payload.get(
+                    "pack_split"
+                ),
+                "pair-opportunity pack_split",
+            )
+        ),
+        "component_sha256": (
+            normalized_components
+        ),
+        "object_label_order": list(
+            labels
+        ),
+        "object_label_order_sha256": (
+            order_sha
+        ),
+        "num_cats": num_cats,
+        "scan_box_cap": (
+            PAIR_OPPORTUNITY_SCAN_BOX_CAP
+        ),
+        "min_support": (
+            PAIR_OPPORTUNITY_MIN_SUPPORT
+        ),
+        "full_scan": True,
+        "extrapolated": False,
+        "opportunity_semantics": (
+            "ordered-instance-pairs-minus-self-on-diagonal"
+        ),
+        "numerator_semantics": (
+            "same-pack-relations-after-400-box-cap"
+        ),
+        "rate_semantics": (
+            "min(1,relations/opportunities)"
+        ),
+        **counts,
+        "npz_format": (
+            PAIR_OPPORTUNITY_NPZ_FORMAT
+        ),
+        "output_sha256": (
+            output_sha
+        ),
+    }
 
 
 def _validate_spatial_derivation(
@@ -521,6 +831,19 @@ def validate_corpus(
         ),
         sidecar_sha256=normalized_payload[
             "predicate_spatial_flags_sha256"
+        ],
+    )
+    normalized_payload[
+        "pair_opportunity_rebuild"
+    ] = _validate_pair_opportunity_rebuild(
+        payload.get(
+            "pair_opportunity_rebuild"
+        ),
+        table_sha256=normalized_payload[
+            "neg_rate_table_sha256"
+        ],
+        spatial_derivation=normalized_payload[
+            "predicate_spatial_flags_derivation"
         ],
     )
     return normalized_payload
@@ -1204,6 +1527,30 @@ def qualify_training_run(
                 f"{training_key} does not match corpus manifest"
             )
 
+    pair_rebuild = corpus[
+        "pair_opportunity_rebuild"
+    ]
+    if (
+        pair_rebuild[
+            "object_label_order"
+        ]
+        != objective_assets[
+            "object_label_order"
+        ]
+    ):
+        raise ValueError(
+            "pair-opportunity category order does not match training object vocabulary"
+        )
+    if (
+        pair_rebuild["num_cats"]
+        != objective_assets[
+            "object_embeddings_shape"
+        ][0]
+    ):
+        raise ValueError(
+            "pair-opportunity category count does not match object text bank"
+        )
+
     if (
         training["predicate_embeddings_sha256"]
         != corpus["predicate_embeddings_sha256"]
@@ -1317,6 +1664,9 @@ def qualify_training_run(
         ],
         "predicate_spatial_flags_derivation": corpus[
             "predicate_spatial_flags_derivation"
+        ],
+        "pair_opportunity_rebuild": corpus[
+            "pair_opportunity_rebuild"
         ],
         "precision": training[
             "training_recipe"
