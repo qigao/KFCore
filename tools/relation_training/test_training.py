@@ -10,6 +10,7 @@ from PIL import Image
 import torch
 from torch import nn
 
+from apache_training_recipe import ModelEMA, module_state_sha256
 from benchmark import DatasetManifest, RelationExample, RelationVocabulary
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from training import (
@@ -313,6 +314,73 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
         self.assertEqual(
             report["annotations_sha256"],
             self.validation_manifest.annotations_sha256,
+        )
+
+    def test_ema_updates_only_on_optimizer_boundaries(self):
+        torch.manual_seed(123)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(2, 6),
+            model_config(),
+        )
+        freeze_backbone(model)
+        repeated = DatasetManifest(
+            examples=self.train_manifest.examples * 4,
+            annotations_sha256="e" * 64,
+            vocabulary_sha256=self.vocabulary.sha256(),
+        )
+        dataset = RelationTrainingDataset(
+            repeated,
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+        )
+        loader = make_training_loader(
+            dataset,
+            FrozenBaselineConfig(
+                epochs=1,
+                batch_size=1,
+                learning_rate=1.0e-2,
+                weight_decay=0.0,
+                seed=19,
+            ),
+        )
+        optimizer = torch.optim.AdamW(
+            trainable_parameters(model),
+            lr=1.0e-2,
+            weight_decay=0.0,
+        )
+        ema = ModelEMA(model)
+        initial_ema = module_state_sha256(
+            ema.ema_model
+        )
+
+        report = train_epoch(
+            model,
+            loader,
+            optimizer,
+            device=torch.device("cpu"),
+            grad_accum=2,
+            ema=ema,
+        )
+
+        self.assertEqual(
+            int(report["micro_batches"]),
+            4,
+        )
+        self.assertEqual(
+            int(report["optimizer_steps"]),
+            2,
+        )
+        self.assertEqual(ema.updates, 2)
+        self.assertNotEqual(
+            module_state_sha256(ema.ema_model),
+            initial_ema,
+        )
+        self.assertNotEqual(
+            module_state_sha256(ema.ema_model),
+            module_state_sha256(model),
         )
 
     def test_split_leakage_box_overflow_and_image_size_mismatch_fail(self):
