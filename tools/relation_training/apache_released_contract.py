@@ -297,31 +297,46 @@ def validate_released_structure(
         "logit_scale_init": logit_scale_init,
     }
 
+    return validate_released_structure_report(
+        {
+            "schema": "kfcore.apache-released-structure/1",
+            "matches_released": True,
+            **report,
+        }
+    )
+
+
+def validate_released_structure_report(
+    report: Mapping[str, Any],
+) -> dict[str, object]:
+    if (
+        report.get("schema")
+        != "kfcore.apache-released-structure/1"
+        or report.get("matches_released") is not True
+    ):
+        raise ValueError(
+            "invalid Apache released structure evidence"
+        )
     expected = dict(RELEASED_STRUCTURE)
     for key, target in expected.items():
-        actual = report[key]
+        actual = _value(report, key)
         if not _matches(actual, target):
             raise ValueError(
                 f"Apache released structure {key} "
                 f"must be {target!r}; got {actual!r}"
             )
     if (
-        report["box_pe_num_freqs"]
+        _value(report, "box_pe_num_freqs")
         != RELEASED_STRUCTURE["pe_num_freqs"]
         or not _matches(
-            report["box_pe_max_octave"],
+            _value(report, "box_pe_max_octave"),
             RELEASED_STRUCTURE["pe_max_octave"],
         )
     ):
         raise ValueError(
             "Apache released box positional encoding differs from 16/7"
         )
-
-    return {
-        "schema": "kfcore.apache-released-structure/1",
-        "matches_released": True,
-        **report,
-    }
+    return dict(report)
 
 
 def validate_released_scalar_contract(
