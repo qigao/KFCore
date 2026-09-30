@@ -95,8 +95,19 @@ def training() -> dict:
                 "epochs": 12,
                 "micro_batch_size": 32,
                 "grad_accum": 4,
+                "ema_decay": 0.9998,
             },
             "effective_batch_size": 128,
+            "weight_source": "ema",
+            "ema": {
+                "enabled": True,
+                "decay": 0.9998,
+                "updates": 47_220,
+                "effective_decay": 0.9998,
+                "state_sha256": h("c"),
+                "raw_state_sha256": h("d"),
+                "weights_source": "ema",
+            },
         },
         "train_mixture": {
             "source_names": list(
@@ -185,6 +196,18 @@ class ApacheReleaseQualificationTest(
             result["effective_batch_size"],
             128,
         )
+        self.assertEqual(
+            result["weight_source"],
+            "ema",
+        )
+        self.assertEqual(
+            result["ema_decay"],
+            0.9998,
+        )
+        self.assertEqual(
+            result["ema_state_sha256"],
+            h("c"),
+        )
 
     def test_unresolved_source_is_representable_but_blocks_qualification(self):
         value = corpus()
@@ -256,6 +279,39 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "max_boxes=40",
+        ):
+            validate_training_run(run)
+
+    def test_released_reference_requires_ema_weights(self):
+        run = training()
+        run["training_recipe"][
+            "weight_source"
+        ] = "raw"
+        with self.assertRaisesRegex(
+            ValueError,
+            "EMA checkpoint weights",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["ema"][
+            "decay"
+        ] = 0.99
+        with self.assertRaisesRegex(
+            ValueError,
+            "ema_decay=0.9998",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["ema"][
+            "state_sha256"
+        ] = run["training_recipe"]["ema"][
+            "raw_state_sha256"
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "must differ",
         ):
             validate_training_run(run)
 

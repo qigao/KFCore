@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import hashlib
 import math
@@ -14,6 +15,7 @@ LEGACY_DEFAULT_MAX_BOXES = 32
 RELEASED_MAX_BOXES = 40
 LEGACY_DEFAULT_HIDDEN_DIM = 256
 RELEASED_D_MODEL = 512
+RELEASED_EMA_DECAY = 0.9998
 
 
 def resolve_training_hidden_dim(
@@ -72,10 +74,12 @@ def resolve_training_max_boxes(
     return value
 
 
-def module_state_sha256(module: nn.Module) -> str:
+def state_dict_sha256(
+    state_dict: dict[str, torch.Tensor],
+) -> str:
     """Deterministic SHA-256 over names/shapes/dtypes/tensor bytes."""
     digest = hashlib.sha256()
-    for name, value in sorted(module.state_dict().items()):
+    for name, value in sorted(state_dict.items()):
         tensor = value.detach().cpu().contiguous()
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
@@ -87,6 +91,100 @@ def module_state_sha256(module: nn.Module) -> str:
         digest.update(b"\0")
         digest.update(tensor.numpy().tobytes(order="C"))
     return digest.hexdigest()
+
+
+def module_state_sha256(module: nn.Module) -> str:
+    return state_dict_sha256(
+        dict(module.state_dict())
+    )
+
+
+class ModelEMA:
+    """Exact released RelateAnything EMA update semantics."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        decay: float = RELEASED_EMA_DECAY,
+    ) -> None:
+        if (
+            not math.isfinite(decay)
+            or decay < 0.0
+            or decay >= 1.0
+        ):
+            raise ValueError(
+                "EMA decay must be finite within [0,1)"
+            )
+        self.decay = float(decay)
+        self.updates = 0
+        self.ema_model = copy.deepcopy(model).eval()
+        for parameter in self.ema_model.parameters():
+            parameter.requires_grad_(False)
+
+    def effective_decay(self) -> float:
+        return self.decay * (
+            1.0
+            - math.exp(
+                -float(self.updates) / 2000.0
+            )
+        )
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        self.updates += 1
+        decay = self.effective_decay()
+        source = (
+            model.module
+            if hasattr(model, "module")
+            else model
+        )
+        for ema_parameter, source_parameter in zip(
+            self.ema_model.parameters(),
+            source.parameters(),
+        ):
+            ema_parameter.mul_(decay).add_(
+                source_parameter.data,
+                alpha=1.0 - decay,
+            )
+        for ema_buffer, source_buffer in zip(
+            self.ema_model.buffers(),
+            source.buffers(),
+        ):
+            ema_buffer.copy_(source_buffer)
+
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        return self.ema_model.state_dict()
+
+    def report(self) -> dict[str, object]:
+        return {
+            "enabled": True,
+            "decay": self.decay,
+            "updates": self.updates,
+            "effective_decay": self.effective_decay(),
+            "state_sha256": module_state_sha256(
+                self.ema_model
+            ),
+            "weights_source": "ema",
+        }
+
+
+def select_artifact_model(
+    raw_model: KFRelationModel,
+    ema: ModelEMA | None,
+    *,
+    recipe: str,
+) -> tuple[KFRelationModel, str]:
+    if recipe == "apache-reference":
+        if ema is None:
+            raise ValueError(
+                "apache-reference artifact selection requires EMA"
+            )
+        return ema.ema_model, "ema"
+    if recipe == "legacy":
+        return raw_model, "raw"
+    raise ValueError(
+        "training recipe must be legacy/apache-reference"
+    )
 
 
 def tap_fusion_weights(model: KFRelationModel) -> list[float]:
@@ -162,6 +260,7 @@ class ApacheTrainingRecipeConfig:
     multi_scale_n: int = 7
     cfa_prob: float = 0.5
     cfa_alpha: float = 1.0
+    ema_decay: float = RELEASED_EMA_DECAY
 
     def __post_init__(self) -> None:
         for name in (
@@ -226,6 +325,14 @@ class ApacheTrainingRecipeConfig:
         ):
             raise ValueError(
                 "cfa_alpha must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.ema_decay)
+            or self.ema_decay < 0.0
+            or self.ema_decay >= 1.0
+        ):
+            raise ValueError(
+                "ema_decay must be finite within [0,1)"
             )
         if self.multi_scale:
             parts = self.multi_scale.split(",")

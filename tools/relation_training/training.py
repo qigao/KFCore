@@ -579,6 +579,7 @@ def train_epoch(
     clip_grad: float | None = None,
     record_gradient_health: bool = False,
     grad_accum: int = 1,
+    ema: object | None = None,
 ) -> dict[str, float]:
     model.train()
     if backbone_training:
@@ -774,6 +775,17 @@ def train_epoch(
             optimizer_steps += 1
             if scheduler is not None:
                 scheduler.step()
+            if ema is not None:
+                update = getattr(
+                    ema,
+                    "update",
+                    None,
+                )
+                if not callable(update):
+                    raise TypeError(
+                        "ema must provide an update(model) method"
+                    )
+                update(model)
             optimizer.zero_grad(set_to_none=True)
         examples += batch_size
         if apache_objective is not None:

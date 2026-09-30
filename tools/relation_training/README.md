@@ -1606,11 +1606,28 @@ The command fails unless the run has all of the following:
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
 - 12 complete epochs;
 - effective batch 128;
+- released EMA decay 0.9998;
+- benchmark/checkpoint weights sourced from the EMA model rather than raw weights;
 - a concrete checkpoint SHA-256.
 
 The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
+
+### Released EMA weight contract
+
+The Apache released model is the EMA model, not the final raw optimizer state.
+For `apache-reference`, KFCore reproduces the upstream update rule after each
+optimizer step:
+
+```text
+d = 0.9998 * (1 - exp(-updates / 2000))
+ema = d * ema + (1 - d) * raw
+```
+
+Buffers are copied exactly. The final benchmark and saved relation checkpoint
+use EMA weights. Training evidence retains both raw and EMA state SHA-256 values
+so qualification fails if a raw checkpoint is accidentally substituted.
 
 ## Checkpoint
 

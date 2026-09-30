@@ -7,7 +7,11 @@ import math
 from pathlib import Path
 from typing import Any
 
-from apache_training_recipe import RELEASED_D_MODEL, RELEASED_MAX_BOXES
+from apache_training_recipe import (
+    RELEASED_D_MODEL,
+    RELEASED_EMA_DECAY,
+    RELEASED_MAX_BOXES,
+)
 from apache_mixture import (
     RELEASED_MICRO_BATCH_SIZE,
     RELEASED_MIX_FRACTIONS,
@@ -318,12 +322,74 @@ def validate_training_run(
         raise ValueError(
             "logical rank/gradient accumulation differs from release"
         )
+    config_ema_decay = config.get("ema_decay")
+    if (
+        isinstance(config_ema_decay, bool)
+        or not isinstance(config_ema_decay, (int, float))
+        or not math.isclose(
+            float(config_ema_decay),
+            RELEASED_EMA_DECAY,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "Apache recipe config requires ema_decay=0.9998"
+        )
     if (
         recipe.get("effective_batch_size")
         != RELEASED_EFFECTIVE_BATCH_SIZE
     ):
         raise ValueError(
             "effective batch size differs from release"
+        )
+    if recipe.get("weight_source") != "ema":
+        raise ValueError(
+            "released qualification requires EMA checkpoint weights"
+        )
+    ema = recipe.get("ema")
+    if not isinstance(ema, dict):
+        raise ValueError(
+            "released qualification requires EMA evidence"
+        )
+    if ema.get("enabled") is not True:
+        raise ValueError(
+            "released qualification requires EMA enabled"
+        )
+    decay = ema.get("decay")
+    if (
+        isinstance(decay, bool)
+        or not isinstance(decay, (int, float))
+        or not math.isclose(
+            float(decay),
+            RELEASED_EMA_DECAY,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "released qualification requires ema_decay=0.9998"
+        )
+    updates = ema.get("updates")
+    if (
+        isinstance(updates, bool)
+        or not isinstance(updates, int)
+        or updates <= 0
+    ):
+        raise ValueError(
+            "released qualification requires positive EMA update count"
+        )
+    require_sha256(
+        ema.get("state_sha256"),
+        "EMA state_sha256",
+    )
+    require_sha256(
+        ema.get("raw_state_sha256"),
+        "raw state_sha256",
+    )
+    if ema["state_sha256"] == ema["raw_state_sha256"]:
+        raise ValueError(
+            "released EMA state must differ from raw training state"
         )
 
     mixture = payload.get("train_mixture")
@@ -598,6 +664,14 @@ def qualify_training_run(
         "effective_batch_size": (
             RELEASED_EFFECTIVE_BATCH_SIZE
         ),
+        "weight_source": "ema",
+        "ema_decay": RELEASED_EMA_DECAY,
+        "ema_updates": training[
+            "training_recipe"
+        ]["ema"]["updates"],
+        "ema_state_sha256": training[
+            "training_recipe"
+        ]["ema"]["state_sha256"],
     }
 
 

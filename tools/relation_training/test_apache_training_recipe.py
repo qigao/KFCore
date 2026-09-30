@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -8,6 +11,8 @@ from torch import nn
 
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
+    ModelEMA,
+    RELEASED_EMA_DECAY,
     build_reference_optimizer,
     build_reference_scheduler,
     backbone_provenance,
@@ -21,8 +26,11 @@ from apache_training_recipe import (
     resolve_training_epochs,
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
+    select_artifact_model,
+    state_dict_sha256,
     tap_fusion_weights,
 )
+from checkpoint import load_payload, save_checkpoint
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from test_model import boxes
 
@@ -200,6 +208,147 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             first_hash,
         )
 
+    def test_released_ema_matches_ramped_update_and_copies_buffers(self):
+        torch.manual_seed(901)
+        model = build_model()
+        ema = ModelEMA(
+            model,
+            decay=RELEASED_EMA_DECAY,
+        )
+        source_parameter = next(
+            model.parameters()
+        )
+        ema_parameter = next(
+            ema.ema_model.parameters()
+        )
+        before = ema_parameter.detach().clone()
+
+        with torch.no_grad():
+            source_parameter.add_(1.0)
+            model.predicate_bank.add_(2.0)
+
+        ema.update(model)
+        expected_decay = (
+            RELEASED_EMA_DECAY
+            * (
+                1.0
+                - math.exp(-1.0 / 2000.0)
+            )
+        )
+        expected = (
+            before * expected_decay
+            + source_parameter.detach()
+            * (1.0 - expected_decay)
+        )
+        self.assertEqual(ema.updates, 1)
+        self.assertAlmostEqual(
+            ema.effective_decay(),
+            expected_decay,
+            places=15,
+        )
+        self.assertTrue(
+            torch.allclose(
+                ema_parameter,
+                expected,
+                rtol=0.0,
+                atol=1.0e-7,
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                ema.ema_model.predicate_bank,
+                model.predicate_bank,
+            )
+        )
+        self.assertFalse(
+            any(
+                parameter.requires_grad
+                for parameter in ema.ema_model.parameters()
+            )
+        )
+
+        with torch.no_grad():
+            source_parameter.add_(1.0)
+        previous = ema_parameter.detach().clone()
+        ema.update(model)
+        second_decay = (
+            RELEASED_EMA_DECAY
+            * (
+                1.0
+                - math.exp(-2.0 / 2000.0)
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                ema_parameter,
+                previous * second_decay
+                + source_parameter.detach()
+                * (1.0 - second_decay),
+                rtol=0.0,
+                atol=1.0e-7,
+            )
+        )
+
+    def test_artifact_selection_uses_ema_only_for_reference(self):
+        model = build_model()
+        ema = ModelEMA(model)
+        with torch.no_grad():
+            next(model.parameters()).add_(0.5)
+        ema.update(model)
+        selected, source = select_artifact_model(
+            model,
+            ema,
+            recipe="apache-reference",
+        )
+        self.assertIs(
+            selected,
+            ema.ema_model,
+        )
+        self.assertEqual(source, "ema")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ema.pt"
+            save_checkpoint(
+                path,
+                selected,
+                backbone_model="synthetic/backbone",
+                predicates=["a", "b", "c"],
+                extra={"weight_source": source},
+            )
+            payload = load_payload(path)
+        self.assertEqual(
+            state_dict_sha256(
+                payload["state_dict"]
+            ),
+            module_state_sha256(
+                ema.ema_model
+            ),
+        )
+        self.assertNotEqual(
+            state_dict_sha256(
+                payload["state_dict"]
+            ),
+            module_state_sha256(model),
+        )
+
+        selected, source = select_artifact_model(
+            model,
+            None,
+            recipe="legacy",
+        )
+        self.assertIs(selected, model)
+        self.assertEqual(source, "raw")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires EMA",
+        ):
+            select_artifact_model(
+                model,
+                None,
+                recipe="apache-reference",
+            )
+
     def test_reference_defaults(self):
         config = ApacheTrainingRecipeConfig()
         self.assertEqual(config.head_lr, 4.0e-4)
@@ -210,6 +359,7 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         self.assertEqual(config.min_lr_factor, 0.01)
         self.assertEqual(config.clip_grad, 1.0)
         self.assertEqual(config.backbone_mode, "full")
+        self.assertEqual(config.ema_decay, RELEASED_EMA_DECAY)
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
         model = build_model()
