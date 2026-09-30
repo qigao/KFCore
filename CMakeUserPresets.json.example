@@ -1,0 +1,79 @@
+{
+  "version": 6,
+  "include": ["CMakePresets.json"],
+  "configurePresets": [
+    {
+      "name": "win-cpu-release-user",
+      "displayName": "CPU Release (Windows, local)",
+      "inherits": [
+        "release-win-msvc-ninja",
+        "runtime-ort-cpu"
+      ],
+      "binaryDir": "${sourceDir}/build/local/win-cpu-release",
+      "cacheVariables": {
+        "BUILD_TESTS": "ON",
+        "CMAKE_PREFIX_PATH": "$env{KFCORE_DEPS_PREFIX}",
+        "CMAKE_INSTALL_PREFIX": "$env{KFCORE_INSTALL_PREFIX}"
+      }
+    },
+    {
+      "name": "win-tensorrt-release-user",
+      "displayName": "TensorRT Release (Windows, local)",
+      "inherits": [
+        "release-win-msvc-ninja",
+        "runtime-tensorrt-only"
+      ],
+      "binaryDir": "${sourceDir}/build/local/win-tensorrt-release",
+      "cacheVariables": {
+        "BUILD_TESTS": "ON",
+        "CMAKE_PREFIX_PATH": "$env{KFCORE_DEPS_PREFIX}",
+        "CMAKE_INSTALL_PREFIX": "$env{KFCORE_INSTALL_PREFIX}"
+      }
+    },
+    {
+      "name": "linux-cpu-release-user",
+      "displayName": "CPU Release (Linux, local)",
+      "inherits": [
+        "release-linux-ninja",
+        "runtime-ort-cpu"
+      ],
+      "binaryDir": "${sourceDir}/build/local/linux-cpu-release",
+      "cacheVariables": {
+        "BUILD_TESTS": "ON",
+        "CMAKE_PREFIX_PATH": "$env{KFCORE_DEPS_PREFIX}",
+        "CMAKE_INSTALL_PREFIX": "$env{KFCORE_INSTALL_PREFIX}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "win-cpu-release-user",
+      "configurePreset": "win-cpu-release-user"
+    },
+    {
+      "name": "win-tensorrt-release-user",
+      "configurePreset": "win-tensorrt-release-user"
+    },
+    {
+      "name": "linux-cpu-release-user",
+      "configurePreset": "linux-cpu-release-user"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "win-cpu-release-user",
+      "inherits": "base-test",
+      "configurePreset": "win-cpu-release-user"
+    },
+    {
+      "name": "win-tensorrt-release-user",
+      "inherits": "base-test",
+      "configurePreset": "win-tensorrt-release-user"
+    },
+    {
+      "name": "linux-cpu-release-user",
+      "inherits": "base-test",
+      "configurePreset": "linux-cpu-release-user"
+    }
+  ]
+}
