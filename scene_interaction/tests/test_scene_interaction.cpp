@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -76,6 +77,17 @@ scene_interaction::SceneInteractionOptions make_options()
     return options;
 }
 
+std::unique_ptr<scene_interaction::SceneBehaviorPipeline>
+make_behavior_pipeline()
+{
+    auto scene_graph = pipelines::SceneGraphPipeline::create(
+        std::unique_ptr<yolo::YoloDetector>{},
+        std::unique_ptr<relation::OpenVocabularyRelation>{});
+    return scene_interaction::SceneBehaviorPipeline::create(
+        std::move(scene_graph),
+        make_options());
+}
+
 } // namespace
 
 spec("typed scene behavior pipeline API")
@@ -116,6 +128,58 @@ spec("typed scene behavior pipeline API")
                              .pair_state_count()),
                 std::size_t>);
         check(true);
+    }
+}
+
+spec("scene behavior pipeline composition")
+{
+    it("executes scene graph to temporal behavior and forwards vocabulary changes")
+    {
+        auto pipeline = make_behavior_pipeline();
+        check(pipeline->supports_dynamic_vocabulary());
+        check(pipeline->supports_live_predicates());
+        check(pipeline->vocabulary_version() == std::uint64_t{7U});
+        check(pipeline->predicates().size() == std::size_t{1U});
+        check(pipeline->predicates()[0] == "interacting");
+
+        const auto configured =
+            pipeline->configure_model(make_model(7U), 0.0);
+        check(configured.empty());
+        check(pipeline->temporal_configured());
+
+        image::ImageView image;
+        const auto first = pipeline->process(image, 0.0);
+        check(first.events.empty());
+        check(first.scene.relations.vocabulary_version ==
+              std::uint64_t{7U});
+        check(pipeline->pair_state_count() == std::size_t{1U});
+
+        const auto second = pipeline->process(image, 0.20);
+        check(second.events.size() == std::size_t{1U});
+        check(second.events[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorStarted);
+        check(pipeline->pair_state_count() == std::size_t{1U});
+
+        pipeline->set_predicates({"touching"});
+        check(pipeline->vocabulary_version() == std::uint64_t{8U});
+        check(pipeline->predicates().size() == std::size_t{1U});
+        check(pipeline->predicates()[0] == "touching");
+
+        const auto changed = pipeline->process(image, 0.30);
+        check(changed.scene.relations.vocabulary_version ==
+              std::uint64_t{8U});
+        check(changed.events.size() == std::size_t{1U});
+        check(changed.events[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorCancelled);
+        check(changed.events[0].reason ==
+              scene_interaction::SceneBehaviorEventReason::VocabularyChanged);
+        check(pipeline->pair_state_count() == std::size_t{0U});
+
+        relation::PredicateVocabulary vocabulary;
+        vocabulary.predicates = {"holding"};
+        pipeline->set_vocabulary(std::move(vocabulary));
+        check(pipeline->vocabulary_version() == std::uint64_t{9U});
+        check(pipeline->predicates()[0] == "holding");
     }
 }
 

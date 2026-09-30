@@ -1,6 +1,13 @@
 name: Scene interaction contract
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'scene_interaction/**'
+      - 'vision/pipelines/scene_graph/include/kfcore/pipelines/scene_graph.hpp'
+      - 'CMakeLists.txt'
+      - '.github/workflows/scene-interaction-contract.yml'
   pull_request:
     branches: [master]
     paths:
@@ -70,12 +77,12 @@ jobs:
 
           cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas -Iesn             -c esn/esn.c             -o "$RUNNER_TEMP/scene-interaction/esn.o"
 
-          for source in scene_interaction/src/scene_features.cpp                         scene_interaction/src/interaction.cpp                         scene_interaction/tests/test_scene_interaction.cpp; do
+          for source in scene_interaction/src/scene_features.cpp                         scene_interaction/src/interaction.cpp                         scene_interaction/src/pipeline.cpp                         scene_interaction/tests/scene_graph_pipeline_test_stub.cpp                         scene_interaction/tests/test_scene_interaction.cpp; do
             object="$RUNNER_TEMP/scene-interaction/$(basename "${source%.*}").o"
             c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic               -fsanitize=address,undefined -fno-omit-frame-pointer               -Iscene_interaction/include               -Iscene_interaction/src               -Ivision/pipelines/scene_graph/include               -Ivision/core/relation/include               -Ivision/core/yolo/include               -Ivision/core/image_processor/include               -Ivision/image/cpu/include               -Iruntime/core/include               -Ivendor/miniblas -Iesn -Isalts/tinytest/include               -c "$source" -o "$object"
           done
 
-          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/scene-interaction/tinytest.o"             "$RUNNER_TEMP/scene-interaction/miniblas.o"             "$RUNNER_TEMP/scene-interaction/linalg.o"             "$RUNNER_TEMP/scene-interaction/esn.o"             "$RUNNER_TEMP/scene-interaction/scene_features.o"             "$RUNNER_TEMP/scene-interaction/interaction.o"             "$RUNNER_TEMP/scene-interaction/test_scene_interaction.o"             -lm -o "$RUNNER_TEMP/scene-interaction/test_scene_interaction"
+          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/scene-interaction/tinytest.o"             "$RUNNER_TEMP/scene-interaction/miniblas.o"             "$RUNNER_TEMP/scene-interaction/linalg.o"             "$RUNNER_TEMP/scene-interaction/esn.o"             "$RUNNER_TEMP/scene-interaction/scene_features.o"             "$RUNNER_TEMP/scene-interaction/interaction.o"             "$RUNNER_TEMP/scene-interaction/pipeline.o"             "$RUNNER_TEMP/scene-interaction/scene_graph_pipeline_test_stub.o"             "$RUNNER_TEMP/scene-interaction/test_scene_interaction.o"             -lm -o "$RUNNER_TEMP/scene-interaction/test_scene_interaction"
 
       - name: Run temporal lifecycle tests
         shell: bash
