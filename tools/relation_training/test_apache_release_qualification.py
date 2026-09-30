@@ -95,6 +95,7 @@ def training() -> dict:
                 "epochs": 12,
                 "micro_batch_size": 32,
                 "grad_accum": 4,
+                "ema_decay": 0.9998,
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
