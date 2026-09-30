@@ -14,6 +14,13 @@ from benchmark import (
     stable_report_json,
 )
 from apache_pair_sampler import PairOpportunityTable
+from apache_training_recipe import (
+    ApacheTrainingRecipeConfig,
+    backbone_provenance,
+    build_reference_optimizer,
+    build_reference_scheduler,
+    resolve_training_epochs,
+)
 from apache_objective import (
     ApacheObjectiveConfig,
     ApacheReferenceObjective,
@@ -191,10 +198,34 @@ def main() -> None:
         type=float,
         default=0.3,
     )
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument(
+        "--training-recipe",
+        choices=("legacy", "apache-reference"),
+        default="legacy",
+        help=(
+            "Optimizer/backbone recipe. apache-reference enables full "
+            "DINOv3 fine-tuning with separate head/backbone learning rates, "
+            "reference weight-decay grouping, warmup/cosine scheduling and "
+            "gradient clipping."
+        ),
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help=(
+            "Training epochs. Defaults to 5 for legacy recipe and 12 for "
+            "apache-reference."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
     parser.add_argument("--weight-decay", type=float, default=1.0e-4)
+    parser.add_argument("--apache-head-lr", type=float, default=4.0e-4)
+    parser.add_argument("--apache-backbone-lr", type=float, default=5.0e-5)
+    parser.add_argument("--apache-warmup-steps", type=int, default=500)
+    parser.add_argument("--apache-min-lr-factor", type=float, default=0.01)
+    parser.add_argument("--apache-clip-grad", type=float, default=1.0)
     parser.add_argument("--sampler-loss-weight", type=float, default=1.0)
     parser.add_argument("--pair-loss-weight", type=float, default=1.0)
     parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
@@ -348,6 +379,18 @@ def main() -> None:
     apache_mode = (
         args.predicate_objective == "apache-reference"
     )
+    reference_training = (
+        args.training_recipe == "apache-reference"
+    )
+    resolved_epochs = resolve_training_epochs(
+        args.epochs,
+        recipe=args.training_recipe,
+    )
+    if reference_training and not apache_mode:
+        raise ValueError(
+            "--training-recipe apache-reference requires "
+            "--predicate-objective apache-reference"
+        )
     if apache_mode:
         if (
             args.pair_evidence_contract != "apache"
@@ -403,9 +446,13 @@ def main() -> None:
             )
 
     baseline_config = FrozenBaselineConfig(
-        epochs=args.epochs,
+        epochs=resolved_epochs,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
+        learning_rate=(
+            args.apache_head_lr
+            if reference_training
+            else args.learning_rate
+        ),
         weight_decay=args.weight_decay,
         seed=args.seed,
     )
@@ -747,10 +794,17 @@ def main() -> None:
         predicate_embeddings,
         model_config,
     )
-    freeze_backbone(model)
+    if not reference_training:
+        freeze_backbone(model)
 
     device = resolve_device(args.device)
     model.to(device)
+
+    backbone_provenance_initial = backbone_provenance(
+        model,
+        model_name=args.backbone,
+        mode=("full" if reference_training else "frozen"),
+    )
 
     if apache_mode:
         if (
@@ -855,14 +909,47 @@ def main() -> None:
     loader = make_training_loader(
         train_dataset, baseline_config
     )
-    parameters = trainable_parameters(model)
+    reference_recipe_config = None
+    optimizer_report = None
+    scheduler_report = None
+    scheduler = None
+    if reference_training:
+        reference_recipe_config = ApacheTrainingRecipeConfig(
+            head_lr=args.apache_head_lr,
+            backbone_lr=args.apache_backbone_lr,
+            weight_decay=args.weight_decay,
+            epochs=resolved_epochs,
+            warmup_steps=args.apache_warmup_steps,
+            min_lr_factor=args.apache_min_lr_factor,
+            clip_grad=args.apache_clip_grad,
+            backbone_mode="full",
+        )
+        optimizer, optimizer_report = build_reference_optimizer(
+            model,
+            reference_recipe_config,
+        )
+        scheduler, scheduler_report = build_reference_scheduler(
+            optimizer,
+            reference_recipe_config,
+            steps_per_epoch=len(loader),
+        )
+    else:
+        parameters = trainable_parameters(model)
+        optimizer = torch.optim.AdamW(
+            parameters,
+            lr=baseline_config.learning_rate,
+            weight_decay=baseline_config.weight_decay,
+        )
+
     trainable_parameter_count = sum(
-        parameter.numel() for parameter in parameters
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
     )
-    optimizer = torch.optim.AdamW(
-        parameters,
-        lr=baseline_config.learning_rate,
-        weight_decay=baseline_config.weight_decay,
+    backbone_trainable_parameter_count = sum(
+        parameter.numel()
+        for parameter in model.backbone.parameters()
+        if parameter.requires_grad
     )
 
     history: list[dict[str, object]] = []
@@ -882,9 +969,23 @@ def main() -> None:
                 predicate_contrastive_negative_mask
             ),
             apache_objective=apache_objective,
+            backbone_training=reference_training,
+            scheduler=scheduler,
+            clip_grad=(
+                reference_recipe_config.clip_grad
+                if reference_recipe_config is not None
+                else None
+            ),
+            record_gradient_health=reference_training,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
+
+    backbone_provenance_final = backbone_provenance(
+        model,
+        model_name=args.backbone,
+        mode=("full" if reference_training else "frozen"),
+    )
 
     benchmark_report = evaluate_gt_boxes(
         model,
@@ -930,8 +1031,29 @@ def main() -> None:
         backbone_model=args.backbone,
         predicates=list(vocabulary.predicates),
         extra={
-            "training_schema": "kfcore.relation-frozen-baseline/1",
-            "frozen_backbone": True,
+            "training_schema": (
+                "kfcore.relation-apache-reference-training/1"
+                if reference_training
+                else "kfcore.relation-frozen-baseline/1"
+            ),
+            "frozen_backbone": not reference_training,
+            "training_recipe": {
+                "name": args.training_recipe,
+                "released_epoch_target": 12,
+                "matches_released_epoch_count": resolved_epochs == 12,
+                "config": (
+                    reference_recipe_config.__dict__
+                    if reference_recipe_config is not None
+                    else None
+                ),
+                "optimizer": optimizer_report,
+                "scheduler": scheduler_report,
+                "backbone_trainable_parameter_count": (
+                    backbone_trainable_parameter_count
+                ),
+                "backbone_initial": backbone_provenance_initial,
+                "backbone_final": backbone_provenance_final,
+            },
             "train_annotations_sha256": train_manifest.annotations_sha256,
             "validation_annotations_sha256": (
                 validation_manifest.annotations_sha256
@@ -1004,7 +1126,22 @@ def main() -> None:
     training_report = {
         "schema": "kfcore.relation-training-run/1",
         "backbone": args.backbone,
-        "frozen_backbone": True,
+        "frozen_backbone": not reference_training,
+        "training_recipe": {
+            "name": args.training_recipe,
+            "released_epoch_target": 12,
+            "matches_released_epoch_count": resolved_epochs == 12,
+            "config": (
+                reference_recipe_config.__dict__
+                if reference_recipe_config is not None
+                else None
+            ),
+            "optimizer": optimizer_report,
+            "scheduler": scheduler_report,
+            "backbone_trainable_parameter_count": (
+                backbone_trainable_parameter_count
+            ),
+        },
         "device": str(device),
         "train_examples": len(train_manifest.examples),
         "validation_examples": len(validation_manifest.examples),

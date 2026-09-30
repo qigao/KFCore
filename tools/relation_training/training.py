@@ -383,9 +383,20 @@ def train_epoch(
     explicit_holdout_row_policy: str = "dimension-only",
     predicate_contrastive_negative_mask: Tensor | None = None,
     apache_objective: torch.nn.Module | None = None,
+    backbone_training: bool = False,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+    clip_grad: float | None = None,
+    record_gradient_health: bool = False,
 ) -> dict[str, float]:
     model.train()
-    model.backbone.eval()
+    if backbone_training:
+        model.backbone.train()
+    else:
+        model.backbone.eval()
+    if clip_grad is not None and (
+        not np.isfinite(clip_grad) or clip_grad <= 0.0
+    ):
+        raise ValueError("clip_grad must be finite and positive")
 
     sums = {
         "loss": 0.0,
@@ -410,6 +421,12 @@ def train_epoch(
     predicate_rows = 0
     predicate_rows_skipped = 0
     apache_sums: dict[str, float] = {}
+    gradient_sums = {
+        "backbone_gradient_norm": 0.0,
+        "head_gradient_norm": 0.0,
+        "backbone_gradient_tensors": 0.0,
+        "head_gradient_tensors": 0.0,
+    }
 
     for batch in loader:
         image = batch["image"].to(device)
@@ -463,13 +480,48 @@ def train_epoch(
             raise RuntimeError("training loss became non-finite")
         losses["loss"].backward()
 
-        for parameter in trainable_parameters(model):
-            if parameter.grad is not None and not torch.isfinite(
-                parameter.grad
-            ).all():
+        backbone_norm2 = 0.0
+        head_norm2 = 0.0
+        backbone_tensors = 0
+        head_tensors = 0
+        for name, parameter in model.named_parameters():
+            if not parameter.requires_grad or parameter.grad is None:
+                continue
+            if not torch.isfinite(parameter.grad).all():
                 raise RuntimeError("training gradient became non-finite")
+            if record_gradient_health:
+                norm = float(
+                    parameter.grad.detach().float().norm().item()
+                )
+                if name.startswith("backbone."):
+                    backbone_norm2 += norm * norm
+                    backbone_tensors += 1
+                else:
+                    head_norm2 += norm * norm
+                    head_tensors += 1
 
+        if record_gradient_health:
+            gradient_sums["backbone_gradient_norm"] += (
+                float(np.sqrt(backbone_norm2)) * batch_size
+            )
+            gradient_sums["head_gradient_norm"] += (
+                float(np.sqrt(head_norm2)) * batch_size
+            )
+            gradient_sums["backbone_gradient_tensors"] += (
+                float(backbone_tensors) * batch_size
+            )
+            gradient_sums["head_gradient_tensors"] += (
+                float(head_tensors) * batch_size
+            )
+
+        if clip_grad is not None:
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                clip_grad,
+            )
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
         examples += batch_size
         if apache_objective is not None:
             for key, value in losses.items():
@@ -500,10 +552,26 @@ def train_epoch(
     if examples == 0:
         raise ValueError("training loader produced no examples")
     if apache_objective is not None:
-        return {
+        report = {
             key: value / examples
             for key, value in apache_sums.items()
         }
+        if record_gradient_health:
+            report.update(
+                {
+                    key: value / examples
+                    for key, value in gradient_sums.items()
+                }
+            )
+        if scheduler is not None:
+            learning_rates = scheduler.get_last_lr()
+            report["learning_rate_min"] = float(
+                min(learning_rates)
+            )
+            report["learning_rate_max"] = float(
+                max(learning_rates)
+            )
+        return report
 
     report = {
         key: value / examples
@@ -515,6 +583,21 @@ def train_epoch(
     )
     for key, value in diagnostic_sums.items():
         report[key] = value / examples
+    if record_gradient_health:
+        report.update(
+            {
+                key: value / examples
+                for key, value in gradient_sums.items()
+            }
+        )
+    if scheduler is not None:
+        learning_rates = scheduler.get_last_lr()
+        report["learning_rate_min"] = float(
+            min(learning_rates)
+        )
+        report["learning_rate_max"] = float(
+            max(learning_rates)
+        )
     return report
 
 

@@ -8,6 +8,11 @@ from pathlib import Path
 import torch
 from huggingface_hub import hf_hub_download
 
+from apache_training_recipe import (
+    ApacheTrainingRecipeConfig,
+    build_reference_optimizer,
+    gradient_health,
+)
 from export_onnx import (
     ENCODER_OUTPUT_NAMES,
     check_dynamic_vocabulary_parity,
@@ -61,6 +66,14 @@ def main() -> None:
         "--predicate-head-contract",
         choices=("legacy", "apache"),
         default="legacy",
+    )
+    parser.add_argument(
+        "--verify-backbone-finetune",
+        action="store_true",
+        help=(
+            "Run one real DINOv3 full-backbone backward pass after export "
+            "and require finite non-zero backbone gradients."
+        ),
     )
     args = parser.parse_args()
 
@@ -304,6 +317,74 @@ def main() -> None:
             "tested_vocabulary_sizes": [1, 3, 5],
         }
 
+    finetune_report = None
+    if args.verify_backbone_finetune:
+        recipe = ApacheTrainingRecipeConfig(
+            epochs=1,
+            warmup_steps=0,
+            backbone_mode="full",
+        )
+        optimizer, optimizer_report = build_reference_optimizer(
+            model,
+            recipe,
+        )
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        train_outputs = model(
+            image,
+            boxes,
+            box_counts,
+        )
+        train_pred_logits = train_outputs[0]
+        train_pair_logits = train_outputs[1]
+        train_valid = train_outputs[4]
+        loss = train_pred_logits.square().mean()
+        if bool(train_valid.any()):
+            loss = (
+                loss
+                + train_pair_logits[train_valid].square().mean()
+            )
+        if not torch.isfinite(loss):
+            raise RuntimeError(
+                "real DINO full-finetune smoke produced non-finite loss"
+            )
+        loss.backward()
+        health = gradient_health(model)
+        if (
+            float(health["backbone_gradient_norm"]) <= 0.0
+            or int(health["backbone_gradient_tensors"]) <= 0
+        ):
+            raise RuntimeError(
+                "real DINO full-finetune smoke produced no backbone gradient"
+            )
+        frozen_unused = optimizer_report["backbone"][
+            "frozen_unused_modules"
+        ]
+        final_norm = getattr(model.backbone.model, "norm", None)
+        if final_norm is not None:
+            for parameter in final_norm.parameters():
+                if parameter.grad is not None:
+                    raise RuntimeError(
+                        "unused final backbone norm received a gradient"
+                    )
+        mask_token = getattr(
+            model.backbone.model,
+            "mask_token",
+            None,
+        )
+        if isinstance(mask_token, torch.nn.Parameter):
+            if mask_token.grad is not None:
+                raise RuntimeError(
+                    "unused backbone mask token received a gradient"
+                )
+        finetune_report = {
+            "loss": float(loss.detach().cpu()),
+            "gradient_health": health,
+            "optimizer": optimizer_report,
+            "frozen_unused_modules": frozen_unused,
+        }
+        model.eval()
+
     report = {
         "schema": "kfcore.real-dinov3-relation-smoke/7",
         "pair_evidence_contract": args.pair_evidence_contract,
@@ -336,6 +417,7 @@ def main() -> None:
         ),
         "valid_pair_count": int(valid_mask.sum().item()),
         "dynamic_vocabulary": dynamic_report,
+        "full_finetune": finetune_report,
     }
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",

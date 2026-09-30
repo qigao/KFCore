@@ -72,6 +72,7 @@ jobs:
             tools/relation_training/apache_vocab_head.py \
             tools/relation_training/apache_text_student.py \
             tools/relation_training/apache_objective.py \
+            tools/relation_training/apache_training_recipe.py \
             tools/relation_training/export_predicate_text_student.py \
             tools/relation_training/losses.py \
             tools/relation_training/checkpoint.py \
@@ -100,6 +101,7 @@ jobs:
             tools/relation_training/test_apache_vocab_head.py \
             tools/relation_training/test_apache_text_student.py \
             tools/relation_training/test_apache_objective.py \
+            tools/relation_training/test_apache_training_recipe.py \
             tools/relation_training/test_tensorrt_dynamic_vocab_profile.py \
             tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
             tools/relation_training/test_benchmark.py \
@@ -111,7 +113,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_apache_objective.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_apache_objective.py test_apache_training_recipe.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
@@ -123,7 +125,7 @@ jobs:
 
   real-vits16:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
@@ -272,6 +274,7 @@ jobs:
             --pair-sampler-contract apache \
             --relation-context-contract apache \
             --predicate-head-contract apache \
+            --verify-backbone-finetune \
             --output-dir "$OUT"
 
       - uses: actions/upload-artifact@v4
