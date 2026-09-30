@@ -20,6 +20,7 @@ class ApachePairSamplerOutput:
     pair_valid: Tensor
     geo_loss: Tensor
     relatedness_loss: Tensor
+    pair_negative_weights: Tensor | None
 
 
 class ApacheRelatednessPairSampler(nn.Module):
@@ -342,6 +343,21 @@ class ApacheRelatednessPairSampler(nn.Module):
             1,
             stage2,
         )
+        pair_negative_weights = None
+        if training_contract:
+            selected_gt = torch.gather(
+                gt_grid.reshape(batch, count * count),
+                1,
+                flat_pair,
+            )
+            pair_negative_weights = torch.where(
+                selected_gt,
+                torch.ones_like(pair_logits),
+                torch.full_like(
+                    pair_logits,
+                    self.negative_weight,
+                ),
+            )
         sub_idx = flat_pair // count
         obj_idx = flat_pair % count
 
@@ -366,6 +382,12 @@ class ApacheRelatednessPairSampler(nn.Module):
                 self.final_budget,
                 pad_value=float("-inf"),
             )
+            if pair_negative_weights is not None:
+                pair_negative_weights = self._pad(
+                    pair_negative_weights,
+                    self.final_budget,
+                    pad_value=0.0,
+                )
 
         return ApachePairSamplerOutput(
             sub_idx=sub_idx.to(torch.int64),
@@ -376,4 +398,5 @@ class ApacheRelatednessPairSampler(nn.Module):
             pair_valid=pair_valid,
             geo_loss=geo_loss,
             relatedness_loss=relatedness_loss,
+            pair_negative_weights=pair_negative_weights,
         )
