@@ -1617,6 +1617,52 @@ The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
 
+### Released scalar hyperparameter contract
+
+For `apache-reference`, defaults are not treated as suggestions. KFCore
+validates the released scalar values before loading the DINOv3 backbone and
+records the resolved contract in training evidence. Qualification recomputes
+the same contract from raw recipe/model/objective evidence rather than trusting
+the recorded flag.
+
+The pinned values cover:
+
+```text
+optimizer/schedule:
+  head_lr=4e-4
+  backbone_lr=5e-5
+  weight_decay=1e-4
+  warmup_steps=500
+  min_lr_factor=0.01
+  clip_grad=1.0
+
+regularization:
+  multi_scale=0.5,1.5
+  multi_scale_n=7
+  cfa_prob=0.5
+  cfa_alpha=1.0
+  context_dropout=0.2
+  box_token_dropout=0.3
+  pair_negative_floor=0.3
+
+objective:
+  infonce_temp=0.07
+  n_neg=512
+  hard_frac=0.5
+  lambda_obj=0.10
+  lambda_swap=0.50
+  lambda_sigmoid=0.25
+  lambda_bg=0.05
+  lambda_geo=1.0
+  lambda_rel=1.0
+  bg_topk=5
+  swap_margin=0.05
+```
+
+Legacy and focused diagnostic dataclasses may still vary these values, but a
+run selected as `apache-reference` fails before training when any value
+drifts.
+
 ### Released external shape and pair budget
 
 The Apache released graph uses a 448 × 448 square input, 40 padded object slots,
