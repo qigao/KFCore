@@ -7,9 +7,14 @@ import math
 from pathlib import Path
 from typing import Any
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from apache_training_recipe import (
     RELEASED_D_MODEL,
     RELEASED_EMA_DECAY,
+    RELEASED_IMAGE_SIZE,
     RELEASED_MAX_BOXES,
     RELEASED_PHOTOMETRIC_AUGMENT,
     RELEASED_TEXT_DIM,
@@ -324,6 +329,18 @@ def validate_training_run(
         raise ValueError(
             "logical rank/gradient accumulation differs from release"
         )
+    if config.get("image_size") != RELEASED_IMAGE_SIZE:
+        raise ValueError(
+            "Apache recipe config requires image_size=448"
+        )
+    if config.get("geo_budget") != RELEASED_GEO_BUDGET:
+        raise ValueError(
+            "Apache recipe config requires geo_budget=400"
+        )
+    if config.get("final_budget") != RELEASED_FINAL_BUDGET:
+        raise ValueError(
+            "Apache recipe config requires final_budget=128"
+        )
     if config.get("text_dim") != RELEASED_TEXT_DIM:
         raise ValueError(
             "Apache recipe config requires text_dim=512"
@@ -512,6 +529,14 @@ def validate_training_run(
     if not isinstance(model_config, dict):
         raise ValueError(
             "model config evidence is missing"
+        )
+    if model_config.get("image_size") != RELEASED_IMAGE_SIZE:
+        raise ValueError(
+            "Apache released qualification requires image_size=448"
+        )
+    if model_config.get("pair_budget") != RELEASED_FINAL_BUDGET:
+        raise ValueError(
+            "Apache released qualification requires pair_budget=128"
         )
     if model_config.get("max_boxes") != RELEASED_MAX_BOXES:
         raise ValueError(
@@ -748,6 +773,9 @@ def qualify_training_run(
             "training_recipe"
         ]["augmentation"],
         "text_dim": RELEASED_TEXT_DIM,
+        "image_size": RELEASED_IMAGE_SIZE,
+        "geo_budget": RELEASED_GEO_BUDGET,
+        "final_budget": RELEASED_FINAL_BUDGET,
     }
 
 
