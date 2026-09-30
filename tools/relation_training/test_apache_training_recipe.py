@@ -359,6 +359,7 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         self.assertEqual(config.min_lr_factor, 0.01)
         self.assertEqual(config.clip_grad, 1.0)
         self.assertEqual(config.backbone_mode, "full")
+        self.assertEqual(config.ema_decay, RELEASED_EMA_DECAY)
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
         model = build_model()
