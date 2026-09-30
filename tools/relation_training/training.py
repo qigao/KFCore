@@ -552,6 +552,12 @@ def train_epoch(
         )
         if object_label_indices is not None:
             object_label_indices = object_label_indices.to(device)
+        coverage = batch.get("coverage")
+        if coverage is not None:
+            coverage = coverage.to(device)
+        fill = batch.get("fill")
+        if fill is not None:
+            fill = fill.to(device)
         batch_size = int(image.shape[0])
         micro_batches += 1
         resolution = batch.get("training_resolution")
@@ -580,6 +586,8 @@ def train_epoch(
                 if apache_objective is not None
                 else None
             ),
+            coverage=coverage,
+            fill=fill,
         )
         if apache_objective is not None:
             source_ids = batch["source_id"].to(device)
