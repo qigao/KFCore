@@ -197,8 +197,12 @@ class RelationTrainingOutputs:
     predicate_query_raw: Tensor
     predicate_bank: Tensor
     predicate_spatial_query: Tensor | None = None
+    predicate_alpha: Tensor | None = None
+    object_subject_query: Tensor | None = None
+    object_object_query: Tensor | None = None
     sampler_geo_loss: Tensor | None = None
     sampler_relatedness_loss: Tensor | None = None
+    sampler_pair_negative_weights: Tensor | None = None
 
 
 class BackboneAdapter(nn.Module):
@@ -1448,6 +1452,10 @@ class KFRelationModel(nn.Module):
         Tensor | None,
         Tensor | None,
         Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
     ]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
@@ -1493,6 +1501,7 @@ class KFRelationModel(nn.Module):
 
         sampler_geo_loss: Tensor | None = None
         sampler_relatedness_loss: Tensor | None = None
+        sampler_pair_negative_weights: Tensor | None = None
         apache_pair_logits: Tensor | None = None
         flat_rich_geometry: Tensor | None = None
         flat_geometry: Tensor | None = None
@@ -1519,6 +1528,9 @@ class KFRelationModel(nn.Module):
                 sampler_geo_loss = sampler_out.geo_loss
                 sampler_relatedness_loss = (
                     sampler_out.relatedness_loss
+                )
+                sampler_pair_negative_weights = (
+                    sampler_out.pair_negative_weights
                 )
         else:
             geometry = self._pair_geometry(boxes)
@@ -1759,6 +1771,9 @@ class KFRelationModel(nn.Module):
         predicate_bank = self.effective_predicate_bank()
 
         predicate_spatial_query: Tensor | None = None
+        predicate_alpha: Tensor | None = None
+        object_subject_query: Tensor | None = None
+        object_object_query: Tensor | None = None
         if self.config.predicate_head_contract == "apache":
             if (
                 self.apache_vocab_head is None
@@ -1796,6 +1811,25 @@ class KFRelationModel(nn.Module):
                 predicate_query_raw,
                 dim=-1,
             )
+            predicate_alpha = self.apache_vocab_head.routing_alpha(
+                predicate_bank
+            )
+            if pair_targets is not None:
+                object_subject_query = self.apache_sub_text_proj(
+                    region_features
+                )
+                object_object_query = self.apache_obj_text_proj(
+                    region_features
+                )
+                valid_object_float = valid_boxes.to(
+                    object_subject_query.dtype
+                ).unsqueeze(-1)
+                object_subject_query = (
+                    object_subject_query * valid_object_float
+                )
+                object_object_query = (
+                    object_object_query * valid_object_float
+                )
             if encoder_only:
                 encoder_runtime = (
                     predicate_query_raw,
@@ -1810,6 +1844,7 @@ class KFRelationModel(nn.Module):
                     predicate_query_raw,
                     predicate_spatial_query,
                     predicate_bank,
+                    alpha=predicate_alpha,
                 )
         else:
             predicate_query_raw = self.predicate_projection(tokens)
@@ -1843,8 +1878,12 @@ class KFRelationModel(nn.Module):
                 predicate_query_raw,
                 predicate_bank,
                 predicate_spatial_query,
+                predicate_alpha,
+                object_subject_query,
+                object_object_query,
                 sampler_geo_loss,
                 sampler_relatedness_loss,
+                sampler_pair_negative_weights,
             )
         runtime = (
             pred_logits,
@@ -1861,14 +1900,18 @@ class KFRelationModel(nn.Module):
             predicate_query_raw,
             predicate_bank,
             predicate_spatial_query,
+            predicate_alpha,
+            object_subject_query,
+            object_object_query,
             sampler_geo_loss,
             sampler_relatedness_loss,
+            sampler_pair_negative_weights,
         )
 
     def forward_encoder(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _, _, _, _, _, _ = self._forward_impl(
             image,
             boxes,
             box_counts,
@@ -1883,7 +1926,7 @@ class KFRelationModel(nn.Module):
     def forward(
         self, image: Tensor, boxes: Tensor, box_counts: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        runtime, _, _, _, _, _, _, _, _ = self._forward_impl(
+        runtime, _, _, _, _, _, _, _, _, _, _, _, _ = self._forward_impl(
             image, boxes, box_counts
         )
         return runtime
@@ -1910,8 +1953,12 @@ class KFRelationModel(nn.Module):
             predicate_query_raw,
             predicate_bank,
             predicate_spatial_query,
+            predicate_alpha,
+            object_subject_query,
+            object_object_query,
             sampler_geo_loss,
             sampler_relatedness_loss,
+            sampler_pair_negative_weights,
         ) = self._forward_impl(
             image,
             boxes,
@@ -1926,6 +1973,10 @@ class KFRelationModel(nn.Module):
             predicate_query_raw=predicate_query_raw,
             predicate_bank=predicate_bank,
             predicate_spatial_query=predicate_spatial_query,
+            predicate_alpha=predicate_alpha,
+            object_subject_query=object_subject_query,
+            object_object_query=object_object_query,
             sampler_geo_loss=sampler_geo_loss,
             sampler_relatedness_loss=sampler_relatedness_loss,
+            sampler_pair_negative_weights=sampler_pair_negative_weights,
         )
