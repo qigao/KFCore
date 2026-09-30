@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from bisect import bisect_right
 from pathlib import Path
 import random
 from typing import Iterable
@@ -9,8 +10,9 @@ import numpy as np
 from PIL import Image
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 
+from apache_mixture import LoadedRelationMixture
 from apache_multiscale import (
     EpochRandomSampler,
     MultiScaleBatchSampler,
@@ -287,6 +289,80 @@ class RelationTrainingDataset(Dataset):
         return result
 
 
+class RelationMixtureTrainingDataset(Dataset):
+    """Concatenated relation datasets with source-specific image roots.
+
+    Supports the same tuple index contract used by MultiScaleBatchSampler.
+    """
+
+    def __init__(
+        self,
+        mixture: LoadedRelationMixture,
+        *,
+        image_size: int,
+        max_boxes: int,
+        predicate_count: int,
+        object_labels: tuple[str, ...] = (),
+    ) -> None:
+        self.mixture = mixture
+        self.datasets = tuple(
+            RelationTrainingDataset(
+                manifest,
+                image_root=source.image_root,
+                image_size=image_size,
+                max_boxes=max_boxes,
+                predicate_count=predicate_count,
+                object_labels=object_labels,
+            )
+            for source, manifest in zip(
+                mixture.config.sources,
+                mixture.manifests,
+            )
+        )
+        cumulative: list[int] = []
+        total = 0
+        for dataset in self.datasets:
+            total += len(dataset)
+            cumulative.append(total)
+        if total <= 0:
+            raise ValueError(
+                "relation mixture training dataset must not be empty"
+            )
+        self.cumulative_sizes = tuple(cumulative)
+
+    def __len__(self) -> int:
+        return self.cumulative_sizes[-1]
+
+    def _locate(self, index: int) -> tuple[int, int]:
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        source = bisect_right(
+            self.cumulative_sizes,
+            index,
+        )
+        previous = (
+            0
+            if source == 0
+            else self.cumulative_sizes[source - 1]
+        )
+        return source, index - previous
+
+    def __getitem__(
+        self,
+        index: int | tuple[int, int],
+    ) -> dict[str, Tensor]:
+        if isinstance(index, tuple):
+            global_index = int(index[0])
+            resolution = int(index[1])
+            source, local = self._locate(global_index)
+            return self.datasets[source][
+                (local, resolution)
+            ]
+        source, local = self._locate(int(index))
+        return self.datasets[source][local]
+
 @dataclass(frozen=True)
 class PredicateWeighting:
     mode: str
@@ -423,19 +499,22 @@ def trainable_parameters(model: KFRelationModel) -> list[Tensor]:
 
 
 def make_training_loader(
-    dataset: RelationTrainingDataset,
+    dataset: Dataset,
     config: FrozenBaselineConfig,
     *,
     resolutions: list[int] | None = None,
     drop_last: bool = False,
+    sampler: Sampler[int] | None = None,
 ) -> DataLoader:
+    active_sampler = sampler
     if resolutions:
-        sampler = EpochRandomSampler(
-            len(dataset),
-            seed=config.seed,
-        )
+        if active_sampler is None:
+            active_sampler = EpochRandomSampler(
+                len(dataset),
+                seed=config.seed,
+            )
         batch_sampler = MultiScaleBatchSampler(
-            sampler,
+            active_sampler,
             config.batch_size,
             resolutions,
             drop_last=drop_last,
@@ -445,6 +524,16 @@ def make_training_loader(
             dataset,
             batch_sampler=batch_sampler,
             num_workers=0,
+        )
+
+    if active_sampler is not None:
+        return DataLoader(
+            dataset,
+            batch_size=config.batch_size,
+            sampler=active_sampler,
+            shuffle=False,
+            num_workers=0,
+            drop_last=drop_last,
         )
 
     generator = torch.Generator()
