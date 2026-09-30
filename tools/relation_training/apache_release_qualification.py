@@ -7,9 +7,14 @@ import math
 from pathlib import Path
 from typing import Any
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from apache_training_recipe import (
     RELEASED_D_MODEL,
     RELEASED_EMA_DECAY,
+    RELEASED_IMAGE_SIZE,
     RELEASED_MAX_BOXES,
     RELEASED_PHOTOMETRIC_AUGMENT,
     RELEASED_TEXT_DIM,
@@ -329,6 +334,19 @@ def validate_training_run(
             "Apache recipe config requires text_dim=512"
         )
 
+    if config.get("image_size") != RELEASED_IMAGE_SIZE:
+        raise ValueError(
+            "Apache recipe config requires img_size=448"
+        )
+    if config.get("geo_budget") != RELEASED_GEO_BUDGET:
+        raise ValueError(
+            "Apache recipe config requires geo_budget=400"
+        )
+    if config.get("final_budget") != RELEASED_FINAL_BUDGET:
+        raise ValueError(
+            "Apache recipe config requires final_budget=128"
+        )
+
     config_augment = config.get("augment")
     if (
         isinstance(config_augment, bool)
@@ -453,6 +471,20 @@ def validate_training_run(
             "released augmentation must claim stochastic-distribution equivalence"
         )
 
+    sampler_budget = recipe.get("sampler_budget")
+    if not isinstance(sampler_budget, dict):
+        raise ValueError(
+            "released qualification requires sampler budget evidence"
+        )
+    if (
+        sampler_budget.get("geo_budget") != RELEASED_GEO_BUDGET
+        or sampler_budget.get("final_budget") != RELEASED_FINAL_BUDGET
+        or sampler_budget.get("matches_released") is not True
+    ):
+        raise ValueError(
+            "released qualification requires sampler budget 400->128"
+        )
+
     mixture = payload.get("train_mixture")
     if not isinstance(mixture, dict):
         raise ValueError(
@@ -513,9 +545,17 @@ def validate_training_run(
         raise ValueError(
             "model config evidence is missing"
         )
+    if model_config.get("image_size") != RELEASED_IMAGE_SIZE:
+        raise ValueError(
+            "Apache released qualification requires image_size=448"
+        )
     if model_config.get("max_boxes") != RELEASED_MAX_BOXES:
         raise ValueError(
             "Apache released qualification requires max_boxes=40"
+        )
+    if model_config.get("pair_budget") != RELEASED_FINAL_BUDGET:
+        raise ValueError(
+            "Apache released qualification requires pair_budget=128"
         )
     if model_config.get("hidden_dim") != RELEASED_D_MODEL:
         raise ValueError(
@@ -748,6 +788,9 @@ def qualify_training_run(
             "training_recipe"
         ]["augmentation"],
         "text_dim": RELEASED_TEXT_DIM,
+        "image_size": RELEASED_IMAGE_SIZE,
+        "geo_budget": RELEASED_GEO_BUDGET,
+        "final_budget": RELEASED_FINAL_BUDGET,
     }
 
 
