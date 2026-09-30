@@ -77,6 +77,14 @@ public:
          const runtime::ExecutionPolicy& policy,
          const OpenVocabularyRelationOptions& options = {});
 
+    // Low-level entry point for applications/tests that already loaded and
+    // resolved an execution backend model. The model_type string selects the
+    // same typed tensor contract used by ModelPackage::model_type().
+    [[nodiscard]] static std::unique_ptr<OpenVocabularyRelation>
+    load_resolved(runtime::ResolvedModel resolved,
+                  std::string_view model_type,
+                  const OpenVocabularyRelationOptions& options = {});
+
     void set_vocabulary(PredicateVocabulary vocabulary);
 
     [[nodiscard]] RelationFrame infer(const image::ImageView& image,
