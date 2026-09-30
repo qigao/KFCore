@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from apache_training_recipe import RELEASED_MAX_BOXES
+from apache_training_recipe import RELEASED_D_MODEL, RELEASED_MAX_BOXES
 from apache_mixture import (
     RELEASED_MICRO_BATCH_SIZE,
     RELEASED_MIX_FRACTIONS,
@@ -389,6 +389,10 @@ def validate_training_run(
     if model_config.get("max_boxes") != RELEASED_MAX_BOXES:
         raise ValueError(
             "Apache released qualification requires max_boxes=40"
+        )
+    if model_config.get("hidden_dim") != RELEASED_D_MODEL:
+        raise ValueError(
+            "Apache released qualification requires hidden_dim=512"
         )
     for key in (
         "pair_evidence_contract",
