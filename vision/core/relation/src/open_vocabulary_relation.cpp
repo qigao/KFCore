@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -724,6 +725,16 @@ RelationFrame OpenVocabularyRelation::infer(
     const image::ImageView& image,
     const std::vector<Region>& regions)
 {
+    return infer_timed(image, regions).frame;
+}
+
+TimedRelationFrame OpenVocabularyRelation::infer_timed(
+    const image::ImageView& image,
+    const std::vector<Region>& regions)
+{
+    using Clock = std::chrono::steady_clock;
+    const auto total_begin = Clock::now();
+
     if (!impl_)
     {
         throw_invalid("model state is unavailable");
@@ -736,6 +747,8 @@ RelationFrame OpenVocabularyRelation::infer(
 
     try
     {
+        const auto preprocess_begin = Clock::now();
+
         const image::BgrImage source =
             image::CpuImageProcessor::copy_bgr(
                 image, impl_->options.max_source_bytes);
@@ -863,7 +876,6 @@ RelationFrame OpenVocabularyRelation::infer(
                  impl_->valid_mask.size() * sizeof(std::uint8_t),
                  runtime::MemoryKind::Host, {}},
             };
-            impl_->context->run(inputs, outputs);
         }
         else
         {
@@ -900,8 +912,17 @@ RelationFrame OpenVocabularyRelation::infer(
                  impl_->valid_mask.size() * sizeof(std::uint8_t),
                  runtime::MemoryKind::Host, {}},
             };
-            impl_->context->run(inputs, outputs);
+        }
 
+        const auto preprocess_end = Clock::now();
+        const auto runtime_begin = preprocess_end;
+        impl_->context->run(inputs, outputs);
+        const auto runtime_end = Clock::now();
+
+        double scoring_ms = 0.0;
+        if (impl_->mode == ScoringMode::HostQueries)
+        {
+            const auto scoring_begin = runtime_end;
             const detail::RawOpenVocabularyQueries queries {
                 impl_->semantic_query.data(),
                 impl_->spatial_query.data(),
@@ -920,8 +941,12 @@ RelationFrame OpenVocabularyRelation::infer(
                 impl_->options.logit_scale,
                 impl_->options.logit_bias,
                 impl_->pred_logits.data());
+            const auto scoring_end = Clock::now();
+            scoring_ms = std::chrono::duration<double, std::milli>(
+                scoring_end - scoring_begin).count();
         }
 
+        const auto decode_begin = Clock::now();
         const detail::RawRelationOutputs raw {
             impl_->pred_logits.data(),
             impl_->pair_logits.data(),
@@ -932,14 +957,46 @@ RelationFrame OpenVocabularyRelation::infer(
             impl_->vocabulary.predicates.size(),
         };
 
-        RelationFrame result;
-        result.image_width = source.width;
-        result.image_height = source.height;
-        result.vocabulary_version = impl_->vocabulary_version;
-        result.edges = detail::decode_relation_outputs(
+        RelationFrame frame;
+        frame.image_width = source.width;
+        frame.image_height = source.height;
+        frame.vocabulary_version = impl_->vocabulary_version;
+        frame.edges = detail::decode_relation_outputs(
             raw, regions,
             decode_options(impl_->options, impl_->vocabulary));
-        return result;
+        const auto decode_end = Clock::now();
+
+        std::size_t selected_pair_count = 0U;
+        for (const std::uint8_t value : impl_->valid_mask)
+        {
+            selected_pair_count += value != 0U ? 1U : 0U;
+        }
+
+        const auto total_end = Clock::now();
+        const auto elapsed = [](auto begin, auto end)
+        {
+            return std::chrono::duration<double, std::milli>(
+                end - begin).count();
+        };
+
+        RelationInferenceTiming timing;
+        timing.preprocess_ms =
+            elapsed(preprocess_begin, preprocess_end);
+        timing.runtime_ms =
+            elapsed(runtime_begin, runtime_end);
+        timing.scoring_ms = scoring_ms;
+        timing.decode_ms =
+            elapsed(decode_begin, decode_end);
+        timing.total_ms =
+            elapsed(total_begin, total_end);
+        timing.region_count = regions.size();
+        timing.predicate_count =
+            impl_->vocabulary.predicates.size();
+        timing.selected_pair_count =
+            selected_pair_count;
+        timing.edge_count = frame.edges.size();
+
+        return {std::move(frame), timing};
     }
     catch (const RelationError&)
     {
