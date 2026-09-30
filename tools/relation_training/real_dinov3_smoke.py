@@ -66,6 +66,12 @@ def main() -> None:
         default="legacy",
     )
     parser.add_argument(
+        "--predicate-dim",
+        type=int,
+        default=32,
+        help="Predicate/text query dimension for the smoke graph.",
+    )
+    parser.add_argument(
         "--predicate-head-contract",
         choices=("legacy", "apache"),
         default="legacy",
@@ -86,6 +92,8 @@ def main() -> None:
         raise ValueError("max-boxes must be at least 4 for the smoke fixture")
     if args.hidden_dim <= 0 or args.hidden_dim % 8 != 0:
         raise ValueError("hidden-dim must be positive and divisible by 8")
+    if args.predicate_dim <= 0:
+        raise ValueError("predicate-dim must be positive")
 
     torch.manual_seed(20260929)
     torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
@@ -145,7 +153,10 @@ def main() -> None:
         allow_training_multiscale=args.verify_backbone_finetune,
     )
     predicate_names = ["beside", "holding", "riding"]
-    predicate_embeddings = torch.randn(len(predicate_names), 32)
+    predicate_embeddings = torch.randn(
+        len(predicate_names),
+        args.predicate_dim,
+    )
 
     model = KFRelationModel(
         backbone,
@@ -520,6 +531,7 @@ def main() -> None:
         "encoder_onnx_bytes": encoder_onnx_path.stat().st_size,
         "encoder_ort_max_abs_delta": encoder_max_abs_delta,
         "encoder_query_dim": int(predicate_embeddings.shape[1]),
+        "predicate_text_dim": int(predicate_embeddings.shape[1]),
         "semantic_spatial_mean_abs_delta": float(
             (semantic_query - spatial_query).abs().mean().item()
         ),

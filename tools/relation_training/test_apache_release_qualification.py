@@ -97,6 +97,7 @@ def training() -> dict:
                 "grad_accum": 4,
                 "ema_decay": 0.9998,
                 "augment": 0.3,
+                "text_dim": 512,
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
@@ -156,6 +157,7 @@ def training() -> dict:
             "predicate_head_contract": "apache",
         },
         "checkpoint_sha256": h("b"),
+        "predicate_embedding_shape": [3, 512],
         "predicate_embeddings_sha256": c[
             "predicate_embeddings_sha256"
         ],
@@ -226,6 +228,10 @@ class ApacheReleaseQualificationTest(
             result["augmentation"][
                 "worker_trajectory_equivalence"
             ]
+        )
+        self.assertEqual(
+            result["text_dim"],
+            512,
         )
 
     def test_unresolved_source_is_representable_but_blocks_qualification(self):
@@ -298,6 +304,25 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "max_boxes=40",
+        ):
+            validate_training_run(run)
+
+    def test_released_reference_requires_text_dim_512(self):
+        run = training()
+        run["training_recipe"]["config"][
+            "text_dim"
+        ] = 32
+        with self.assertRaisesRegex(
+            ValueError,
+            "text_dim=512",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["predicate_embedding_shape"] = [3, 32]
+        with self.assertRaisesRegex(
+            ValueError,
+            "text_dim=512",
         ):
             validate_training_run(run)
 
