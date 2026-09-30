@@ -1614,6 +1614,18 @@ The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
 
+### Released predicate text-space width
+
+The Apache released recipe uses a 512-D predicate text space. For
+`apache-reference`, KFCore requires predicate embeddings with shape
+`[V,512]`; the object-text auxiliary remains in the same 512-D space. The
+open-vocabulary encoder therefore emits semantic/spatial relation queries with
+last dimension 512, and the dynamic vocabulary graph accepts `W[V,512]`.
+
+Legacy experiments may continue to use other predicate dimensions. A
+full-reference qualification fails if the training predicate bank is not
+512-D.
+
 ### Released photometric augmentation contract
 
 The Apache released recipe uses training-only photometric jitter with strength
