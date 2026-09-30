@@ -201,6 +201,71 @@ def _require_sha256(
     return value
 
 
+def validate_object_bank_evidence(
+    meta: dict[str, Any],
+    *,
+    object_labels: Sequence[str] | None = None,
+    required_dim: int = RELEASED_TEXT_DIM,
+) -> dict[str, Any]:
+    if meta.get("schema") != OBJECT_BANK_SCHEMA:
+        raise ValueError(
+            "unsupported Apache object-bank provenance schema"
+        )
+    if meta.get("templates") != list(
+        OBJECT_TEMPLATES
+    ):
+        raise ValueError(
+            "Apache object-bank templates differ from release"
+        )
+    labels = meta.get("object_labels")
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or any(
+            not isinstance(value, str)
+            or not value
+            for value in labels
+        )
+        or len(set(labels)) != len(labels)
+    ):
+        raise ValueError(
+            "Apache object-bank object labels must be unique strings"
+        )
+    if (
+        object_labels is not None
+        and labels != list(object_labels)
+    ):
+        raise ValueError(
+            "Apache object-bank object-label order differs from vocabulary"
+        )
+    if (
+        meta.get("object_labels_sha256")
+        != ordered_strings_sha256(labels)
+    ):
+        raise ValueError(
+            "Apache object-bank object-label hash mismatch"
+        )
+    if meta.get("output_dim") != required_dim:
+        raise ValueError(
+            "Apache object-bank output_dim must be 512"
+        )
+    if meta.get("row_normalized") is not True:
+        raise ValueError(
+            "Apache object-bank provenance must record row normalization"
+        )
+    for key in (
+        "tensor_sha256",
+        "tensor_file_sha256",
+        "text_student_sha256",
+        "tokenizer_contract_sha256",
+    ):
+        _require_sha256(
+            meta.get(key),
+            key,
+        )
+    return dict(meta)
+
+
 def validate_object_bank_provenance(
     bank: Tensor,
     *,
@@ -216,35 +281,15 @@ def validate_object_bank_provenance(
             encoding="utf-8"
         )
     )
-    if (
-        not isinstance(meta, dict)
-        or meta.get("schema") != OBJECT_BANK_SCHEMA
-    ):
+    if not isinstance(meta, dict):
         raise ValueError(
-            "unsupported Apache object-bank provenance schema"
+            "Apache object-bank metadata must be an object"
         )
-    if meta.get("templates") != list(
-        OBJECT_TEMPLATES
-    ):
-        raise ValueError(
-            "Apache object-bank templates differ from release"
-        )
-    if meta.get("object_labels") != list(
-        object_labels
-    ):
-        raise ValueError(
-            "Apache object-bank object-label order differs from vocabulary"
-        )
-    expected_labels_sha = ordered_strings_sha256(
-        object_labels
+    meta = validate_object_bank_evidence(
+        meta,
+        object_labels=object_labels,
+        required_dim=required_dim,
     )
-    if (
-        meta.get("object_labels_sha256")
-        != expected_labels_sha
-    ):
-        raise ValueError(
-            "Apache object-bank object-label hash mismatch"
-        )
 
     if (
         bank.ndim != 2
@@ -298,15 +343,6 @@ def validate_object_bank_provenance(
             raise ValueError(
                 f"Apache object-bank {key} mismatch"
             )
-    if meta.get("output_dim") != required_dim:
-        raise ValueError(
-            "Apache object-bank output_dim must be 512"
-        )
-    if meta.get("row_normalized") is not True:
-        raise ValueError(
-            "Apache object-bank provenance must record row normalization"
-        )
-
     return dict(meta)
 
 
