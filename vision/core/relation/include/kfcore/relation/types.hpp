@@ -8,6 +8,9 @@
 namespace kfcore::relation
 {
 
+inline constexpr std::size_t kLegacyRelationMaxBoxes = 32U;
+inline constexpr std::size_t kApacheReleasedMaxBoxes = 40U;
+
 struct Region
 {
     float left = 0.0F;
