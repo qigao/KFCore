@@ -60,7 +60,7 @@ kfcore_kalman_status kalman_ekf_takasu_predict(
     {
         return status;
     }
-    if (!x || !P || !transition)
+    if (!x || !P || !transition || (r > 0U && (!G || !Q)))
     {
         return KFCORE_KALMAN_INVALID_ARGUMENT;
     }
@@ -208,7 +208,7 @@ kfcore_kalman_status kalman_ekf_udu_predict(
     {
         return status;
     }
-    if (!x || !U || !d || !transition)
+    if (!x || !U || !d || !transition || (r > 0U && (!G || !Q)))
     {
         return KFCORE_KALMAN_INVALID_ARGUMENT;
     }
