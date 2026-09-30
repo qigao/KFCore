@@ -20,7 +20,11 @@ from apache_mixture import (
     sample_weights_from_fractions,
 )
 from benchmark import DatasetManifest, RelationVocabulary
-from training import RelationMixtureTrainingDataset
+from training import (
+    FrozenBaselineConfig,
+    RelationMixtureTrainingDataset,
+    make_training_loader,
+)
 
 
 def _write_example(
@@ -274,6 +278,114 @@ class ApacheMixtureTest(unittest.TestCase):
                 report["weight_realized_fractions"],
                 [0.25, 0.75],
             )
+        )
+
+    def test_weighted_sampler_composes_with_multiscale_loader(self):
+        vocabulary = RelationVocabulary(
+            ("riding",),
+            ("person", "horse"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = []
+            for source_id, name in enumerate(("left", "right")):
+                image_root = root / name
+                image_root.mkdir()
+                image_name = f"{name}.png"
+                Image.new(
+                    "RGB",
+                    (8, 8),
+                    color=(20 + source_id, 30, 40),
+                ).save(image_root / image_name)
+                annotations = root / f"{name}.jsonl"
+                _write_example(
+                    annotations,
+                    image=image_name,
+                )
+                sources.append(
+                    {
+                        "name": name,
+                        "annotations": annotations.name,
+                        "image_root": name,
+                        "fraction": 0.5,
+                    }
+                )
+
+            mixture_path = root / "mixture.json"
+            mixture_path.write_text(
+                json.dumps(
+                    {
+                        "schema": MIXTURE_SCHEMA,
+                        "sources": sources,
+                        "samples_per_epoch": 8,
+                        "seed": 44,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mixture = load_relation_mixture(
+                mixture_path,
+                vocabulary,
+            )
+            dataset = RelationMixtureTrainingDataset(
+                mixture,
+                image_size=8,
+                max_boxes=2,
+                predicate_count=1,
+                object_labels=vocabulary.object_labels,
+            )
+            weights = sample_weights_from_fractions(
+                mixture.source_of_index,
+                mixture.config.fractions,
+            )
+            sampler = DistributedWeightedSampler(
+                weights,
+                num_samples=mixture.draws_per_epoch,
+                seed=mixture.config.seed,
+            )
+            loader = make_training_loader(
+                dataset,
+                FrozenBaselineConfig(
+                    epochs=1,
+                    batch_size=2,
+                    learning_rate=1.0e-3,
+                    weight_decay=0.0,
+                    seed=44,
+                ),
+                resolutions=[8, 16],
+                drop_last=True,
+                sampler=sampler,
+            )
+            loader.batch_sampler.set_epoch(0)
+            first_epoch = [
+                (
+                    batch["source_id"].tolist(),
+                    batch["training_resolution"].tolist(),
+                )
+                for batch in loader
+            ]
+            first_draw = sampler.last_global_indices.clone()
+
+            loader.batch_sampler.set_epoch(1)
+            second_epoch = [
+                (
+                    batch["source_id"].tolist(),
+                    batch["training_resolution"].tolist(),
+                )
+                for batch in loader
+            ]
+            second_draw = sampler.last_global_indices.clone()
+
+        self.assertEqual(len(first_epoch), 4)
+        self.assertEqual(len(second_epoch), 4)
+        for source_ids, resolutions in first_epoch + second_epoch:
+            self.assertEqual(len(source_ids), 2)
+            self.assertIn(source_ids[0], (0, 1))
+            self.assertIn(source_ids[1], (0, 1))
+            self.assertEqual(resolutions[0], resolutions[1])
+            self.assertIn(resolutions[0], (8, 16))
+        self.assertFalse(
+            torch.equal(first_draw, second_draw)
         )
 
     def test_realized_draw_report_uses_global_padded_draw(self):
