@@ -12,6 +12,9 @@
 #include "nav_fusion2d.h"
 #include "navtoolbox.h"
 
+#define NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS \
+    (2 * NAV_FUSION2D_STATE_SIZE * NAV_FUSION2D_STATE_SIZE + NAV_FUSION2D_STATE_SIZE)
+
 static void fusion2d_identity(float* A, int n)
 {
     mateye(A, n);
@@ -56,6 +59,7 @@ int nav_fusion2d_predict_imu(nav_fusion2d* fusion, const float accel_body_m_s2[2
     float sy;
     float an_x;
     float an_y;
+    float kalman_workspace[NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS];
 
     if (!fusion || !accel_body_m_s2 || dt_s <= 0.0f)
     {
@@ -102,12 +106,14 @@ int nav_fusion2d_predict_imu(nav_fusion2d* fusion, const float accel_body_m_s2[2
     if (process_var_diag)
     {
         fusion2d_identity(G, NAV_FUSION2D_STATE_SIZE);
-        kalman_predict(NULL, fusion->P, Phi, G, process_var_diag, NAV_FUSION2D_STATE_SIZE,
-                       NAV_FUSION2D_STATE_SIZE);
+        if (kalman_predict(NULL, fusion->P, Phi, G, process_var_diag, NAV_FUSION2D_STATE_SIZE,
+                           NAV_FUSION2D_STATE_SIZE, kalman_workspace,
+                           NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) return -1;
     }
     else
     {
-        kalman_predict(NULL, fusion->P, Phi, NULL, NULL, NAV_FUSION2D_STATE_SIZE, 0);
+        if (kalman_predict(NULL, fusion->P, Phi, NULL, NULL, NAV_FUSION2D_STATE_SIZE, 0,
+                           kalman_workspace, NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) return -1;
     }
 
     return 0;
@@ -118,6 +124,7 @@ int nav_fusion2d_update_position(nav_fusion2d* fusion, const float position_xy[2
 {
     float dz[2];
     float Ht[NAV_FUSION2D_STATE_SIZE * 2] = { 0.0f };
+    float kalman_workspace[NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS];
 
     if (!fusion || !position_xy || !R_pos)
     {
@@ -130,7 +137,7 @@ int nav_fusion2d_update_position(nav_fusion2d* fusion, const float position_xy[2
     MAT_ELEM(Ht, NAV_FUSION2D_Y, 1, NAV_FUSION2D_STATE_SIZE, 2) = 1.0f;
 
     return kalman_takasu(fusion->x, fusion->P, dz, R_pos, Ht, NAV_FUSION2D_STATE_SIZE, 2,
-                         chi2_threshold, chi2);
+                         chi2_threshold, chi2, kalman_workspace, NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS);
 }
 
 int nav_fusion2d_update_velocity_nav(nav_fusion2d* fusion, const float velocity_xy[2],
@@ -138,6 +145,7 @@ int nav_fusion2d_update_velocity_nav(nav_fusion2d* fusion, const float velocity_
 {
     float dz[2];
     float Ht[NAV_FUSION2D_STATE_SIZE * 2] = { 0.0f };
+    float kalman_workspace[NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS];
 
     if (!fusion || !velocity_xy || !R_vel)
     {
@@ -150,7 +158,7 @@ int nav_fusion2d_update_velocity_nav(nav_fusion2d* fusion, const float velocity_
     MAT_ELEM(Ht, NAV_FUSION2D_VY, 1, NAV_FUSION2D_STATE_SIZE, 2) = 1.0f;
 
     return kalman_takasu(fusion->x, fusion->P, dz, R_vel, Ht, NAV_FUSION2D_STATE_SIZE, 2,
-                         chi2_threshold, chi2);
+                         chi2_threshold, chi2, kalman_workspace, NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS);
 }
 
 int nav_fusion2d_update_velocity_body(nav_fusion2d* fusion, const float velocity_body_xy[2],
@@ -166,6 +174,7 @@ int nav_fusion2d_update_velocity_body(nav_fusion2d* fusion, const float velocity
     float vy;
     float pred_bx;
     float pred_by;
+    float kalman_workspace[NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS];
 
     if (!fusion || !velocity_body_xy || !R_vel_body)
     {
@@ -191,7 +200,7 @@ int nav_fusion2d_update_velocity_body(nav_fusion2d* fusion, const float velocity
     MAT_ELEM(Ht, NAV_FUSION2D_YAW, 1, NAV_FUSION2D_STATE_SIZE, 2) = -cy * vx - sy * vy;
 
     return kalman_takasu(fusion->x, fusion->P, dz, R_vel_body, Ht, NAV_FUSION2D_STATE_SIZE, 2,
-                         chi2_threshold, chi2);
+                         chi2_threshold, chi2, kalman_workspace, NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS);
 }
 
 int nav_fusion2d_update_yaw(nav_fusion2d* fusion, float yaw_rad, float R_yaw,
@@ -200,6 +209,7 @@ int nav_fusion2d_update_yaw(nav_fusion2d* fusion, float yaw_rad, float R_yaw,
     float dz[1];
     float R[1];
     float Ht[NAV_FUSION2D_STATE_SIZE] = { 0.0f };
+    float kalman_workspace[NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS];
     int   ret;
 
     if (!fusion || R_yaw <= 0.0f)
@@ -211,7 +221,7 @@ int nav_fusion2d_update_yaw(nav_fusion2d* fusion, float yaw_rad, float R_yaw,
     R[0]                        = R_yaw;
     Ht[NAV_FUSION2D_YAW]        = 1.0f;
     ret = kalman_takasu(fusion->x, fusion->P, dz, R, Ht, NAV_FUSION2D_STATE_SIZE, 1,
-                        chi2_threshold, chi2);
+                        chi2_threshold, chi2, kalman_workspace, NAV_FUSION2D_KALMAN_WORKSPACE_FLOATS);
     fusion->x[NAV_FUSION2D_YAW] = nav_wrap_pi(fusion->x[NAV_FUSION2D_YAW]);
 
     return ret;

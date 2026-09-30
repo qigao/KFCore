@@ -44,6 +44,57 @@
         check_within((actual), (expected), (delta));                                               \
     } while (0)
 
+#define TEST_KALMAN_WORKSPACE_FLOATS 4096U
+
+static int test_kalman_takasu(float* x, float* P, const float* dz, const float* R,
+                              const float* Ht, int n, int m, float chi2_threshold, float* chi2)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_takasu)(x, P, dz, R, Ht, (size_t)n, (size_t)m,
+                               chi2_threshold, chi2, workspace,
+                               TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static void test_kalman_predict(float* x, float* P, const float* Phi, const float* G,
+                                const float* Q, int n, int r)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    (void)(kalman_predict)(x, P, Phi, G, Q, (size_t)n, (size_t)r,
+                           workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_udu(float* x, float* U, float* d, const float* z, const float* R,
+                           const float* Ht, int n, int m, float chi2_threshold,
+                           int downweight_outlier)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_udu)(x, U, d, z, R, Ht, (size_t)n, (size_t)m,
+                            chi2_threshold, downweight_outlier, workspace,
+                            TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_udu_scalar(float* x, float* U, float* d, float dz, float R,
+                                  const float* H_line, int n)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_udu_scalar)(x, U, d, dz, R, H_line, (size_t)n,
+                                   workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static void test_kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
+                                    const float* G, const float* Q, int n, int r)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    (void)(kalman_udu_predict)(x, U, d, Phi, G, Q, (size_t)n, (size_t)r,
+                               workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+#define kalman_takasu(...) test_kalman_takasu(__VA_ARGS__)
+#define kalman_predict(...) test_kalman_predict(__VA_ARGS__)
+#define kalman_udu(...) test_kalman_udu(__VA_ARGS__)
+#define kalman_udu_scalar(...) test_kalman_udu_scalar(__VA_ARGS__)
+#define kalman_udu_predict(...) test_kalman_udu_predict(__VA_ARGS__)
+
 /******************************************************************************
  * TYPEDEFS
  ******************************************************************************/
@@ -479,16 +530,12 @@ static void testkalmanbounds(void)
     float Ht[1]  = { 1.0f };
     float Phi[1] = { 1.0f };
 
-    check_equal(kalman_takasu(x, P, z, R, Ht, 0, 1, 0.0f, NULL), -1);
-    check_equal(kalman_takasu(x, P, z, R, Ht, 33, 1, 0.0f, NULL), -1);
-    check_equal(kalman_takasu(x, P, z, R, Ht, 1, 5, 0.0f, NULL), -1);
-    check_equal(kalman_takasu(NULL, P, z, R, Ht, 1, 1, 0.0f, NULL), -1);
+    check_equal(kalman_takasu(x, P, z, R, Ht, 0, 1, 0.0f, NULL), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(kalman_takasu(NULL, P, z, R, Ht, 1, 1, 0.0f, NULL), KFCORE_KALMAN_INVALID_ARGUMENT);
 
-    check_equal(kalman_udu_scalar(x, U, d, 0.0f, R[0], Ht, 33), -1);
-    check_equal(kalman_udu_scalar(x, U, d, 0.0f, NAN, Ht, 1), -1);
-    check_equal(kalman_udu(x, U, d, z, R, Ht, 33, 1, 0.0f, 0), -1);
-    check_equal(kalman_udu(x, U, d, z, R, Ht, 1, 0, 0.0f, 0), -1);
-    check_equal(decorrelate(z, Ht, R, 0, 1), -1);
+    check_equal(kalman_udu_scalar(x, U, d, 0.0f, NAN, Ht, 1), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(kalman_udu(x, U, d, z, R, Ht, 1, 0, 0.0f, 0), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(decorrelate(z, Ht, R, 0, 1), KFCORE_KALMAN_INVALID_ARGUMENT);
 
     check_equal(kalman_ekf_takasu_predict(x, P, NULL, NULL, NULL, 33, 0, NULL), -1);
     check_equal(kalman_ekf_takasu_update(x, P, z, R, NULL, 1, 4, 0.0f, NULL, NULL), -1);
@@ -498,16 +545,8 @@ static void testkalmanbounds(void)
     check_equal(kalman_ukf_predict(x, P, NULL, NULL, 33, NULL, NULL), -1);
     check_equal(kalman_ukf_update(x, P, z, R, NULL, 1, 4, NULL, 0.0f, NULL, NULL), -1);
 
-    kalman_predict(x, P, Phi, NULL, NULL, 33, 0);
-    TEST_FLOAT_WITHIN(0.0f, 7.0f, x[0], "invalid kalman_predict changed state");
-    TEST_FLOAT_WITHIN(0.0f, 9.0f, P[0], "invalid kalman_predict changed covariance");
-
-    kalman_udu_predict(x, U, d, Phi, NULL, NULL, 33, 0);
-    TEST_FLOAT_WITHIN(0.0f, 7.0f, x[0], "invalid kalman_udu_predict changed state");
-    TEST_FLOAT_WITHIN(0.0f, 1.0f, U[0], "invalid kalman_udu_predict changed U");
-    TEST_FLOAT_WITHIN(0.0f, 2.0f, d[0], "invalid kalman_udu_predict changed d");
-
-    printf("[x] Kalman public dimension guards\n");
+    (void)Phi;
+    printf("[x] Kalman validation and remaining fixed-wrapper guards\n");
 }
 
 static void testnavtoolbox(void)

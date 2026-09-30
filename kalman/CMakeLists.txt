@@ -13,6 +13,7 @@ set(KFCORE_SOURCES
     signal_filters.c)
 
 set(KFCORE_PUBLIC_HEADERS
+    kalman_status.h
     kalman_takasu.h
     kalman_udu.h
     kalman_ekf.h

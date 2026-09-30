@@ -1,6 +1,9 @@
 #ifndef KALMAN_UDU_H
 #define KALMAN_UDU_H
 
+#include "kalman_status.h"
+#include <stddef.h>
+
 /** @file kalman_udu.h
  * @author Jan Zwiener (jan@zwiener.org)
  *
@@ -56,10 +59,19 @@ extern "C"
      * disable.
      * @param[in] downweight_outlier If set to 0, measurements classified as outliers are skipped.
      *
-     * @return 0 on success, -1 on error.
      */
-    int kalman_udu(float* x, float* U, float* d, const float* z, const float* R,
-                   const float* Ht, int n, int m, float chi2_threshold, int downweight_outlier);
+    /** Return float scratch required by kalman_udu(). */
+    kfcore_kalman_status kalman_udu_workspace_floats(size_t n, size_t* required);
+
+    /** UDU measurement update using caller-owned scratch.
+     * workspace must contain the queried number of float elements and must not
+     * overlap state/factor/input buffers.
+     * @return KFCORE_KALMAN_OK or a validation/workspace/size/numerical status.
+     */
+    kfcore_kalman_status kalman_udu(float* x, float* U, float* d, const float* z, const float* R,
+                                   const float* Ht, size_t n, size_t m,
+                                   float chi2_threshold, int downweight_outlier,
+                                   float* workspace, size_t workspace_floats);
 
     /** @brief Square Root Kalman Filter (Bierman) Routine for a single scalar measurement.
      *
@@ -73,8 +85,13 @@ extern "C"
      * @param[in] H_line Row of measurement sensitivity matrix (n x 1)
      * @param[in] n     Number of state variables
      */
-    int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float R,
-                          const float* H_line, int n);
+    /** Return float scratch required by kalman_udu_scalar(). */
+    kfcore_kalman_status kalman_udu_scalar_workspace_floats(size_t n, size_t* required);
+
+    /** Scalar UDU update using caller-owned scratch. */
+    kfcore_kalman_status kalman_udu_scalar(float* x, float* U, float* d, float dz, float R,
+                                          const float* H_line, size_t n,
+                                          float* workspace, size_t workspace_floats);
 
     /** @brief Decorrelate measurements. For a given covariance matrix R of correlated measurements,
      * calculate a vector of decorrelated measurements (and the matching H-matrix) so that
@@ -99,7 +116,11 @@ extern "C"
      *      decorrelate(z, Ht, R, n, m); // in-place decorrelation of z and Ht
      *      float Reye[3*3];
      *      mateye(Reye, 3); // set R to eye(2)
-     *      kalman_udu(x, U, d, z, Reye, Ht, n, m, 0.0f, 0);
+     *      size_t workspace_floats = 0;
+     *      kalman_udu_workspace_floats(n, &workspace_floats);
+     *      float workspace[WORKSPACE_FLOATS];
+     *      kalman_udu(x, U, d, z, Reye, Ht, n, m, 0.0f, 0,
+     *                 workspace, workspace_floats);
      *
      * If Ht and R do not change, subsequently only measurements z need to be decorrelated.
      * As the input R is replaced by L (such that L*L' = R), L can be reused to
@@ -107,10 +128,10 @@ extern "C"
      *
      *     trisolve(L, z, m, 1, "N");
      *
-     * @return 0 if successful, if -1 state of z and H is not guaranteed to be
-     *           consistent and must be discarded.
+     * @return KFCORE_KALMAN_OK on success. A numerical failure may leave z/Ht/R
+     * partially transformed; discard them in that case.
      */
-    int decorrelate(float* z, float* Ht, float* R, int n, int m);
+    kfcore_kalman_status decorrelate(float* z, float* Ht, float* R, size_t n, size_t m);
 
     /** @brief UDU' (Thornton) Filter Temporal / Prediction Step
      *
@@ -151,8 +172,18 @@ extern "C"
      *  [1] Grewal, Weill, Andrews. "Global positioning systems, inertial
      *      navigation, and integration". 1st ed. John Wiley & Sons, New York, 2001.
      */
-    void kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
-                            const float* G, const float* Q, int n, int r);
+    /** Return float scratch required by kalman_udu_predict(). */
+    kfcore_kalman_status kalman_udu_predict_workspace_floats(size_t n, size_t r,
+                                                             size_t* required);
+
+    /** Thornton UDU prediction using caller-owned scratch.
+     * For r>0 both G and Q are required. Validation/workspace failure occurs
+     * before x/U/d mutation; numerical failure may leave outputs modified and
+     * the caller must discard them.
+     */
+    kfcore_kalman_status kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
+                                           const float* G, const float* Q, size_t n, size_t r,
+                                           float* workspace, size_t workspace_floats);
 
 #ifdef __cplusplus
 }

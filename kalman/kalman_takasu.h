@@ -1,6 +1,9 @@
 #ifndef KALMAN_TAKASU_H
 #define KALMAN_TAKASU_H
 
+#include "kalman_status.h"
+#include <stddef.h>
+
 /** @file kalman_takasu.h
  * KFCore
  * @author Jan Zwiener (jan@zwiener.org)
@@ -77,10 +80,35 @@ extern "C"
      *              18.4753, 20.0902, 21.6660, 23.2093, 24.7250, 26.2170, 27.6882, ...
      *              29.1412, 30.5779, 31.9999, 33.4087, 34.8053, 36.1909, 37.5662 ];
      *
-     * @return 0 on success, -1 on error, -2 if measurement is rejected as outlier.
      */
-    int kalman_takasu(float* x, float* P, const float* dz, const float* R, const float* Ht, int n,
-                      int m, float chi2_threshold, float* chi2);
+    /** Return the caller-owned float scratch required by kalman_takasu().
+     * The query performs the same dimension/range checks as the operation and
+     * fails closed on checked-size overflow.
+     */
+    kfcore_kalman_status kalman_takasu_workspace_floats(size_t n, size_t m, size_t* required);
+
+    /** Takasu update using caller-owned scratch.
+     * @param[in,out] x System state (n x 1).
+     * @param[in,out] P Upper-triangular covariance (n x n).
+     * @param[in] dz Measurement residual (m x 1).
+     * @param[in] R Measurement covariance (m x m).
+     * @param[in] Ht Transposed measurement matrix (n x m).
+     * @param[in] n State dimension.
+     * @param[in] m Measurement dimension.
+     * @param[in] chi2_threshold Outlier threshold; <=0 disables rejection.
+     * @param[out] chi2 Optional normalized chi-square statistic.
+     * @param[in,out] workspace Caller-owned float scratch. Must not overlap inputs/state.
+     * @param[in] workspace_floats Number of float elements available in workspace.
+     *
+     * Validation/workspace failure occurs before x/P mutation.
+     * @return KFCORE_KALMAN_OK, KFCORE_KALMAN_REJECTED,
+     * KFCORE_KALMAN_INVALID_ARGUMENT, KFCORE_KALMAN_WORKSPACE_TOO_SMALL,
+     * KFCORE_KALMAN_SIZE_OVERFLOW, or KFCORE_KALMAN_NUMERICAL_FAILURE.
+     */
+    kfcore_kalman_status kalman_takasu(float* x, float* P, const float* dz, const float* R,
+                                      const float* Ht, size_t n, size_t m,
+                                      float chi2_threshold, float* chi2,
+                                      float* workspace, size_t workspace_floats);
 
     /** @brief Kalman Temporal / Prediction Step
      *
@@ -101,8 +129,19 @@ extern "C"
      *      x^{-} = Phi*x^{+}
      *      P^{+} = Phi*P^{-}*Phi' + G*diag(Q)*G'
      */
-    void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
-                        int r);
+    /** Return the caller-owned float scratch required by kalman_predict(). */
+    kfcore_kalman_status kalman_predict_workspace_floats(size_t n, size_t r, size_t* required);
+
+    /** Linear prediction using caller-owned scratch.
+     * x and P are independently optional, but at least one must be non-NULL.
+     * For r>0 with P requested, G and Q are required.
+     * @param[in,out] workspace Caller-owned float scratch; no overlap with inputs/state.
+     * @param[in] workspace_floats Number of float elements available.
+     * @return KFCORE_KALMAN_OK or a validation/workspace/size failure status.
+     */
+    kfcore_kalman_status kalman_predict(float* x, float* P, const float* Phi, const float* G,
+                                       const float* Q, size_t n, size_t r,
+                                       float* workspace, size_t workspace_floats);
 
 #ifdef __cplusplus
 }
