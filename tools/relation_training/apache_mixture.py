@@ -254,9 +254,17 @@ class LoadedRelationMixture:
         )
 
     def matches_released_sampling_contract(self) -> bool:
+        counts = np.bincount(
+            self.source_of_index,
+            minlength=len(self.config.sources),
+        )
         return (
             self.config.matches_released_mixture()
             and self.draws_per_epoch == RELEASED_SAMPLES_PER_EPOCH
+            and self.source_of_index.shape == (
+                len(self.combined_manifest.examples),
+            )
+            and bool((counts > 0).all())
         )
 
     def report(self) -> dict[str, object]:
@@ -364,6 +372,10 @@ def load_relation_mixture(
             len(raw_manifest.examples)
             - len(filtered_examples)
         )
+        if not filtered_examples:
+            raise ValueError(
+                f"mixture source {source.name} has no samples after exclusion"
+            )
         manifest = DatasetManifest(
             examples=tuple(
                 replace(
