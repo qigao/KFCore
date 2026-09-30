@@ -1,12 +1,70 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
 
 import torch
 from torch import nn
 
 from model import KFRelationModel
+
+
+def module_state_sha256(module: nn.Module) -> str:
+    """Deterministic SHA-256 over names/shapes/dtypes/tensor bytes."""
+    digest = hashlib.sha256()
+    for name, value in sorted(module.state_dict().items()):
+        tensor = value.detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(
+            ",".join(str(int(dim)) for dim in tensor.shape).encode("ascii")
+        )
+        digest.update(b"\0")
+        digest.update(tensor.numpy().tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def tap_fusion_weights(model: KFRelationModel) -> list[float]:
+    return [
+        float(value)
+        for value in torch.softmax(
+            model.tap_logits.detach().float().cpu(),
+            dim=0,
+        ).tolist()
+    ]
+
+
+def backbone_provenance(
+    model: KFRelationModel,
+    *,
+    model_name: str,
+    mode: str,
+) -> dict[str, object]:
+    mean = getattr(model.backbone, "_mean", None)
+    std = getattr(model.backbone, "_std", None)
+    return {
+        "model": model_name,
+        "mode": mode,
+        "state_sha256": module_state_sha256(model.backbone),
+        "hidden_size": int(model.backbone.hidden_size),
+        "patch_size": int(model.backbone.patch_size),
+        "depth": int(getattr(model.backbone, "depth", 0)),
+        "tap_indices": list(model.config.tap_indices),
+        "tap_weights": tap_fusion_weights(model),
+        "image_mean": (
+            [float(v) for v in mean.reshape(-1).tolist()]
+            if isinstance(mean, torch.Tensor)
+            else None
+        ),
+        "image_std": (
+            [float(v) for v in std.reshape(-1).tolist()]
+            if isinstance(std, torch.Tensor)
+            else None
+        ),
+    }
 
 
 @dataclass(frozen=True)
