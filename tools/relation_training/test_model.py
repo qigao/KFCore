@@ -805,17 +805,20 @@ class RelationModelTest(unittest.TestCase):
             (1, 40, 4),
             dtype=torch.float32,
         )
-        box_tensor[0, :4] = torch.tensor(
-            [
-                [0.20, 0.20, 0.20, 0.20],
-                [0.50, 0.20, 0.20, 0.20],
-                [0.20, 0.60, 0.20, 0.20],
-                [0.70, 0.70, 0.20, 0.20],
-            ],
-            dtype=torch.float32,
-        )
+        for index in range(12):
+            column = index % 4
+            row = index // 4
+            box_tensor[0, index] = torch.tensor(
+                [
+                    (column + 0.5) / 4.0,
+                    (row + 0.5) / 3.0,
+                    0.16,
+                    0.20,
+                ],
+                dtype=torch.float32,
+            )
         counts = torch.tensor(
-            [4],
+            [12],
             dtype=torch.int64,
         )
 
@@ -871,6 +874,10 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(
             tuple(reference[1].shape),
             (1, 128),
+        )
+        self.assertEqual(
+            int(reference[4].sum().item()),
+            128,
         )
         self.assertEqual(
             output_shapes["pred_logits"],
