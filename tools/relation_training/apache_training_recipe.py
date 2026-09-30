@@ -12,6 +12,18 @@ from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
 )
+from apache_release_scalars import (
+    RELEASED_BACKBONE_LR,
+    RELEASED_CFA_ALPHA,
+    RELEASED_CFA_PROB,
+    RELEASED_CLIP_GRAD,
+    RELEASED_HEAD_LR,
+    RELEASED_MIN_LR_FACTOR,
+    RELEASED_MULTI_SCALE,
+    RELEASED_MULTI_SCALE_N,
+    RELEASED_WARMUP_STEPS,
+    RELEASED_WEIGHT_DECAY,
+)
 from model import KFRelationModel
 
 
@@ -373,20 +385,20 @@ def resolve_training_epochs(
 
 @dataclass(frozen=True)
 class ApacheTrainingRecipeConfig:
-    head_lr: float = 4.0e-4
-    backbone_lr: float = 5.0e-5
-    weight_decay: float = 1.0e-4
+    head_lr: float = RELEASED_HEAD_LR
+    backbone_lr: float = RELEASED_BACKBONE_LR
+    weight_decay: float = RELEASED_WEIGHT_DECAY
     epochs: int = 12
-    warmup_steps: int = 500
-    min_lr_factor: float = 0.01
-    clip_grad: float = 1.0
+    warmup_steps: int = RELEASED_WARMUP_STEPS
+    min_lr_factor: float = RELEASED_MIN_LR_FACTOR
+    clip_grad: float = RELEASED_CLIP_GRAD
     backbone_mode: str = "full"
     micro_batch_size: int = 32
     grad_accum: int = 4
-    multi_scale: str = "0.5,1.5"
-    multi_scale_n: int = 7
-    cfa_prob: float = 0.5
-    cfa_alpha: float = 1.0
+    multi_scale: str = RELEASED_MULTI_SCALE
+    multi_scale_n: int = RELEASED_MULTI_SCALE_N
+    cfa_prob: float = RELEASED_CFA_PROB
+    cfa_alpha: float = RELEASED_CFA_ALPHA
     ema_decay: float = RELEASED_EMA_DECAY
     augment: float = RELEASED_PHOTOMETRIC_AUGMENT
     text_dim: int = RELEASED_TEXT_DIM
