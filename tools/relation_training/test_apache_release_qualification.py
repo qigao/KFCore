@@ -128,6 +128,7 @@ def training() -> dict:
         ],
         "model_config": {
             "max_boxes": 40,
+            "hidden_dim": 512,
             "pair_evidence_contract": "apache",
             "pair_sampler_contract": "apache",
             "relation_context_contract": "apache",
@@ -239,6 +240,15 @@ class ApacheReleaseQualificationTest(
                 corpus(),
                 run,
             )
+
+    def test_released_hidden_dim_must_be_512(self):
+        run = training()
+        run["model_config"]["hidden_dim"] = 256
+        with self.assertRaisesRegex(
+            ValueError,
+            "hidden_dim=512",
+        ):
+            validate_training_run(run)
 
     def test_released_max_boxes_must_be_40(self):
         run = training()
