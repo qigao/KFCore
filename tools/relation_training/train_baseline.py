@@ -53,6 +53,9 @@ from apache_training_recipe import (
     select_artifact_model,
     validate_training_text_dim,
 )
+from apache_object_bank import (
+    load_object_text_bank,
+)
 from apache_objective import (
     ApacheObjectiveConfig,
     ApacheReferenceObjective,
@@ -463,7 +466,10 @@ def main() -> None:
     parser.add_argument(
         "--apache-object-embeddings",
         default="",
-        help="Object-category text embedding tensor [O,D]; required for lambda_obj > 0.",
+        help=(
+            "Apache obj_embeds.npz with exact names + embeddings [O,512]; "
+            "required for lambda_obj > 0."
+        ),
     )
     parser.add_argument(
         "--apache-neg-rate-table",
@@ -958,6 +964,7 @@ def main() -> None:
     apache_source_names: tuple[str, ...] = ()
     apache_source_allow = None
     apache_object_embeddings = None
+    apache_object_bank_report = None
     apache_pair_opportunity = None
     apache_asset_report = None
     if apache_mode:
@@ -1005,17 +1012,16 @@ def main() -> None:
                 "vocabulary object-label count"
             )
         if args.apache_lambda_obj > 0.0:
-            apache_object_embeddings = load_predicate_embeddings(
+            (
+                apache_object_embeddings,
+                apache_object_bank_report,
+            ) = load_object_text_bank(
                 args.apache_object_embeddings,
-                len(vocabulary.object_labels),
+                vocabulary.object_labels,
+                text_dim=int(
+                    predicate_embeddings.shape[1]
+                ),
             )
-            if (
-                apache_object_embeddings.shape[1]
-                != predicate_embeddings.shape[1]
-            ):
-                raise ValueError(
-                    "object/predicate embeddings must share text dimension"
-                )
         apache_asset_report = {
             "ontology_meta_sha256": sha256(
                 Path(args.apache_ontology_meta)
@@ -1040,10 +1046,18 @@ def main() -> None:
             ),
             "object_label_order": list(vocabulary.object_labels),
             "object_embeddings_sha256": (
-                sha256(Path(args.apache_object_embeddings))
-                if args.apache_object_embeddings
+                apache_object_bank_report[
+                    "artifact_sha256"
+                ]
+                if apache_object_bank_report is not None
                 else None
             ),
+            "object_embeddings_shape": (
+                apache_object_bank_report["shape"]
+                if apache_object_bank_report is not None
+                else None
+            ),
+            "object_bank": apache_object_bank_report,
         }
 
     backbone = TimmDinoV3Backbone.from_pretrained(
