@@ -33,9 +33,9 @@ endif()
 
 find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED
-             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+             HINTS "$ENV{SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED
-             PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
+             HINTS "$ENV{SALTS_UTILS_ROOT}")
 
 add_subdirectory(vendor)
 add_subdirectory(esn)

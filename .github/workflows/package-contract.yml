@@ -1,0 +1,64 @@
+name: KFCore package contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'cmake/KFCoreConfig.cmake.in'
+      - 'cmake/tests/package_contract.cmake'
+      - 'vcpkg.json'
+      - '.github/workflows/package-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'cmake/KFCoreConfig.cmake.in'
+      - 'cmake/tests/package_contract.cmake'
+      - 'vcpkg.json'
+      - '.github/workflows/package-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kfcore-package-contract-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  package-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Validate backend-neutral relocatable package contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake \
+            -DKFCORE_SOURCE_DIR="$GITHUB_WORKSPACE" \
+            -DKFCORE_CONTRACT_ROOT="$RUNNER_TEMP/kfcore-package-contract" \
+            -P cmake/tests/package_contract.cmake
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
