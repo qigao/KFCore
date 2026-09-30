@@ -1,6 +1,16 @@
 name: Scene graph contract
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'vision/pipelines/scene_graph/**'
+      - 'vision/core/yolo/include/kfcore/yolo/tracking.hpp'
+      - 'vision/core/yolo/src/tracking.cpp'
+      - 'trackers/**'
+      - 'vendor/miniblas/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/scene-graph-contract.yml'
   pull_request:
     branches:
       - master
@@ -37,6 +47,13 @@ jobs:
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
+      - name: Install focused build dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
       - name: Checkout pinned TinyTest source
         uses: actions/checkout@v4
         with:
@@ -57,9 +74,14 @@ jobs:
           set -euxo pipefail
           mkdir -p "$RUNNER_TEMP/scene-graph-contract"
           cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer             -Isalts/tinytest/include             -c salts/tinytest/src/tinytest.c             -o "$RUNNER_TEMP/scene-graph-contract/tinytest.o"
-          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/src/scene_graph_detail.cpp             -o "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"
-          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/tests/test_scene_graph.cpp             -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"
-          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/scene-graph-contract/tinytest.o"             "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"             "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"             -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             -c vendor/miniblas/miniblas.c             -o "$RUNNER_TEMP/scene-graph-contract/miniblas.o"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             -c vendor/miniblas/linalg.c             -o "$RUNNER_TEMP/scene-graph-contract/linalg.o"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             -c kalman/kalman_takasu.c             -o "$RUNNER_TEMP/scene-graph-contract/kalman_takasu.o"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Itrackers/include -Ivendor/miniblas -Ikalman             -c trackers/src/tracker.c             -o "$RUNNER_TEMP/scene-graph-contract/tracker.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/core/yolo/include             -Ivision/core/yolo/src             -Ivision/core/image_processor/include             -Itrackers/include             -c vision/core/yolo/src/tracking.cpp             -o "$RUNNER_TEMP/scene-graph-contract/tracking.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Itrackers/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/src/scene_graph_detail.cpp             -o "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivision/pipelines/scene_graph/include             -Ivision/pipelines/scene_graph/src             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Itrackers/include             -Isalts/tinytest/include             -c vision/pipelines/scene_graph/tests/test_scene_graph.cpp             -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"
+          c++ -fsanitize=address,undefined             "$RUNNER_TEMP/scene-graph-contract/tinytest.o"             "$RUNNER_TEMP/scene-graph-contract/miniblas.o"             "$RUNNER_TEMP/scene-graph-contract/linalg.o"             "$RUNNER_TEMP/scene-graph-contract/kalman_takasu.o"             "$RUNNER_TEMP/scene-graph-contract/tracker.o"             "$RUNNER_TEMP/scene-graph-contract/tracking.o"             "$RUNNER_TEMP/scene-graph-contract/scene_graph_detail.o"             "$RUNNER_TEMP/scene-graph-contract/test_scene_graph.o"             -lm -o "$RUNNER_TEMP/scene-graph-contract/test_scene_graph"
 
       - name: Run composition tests
         shell: bash

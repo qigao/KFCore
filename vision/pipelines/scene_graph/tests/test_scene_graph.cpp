@@ -3,6 +3,7 @@
 #include "tinytest.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -14,6 +15,126 @@ using namespace kfcore;
 
 namespace
 {
+
+class FakeDetector final : public pipelines::detail::DetectionRunner
+{
+public:
+    yolo::DetectionFrame frame;
+    std::size_t calls = 0U;
+
+    yolo::DetectionFrame
+    detect(const image::ImageView&) override
+    {
+        ++calls;
+        return frame;
+    }
+};
+
+class FakeRelation final : public pipelines::detail::RelationRunner
+{
+public:
+    std::size_t max_boxes_value = 8U;
+    bool dynamic = true;
+    bool live = true;
+    std::uint64_t version = 7U;
+    std::vector<std::string> names {"interacting"};
+    std::vector<relation::Region> last_regions;
+    std::size_t infer_calls = 0U;
+
+    std::size_t max_boxes() const noexcept override
+    {
+        return max_boxes_value;
+    }
+
+    bool supports_dynamic_vocabulary() const noexcept override
+    {
+        return dynamic;
+    }
+
+    bool supports_live_predicates() const noexcept override
+    {
+        return live;
+    }
+
+    void set_vocabulary(
+        relation::PredicateVocabulary vocabulary) override
+    {
+        if (!dynamic)
+        {
+            throw std::logic_error("fixed vocabulary");
+        }
+        names = std::move(vocabulary.predicates);
+        ++version;
+    }
+
+    void set_predicates(
+        const std::vector<std::string>& predicates) override
+    {
+        if (!live)
+        {
+            throw std::logic_error("live predicates unavailable");
+        }
+        names = predicates;
+        ++version;
+    }
+
+    std::uint64_t vocabulary_version() const noexcept override
+    {
+        return version;
+    }
+
+    const std::vector<std::string>&
+    predicates() const noexcept override
+    {
+        return names;
+    }
+
+    relation::RelationFrame infer(
+        const image::ImageView&,
+        const std::vector<relation::Region>& regions) override
+    {
+        ++infer_calls;
+        last_regions = regions;
+
+        relation::RelationFrame frame;
+        frame.image_width = 640;
+        frame.image_height = 480;
+        frame.vocabulary_version = version;
+        if (regions.size() >= 2U)
+        {
+            frame.edges.push_back({
+                0U,
+                1U,
+                0U,
+                0.9F,
+                regions[0].track_id,
+                regions[1].track_id,
+            });
+        }
+        return frame;
+    }
+};
+
+yolo::DetectionFrame detector_frame()
+{
+    yolo::DetectionFrame frame;
+    frame.image_width = 640;
+    frame.image_height = 480;
+    frame.detections = {
+        {{10.0F, 20.0F, 110.0F, 220.0F}, 0.95F, 0},
+        {{200.0F, 100.0F, 340.0F, 300.0F}, 0.92F, 1},
+    };
+    return frame;
+}
+
+pipelines::SceneGraphPipelineOptions engine_options()
+{
+    pipelines::SceneGraphPipelineOptions options;
+    options.tracking.minimum_consecutive_frames = 1;
+    options.tracking.track_activation_threshold = 0.5F;
+    options.tracking.high_conf_det_threshold = 0.5F;
+    return options;
+}
 
 yolo::TrackFrame tracked_frame()
 {
@@ -40,6 +161,100 @@ relation::RelationFrame relation_frame()
 }
 
 } // namespace
+
+spec("scene graph production engine")
+{
+    it("runs detector through real ByteTrack into relation regions")
+    {
+        auto detector = std::make_unique<FakeDetector>();
+        auto relation_model = std::make_unique<FakeRelation>();
+        FakeDetector* detector_view = detector.get();
+        FakeRelation* relation_view = relation_model.get();
+        detector_view->frame = detector_frame();
+
+        pipelines::detail::SceneGraphEngine engine(
+            std::move(detector),
+            std::move(relation_model),
+            engine_options());
+
+        image::ImageView image;
+
+        // ByteTrack exposes the first observation as tentative even when
+        // minimum_consecutive_frames=1. The second consistent observation
+        // receives the persistent track identity.
+        const auto tentative = engine.process(image);
+        check(detector_view->calls == std::size_t{1U});
+        check(relation_view->infer_calls == std::size_t{1U});
+        check(tentative.objects.detections.size() == std::size_t{2U});
+        check_false(
+            tentative.objects.detections[0].track_id.has_value());
+        check_false(
+            tentative.objects.detections[1].track_id.has_value());
+
+        const auto scene = engine.process(image);
+
+        check(detector_view->calls == std::size_t{2U});
+        check(relation_view->infer_calls == std::size_t{2U});
+        check(relation_view->last_regions.size() == std::size_t{2U});
+        check(relation_view->last_regions[0].track_id.has_value());
+        check(relation_view->last_regions[1].track_id.has_value());
+        check(scene.objects.detections.size() == std::size_t{2U});
+        check(scene.relations.edges.size() == std::size_t{1U});
+        check(scene.relations.edges[0].subject_track_id ==
+              scene.objects.detections[0].track_id);
+        check(scene.relations.edges[0].object_track_id ==
+              scene.objects.detections[1].track_id);
+        check(scene.relations.vocabulary_version == std::uint64_t{7U});
+    }
+
+    it("forwards dynamic and live vocabulary controls")
+    {
+        auto detector = std::make_unique<FakeDetector>();
+        detector->frame = detector_frame();
+        auto relation_model = std::make_unique<FakeRelation>();
+
+        pipelines::detail::SceneGraphEngine engine(
+            std::move(detector),
+            std::move(relation_model),
+            engine_options());
+
+        check(engine.supports_dynamic_vocabulary());
+        check(engine.supports_live_predicates());
+        check(engine.vocabulary_version() == std::uint64_t{7U});
+        check(engine.predicates()[0] == "interacting");
+
+        relation::PredicateVocabulary vocabulary;
+        vocabulary.predicates = {"holding"};
+        engine.set_vocabulary(std::move(vocabulary));
+        check(engine.vocabulary_version() == std::uint64_t{8U});
+        check(engine.predicates()[0] == "holding");
+
+        engine.set_predicates({"riding"});
+        check(engine.vocabulary_version() == std::uint64_t{9U});
+        check(engine.predicates()[0] == "riding");
+
+        engine.reset_tracking();
+        const auto scene = engine.process(image::ImageView{});
+        check(scene.objects.detections.size() == std::size_t{2U});
+    }
+
+    it("rejects tracked object counts above the relation ceiling")
+    {
+        auto detector = std::make_unique<FakeDetector>();
+        detector->frame = detector_frame();
+        auto relation_model = std::make_unique<FakeRelation>();
+        relation_model->max_boxes_value = 1U;
+
+        pipelines::detail::SceneGraphEngine engine(
+            std::move(detector),
+            std::move(relation_model),
+            engine_options());
+
+        check_throws_as(
+            engine.process(image::ImageView{}),
+            std::length_error);
+    }
+}
 
 spec("scene graph pipeline dynamic vocabulary API")
 {
