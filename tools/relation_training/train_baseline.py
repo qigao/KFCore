@@ -1145,7 +1145,7 @@ def main() -> None:
                 ),
                 "matches_released_topology": runtime_matches,
             }
-            mixture_report["matches_released_training_stream"] = (
+            mixture_report["matches_released_sampling_stream"] = (
                 bool(mixture_report["matches_released_mixture"])
                 and runtime_matches
             )
