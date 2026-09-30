@@ -63,6 +63,7 @@ class RelationExample:
     boxes_xyxy: tuple[tuple[float, float, float, float], ...]
     object_labels: tuple[str, ...]
     relations: tuple[tuple[int, int, int], ...]
+    source_id: int = 0
 
     @classmethod
     def from_payload(
@@ -79,6 +80,7 @@ class RelationExample:
         boxes_raw = payload.get("boxes_xyxy")
         labels_raw = payload.get("object_labels")
         relations_raw = payload.get("relations")
+        source_id = payload.get("source_id", 0)
 
         if not isinstance(image, str) or not image:
             raise ValueError("image must be a non-empty relative path")
@@ -97,6 +99,12 @@ class RelationExample:
             raise ValueError("object_labels length must match boxes")
         if not isinstance(relations_raw, list):
             raise ValueError("relations must be an array")
+        if (
+            isinstance(source_id, bool)
+            or not isinstance(source_id, int)
+            or source_id < 0
+        ):
+            raise ValueError("source_id must be a non-negative integer")
 
         boxes: list[tuple[float, float, float, float]] = []
         for raw in boxes_raw:
@@ -165,6 +173,7 @@ class RelationExample:
             boxes_xyxy=tuple(boxes),
             object_labels=tuple(labels),
             relations=tuple(relations),
+            source_id=source_id,
         )
 
 
