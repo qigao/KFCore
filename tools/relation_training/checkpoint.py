@@ -52,6 +52,11 @@ def save_checkpoint(
             "apache_pair_negative_floor": (
                 model.config.apache_pair_negative_floor
             ),
+            "apache_cfa_prob": model.config.apache_cfa_prob,
+            "apache_cfa_alpha": model.config.apache_cfa_alpha,
+            "allow_training_multiscale": (
+                model.config.allow_training_multiscale
+            ),
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),

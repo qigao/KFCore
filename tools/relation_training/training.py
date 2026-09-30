@@ -11,6 +11,10 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
+from apache_multiscale import (
+    EpochRandomSampler,
+    MultiScaleBatchSampler,
+)
 from benchmark import (
     BenchmarkConfig,
     DatasetManifest,
@@ -195,11 +199,19 @@ def prepare_example(
         (max_boxes, max_boxes, predicate_count),
         dtype=torch.float32,
     )
+    cfa_predicate_labels = torch.full(
+        (max_boxes, max_boxes),
+        -1,
+        dtype=torch.int64,
+    )
     for subject, predicate, object_ in example.relations:
         if predicate >= predicate_count:
             raise ValueError("relation predicate exceeds model vocabulary")
         pair_targets[subject, object_] = 1.0
         predicate_targets[subject, object_, predicate] = 1.0
+        # Apache sampler/CFA contract: last predicate annotation wins for
+        # the per-pair feature-mixing label while the loss remains multi-hot.
+        cfa_predicate_labels[subject, object_] = int(predicate)
 
     return {
         "image": image,
@@ -209,6 +221,7 @@ def prepare_example(
         ),
         "pair_targets": pair_targets,
         "predicate_targets": predicate_targets,
+        "cfa_predicate_labels": cfa_predicate_labels,
         "object_label_indices": object_label_indices,
         "source_id": torch.tensor(
             example.source_id,
@@ -245,15 +258,33 @@ class RelationTrainingDataset(Dataset):
     def __len__(self) -> int:
         return len(self.manifest.examples)
 
-    def __getitem__(self, index: int) -> dict[str, Tensor]:
-        return prepare_example(
-            self.manifest.examples[index],
+    def __getitem__(
+        self,
+        index: int | tuple[int, int],
+    ) -> dict[str, Tensor]:
+        if isinstance(index, tuple):
+            example_index = int(index[0])
+            image_size = int(index[1])
+        else:
+            example_index = int(index)
+            image_size = self.image_size
+        if image_size <= 0:
+            raise ValueError(
+                "training image resolution must be positive"
+            )
+        result = prepare_example(
+            self.manifest.examples[example_index],
             image_root=self.image_root,
-            image_size=self.image_size,
+            image_size=image_size,
             max_boxes=self.max_boxes,
             predicate_count=self.predicate_count,
             object_label_to_index=self.object_label_to_index,
         )
+        result["training_resolution"] = torch.tensor(
+            image_size,
+            dtype=torch.int64,
+        )
+        return result
 
 
 @dataclass(frozen=True)
@@ -394,7 +425,28 @@ def trainable_parameters(model: KFRelationModel) -> list[Tensor]:
 def make_training_loader(
     dataset: RelationTrainingDataset,
     config: FrozenBaselineConfig,
+    *,
+    resolutions: list[int] | None = None,
+    drop_last: bool = False,
 ) -> DataLoader:
+    if resolutions:
+        sampler = EpochRandomSampler(
+            len(dataset),
+            seed=config.seed,
+        )
+        batch_sampler = MultiScaleBatchSampler(
+            sampler,
+            config.batch_size,
+            resolutions,
+            drop_last=drop_last,
+            seed=config.seed,
+        )
+        return DataLoader(
+            dataset,
+            batch_sampler=batch_sampler,
+            num_workers=0,
+        )
+
     generator = torch.Generator()
     generator.manual_seed(config.seed)
     return DataLoader(
@@ -403,7 +455,7 @@ def make_training_loader(
         shuffle=True,
         num_workers=0,
         generator=generator,
-        drop_last=False,
+        drop_last=drop_last,
     )
 
 
@@ -425,6 +477,7 @@ def train_epoch(
     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     clip_grad: float | None = None,
     record_gradient_health: bool = False,
+    grad_accum: int = 1,
 ) -> dict[str, float]:
     model.train()
     if backbone_training:
@@ -435,6 +488,14 @@ def train_epoch(
         not np.isfinite(clip_grad) or clip_grad <= 0.0
     ):
         raise ValueError("clip_grad must be finite and positive")
+    if (
+        isinstance(grad_accum, bool)
+        or not isinstance(grad_accum, int)
+        or grad_accum <= 0
+    ):
+        raise ValueError(
+            "grad_accum must be a positive integer"
+        )
 
     sums = {
         "loss": 0.0,
@@ -456,6 +517,9 @@ def train_epoch(
         "predicate_calibration_column_fraction": 0.0,
     }
     examples = 0
+    micro_batches = 0
+    optimizer_steps = 0
+    resolution_counts: dict[int, int] = {}
     predicate_rows = 0
     predicate_rows_skipped = 0
     apache_sums: dict[str, float] = {}
@@ -466,25 +530,51 @@ def train_epoch(
         "head_gradient_tensors": 0.0,
     }
 
-    for batch in loader:
+    try:
+        total_batches = len(loader)  # type: ignore[arg-type]
+    except TypeError:
+        total_batches = None
+    optimizer.zero_grad(set_to_none=True)
+
+    for step, batch in enumerate(loader):
         image = batch["image"].to(device)
         boxes = batch["boxes"].to(device)
         box_counts = batch["box_count"].to(device)
         pair_targets = batch["pair_targets"].to(device)
         predicate_targets = batch["predicate_targets"].to(device)
+        cfa_predicate_labels = batch.get(
+            "cfa_predicate_labels"
+        )
+        if cfa_predicate_labels is not None:
+            cfa_predicate_labels = cfa_predicate_labels.to(device)
         object_label_indices = batch.get(
             "object_label_indices"
         )
         if object_label_indices is not None:
             object_label_indices = object_label_indices.to(device)
         batch_size = int(image.shape[0])
+        micro_batches += 1
+        resolution = batch.get("training_resolution")
+        if resolution is not None:
+            unique_resolution = torch.unique(
+                resolution.to(torch.int64)
+            )
+            if unique_resolution.numel() != 1:
+                raise RuntimeError(
+                    "multi-scale batch contains mixed image resolutions"
+                )
+            value = int(unique_resolution.item())
+            resolution_counts[value] = (
+                resolution_counts.get(value, 0)
+                + batch_size
+            )
 
-        optimizer.zero_grad(set_to_none=True)
         outputs = model.forward_training(
             image,
             boxes,
             box_counts,
             pair_targets=pair_targets,
+            cfa_predicate_labels=cfa_predicate_labels,
             entity_labels=(
                 object_label_indices
                 if apache_objective is not None
@@ -516,7 +606,20 @@ def train_epoch(
             )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
-        losses["loss"].backward()
+        backward_loss = (
+            losses["loss"] / float(grad_accum)
+            if grad_accum > 1
+            else losses["loss"]
+        )
+        backward_loss.backward()
+
+        boundary = (
+            (step + 1) % grad_accum == 0
+            or (
+                total_batches is not None
+                and step + 1 == total_batches
+            )
+        )
 
         backbone_norm2 = 0.0
         head_norm2 = 0.0
@@ -552,14 +655,17 @@ def train_epoch(
                 float(head_tensors) * batch_size
             )
 
-        if clip_grad is not None:
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                clip_grad,
-            )
-        optimizer.step()
-        if scheduler is not None:
-            scheduler.step()
+        if boundary:
+            if clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    clip_grad,
+                )
+            optimizer.step()
+            optimizer_steps += 1
+            if scheduler is not None:
+                scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
         examples += batch_size
         if apache_objective is not None:
             for key, value in losses.items():
@@ -601,6 +707,19 @@ def train_epoch(
                     for key, value in gradient_sums.items()
                 }
             )
+        report["micro_batches"] = float(micro_batches)
+        report["optimizer_steps"] = float(optimizer_steps)
+        report["grad_accum"] = float(grad_accum)
+        if resolution_counts:
+            report["training_resolution_min"] = float(
+                min(resolution_counts)
+            )
+            report["training_resolution_max"] = float(
+                max(resolution_counts)
+            )
+            report["training_resolution_distinct"] = float(
+                len(resolution_counts)
+            )
         if scheduler is not None:
             learning_rates = scheduler.get_last_lr()
             report["learning_rate_min"] = float(
@@ -627,6 +746,19 @@ def train_epoch(
                 key: value / examples
                 for key, value in gradient_sums.items()
             }
+        )
+    report["micro_batches"] = float(micro_batches)
+    report["optimizer_steps"] = float(optimizer_steps)
+    report["grad_accum"] = float(grad_accum)
+    if resolution_counts:
+        report["training_resolution_min"] = float(
+            min(resolution_counts)
+        )
+        report["training_resolution_max"] = float(
+            max(resolution_counts)
+        )
+        report["training_resolution_distinct"] = float(
+            len(resolution_counts)
         )
     if scheduler is not None:
         learning_rates = scheduler.get_last_lr()

@@ -94,6 +94,12 @@ class ApacheTrainingRecipeConfig:
     min_lr_factor: float = 0.01
     clip_grad: float = 1.0
     backbone_mode: str = "full"
+    micro_batch_size: int = 32
+    grad_accum: int = 4
+    multi_scale: str = "0.5,1.5"
+    multi_scale_n: int = 7
+    cfa_prob: float = 0.5
+    cfa_alpha: float = 1.0
 
     def __post_init__(self) -> None:
         for name in (
@@ -130,10 +136,54 @@ class ApacheTrainingRecipeConfig:
             raise ValueError(
                 "warmup_steps must be a non-negative integer"
             )
+        for name in (
+            "micro_batch_size",
+            "grad_accum",
+            "multi_scale_n",
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise ValueError(
+                    f"{name} must be a positive integer"
+                )
+        if (
+            not math.isfinite(self.cfa_prob)
+            or self.cfa_prob < 0.0
+            or self.cfa_prob > 1.0
+        ):
+            raise ValueError(
+                "cfa_prob must be within [0,1]"
+            )
+        if (
+            not math.isfinite(self.cfa_alpha)
+            or self.cfa_alpha <= 0.0
+        ):
+            raise ValueError(
+                "cfa_alpha must be finite and positive"
+            )
+        if self.multi_scale:
+            parts = self.multi_scale.split(",")
+            if len(parts) != 2:
+                raise ValueError(
+                    "multi_scale must be 'lo,hi' or empty"
+                )
+            lo, hi = (float(value) for value in parts)
+            if not (0.0 < lo <= hi):
+                raise ValueError(
+                    "multi_scale range must satisfy 0 < lo <= hi"
+                )
         if self.backbone_mode not in {"frozen", "full"}:
             raise ValueError(
                 "backbone_mode must be frozen/full"
             )
+
+    @property
+    def effective_batch_size(self) -> int:
+        return self.micro_batch_size * self.grad_accum
 
 
 def _freeze_unused_backbone_outputs(

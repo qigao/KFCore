@@ -135,6 +135,7 @@ def main() -> None:
         pair_sampler_contract=args.pair_sampler_contract,
         relation_context_contract=args.relation_context_contract,
         predicate_head_contract=args.predicate_head_contract,
+        allow_training_multiscale=args.verify_backbone_finetune,
     )
     predicate_names = ["beside", "holding", "riding"]
     predicate_embeddings = torch.randn(len(predicate_names), 32)
@@ -377,11 +378,69 @@ def main() -> None:
                 raise RuntimeError(
                     "unused backbone mask token received a gradient"
                 )
+        multiscale_size = (
+            args.image_size + backbone.patch_size * 5
+        )
+        multiscale_image = torch.rand(
+            1,
+            3,
+            multiscale_size,
+            multiscale_size,
+        )
+        optimizer.zero_grad(set_to_none=True)
+        multiscale_outputs = model(
+            multiscale_image,
+            boxes,
+            box_counts,
+        )
+        multiscale_loss = (
+            multiscale_outputs[0].square().mean()
+        )
+        multiscale_valid = multiscale_outputs[4]
+        if bool(multiscale_valid.any()):
+            multiscale_loss = (
+                multiscale_loss
+                + multiscale_outputs[1][
+                    multiscale_valid
+                ].square().mean()
+            )
+        if not torch.isfinite(multiscale_loss):
+            raise RuntimeError(
+                "real DINO multi-scale backward produced non-finite loss"
+            )
+        multiscale_loss.backward()
+        multiscale_health = gradient_health(model)
+        if (
+            float(
+                multiscale_health[
+                    "backbone_gradient_norm"
+                ]
+            )
+            <= 0.0
+            or int(
+                multiscale_health[
+                    "backbone_gradient_tensors"
+                ]
+            )
+            <= 0
+        ):
+            raise RuntimeError(
+                "real DINO multi-scale backward produced no backbone gradient"
+            )
+
         finetune_report = {
             "loss": float(loss.detach().cpu()),
             "gradient_health": health,
             "optimizer": optimizer_report,
             "frozen_unused_modules": frozen_unused,
+            "multi_scale": {
+                "base_size": args.image_size,
+                "alternate_size": multiscale_size,
+                "loss": float(
+                    multiscale_loss.detach().cpu()
+                ),
+                "gradient_health": multiscale_health,
+            },
         }
         model.eval()
 
