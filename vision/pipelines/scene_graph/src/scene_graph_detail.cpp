@@ -1,11 +1,26 @@
 #include "scene_graph_detail.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace kfcore::pipelines::detail
 {
+namespace
+{
+
+using SteadyClock = std::chrono::steady_clock;
+
+double elapsed_ms(
+    SteadyClock::time_point begin,
+    SteadyClock::time_point end)
+{
+    return std::chrono::duration<double, std::milli>(
+        end - begin).count();
+}
+
+} // namespace
 
 SceneGraphEngine::SceneGraphEngine(
     std::unique_ptr<DetectionRunner> detector,
@@ -25,10 +40,28 @@ SceneGraphEngine::SceneGraphEngine(
 SceneGraphFrame SceneGraphEngine::process(
     const image::ImageView& image)
 {
-    const yolo::DetectionFrame detections =
+    TimedSceneGraphFrame timed =
+        process_timed(image);
+    return std::move(timed.frame);
+}
+
+TimedSceneGraphFrame SceneGraphEngine::process_timed(
+    const image::ImageView& image)
+{
+    const auto total_begin = SteadyClock::now();
+
+    const auto detector_begin = total_begin;
+    yolo::DetectionFrame detections =
         detector_->detect(image);
+    const auto detector_end = SteadyClock::now();
+
+    const std::size_t detection_count =
+        detections.detections.size();
+
+    const auto tracker_begin = detector_end;
     yolo::TrackFrame tracks =
         tracking_.update(detections);
+    const auto tracker_end = SteadyClock::now();
 
     if (tracks.detections.size() >
         relation_model_->max_boxes())
@@ -36,17 +69,58 @@ SceneGraphFrame SceneGraphEngine::process(
         throw std::length_error(
             "SceneGraphPipeline tracked object count exceeds relation max_boxes");
     }
+    const std::size_t tracked_object_count =
+        tracks.detections.size();
 
+    const auto region_begin = tracker_end;
     const std::vector<relation::Region> regions =
         regions_from_tracks(tracks);
+    const auto region_end = SteadyClock::now();
+
+    const auto relation_begin = region_end;
     relation::RelationFrame relations =
         relation_model_->infer(
             image,
             regions);
+    const auto relation_end = SteadyClock::now();
 
-    return assemble_scene_graph(
-        std::move(tracks),
-        std::move(relations));
+    const std::size_t relation_edge_count =
+        relations.edges.size();
+
+    const auto assembly_begin = relation_end;
+    SceneGraphFrame frame =
+        assemble_scene_graph(
+            std::move(tracks),
+            std::move(relations));
+    const auto assembly_end = SteadyClock::now();
+
+    SceneGraphTiming timing;
+    timing.detector_ms = elapsed_ms(
+        detector_begin,
+        detector_end);
+    timing.tracker_ms = elapsed_ms(
+        tracker_begin,
+        tracker_end);
+    timing.region_prepare_ms = elapsed_ms(
+        region_begin,
+        region_end);
+    timing.relation_ms = elapsed_ms(
+        relation_begin,
+        relation_end);
+    timing.assembly_ms = elapsed_ms(
+        assembly_begin,
+        assembly_end);
+    timing.total_ms = elapsed_ms(
+        total_begin,
+        assembly_end);
+    timing.detection_count = detection_count;
+    timing.tracked_object_count = tracked_object_count;
+    timing.relation_edge_count = relation_edge_count;
+
+    return {
+        std::move(frame),
+        timing,
+    };
 }
 
 bool SceneGraphEngine::supports_dynamic_vocabulary() const noexcept

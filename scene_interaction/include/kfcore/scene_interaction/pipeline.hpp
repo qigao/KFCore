@@ -4,6 +4,7 @@
 #include "kfcore/pipelines/scene_graph.hpp"
 #include "kfcore/scene_interaction/interaction.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -16,6 +17,21 @@ struct SceneBehaviorFrame
 {
     pipelines::SceneGraphFrame scene;
     std::vector<SceneBehaviorEvent> events;
+};
+
+struct SceneBehaviorTiming
+{
+    pipelines::SceneGraphTiming scene_graph;
+    double temporal_ms = 0.0;
+    double total_ms = 0.0;
+    std::size_t event_count = 0U;
+    std::size_t pair_state_count = 0U;
+};
+
+struct TimedSceneBehaviorFrame
+{
+    SceneBehaviorFrame frame;
+    SceneBehaviorTiming timing;
 };
 
 class SceneBehaviorPipeline final
@@ -35,6 +51,9 @@ public:
 
     [[nodiscard]] SceneBehaviorFrame
     process(const image::ImageView& image, double seconds);
+
+    [[nodiscard]] TimedSceneBehaviorFrame
+    process_timed(const image::ImageView& image, double seconds);
 
     [[nodiscard]] std::vector<SceneBehaviorEvent>
     advance(double seconds);

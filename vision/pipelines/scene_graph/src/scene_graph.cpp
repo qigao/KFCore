@@ -319,6 +319,17 @@ SceneGraphFrame SceneGraphPipeline::process(
     return impl_->engine.process(image);
 }
 
+TimedSceneGraphFrame SceneGraphPipeline::process_timed(
+    const image::ImageView& image)
+{
+    if (!impl_)
+    {
+        throw std::logic_error(
+            "SceneGraphPipeline state is unavailable");
+    }
+    return impl_->engine.process_timed(image);
+}
+
 bool SceneGraphPipeline::supports_dynamic_vocabulary() const noexcept
 {
     return impl_ &&

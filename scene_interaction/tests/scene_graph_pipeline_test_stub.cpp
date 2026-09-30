@@ -76,6 +76,20 @@ SceneGraphFrame SceneGraphPipeline::process(const image::ImageView&)
     return frame;
 }
 
+TimedSceneGraphFrame
+SceneGraphPipeline::process_timed(const image::ImageView& image)
+{
+    SceneGraphFrame frame = process(image);
+    SceneGraphTiming timing;
+    timing.detection_count = frame.objects.detections.size();
+    timing.tracked_object_count = frame.objects.detections.size();
+    timing.relation_edge_count = frame.relations.edges.size();
+    return {
+        std::move(frame),
+        timing,
+    };
+}
+
 bool SceneGraphPipeline::supports_dynamic_vocabulary() const noexcept
 {
     return impl_ != nullptr;

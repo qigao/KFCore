@@ -1,10 +1,25 @@
 #include "kfcore/scene_interaction/pipeline.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
 namespace kfcore::scene_interaction
 {
+namespace
+{
+
+using SteadyClock = std::chrono::steady_clock;
+
+double elapsed_ms(
+    SteadyClock::time_point begin,
+    SteadyClock::time_point end)
+{
+    return std::chrono::duration<double, std::milli>(
+        end - begin).count();
+}
+
+} // namespace
 
 struct SceneBehaviorPipeline::Impl final
 {
@@ -63,22 +78,52 @@ SceneBehaviorFrame SceneBehaviorPipeline::process(
     const image::ImageView& image,
     double seconds)
 {
+    TimedSceneBehaviorFrame timed =
+        process_timed(image, seconds);
+    return std::move(timed.frame);
+}
+
+TimedSceneBehaviorFrame SceneBehaviorPipeline::process_timed(
+    const image::ImageView& image,
+    double seconds)
+{
     if (!impl_ || !impl_->scene_graph)
     {
         throw std::logic_error(
             "SceneBehaviorPipeline state is unavailable");
     }
 
-    pipelines::SceneGraphFrame scene =
-        impl_->scene_graph->process(image);
+    const auto total_begin = SteadyClock::now();
+    pipelines::TimedSceneGraphFrame timed_scene =
+        impl_->scene_graph->process_timed(image);
+
+    const auto temporal_begin = SteadyClock::now();
     std::vector<SceneBehaviorEvent> events =
         impl_->interaction.process(
-            scene,
+            timed_scene.frame,
             seconds);
+    const auto temporal_end = SteadyClock::now();
+
+    SceneBehaviorFrame frame {
+        std::move(timed_scene.frame),
+        std::move(events),
+    };
+
+    SceneBehaviorTiming timing;
+    timing.scene_graph = timed_scene.timing;
+    timing.temporal_ms = elapsed_ms(
+        temporal_begin,
+        temporal_end);
+    timing.total_ms = elapsed_ms(
+        total_begin,
+        temporal_end);
+    timing.event_count = frame.events.size();
+    timing.pair_state_count =
+        impl_->interaction.pair_state_count();
 
     return {
-        std::move(scene),
-        std::move(events),
+        std::move(frame),
+        timing,
     };
 }
 

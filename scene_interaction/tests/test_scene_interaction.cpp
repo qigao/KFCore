@@ -124,6 +124,12 @@ spec("typed scene behavior pipeline API")
                 scene_interaction::SceneBehaviorFrame>);
         static_assert(
             std::is_same_v<
+                decltype(std::declval<Pipeline&>().process_timed(
+                    std::declval<const image::ImageView&>(),
+                    0.0)),
+                scene_interaction::TimedSceneBehaviorFrame>);
+        static_assert(
+            std::is_same_v<
                 decltype(std::declval<const Pipeline&>()
                              .pair_state_count()),
                 std::size_t>);
@@ -180,6 +186,51 @@ spec("scene behavior pipeline composition")
         pipeline->set_vocabulary(std::move(vocabulary));
         check(pipeline->vocabulary_version() == std::uint64_t{9U});
         check(pipeline->predicates()[0] == "holding");
+    }
+}
+
+spec("scene behavior pipeline timing")
+{
+    it("reports scene and temporal timing without changing frame semantics")
+    {
+        auto pipeline = make_behavior_pipeline();
+        (void)pipeline->configure_model(
+            make_model(7U),
+            0.0);
+
+        const auto timed =
+            pipeline->process_timed(
+                image::ImageView{},
+                0.0);
+
+        check(
+            timed.frame.scene.objects.detections.size() ==
+            std::size_t{2U});
+        check(
+            timed.frame.scene.relations.edges.size() ==
+            std::size_t{1U});
+        check(timed.frame.events.empty());
+
+        check(
+            timed.timing.scene_graph.detection_count ==
+            std::size_t{2U});
+        check(
+            timed.timing.scene_graph.tracked_object_count ==
+            std::size_t{2U});
+        check(
+            timed.timing.scene_graph.relation_edge_count ==
+            std::size_t{1U});
+        check(
+            timed.timing.event_count ==
+            std::size_t{0U});
+        check(
+            timed.timing.pair_state_count ==
+            std::size_t{1U});
+
+        check(std::isfinite(timed.timing.temporal_ms));
+        check(std::isfinite(timed.timing.total_ms));
+        check(timed.timing.temporal_ms >= 0.0);
+        check(timed.timing.total_ms >= timed.timing.temporal_ms);
     }
 }
 
