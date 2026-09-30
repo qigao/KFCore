@@ -1596,6 +1596,7 @@ The command fails unless the run has all of the following:
 
 - the released `max_objects=40` / `max_boxes=40` model shape;
 - the released `d_model=512` relation-head width;
+- the released `text_dim=512` predicate/query space;
 - the last Apache-2.0 source reference
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;
@@ -1613,6 +1614,17 @@ The command fails unless the run has all of the following:
 The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
+
+### Released text-space width
+
+The Apache released recipe pins `text_dim=512`. For `apache-reference`,
+KFCore therefore requires predicate/text embeddings shaped `[V,512]`; the
+semantic and spatial encoder outputs are `[B,K,512]`, and the dynamic
+open-vocabulary graph accepts `W[V,512]`.
+
+Legacy/diagnostic experiments may still use smaller text dimensions, but they
+cannot pass released-run qualification. The real-DINO full Apache smoke runs
+the dynamic-vocabulary ONNX/ORT contract in the 512-D text space.
 
 ### Released photometric augmentation contract
 
