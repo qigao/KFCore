@@ -16,7 +16,7 @@ from apache_training_recipe import ApacheTrainingRecipeConfig
 from benchmark import RelationExample
 from model import KFRelationModel, RelationModelConfig
 from test_model import ToyBackbone, boxes
-from training import prepare_example
+from training import prepare_example, train_epoch
 
 
 def apache_model_config(**overrides) -> RelationModelConfig:
@@ -37,6 +37,16 @@ def apache_model_config(**overrides) -> RelationModelConfig:
     )
     values.update(overrides)
     return RelationModelConfig(**values)
+
+
+class CountingSGD(torch.optim.SGD):
+    def __init__(self, params, *, lr: float) -> None:
+        super().__init__(params, lr=lr)
+        self.step_count = 0
+
+    def step(self, closure=None):
+        self.step_count += 1
+        return super().step(closure)
 
 
 class ApacheTrainingRegularizationTest(unittest.TestCase):
@@ -186,6 +196,58 @@ class ApacheTrainingRegularizationTest(unittest.TestCase):
                 box_tensor[:1],
                 box_counts[:1],
             )
+
+    def test_gradient_accumulation_steps_optimizer_only_on_boundaries(self):
+        torch.manual_seed(94)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            RelationModelConfig(
+                image_size=8,
+                max_boxes=4,
+                pair_budget=6,
+                hidden_dim=16,
+                geometry_dim=8,
+                num_heads=4,
+                num_layers=1,
+                dropout=0.0,
+                tap_indices=(-3, -2, -1),
+            ),
+        )
+        optimizer = CountingSGD(
+            model.parameters(),
+            lr=1.0e-3,
+        )
+        box_tensor, box_counts = boxes()
+        pair_targets = torch.zeros(1, 4, 4)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        batch = {
+            "image": torch.rand(1, 3, 8, 8),
+            "boxes": box_tensor[:1].clone(),
+            "box_count": box_counts[:1].clone(),
+            "pair_targets": pair_targets,
+            "predicate_targets": predicate_targets,
+            "training_resolution": torch.tensor([8]),
+        }
+
+        report = train_epoch(
+            model,
+            [batch, batch, batch, batch],
+            optimizer,
+            device=torch.device("cpu"),
+            grad_accum=2,
+        )
+
+        self.assertEqual(optimizer.step_count, 2)
+        self.assertEqual(report["micro_batches"], 4.0)
+        self.assertEqual(report["optimizer_steps"], 2.0)
+        self.assertEqual(report["grad_accum"], 2.0)
+        self.assertEqual(
+            report["training_resolution_distinct"],
+            1.0,
+        )
 
     def test_reference_single_process_effective_batch_is_128(self):
         config = ApacheTrainingRecipeConfig()
