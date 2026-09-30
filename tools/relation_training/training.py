@@ -382,6 +382,7 @@ def train_epoch(
     explicit_holdout_mask: Tensor | None = None,
     explicit_holdout_row_policy: str = "dimension-only",
     predicate_contrastive_negative_mask: Tensor | None = None,
+    apache_objective: torch.nn.Module | None = None,
 ) -> dict[str, float]:
     model.train()
     model.backbone.eval()
@@ -408,6 +409,7 @@ def train_epoch(
     examples = 0
     predicate_rows = 0
     predicate_rows_skipped = 0
+    apache_sums: dict[str, float] = {}
 
     for batch in loader:
         image = batch["image"].to(device)
@@ -424,20 +426,34 @@ def train_epoch(
             box_counts,
             pair_targets=pair_targets,
         )
-        losses = supervised_relation_loss(
-            outputs,
-            pair_targets,
-            predicate_targets,
-            loss_config,
-            predicate_positive_weights=predicate_positive_weights,
-            predicate_supervision_mask=predicate_supervision_mask,
-            predicate_negative_weights=predicate_negative_weights,
-            explicit_holdout_mask=explicit_holdout_mask,
-            explicit_holdout_row_policy=explicit_holdout_row_policy,
-            predicate_contrastive_negative_mask=(
-                predicate_contrastive_negative_mask
-            ),
-        )
+        if apache_objective is not None:
+            source_ids = batch["source_id"].to(device)
+            object_label_indices = batch.get(
+                "object_label_indices"
+            )
+            if object_label_indices is not None:
+                object_label_indices = object_label_indices.to(device)
+            losses = apache_objective(
+                outputs,
+                predicate_targets,
+                source_ids=source_ids,
+                object_label_indices=object_label_indices,
+            )
+        else:
+            losses = supervised_relation_loss(
+                outputs,
+                pair_targets,
+                predicate_targets,
+                loss_config,
+                predicate_positive_weights=predicate_positive_weights,
+                predicate_supervision_mask=predicate_supervision_mask,
+                predicate_negative_weights=predicate_negative_weights,
+                explicit_holdout_mask=explicit_holdout_mask,
+                explicit_holdout_row_policy=explicit_holdout_row_policy,
+                predicate_contrastive_negative_mask=(
+                    predicate_contrastive_negative_mask
+                ),
+            )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
         losses["loss"].backward()
@@ -450,21 +466,40 @@ def train_epoch(
 
         optimizer.step()
         examples += batch_size
-        predicate_rows += int(
-            losses["predicate_rows"].detach().cpu().item()
-        )
-        predicate_rows_skipped += int(
-            losses["predicate_rows_skipped"].detach().cpu().item()
-        )
-        for key in sums:
-            sums[key] += float(losses[key].detach().cpu()) * batch_size
-        for key in diagnostic_sums:
-            diagnostic_sums[key] += (
-                float(losses[key].detach().cpu()) * batch_size
+        if apache_objective is not None:
+            for key, value in losses.items():
+                if not isinstance(value, Tensor) or value.ndim != 0:
+                    raise ValueError(
+                        "Apache objective diagnostics must be scalar tensors"
+                    )
+                apache_sums[key] = (
+                    apache_sums.get(key, 0.0)
+                    + float(value.detach().cpu()) * batch_size
+                )
+        else:
+            predicate_rows += int(
+                losses["predicate_rows"].detach().cpu().item()
             )
+            predicate_rows_skipped += int(
+                losses["predicate_rows_skipped"].detach().cpu().item()
+            )
+            for key in sums:
+                sums[key] += (
+                    float(losses[key].detach().cpu()) * batch_size
+                )
+            for key in diagnostic_sums:
+                diagnostic_sums[key] += (
+                    float(losses[key].detach().cpu()) * batch_size
+                )
 
     if examples == 0:
         raise ValueError("training loader produced no examples")
+    if apache_objective is not None:
+        return {
+            key: value / examples
+            for key, value in apache_sums.items()
+        }
+
     report = {
         key: value / examples
         for key, value in sums.items()
