@@ -9,7 +9,9 @@ import numpy as np
 from PIL import Image
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
+
+from apache_multiscale import MultiScaleBatchSampler
 
 from benchmark import (
     BenchmarkConfig,
@@ -153,6 +155,11 @@ def prepare_example(
     pair_targets = torch.zeros(
         (max_boxes, max_boxes), dtype=torch.float32
     )
+    cfa_pair_labels = torch.full(
+        (max_boxes, max_boxes),
+        -1,
+        dtype=torch.int64,
+    )
     predicate_targets = torch.zeros(
         (max_boxes, max_boxes, predicate_count),
         dtype=torch.float32,
@@ -161,6 +168,10 @@ def prepare_example(
         if predicate >= predicate_count:
             raise ValueError("relation predicate exceeds model vocabulary")
         pair_targets[subject, object_] = 1.0
+        # Apache CFA uses one sampler label per pair; for multi-predicate
+        # pairs the last relation row wins. Multi-label predicate_targets
+        # remain intact for the reference objective.
+        cfa_pair_labels[subject, object_] = int(predicate)
         predicate_targets[subject, object_, predicate] = 1.0
 
     return {
@@ -170,6 +181,7 @@ def prepare_example(
             len(example.boxes_xyxy), dtype=torch.int64
         ),
         "pair_targets": pair_targets,
+        "cfa_pair_labels": cfa_pair_labels,
         "predicate_targets": predicate_targets,
         "object_label_indices": object_label_indices,
         "source_id": torch.tensor(
@@ -207,11 +219,17 @@ class RelationTrainingDataset(Dataset):
     def __len__(self) -> int:
         return len(self.manifest.examples)
 
-    def __getitem__(self, index: int) -> dict[str, Tensor]:
+    def __getitem__(
+        self,
+        index: int | tuple[int, int],
+    ) -> dict[str, Tensor]:
+        resolution = self.image_size
+        if isinstance(index, tuple):
+            index, resolution = int(index[0]), int(index[1])
         return prepare_example(
             self.manifest.examples[index],
             image_root=self.image_root,
-            image_size=self.image_size,
+            image_size=resolution,
             max_boxes=self.max_boxes,
             predicate_count=self.predicate_count,
             object_label_to_index=self.object_label_to_index,
@@ -356,16 +374,38 @@ def trainable_parameters(model: KFRelationModel) -> list[Tensor]:
 def make_training_loader(
     dataset: RelationTrainingDataset,
     config: FrozenBaselineConfig,
+    *,
+    multi_scale_resolutions: tuple[int, ...] = (),
+    drop_last: bool = False,
 ) -> DataLoader:
     generator = torch.Generator()
     generator.manual_seed(config.seed)
+
+    if multi_scale_resolutions:
+        sampler = RandomSampler(
+            dataset,
+            generator=generator,
+        )
+        batch_sampler = MultiScaleBatchSampler(
+            sampler,
+            config.batch_size,
+            multi_scale_resolutions,
+            drop_last=drop_last,
+            seed=42,
+        )
+        return DataLoader(
+            dataset,
+            batch_sampler=batch_sampler,
+            num_workers=0,
+        )
+
     return DataLoader(
         dataset,
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=0,
         generator=generator,
-        drop_last=False,
+        drop_last=drop_last,
     )
 
 
