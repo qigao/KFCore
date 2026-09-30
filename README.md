@@ -19,7 +19,7 @@ See:
 
 - `docs/runtime/model-package-v1.md`
 - `docs/runtime/manual-build.md`
-- `docs/superpowers/specs/2026-09-14-backend-neutral-runtime-plugin-abi-design.md`
+- `docs/runtime/backend-plugin-abi.md`
 
 ## Runtime loading
 
