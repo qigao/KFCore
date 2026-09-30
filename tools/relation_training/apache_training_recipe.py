@@ -8,9 +8,16 @@ import math
 import torch
 from torch import nn
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from model import KFRelationModel
 
 
+LEGACY_DEFAULT_IMAGE_SIZE = 448
+RELEASED_IMAGE_SIZE = 448
+LEGACY_DEFAULT_PAIR_BUDGET = 128
 LEGACY_DEFAULT_MAX_BOXES = 32
 RELEASED_MAX_BOXES = 40
 LEGACY_DEFAULT_HIDDEN_DIM = 256
@@ -19,6 +26,62 @@ RELEASED_TEXT_DIM = 512
 RELEASED_EMA_DECAY = 0.9998
 LEGACY_DEFAULT_AUGMENT = 0.0
 RELEASED_PHOTOMETRIC_AUGMENT = 0.3
+
+
+def resolve_training_image_size(
+    requested: int | None,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        int(requested)
+        if requested is not None
+        else (
+            RELEASED_IMAGE_SIZE
+            if recipe == "apache-reference"
+            else LEGACY_DEFAULT_IMAGE_SIZE
+        )
+    )
+    if value <= 0:
+        raise ValueError("image size must be positive")
+    if (
+        recipe == "apache-reference"
+        and value != RELEASED_IMAGE_SIZE
+    ):
+        raise ValueError(
+            "apache-reference requires released img_size=448"
+        )
+    return value
+
+
+def resolve_training_pair_budget(
+    requested: int | None,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        int(requested)
+        if requested is not None
+        else (
+            RELEASED_FINAL_BUDGET
+            if recipe == "apache-reference"
+            else LEGACY_DEFAULT_PAIR_BUDGET
+        )
+    )
+    if value <= 0:
+        raise ValueError("pair budget must be positive")
+    if (
+        recipe == "apache-reference"
+        and value != RELEASED_FINAL_BUDGET
+    ):
+        raise ValueError(
+            "apache-reference requires released final_budget=128"
+        )
+    return value
 
 
 def resolve_training_hidden_dim(
@@ -327,6 +390,9 @@ class ApacheTrainingRecipeConfig:
     ema_decay: float = RELEASED_EMA_DECAY
     augment: float = RELEASED_PHOTOMETRIC_AUGMENT
     text_dim: int = RELEASED_TEXT_DIM
+    image_size: int = RELEASED_IMAGE_SIZE
+    geo_budget: int = RELEASED_GEO_BUDGET
+    final_budget: int = RELEASED_FINAL_BUDGET
 
     def __post_init__(self) -> None:
         for name in (
@@ -400,6 +466,24 @@ class ApacheTrainingRecipeConfig:
             raise ValueError(
                 "ema_decay must be finite within [0,1)"
             )
+        for name, expected in (
+            ("image_size", RELEASED_IMAGE_SIZE),
+            ("geo_budget", RELEASED_GEO_BUDGET),
+            ("final_budget", RELEASED_FINAL_BUDGET),
+        ):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise ValueError(
+                    f"{name} must be a positive integer"
+                )
+            if value != expected:
+                raise ValueError(
+                    f"Apache released recipe requires {name}={expected}"
+                )
         if (
             isinstance(self.text_dim, bool)
             or not isinstance(self.text_dim, int)
