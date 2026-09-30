@@ -427,6 +427,9 @@ def train_epoch(
     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     clip_grad: float | None = None,
     record_gradient_health: bool = False,
+    gradient_accumulation_steps: int = 1,
+    allow_dynamic_image_size: bool = False,
+    enable_apache_cfa: bool = False,
 ) -> dict[str, float]:
     model.train()
     if backbone_training:
@@ -438,6 +441,14 @@ def train_epoch(
     ):
         raise ValueError("clip_grad must be finite and positive")
 
+    if (
+        isinstance(gradient_accumulation_steps, bool)
+        or not isinstance(gradient_accumulation_steps, int)
+        or gradient_accumulation_steps <= 0
+    ):
+        raise ValueError(
+            "gradient_accumulation_steps must be a positive integer"
+        )
     sums = {
         "loss": 0.0,
         "sampler_loss": 0.0,
@@ -468,7 +479,12 @@ def train_epoch(
         "head_gradient_tensors": 0.0,
     }
 
-    for batch in loader:
+    optimizer.zero_grad(set_to_none=True)
+    pending_batches = 0
+    optimizer_steps = 0
+    loader_length = len(loader) if hasattr(loader, "__len__") else None
+
+    for batch_index, batch in enumerate(loader):
         image = batch["image"].to(device)
         boxes = batch["boxes"].to(device)
         box_counts = batch["box_count"].to(device)
@@ -481,7 +497,6 @@ def train_epoch(
             object_label_indices = object_label_indices.to(device)
         batch_size = int(image.shape[0])
 
-        optimizer.zero_grad(set_to_none=True)
         outputs = model.forward_training(
             image,
             boxes,
@@ -492,6 +507,12 @@ def train_epoch(
                 if apache_objective is not None
                 else None
             ),
+            cfa_pair_labels=(
+                batch["cfa_pair_labels"].to(device)
+                if enable_apache_cfa
+                else None
+            ),
+            allow_dynamic_image_size=allow_dynamic_image_size,
         )
         if apache_objective is not None:
             source_ids = batch["source_id"].to(device)
@@ -518,50 +539,71 @@ def train_epoch(
             )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
-        losses["loss"].backward()
+        (
+            losses["loss"]
+            / float(gradient_accumulation_steps)
+        ).backward()
+        pending_batches += 1
 
-        backbone_norm2 = 0.0
-        head_norm2 = 0.0
-        backbone_tensors = 0
-        head_tensors = 0
-        for name, parameter in model.named_parameters():
-            if not parameter.requires_grad or parameter.grad is None:
-                continue
-            if not torch.isfinite(parameter.grad).all():
-                raise RuntimeError("training gradient became non-finite")
+        should_step = (
+            pending_batches >= gradient_accumulation_steps
+            or (
+                loader_length is not None
+                and batch_index + 1 == loader_length
+            )
+        )
+
+        if should_step:
+            backbone_norm2 = 0.0
+            head_norm2 = 0.0
+            backbone_tensors = 0
+            head_tensors = 0
+            for name, parameter in model.named_parameters():
+                if (
+                    not parameter.requires_grad
+                    or parameter.grad is None
+                ):
+                    continue
+                if not torch.isfinite(parameter.grad).all():
+                    raise RuntimeError(
+                        "training gradient became non-finite"
+                    )
+                if record_gradient_health:
+                    norm = float(
+                        parameter.grad.detach().float().norm().item()
+                    )
+                    if name.startswith("backbone."):
+                        backbone_norm2 += norm * norm
+                        backbone_tensors += 1
+                    else:
+                        head_norm2 += norm * norm
+                        head_tensors += 1
+
             if record_gradient_health:
-                norm = float(
-                    parameter.grad.detach().float().norm().item()
+                gradient_sums["backbone_gradient_norm"] += (
+                    float(np.sqrt(backbone_norm2))
                 )
-                if name.startswith("backbone."):
-                    backbone_norm2 += norm * norm
-                    backbone_tensors += 1
-                else:
-                    head_norm2 += norm * norm
-                    head_tensors += 1
+                gradient_sums["head_gradient_norm"] += (
+                    float(np.sqrt(head_norm2))
+                )
+                gradient_sums["backbone_gradient_tensors"] += float(
+                    backbone_tensors
+                )
+                gradient_sums["head_gradient_tensors"] += float(
+                    head_tensors
+                )
 
-        if record_gradient_health:
-            gradient_sums["backbone_gradient_norm"] += (
-                float(np.sqrt(backbone_norm2)) * batch_size
-            )
-            gradient_sums["head_gradient_norm"] += (
-                float(np.sqrt(head_norm2)) * batch_size
-            )
-            gradient_sums["backbone_gradient_tensors"] += (
-                float(backbone_tensors) * batch_size
-            )
-            gradient_sums["head_gradient_tensors"] += (
-                float(head_tensors) * batch_size
-            )
-
-        if clip_grad is not None:
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                clip_grad,
-            )
-        optimizer.step()
-        if scheduler is not None:
-            scheduler.step()
+            if clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    clip_grad,
+                )
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
+            pending_batches = 0
+            optimizer_steps += 1
         examples += batch_size
         if apache_objective is not None:
             for key, value in losses.items():
@@ -589,6 +631,10 @@ def train_epoch(
                     float(losses[key].detach().cpu()) * batch_size
                 )
 
+    if pending_batches:
+        raise RuntimeError(
+            "training loader without a usable length left unstepped gradients"
+        )
     if examples == 0:
         raise ValueError("training loader produced no examples")
     if apache_objective is not None:
@@ -597,12 +643,17 @@ def train_epoch(
             for key, value in apache_sums.items()
         }
         if record_gradient_health:
+            divisor = max(optimizer_steps, 1)
             report.update(
                 {
-                    key: value / examples
+                    key: value / divisor
                     for key, value in gradient_sums.items()
                 }
             )
+        report["optimizer_steps"] = float(optimizer_steps)
+        report["gradient_accumulation_steps"] = float(
+            gradient_accumulation_steps
+        )
         if scheduler is not None:
             learning_rates = scheduler.get_last_lr()
             report["learning_rate_min"] = float(
@@ -624,12 +675,17 @@ def train_epoch(
     for key, value in diagnostic_sums.items():
         report[key] = value / examples
     if record_gradient_health:
+        divisor = max(optimizer_steps, 1)
         report.update(
             {
-                key: value / examples
+                key: value / divisor
                 for key, value in gradient_sums.items()
             }
         )
+    report["optimizer_steps"] = float(optimizer_steps)
+    report["gradient_accumulation_steps"] = float(
+        gradient_accumulation_steps
+    )
     if scheduler is not None:
         learning_rates = scheduler.get_last_lr()
         report["learning_rate_min"] = float(
