@@ -105,6 +105,7 @@ def prepare_example(
     image_size: int,
     max_boxes: int,
     predicate_count: int,
+    object_label_to_index: dict[str, int] | None = None,
 ) -> dict[str, Tensor]:
     if max_boxes < 2:
         raise ValueError("max_boxes must be at least 2")
@@ -134,6 +135,21 @@ def prepare_example(
             dtype=torch.float32,
         )
 
+    object_label_indices = torch.full(
+        (max_boxes,),
+        -1,
+        dtype=torch.int64,
+    )
+    if object_label_to_index is not None:
+        for index, label in enumerate(example.object_labels):
+            if label not in object_label_to_index:
+                raise ValueError(
+                    f"unknown object label for training: {label}"
+                )
+            object_label_indices[index] = int(
+                object_label_to_index[label]
+            )
+
     pair_targets = torch.zeros(
         (max_boxes, max_boxes), dtype=torch.float32
     )
@@ -155,6 +171,11 @@ def prepare_example(
         ),
         "pair_targets": pair_targets,
         "predicate_targets": predicate_targets,
+        "object_label_indices": object_label_indices,
+        "source_id": torch.tensor(
+            example.source_id,
+            dtype=torch.int64,
+        ),
     }
 
 
@@ -167,12 +188,21 @@ class RelationTrainingDataset(Dataset):
         image_size: int,
         max_boxes: int,
         predicate_count: int,
+        object_labels: tuple[str, ...] = (),
     ) -> None:
         self.manifest = manifest
         self.image_root = Path(image_root)
         self.image_size = image_size
         self.max_boxes = max_boxes
         self.predicate_count = predicate_count
+        self.object_label_to_index = (
+            {
+                name: index
+                for index, name in enumerate(object_labels)
+            }
+            if object_labels
+            else None
+        )
 
     def __len__(self) -> int:
         return len(self.manifest.examples)
@@ -184,6 +214,7 @@ class RelationTrainingDataset(Dataset):
             image_size=self.image_size,
             max_boxes=self.max_boxes,
             predicate_count=self.predicate_count,
+            object_label_to_index=self.object_label_to_index,
         )
 
 
