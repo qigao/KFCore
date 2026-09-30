@@ -169,7 +169,7 @@ def build_reference_optimizer(
     model: KFRelationModel,
     config: ApacheTrainingRecipeConfig,
 ) -> tuple[torch.optim.AdamW, dict[str, object]]:
-    configure_backbone_trainability(
+    backbone_report = configure_backbone_trainability(
         model,
         mode=config.backbone_mode,
     )
@@ -253,6 +253,7 @@ def build_reference_optimizer(
     )
     report = {
         "head_lr": config.head_lr,
+        "backbone": backbone_report,
         "backbone_lr": config.backbone_lr,
         "weight_decay": config.weight_decay,
         "groups": [
