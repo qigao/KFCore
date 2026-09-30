@@ -84,6 +84,7 @@ def corpus() -> dict:
         "ontology_npz_sha256": h("7"),
         "neg_rate_table_sha256": h("8"),
         "predicate_embeddings_sha256": h("9"),
+        "object_embeddings_sha256": h("e"),
         "vocabulary_sha256": h("a"),
     }
 
@@ -234,6 +235,33 @@ def training() -> dict:
                 "neg_rate_table_sha256": c[
                     "neg_rate_table_sha256"
                 ],
+                "object_embeddings_sha256": c[
+                    "object_embeddings_sha256"
+                ],
+                "object_embeddings_shape": [
+                    2,
+                    512,
+                ],
+                "object_label_order": [
+                    "person",
+                    "horse",
+                ],
+                "object_bank": {
+                    "schema": "kfcore.apache-object-text-bank/1",
+                    "artifact_sha256": c[
+                        "object_embeddings_sha256"
+                    ],
+                    "shape": [2, 512],
+                    "source_dtype": "float16",
+                    "runtime_dtype": "torch.float32",
+                    "object_label_count": 2,
+                    "object_label_order": [
+                        "person",
+                        "horse",
+                    ],
+                    "object_label_order_sha256": h("f"),
+                    "text_dim": 512,
+                },
             }
         },
     }
@@ -288,6 +316,14 @@ class ApacheReleaseQualificationTest(
         self.assertEqual(
             result["text_dim"],
             512,
+        )
+        self.assertEqual(
+            result["object_embeddings_sha256"],
+            h("e"),
+        )
+        self.assertEqual(
+            result["object_embeddings_shape"],
+            [2, 512],
         )
         self.assertEqual(
             result["precision"]["amp_dtype"],
@@ -614,6 +650,54 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "epoch sequence",
+        ):
+            validate_training_run(run)
+
+    def test_object_bank_provenance_is_required_and_bound(self):
+        value = corpus()
+        del value["object_embeddings_sha256"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "object_embeddings_sha256",
+        ):
+            validate_corpus(value)
+
+        run = training()
+        run["apache_reference_objective"][
+            "assets"
+        ]["object_embeddings_sha256"] = h("d")
+        run["apache_reference_objective"][
+            "assets"
+        ]["object_bank"]["artifact_sha256"] = h("d")
+        with self.assertRaisesRegex(
+            ValueError,
+            "object_embeddings_sha256",
+        ):
+            qualify_training_run(
+                corpus(),
+                run,
+            )
+
+        run = training()
+        run["apache_reference_objective"][
+            "assets"
+        ]["object_embeddings_shape"] = [2, 256]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"\[O,512\]",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["apache_reference_objective"][
+            "assets"
+        ]["object_label_order"] = [
+            "horse",
+            "person",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "named object-bank provenance",
         ):
             validate_training_run(run)
 
