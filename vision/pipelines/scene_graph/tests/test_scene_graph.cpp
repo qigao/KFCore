@@ -178,10 +178,23 @@ spec("scene graph production engine")
             engine_options());
 
         image::ImageView image;
-        const auto scene = engine.process(image);
 
+        // ByteTrack exposes the first observation as tentative even when
+        // minimum_consecutive_frames=1. The second consistent observation
+        // receives the persistent track identity.
+        const auto tentative = engine.process(image);
         check(detector_view->calls == std::size_t{1U});
         check(relation_view->infer_calls == std::size_t{1U});
+        check(tentative.objects.detections.size() == std::size_t{2U});
+        check_false(
+            tentative.objects.detections[0].track_id.has_value());
+        check_false(
+            tentative.objects.detections[1].track_id.has_value());
+
+        const auto scene = engine.process(image);
+
+        check(detector_view->calls == std::size_t{2U});
+        check(relation_view->infer_calls == std::size_t{2U});
         check(relation_view->last_regions.size() == std::size_t{2U});
         check(relation_view->last_regions[0].track_id.has_value());
         check(relation_view->last_regions[1].track_id.has_value());
