@@ -1230,6 +1230,38 @@ def qualify_training_run(
         raise ValueError(
             "predicate spatial-flags hash does not match corpus manifest"
         )
+    derivation = corpus[
+        "predicate_spatial_flags_derivation"
+    ]
+    predicate_count = training[
+        "predicate_embedding_shape"
+    ][0]
+    if (
+        derivation["union_predicate_count"]
+        != predicate_count
+    ):
+        raise ValueError(
+            "predicate spatial derivation vocabulary size does not match training"
+        )
+    if (
+        derivation[
+            "spatial_union_predicate_count"
+        ]
+        != routing["spatial_count"]
+    ):
+        raise ValueError(
+            "predicate spatial derivation count does not match routing evidence"
+        )
+    if (
+        predicate_count
+        - derivation[
+            "spatial_union_predicate_count"
+        ]
+        != routing["semantic_count"]
+    ):
+        raise ValueError(
+            "predicate semantic derivation count does not match routing evidence"
+        )
 
     return {
         "schema": QUALIFICATION_SCHEMA,
