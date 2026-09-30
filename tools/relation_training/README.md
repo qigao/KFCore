@@ -1614,6 +1614,27 @@ The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
 
+### Released reference image and pair budgets
+
+A qualified Apache release run is fixed to:
+
+```text
+image_size   = 448
+max_objects  = 40
+geo_budget   = 400
+final_budget = 128
+```
+
+The two-stage Apache sampler always uses the 400-candidate geometry stage. For
+`apache-reference`, KFCore also rejects any final pair budget other than 128
+and any square input size other than 448. Legacy experiments keep their
+historical defaults and may use smaller explicit shapes.
+
+Production ONNX metadata already records image size and final budget from the
+checkpoint; TensorRT profiles derive their fixed image/box dimensions from that
+metadata. Therefore a qualified checkpoint carries these reference dimensions
+through export without a separate hidden default.
+
 ### Released predicate text-space width
 
 The Apache released recipe uses a 512-D predicate text space. For
