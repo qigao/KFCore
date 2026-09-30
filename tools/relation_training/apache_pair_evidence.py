@@ -334,6 +334,45 @@ def contact_box(subject: Tensor, object_: Tensor) -> Tensor:
     )
 
 
+def box_coverage_raster(
+    boxes: Tensor,
+    resolution: int = 32,
+) -> Tensor:
+    """Analytic normalized box coverage on a square region grid.
+
+    boxes: [...,4] normalized cxcywh
+    returns: [...,resolution,resolution] cell-area fractions in [0,1]
+    """
+    if (
+        isinstance(resolution, bool)
+        or not isinstance(resolution, int)
+        or resolution <= 0
+    ):
+        raise ValueError("coverage resolution must be a positive integer")
+    if boxes.ndim < 1 or boxes.shape[-1] != 4:
+        raise ValueError("boxes must end with normalized cxcywh coordinates")
+    xyxy = cxcywh_to_xyxy(boxes)
+    x1, y1, x2, y2 = xyxy.unbind(dim=-1)
+    edges = torch.arange(
+        resolution + 1,
+        device=boxes.device,
+        dtype=boxes.dtype,
+    ) / float(resolution)
+    ix = (
+        torch.minimum(x2.unsqueeze(-1), edges[1:])
+        - torch.maximum(x1.unsqueeze(-1), edges[:-1])
+    ).clamp_min(0.0)
+    iy = (
+        torch.minimum(y2.unsqueeze(-1), edges[1:])
+        - torch.maximum(y1.unsqueeze(-1), edges[:-1])
+    ).clamp_min(0.0)
+    return (
+        iy.unsqueeze(-1)
+        * ix.unsqueeze(-2)
+        * float(resolution * resolution)
+    ).clamp(0.0, 1.0)
+
+
 def coverage_pair_metrics(
     coverage: Tensor,
 ) -> tuple[Tensor, Tensor]:
