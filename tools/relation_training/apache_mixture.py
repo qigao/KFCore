@@ -467,6 +467,7 @@ class DistributedWeightedSampler(Sampler[int]):
         )
         self.seed = int(seed)
         self.epoch = 0
+        self.last_global_indices: torch.Tensor | None = None
 
     def set_epoch(self, epoch: int) -> None:
         if (
@@ -490,6 +491,7 @@ class DistributedWeightedSampler(Sampler[int]):
             replacement=True,
             generator=generator,
         )
+        self.last_global_indices = indices.clone()
         yield from indices[
             self.rank :
             self.total_size :
@@ -526,3 +528,53 @@ def validate_mixture_disjoint_validation(
                     "train/validation image leakage: "
                     + str(path)
                 )
+
+
+
+def realized_source_draws(
+    sampler: DistributedWeightedSampler,
+    source_of_index: np.ndarray,
+    source_count: int,
+) -> dict[str, object]:
+    if sampler.last_global_indices is None:
+        raise ValueError(
+            "sampler has not produced an epoch draw yet"
+        )
+    source = np.asarray(
+        source_of_index,
+        dtype=np.int64,
+    )
+    indices = (
+        sampler.last_global_indices.detach()
+        .cpu()
+        .numpy()
+        .astype(np.int64, copy=False)
+    )
+    if (
+        indices.ndim != 1
+        or indices.size != sampler.total_size
+        or np.any(indices < 0)
+        or np.any(indices >= source.shape[0])
+    ):
+        raise RuntimeError(
+            "sampler recorded invalid global indices"
+        )
+    counts = np.bincount(
+        source[indices],
+        minlength=source_count,
+    )
+    fractions = counts.astype(
+        np.float64
+    ) / float(indices.size)
+    return {
+        "epoch": sampler.epoch,
+        "global_draw_count": int(indices.size),
+        "source_counts": [
+            int(value)
+            for value in counts.tolist()
+        ],
+        "source_fractions": [
+            float(value)
+            for value in fractions.tolist()
+        ],
+    }
