@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import (
     ENCODER_OUTPUT_NAMES,
@@ -42,6 +46,32 @@ class ToyBackbone(BackboneAdapter):
     def forward_taps(self, image: torch.Tensor, taps) -> list[torch.Tensor]:
         base = self.conv(image)
         return [base + float(index) * 0.1 for index, _ in enumerate(taps)]
+
+
+class ReferenceShapeBackbone(BackboneAdapter):
+    hidden_size = 8
+    patch_size = 112
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(
+            3,
+            self.hidden_size,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+            bias=False,
+        )
+
+    def forward_taps(
+        self,
+        image: torch.Tensor,
+        taps,
+    ) -> list[torch.Tensor]:
+        base = self.conv(image)
+        return [
+            base + float(index) * 0.1
+            for index, _ in enumerate(taps)
+        ]
 
 
 class FakeOfficialModel(nn.Module):
@@ -728,6 +758,123 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(
             tuple(output[0].shape),
             (1, 6, 3),
+        )
+
+    def test_released_reference_448_40_128_512_onnx_contract(self):
+        torch.manual_seed(2026)
+        cfg = RelationModelConfig(
+            image_size=448,
+            max_boxes=40,
+            pair_budget=128,
+            hidden_dim=512,
+            geometry_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+            pair_evidence_contract="apache",
+            pair_sampler_contract="apache",
+            relation_context_contract="apache",
+            predicate_head_contract="apache",
+        )
+        model = KFRelationModel(
+            ReferenceShapeBackbone(),
+            torch.randn(3, 512),
+            cfg,
+        )
+        self.assertIsNotNone(
+            model.apache_pair_sampler
+        )
+        assert model.apache_pair_sampler is not None
+        self.assertEqual(
+            model.apache_pair_sampler.geo_budget,
+            RELEASED_GEO_BUDGET,
+        )
+        self.assertEqual(
+            model.apache_pair_sampler.final_budget,
+            RELEASED_FINAL_BUDGET,
+        )
+
+        image = torch.rand(
+            1,
+            3,
+            448,
+            448,
+        )
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        box_tensor[0, :4] = torch.tensor(
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            dtype=torch.float32,
+        )
+        counts = torch.tensor(
+            [4],
+            dtype=torch.int64,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "released-reference.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor,
+                counts,
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor,
+                counts,
+                reference,
+            )
+            self.assertLessEqual(
+                delta,
+                1.0e-3,
+            )
+
+            import onnxruntime as ort
+
+            session = ort.InferenceSession(
+                str(path),
+                providers=["CPUExecutionProvider"],
+            )
+            input_shapes = {
+                item.name: item.shape
+                for item in session.get_inputs()
+            }
+            output_shapes = {
+                item.name: item.shape
+                for item in session.get_outputs()
+            }
+
+        self.assertEqual(
+            input_shapes["image"],
+            [1, 3, 448, 448],
+        )
+        self.assertEqual(
+            input_shapes["boxes"],
+            [1, 40, 4],
+        )
+        self.assertEqual(
+            tuple(reference[0].shape),
+            (1, 128, 3),
+        )
+        self.assertEqual(
+            tuple(reference[1].shape),
+            (1, 128),
+        )
+        self.assertEqual(
+            output_shapes["pred_logits"],
+            [1, 128, 3],
         )
 
     def test_reference_40_box_tensor_contract(self):
