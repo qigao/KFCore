@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Iscene_interaction/include             -Iscene_interaction/src             -Ivision/pipelines/scene_graph/include             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Iesn             scene_interaction/src/scene_features.cpp             scene_interaction/src/interaction.cpp
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Iscene_interaction/include             -Iscene_interaction/src             -Ivision/pipelines/scene_graph/include             -Ivision/core/relation/include             -Ivision/core/yolo/include             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Iesn             scene_interaction/src/scene_features.cpp             scene_interaction/src/interaction.cpp             scene_interaction/src/pipeline.cpp
 
       - name: Build temporal lifecycle tests
         shell: bash
