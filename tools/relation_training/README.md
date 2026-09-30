@@ -1606,7 +1606,7 @@ The command fails unless the run has all of the following:
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
-- matching vocabulary, predicate-embedding and named object-bank hashes;
+- matching vocabulary, predicate-embedding, named object-bank and derived spatial-routing hashes;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
 - 12 complete epochs;
@@ -1677,6 +1677,31 @@ CPU tests may exercise the BF16 autocast software path, but a released-run
 qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
+
+### Released spatial routing derivation
+
+The Apache dual-vocabulary routing gate is warm-started from a data-derived
+spatial/semantic flag for every predicate. The released rule is computed from
+the original relation packs, not guessed from predicate strings:
+
+```text
+spatial_bit = rels[:,3] & 1
+per source + predicate:
+  spatial = spatial_count >= 0.5 * relation_count
+union:
+  spatial if ANY supported source marks the predicate spatial
+```
+
+KFCore materializes the existing `kfcore.predicate-spatial-flags/1` sidecar
+with `apache_spatial_flags.py`. Derivation evidence records every source
+pack's `meta.json` and `rels.npy` SHA-256, the exact `>= 0.5` rule, local
+support counts and the emitted sidecar SHA-256. Local predicate order is mapped
+by name into the union vocabulary; predicates with no support remain semantic.
+
+Full-reference qualification binds the training warm-start's
+`spatial_flags_sha256` to this derivation and cross-checks the derived
+spatial/semantic counts against the predicate-bank row count. An arbitrary
+hand-authored sidecar cannot qualify as the released routing input.
 
 ### Released object text bank
 
