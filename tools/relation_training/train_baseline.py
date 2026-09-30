@@ -24,6 +24,33 @@ from apache_mixture import (
     validate_mixture_disjoint_validation,
 )
 from apache_multiscale import scale_ladder
+from apache_release_scalars import (
+    RELEASED_BACKBONE_LR,
+    RELEASED_BG_TOPK,
+    RELEASED_BOX_TOKEN_DROPOUT,
+    RELEASED_CFA_ALPHA,
+    RELEASED_CFA_PROB,
+    RELEASED_CLIP_GRAD,
+    RELEASED_CONTEXT_DROPOUT,
+    RELEASED_HARD_FRAC,
+    RELEASED_HEAD_LR,
+    RELEASED_INFONCE_TEMP,
+    RELEASED_LAMBDA_BG,
+    RELEASED_LAMBDA_GEO,
+    RELEASED_LAMBDA_OBJ,
+    RELEASED_LAMBDA_REL,
+    RELEASED_LAMBDA_SIGMOID,
+    RELEASED_LAMBDA_SWAP,
+    RELEASED_MIN_LR_FACTOR,
+    RELEASED_MULTI_SCALE,
+    RELEASED_MULTI_SCALE_N,
+    RELEASED_N_NEG,
+    RELEASED_PAIR_NEGATIVE_FLOOR,
+    RELEASED_SWAP_MARGIN,
+    RELEASED_WARMUP_STEPS,
+    RELEASED_WEIGHT_DECAY,
+    validate_released_scalar_contract,
+)
 from apache_pair_sampler import (
     PairOpportunityTable,
     RELEASED_FINAL_BUDGET,
@@ -276,12 +303,12 @@ def main() -> None:
     parser.add_argument(
         "--apache-context-dropout",
         type=float,
-        default=0.2,
+        default=RELEASED_CONTEXT_DROPOUT,
     )
     parser.add_argument(
         "--apache-box-token-dropout",
         type=float,
-        default=0.3,
+        default=RELEASED_BOX_TOKEN_DROPOUT,
     )
     parser.add_argument(
         "--training-recipe",
@@ -313,12 +340,36 @@ def main() -> None:
         ),
     )
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
-    parser.add_argument("--weight-decay", type=float, default=1.0e-4)
-    parser.add_argument("--apache-head-lr", type=float, default=4.0e-4)
-    parser.add_argument("--apache-backbone-lr", type=float, default=5.0e-5)
-    parser.add_argument("--apache-warmup-steps", type=int, default=500)
-    parser.add_argument("--apache-min-lr-factor", type=float, default=0.01)
-    parser.add_argument("--apache-clip-grad", type=float, default=1.0)
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=RELEASED_WEIGHT_DECAY,
+    )
+    parser.add_argument(
+        "--apache-head-lr",
+        type=float,
+        default=RELEASED_HEAD_LR,
+    )
+    parser.add_argument(
+        "--apache-backbone-lr",
+        type=float,
+        default=RELEASED_BACKBONE_LR,
+    )
+    parser.add_argument(
+        "--apache-warmup-steps",
+        type=int,
+        default=RELEASED_WARMUP_STEPS,
+    )
+    parser.add_argument(
+        "--apache-min-lr-factor",
+        type=float,
+        default=RELEASED_MIN_LR_FACTOR,
+    )
+    parser.add_argument(
+        "--apache-clip-grad",
+        type=float,
+        default=RELEASED_CLIP_GRAD,
+    )
     parser.add_argument(
         "--apache-grad-accum",
         type=int,
@@ -330,7 +381,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--apache-multi-scale",
-        default="0.5,1.5",
+        default=RELEASED_MULTI_SCALE,
         help=(
             "Apache per-batch square scale range relative to --image-size; "
             "empty string disables multi-scale."
@@ -339,17 +390,17 @@ def main() -> None:
     parser.add_argument(
         "--apache-multi-scale-n",
         type=int,
-        default=7,
+        default=RELEASED_MULTI_SCALE_N,
     )
     parser.add_argument(
         "--apache-cfa-prob",
         type=float,
-        default=0.5,
+        default=RELEASED_CFA_PROB,
     )
     parser.add_argument(
         "--apache-cfa-alpha",
         type=float,
-        default=1.0,
+        default=RELEASED_CFA_ALPHA,
     )
     parser.add_argument("--sampler-loss-weight", type=float, default=1.0)
     parser.add_argument("--pair-loss-weight", type=float, default=1.0)
@@ -368,7 +419,7 @@ def main() -> None:
     parser.add_argument(
         "--predicate-contrastive-temperature",
         type=float,
-        default=0.07,
+        default=RELEASED_INFONCE_TEMP,
     )
     parser.add_argument(
         "--predicate-contrastive-hard-negative-count",
@@ -467,17 +518,61 @@ def main() -> None:
             "for apache-reference relatedness/background PU weighting."
         ),
     )
-    parser.add_argument("--apache-n-neg", type=int, default=512)
-    parser.add_argument("--apache-hard-frac", type=float, default=0.5)
-    parser.add_argument("--apache-lambda-obj", type=float, default=0.10)
-    parser.add_argument("--apache-lambda-swap", type=float, default=0.50)
-    parser.add_argument("--apache-lambda-sigmoid", type=float, default=0.25)
-    parser.add_argument("--apache-lambda-bg", type=float, default=0.05)
-    parser.add_argument("--apache-lambda-geo", type=float, default=1.0)
-    parser.add_argument("--apache-lambda-rel", type=float, default=1.0)
-    parser.add_argument("--apache-bg-topk", type=int, default=5)
-    parser.add_argument("--apache-swap-margin", type=float, default=0.05)
-    parser.add_argument("--apache-pair-negative-floor", type=float, default=0.30)
+    parser.add_argument(
+        "--apache-n-neg",
+        type=int,
+        default=RELEASED_N_NEG,
+    )
+    parser.add_argument(
+        "--apache-hard-frac",
+        type=float,
+        default=RELEASED_HARD_FRAC,
+    )
+    parser.add_argument(
+        "--apache-lambda-obj",
+        type=float,
+        default=RELEASED_LAMBDA_OBJ,
+    )
+    parser.add_argument(
+        "--apache-lambda-swap",
+        type=float,
+        default=RELEASED_LAMBDA_SWAP,
+    )
+    parser.add_argument(
+        "--apache-lambda-sigmoid",
+        type=float,
+        default=RELEASED_LAMBDA_SIGMOID,
+    )
+    parser.add_argument(
+        "--apache-lambda-bg",
+        type=float,
+        default=RELEASED_LAMBDA_BG,
+    )
+    parser.add_argument(
+        "--apache-lambda-geo",
+        type=float,
+        default=RELEASED_LAMBDA_GEO,
+    )
+    parser.add_argument(
+        "--apache-lambda-rel",
+        type=float,
+        default=RELEASED_LAMBDA_REL,
+    )
+    parser.add_argument(
+        "--apache-bg-topk",
+        type=int,
+        default=RELEASED_BG_TOPK,
+    )
+    parser.add_argument(
+        "--apache-swap-margin",
+        type=float,
+        default=RELEASED_SWAP_MARGIN,
+    )
+    parser.add_argument(
+        "--apache-pair-negative-floor",
+        type=float,
+        default=RELEASED_PAIR_NEGATIVE_FLOOR,
+    )
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument(
@@ -740,6 +835,26 @@ def main() -> None:
         if apache_mode
         else None
     )
+
+    reference_scalar_contract = None
+    if reference_training:
+        assert apache_objective_config is not None
+        reference_scalar_contract = validate_released_scalar_contract(
+            {
+                "head_lr": args.apache_head_lr,
+                "backbone_lr": args.apache_backbone_lr,
+                "weight_decay": args.weight_decay,
+                "warmup_steps": args.apache_warmup_steps,
+                "min_lr_factor": args.apache_min_lr_factor,
+                "clip_grad": args.apache_clip_grad,
+                "multi_scale": args.apache_multi_scale,
+                "multi_scale_n": args.apache_multi_scale_n,
+                "cfa_prob": args.apache_cfa_prob,
+                "cfa_alpha": args.apache_cfa_alpha,
+            },
+            model_config.__dict__,
+            apache_objective_config.__dict__,
+        )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
         pair_weight=args.pair_weight,
@@ -1533,6 +1648,7 @@ def main() -> None:
                 "ema": ema_report,
                 "augmentation": augmentation_report,
                 "sampler_budget": reference_sampler_report,
+                "scalar_contract": reference_scalar_contract,
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
@@ -1639,6 +1755,7 @@ def main() -> None:
             "ema": ema_report,
             "augmentation": augmentation_report,
             "sampler_budget": reference_sampler_report,
+            "scalar_contract": reference_scalar_contract,
             "source_mixture": mixture_report,
         },
         "device": str(device),
