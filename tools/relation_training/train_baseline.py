@@ -32,6 +32,8 @@ from apache_pair_sampler import (
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
+    RELEASED_AMP,
+    RELEASED_AMP_DTYPE,
     RELEASED_EMA_DECAY,
     RELEASED_PHOTOMETRIC_AUGMENT,
     backbone_provenance,
@@ -1034,6 +1036,33 @@ def main() -> None:
     device = resolve_device(args.device)
     model.to(device)
 
+    precision_report = {
+        "amp_requested": bool(
+            RELEASED_AMP
+            if reference_training
+            else False
+        ),
+        "amp_dtype": (
+            RELEASED_AMP_DTYPE
+            if reference_training
+            else "fp32"
+        ),
+        "autocast_device_type": (
+            device.type
+            if reference_training
+            else None
+        ),
+        "autocast_executed": bool(
+            reference_training
+            and device.type in {"cuda", "cpu"}
+        ),
+        "grad_scaler": False,
+        "released_cuda_execution": bool(
+            reference_training
+            and device.type == "cuda"
+        ),
+    }
+
     backbone_provenance_initial = backbone_provenance(
         model,
         model_name=args.backbone,
@@ -1308,6 +1337,8 @@ def main() -> None:
             image_size=resolved_image_size,
             geo_budget=RELEASED_GEO_BUDGET,
             final_budget=resolved_pair_budget,
+            amp=RELEASED_AMP,
+            amp_dtype=RELEASED_AMP_DTYPE,
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
@@ -1401,6 +1432,11 @@ def main() -> None:
                 else 1
             ),
             ema=ema,
+            amp_enabled=(
+                reference_training
+                and precision_report["autocast_executed"]
+            ),
+            amp_dtype=torch.bfloat16,
         )
         epoch_report: dict[str, object] = {
             "epoch": epoch,
@@ -1532,6 +1568,7 @@ def main() -> None:
                 "weight_source": artifact_weight_source,
                 "ema": ema_report,
                 "augmentation": augmentation_report,
+                "precision": precision_report,
                 "sampler_budget": reference_sampler_report,
                 "source_mixture": mixture_report,
             },
@@ -1638,6 +1675,7 @@ def main() -> None:
             "weight_source": artifact_weight_source,
             "ema": ema_report,
             "augmentation": augmentation_report,
+            "precision": precision_report,
             "sampler_budget": reference_sampler_report,
             "source_mixture": mixture_report,
         },

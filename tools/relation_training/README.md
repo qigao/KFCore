@@ -1599,6 +1599,7 @@ The command fails unless the run has all of the following:
 - the released `geo_budget=400 -> final_budget=128` pair sampler;
 - the released `d_model=512` relation-head width;
 - the released `text_dim=512` predicate/query space;
+- CUDA BF16 AMP execution (`amp=true`, `amp_dtype=bf16`, no GradScaler);
 - the last Apache-2.0 source reference
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;
@@ -1636,6 +1637,26 @@ The 400/128 evidence is read from the constructed
 synthetic ONNX/ORT gate uses a tiny large-patch backbone to exercise the exact
 external shape without making a real DINOv3 448 export part of every CI run.
 Legacy and diagnostic runs may still choose smaller shapes.
+
+### Released precision contract
+
+The released Apache training recipe uses CUDA automatic mixed precision with
+BF16:
+
+```text
+amp = true
+amp_dtype = bf16
+GradScaler = disabled
+```
+
+KFCore wraps the relation-model forward and the Apache objective computation in
+the same BF16 autocast context. Backward, gradient clipping, optimizer update,
+scheduler update, and EMA update then follow without FP16 loss scaling.
+
+CPU tests may exercise the BF16 autocast software path, but a released-run
+qualification is accepted only when the recorded training device is CUDA and
+CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
+for development but cannot be labeled a released training reproduction.
 
 ### Released text-space width
 
