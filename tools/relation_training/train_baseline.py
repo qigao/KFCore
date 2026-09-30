@@ -1054,6 +1054,31 @@ def main() -> None:
             apache_pair_opportunity.num_cats,
         )
 
+    reference_sampler_report = None
+    if reference_training:
+        if model.apache_pair_sampler is None:
+            raise RuntimeError(
+                "apache-reference requires the Apache pair sampler"
+            )
+        reference_sampler_report = {
+            "geo_budget": int(
+                model.apache_pair_sampler.geo_budget
+            ),
+            "final_budget": int(
+                model.apache_pair_sampler.final_budget
+            ),
+        }
+        reference_sampler_report["matches_released"] = (
+            reference_sampler_report["geo_budget"]
+            == RELEASED_GEO_BUDGET
+            and reference_sampler_report["final_budget"]
+            == RELEASED_FINAL_BUDGET
+        )
+        if not reference_sampler_report["matches_released"]:
+            raise RuntimeError(
+                "Apache pair sampler budget differs from released 400->128 contract"
+            )
+
     routing_warm_start = None
     if args.predicate_head_contract == "apache":
         spatial_flags = load_predicate_spatial_flags(
@@ -1507,6 +1532,7 @@ def main() -> None:
                 "weight_source": artifact_weight_source,
                 "ema": ema_report,
                 "augmentation": augmentation_report,
+                "sampler_budget": reference_sampler_report,
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
@@ -1612,6 +1638,7 @@ def main() -> None:
             "weight_source": artifact_weight_source,
             "ema": ema_report,
             "augmentation": augmentation_report,
+            "sampler_budget": reference_sampler_report,
             "source_mixture": mixture_report,
         },
         "device": str(device),
