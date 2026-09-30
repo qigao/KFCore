@@ -22,6 +22,11 @@ from apache_spatial_flags import (
     MAJORITY_THRESHOLD,
     SPATIAL_BIT,
 )
+from apache_source_allow import (
+    DERIVATION_ALGORITHM as SOURCE_ALLOW_DERIVATION_ALGORITHM,
+    DERIVATION_SCHEMA as SOURCE_ALLOW_DERIVATION_SCHEMA,
+    RELEASED_RESTRICTED_SOURCES,
+)
 from apache_training_recipe import (
     RELEASED_AMP,
     RELEASED_AMP_DTYPE,
@@ -378,6 +383,171 @@ def _validate_spatial_derivation(
     }
 
 
+def _validate_source_allow_derivation(
+    payload: object,
+    *,
+    sidecar_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "source-column derivation must be an object"
+        )
+    if (
+        payload.get("schema")
+        != SOURCE_ALLOW_DERIVATION_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported source-column derivation schema"
+        )
+    if (
+        payload.get("algorithm")
+        != SOURCE_ALLOW_DERIVATION_ALGORITHM
+    ):
+        raise ValueError(
+            "source-column derivation algorithm differs from Apache"
+        )
+    restricted = payload.get(
+        "restricted_sources"
+    )
+    if restricted != list(
+        RELEASED_RESTRICTED_SOURCES
+    ):
+        raise ValueError(
+            "released source-column derivation must restrict only hicodet"
+        )
+    union_count = _require_positive_int(
+        payload.get(
+            "union_predicate_count"
+        ),
+        "source-column union_predicate_count",
+    )
+    derived_sha = require_sha256(
+        payload.get("sidecar_sha256"),
+        "source-column sidecar_sha256",
+    )
+    if derived_sha != sidecar_sha256:
+        raise ValueError(
+            "source-column derivation sidecar hash does not match corpus"
+        )
+
+    sources = payload.get("sources")
+    if (
+        not isinstance(sources, list)
+        or len(sources)
+        != len(RELEASED_SOURCE_NAMES)
+    ):
+        raise ValueError(
+            "source-column derivation must describe all released sources"
+        )
+    normalized_sources: list[
+        dict[str, Any]
+    ] = []
+    names: list[str] = []
+    for index, source in enumerate(
+        sources
+    ):
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"source-column source {index} must be an object"
+            )
+        name = require_non_empty_string(
+            source.get("source_name"),
+            f"source-column source {index} name",
+        )
+        names.append(name)
+        local_count = _require_positive_int(
+            source.get(
+                "local_predicate_count"
+            ),
+            f"{name} local_predicate_count",
+        )
+        allowed_count = _require_positive_int(
+            source.get(
+                "allowed_predicate_count"
+            ),
+            f"{name} allowed_predicate_count",
+        )
+        if allowed_count > union_count:
+            raise ValueError(
+                f"{name} allowed predicate count exceeds union vocabulary"
+            )
+        expected_restricted = (
+            name
+            in RELEASED_RESTRICTED_SOURCES
+        )
+        if (
+            source.get("restricted")
+            is not expected_restricted
+        ):
+            raise ValueError(
+                f"{name} restricted-source evidence differs from release"
+            )
+        if (
+            not expected_restricted
+            and allowed_count
+            != union_count
+        ):
+            raise ValueError(
+                f"{name} unrestricted source must allow every union predicate"
+            )
+        ignored = source.get(
+            "ignored_predicates"
+        )
+        if (
+            not isinstance(ignored, list)
+            or any(
+                not isinstance(value, str)
+                or not value
+                for value in ignored
+            )
+        ):
+            raise ValueError(
+                f"{name} ignored_predicates must be strings"
+            )
+        normalized_sources.append(
+            {
+                "source_name": name,
+                "pack_split": require_non_empty_string(
+                    source.get("pack_split"),
+                    f"{name} pack_split",
+                ),
+                "meta_sha256": require_sha256(
+                    source.get("meta_sha256"),
+                    f"{name} meta_sha256",
+                ),
+                "local_predicate_count": (
+                    local_count
+                ),
+                "restricted": (
+                    expected_restricted
+                ),
+                "allowed_predicate_count": (
+                    allowed_count
+                ),
+                "ignored_predicates": list(
+                    ignored
+                ),
+            }
+        )
+    if tuple(names) != RELEASED_SOURCE_NAMES:
+        raise ValueError(
+            "source-column derivation source order differs from release"
+        )
+
+    return {
+        "schema": SOURCE_ALLOW_DERIVATION_SCHEMA,
+        "algorithm": SOURCE_ALLOW_DERIVATION_ALGORITHM,
+        "restricted_sources": list(
+            RELEASED_RESTRICTED_SOURCES
+        ),
+        "union_predicate_count": (
+            union_count
+        ),
+        "sources": normalized_sources,
+        "sidecar_sha256": derived_sha,
+    }
+
+
 def validate_corpus(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
@@ -521,6 +691,16 @@ def validate_corpus(
         ),
         sidecar_sha256=normalized_payload[
             "predicate_spatial_flags_sha256"
+        ],
+    )
+    normalized_payload[
+        "source_column_allow_derivation"
+    ] = _validate_source_allow_derivation(
+        payload.get(
+            "source_column_allow_derivation"
+        ),
+        sidecar_sha256=normalized_payload[
+            "source_column_allow_sha256"
         ],
     )
     return normalized_payload
@@ -972,6 +1152,13 @@ def validate_training_run(
             key,
         )
 
+    if assets.get("source_names") != list(
+        RELEASED_SOURCE_NAMES
+    ):
+        raise ValueError(
+            "released source-column table source order differs from release"
+        )
+
     object_shape = assets.get(
         "object_embeddings_shape"
     )
@@ -1317,6 +1504,12 @@ def qualify_training_run(
         ],
         "predicate_spatial_flags_derivation": corpus[
             "predicate_spatial_flags_derivation"
+        ],
+        "source_column_allow_sha256": corpus[
+            "source_column_allow_sha256"
+        ],
+        "source_column_allow_derivation": corpus[
+            "source_column_allow_derivation"
         ],
         "precision": training[
             "training_recipe"
