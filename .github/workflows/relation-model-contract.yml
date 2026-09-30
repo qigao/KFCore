@@ -286,6 +286,7 @@ jobs:
             --filename "$DINOV3_FILENAME" \
             --model "$DINOV3_MODEL" \
             --image-size 224 \
+            --max-boxes 40 \
             --pair-evidence-contract apache \
             --pair-sampler-contract apache \
             --relation-context-contract apache \
