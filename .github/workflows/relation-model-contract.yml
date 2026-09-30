@@ -1,6 +1,13 @@
 name: DINO relation model contract
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/relation_training/**'
+      - 'THIRD_PARTY_NOTICES.md'
+      - '.github/workflows/relation-model-contract.yml'
+      - '.github/workflows/real-dinov3-relation-smoke.yml'
   pull_request:
     branches: [master]
     paths:
