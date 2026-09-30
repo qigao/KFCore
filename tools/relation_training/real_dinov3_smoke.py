@@ -21,6 +21,7 @@ from export_onnx import (
     export_encoder_graph,
     export_graph,
 )
+from apache_pair_evidence import box_coverage_raster
 from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 
 
@@ -164,6 +165,46 @@ def main() -> None:
     with torch.inference_mode():
         outputs = model(image, boxes, box_counts)
     pred_logits, pair_logits, sub_idx, obj_idx, valid_mask = outputs
+
+    mask_contract = None
+    if args.pair_evidence_contract == "apache":
+        box_cov = box_coverage_raster(
+            boxes,
+            resolution=32,
+        )
+        box_fill = torch.ones(
+            boxes.shape[:2],
+            dtype=boxes.dtype,
+        )
+        with torch.inference_mode():
+            boxed_outputs = model(
+                image,
+                boxes,
+                box_counts,
+                coverage=box_cov,
+                fill=box_fill,
+            )
+        max_delta = 0.0
+        for plain, boxed in zip(outputs, boxed_outputs):
+            if plain.dtype == torch.bool or not plain.dtype.is_floating_point:
+                if not torch.equal(plain, boxed):
+                    raise RuntimeError(
+                        "box-raster mask contract changed discrete relation outputs"
+                    )
+            else:
+                delta = float(
+                    (plain - boxed).abs().max().item()
+                )
+                max_delta = max(max_delta, delta)
+                if delta > 2.0e-4:
+                    raise RuntimeError(
+                        "box-raster mask contract diverged from boxes-only path: "
+                        f"{delta}"
+                    )
+        mask_contract = {
+            "box_raster_resolution": 32,
+            "box_raster_max_abs_delta": max_delta,
+        }
 
     expected_shapes = [
         (1, config.pair_budget, len(predicate_names)),
