@@ -1600,6 +1600,7 @@ The command fails unless the run has all of the following:
 - the released `d_model=512` relation-head width;
 - the released `text_dim=512` predicate/query space;
 - CUDA BF16 AMP execution (`amp=true`, `amp_dtype=bf16`, no GradScaler);
+- exact released scalar hyperparameter and hard-coded structure contracts;
 - the last Apache-2.0 source reference
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;
@@ -1637,6 +1638,25 @@ The 400/128 evidence is read from the constructed
 synthetic ONNX/ORT gate uses a tiny large-patch backbone to exercise the exact
 external shape without making a real DINOv3 448 export part of every CI run.
 Legacy and diagnostic runs may still choose smaller shapes.
+
+### Released scalar hyperparameter contract
+
+`apache-reference` treats the released scalar values as a contract, not merely
+defaults. Training fails before the expensive run starts if any mutable
+optimizer, regularization, model, or objective scalar drifts.
+
+Pinned values include head/backbone LR, weight decay, warmup/cosine floor,
+gradient clipping, multi-scale range/rungs, CFA, context/box-token dropout,
+pair-negative floor, InfoNCE temperature/negative sampling, all released
+`lambda_*` terms, background top-k, and swap margin.
+
+The same canonical validator is run again by released-run qualification.
+Training evidence stores both the resolved scalar report and a hard-coded
+structure report. The structure report covers the 2+2 relation context, 2+1
+interaction stack, 8-head attention, 2× FFN width, deformable 4/8/2 contract,
+16/7 positional encoding, two-layer vocabulary projection, and initial logit
+scale 5. Legacy and focused diagnostic fixtures remain free to use alternate
+values; they simply cannot claim the Apache released contract.
 
 ### Released precision contract
 
