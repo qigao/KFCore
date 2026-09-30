@@ -138,23 +138,164 @@ static void test_linear_workspace_contract(void)
                KFCORE_KALMAN_INVALID_ARGUMENT);
 }
 
+static int ekf_identity_transition(float* x_pred, float* Phi, const float* x, int n, void* user)
+{
+    if (user && *(const int*)user != 0)
+    {
+        return -1;
+    }
+    memcpy(x_pred, x, sizeof(float) * (size_t)n);
+    fill_identity(Phi, (size_t)n);
+    return 0;
+}
+
+static int ekf_counting_transition(float* x_pred, float* Phi, const float* x,
+                                   int n, void* user)
+{
+    int* calls = (int*)user;
+    ++(*calls);
+    memcpy(x_pred, x, sizeof(float) * (size_t)n);
+    fill_identity(Phi, (size_t)n);
+    return 0;
+}
+
+static int ekf_identity_measurement(float* z_pred, float* Ht, const float* x,
+                                    int n, int m, void* user)
+{
+    if (user && *(const int*)user != 0)
+    {
+        return -1;
+    }
+    memset(Ht, 0, sizeof(float) * (size_t)n * (size_t)m);
+    for (int i = 0; i < m; ++i)
+    {
+        z_pred[i] = x[i];
+        Ht[(size_t)i + (size_t)i * (size_t)n] = 1.0f;
+    }
+    return 0;
+}
+
+static void test_ekf_workspace_contract(void)
+{
+    enum { N = 40, M = 5 };
+    float x[N];
+    float P[N * N];
+    float U[N * N];
+    float d[N];
+    float z[M];
+    float R[M * M];
+    float workspace[4096];
+    float tiny[1] = { 0.0f };
+    size_t required = 0U;
+
+    fill_identity(P, N);
+    fill_identity(U, N);
+    fill_identity(R, M);
+    for (size_t i = 0U; i < N; ++i)
+    {
+        x[i] = (float)i;
+        d[i] = 1.0f;
+    }
+    for (size_t i = 0U; i < M; ++i)
+    {
+        z[i] = x[i];
+    }
+
+    expect_int("EKF Takasu predict query",
+               kalman_ekf_takasu_predict_workspace_floats(N, 0, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("EKF Takasu predict size", (int)required, 2 * N + 2 * N * N);
+    expect_int("EKF Takasu predict n>32",
+               kalman_ekf_takasu_predict(
+                   x, P, ekf_identity_transition, NULL, NULL, N, 0, NULL,
+                   workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    expect_int("EKF Takasu update query",
+               kalman_ekf_takasu_update_workspace_floats(N, M, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("EKF Takasu update size", (int)required,
+               3 * M + 2 * N * M + M * M);
+    expect_int("EKF Takasu update n>32 m>3",
+               kalman_ekf_takasu_update(
+                   x, P, z, R, ekf_identity_measurement, N, M,
+                   0.0f, NULL, NULL, workspace,
+                   sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    expect_int("EKF UDU predict query",
+               kalman_ekf_udu_predict_workspace_floats(N, 0, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("EKF UDU predict size", (int)required, 3 * N + 2 * N * N);
+    expect_int("EKF UDU predict n>32",
+               kalman_ekf_udu_predict(
+                   x, U, d, ekf_identity_transition, NULL, NULL, N, 0, NULL,
+                   workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    expect_int("EKF UDU update query",
+               kalman_ekf_udu_update_workspace_floats(N, M, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("EKF UDU update size", (int)required,
+               2 * M + N * M + M * M + 2 * N);
+    expect_int("EKF UDU update n>32 m>3",
+               kalman_ekf_udu_update(
+                   x, U, d, z, R, ekf_identity_measurement, N, M,
+                   0.0f, 0, NULL, workspace,
+                   sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    {
+        int callback_calls = 0;
+        expect_int("EKF invalid process-noise arguments",
+                   kalman_ekf_takasu_predict(
+                       x, P, ekf_counting_transition, NULL, NULL, N, 1,
+                       &callback_calls, workspace,
+                       sizeof(workspace) / sizeof(workspace[0])),
+                   KFCORE_KALMAN_INVALID_ARGUMENT);
+        expect_int("EKF invalid arguments skip callback", callback_calls, 0);
+    }
+
+    {
+        int callback_failure = 1;
+        float before_x = x[0];
+        float before_p = P[0];
+
+        expect_int("EKF callback failure status",
+                   kalman_ekf_takasu_predict(
+                       x, P, ekf_identity_transition, NULL, NULL, N, 0,
+                       &callback_failure, workspace,
+                       sizeof(workspace) / sizeof(workspace[0])),
+                   KFCORE_KALMAN_CALLBACK_FAILURE);
+        expect_float("EKF callback failure preserves state", x[0], before_x);
+        expect_float("EKF callback failure preserves covariance", P[0], before_p);
+    }
+
+    {
+        float before_x = x[0];
+        float before_p = P[0];
+
+        expect_int("EKF undersized workspace",
+                   kalman_ekf_takasu_update(
+                       x, P, z, R, ekf_identity_measurement, N, M,
+                       0.0f, NULL, NULL, tiny, 1),
+                   KFCORE_KALMAN_WORKSPACE_TOO_SMALL);
+        expect_float("EKF workspace failure preserves state", x[0], before_x);
+        expect_float("EKF workspace failure preserves covariance", P[0], before_p);
+    }
+
+    expect_int("EKF invalid zero state query",
+               kalman_ekf_takasu_predict_workspace_floats(0, 0, &required),
+               KFCORE_KALMAN_INVALID_ARGUMENT);
+}
+
 static void test_remaining_fixed_wrappers(void)
 {
     float x[1] = { 7.0f };
     float P[1] = { 9.0f };
-    float U[1] = { 1.0f };
-    float d[1] = { 2.0f };
     float z[1] = { 0.0f };
     float R[1] = { 1.0f };
 
-    expect_int("ekf Takasu state overflow",
-               kalman_ekf_takasu_predict(x, P, NULL, NULL, NULL, 33, 0, NULL), -1);
-    expect_int("ekf Takasu measurement overflow",
-               kalman_ekf_takasu_update(x, P, z, R, NULL, 1, 4, 0.0f, NULL, NULL), -1);
-    expect_int("ekf UDU state overflow",
-               kalman_ekf_udu_predict(x, U, d, NULL, NULL, NULL, 33, 0, NULL), -1);
-    expect_int("ekf UDU measurement overflow",
-               kalman_ekf_udu_update(x, U, d, z, R, NULL, 1, 4, 0.0f, 0, NULL), -1);
     expect_int("ukf state overflow", kalman_ukf_predict(x, P, NULL, NULL, 33, NULL, NULL), -1);
     expect_int("ukf measurement overflow",
                kalman_ukf_update(x, P, z, R, NULL, 1, 4, NULL, 0.0f, NULL, NULL), -1);
@@ -164,6 +305,7 @@ int main(void)
 {
     test_udu_pivots();
     test_linear_workspace_contract();
+    test_ekf_workspace_contract();
     test_remaining_fixed_wrappers();
 
     if (failures != 0)
