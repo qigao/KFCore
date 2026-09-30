@@ -150,8 +150,10 @@ def _load_pack_flags(
     )
     report = {
         "source_name": source_name,
-        "pack_split": str(
-            split_dir.resolve()
+        "pack_split": (
+            f"{source_name}/train"
+            if split_dir.name == "train"
+            else source_name
         ),
         "meta_sha256": sha256_file(
             meta_path
