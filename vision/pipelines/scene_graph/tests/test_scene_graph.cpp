@@ -29,6 +29,7 @@ relation::RelationFrame relation_frame()
     relation::RelationFrame frame;
     frame.image_width = 640;
     frame.image_height = 480;
+    frame.vocabulary_version = 7U;
     frame.edges = {
         {0U, 1U, 3U, 0.91F, std::uint64_t{101}, std::nullopt},
     };
@@ -65,6 +66,7 @@ spec("scene graph pipeline composition")
               scene.objects.detections[0].track_id);
         check(scene.relations.edges[0].object_track_id ==
               scene.objects.detections[1].track_id);
+        check(scene.relations.vocabulary_version == std::uint64_t{7});
     }
 
     it("rejects relation frames from a different image geometry")
