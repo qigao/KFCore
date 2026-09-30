@@ -22,6 +22,7 @@ from apache_pair_evidence import (
     RelGeomEncoder as ApacheRelGeomEncoder,
     SoftSpatialPool as ApacheSoftSpatialPool,
     contact_box as apache_contact_box,
+    coverage_pair_metrics as apache_coverage_pair_metrics,
     cxcywh_to_xyxy as apache_cxcywh_to_xyxy,
     union_box as apache_union_box,
 )
@@ -1467,6 +1468,10 @@ class KFRelationModel(nn.Module):
         object_index: Tensor,
         selected_valid: Tensor,
         region_features: Tensor | None = None,
+        coverage_grid: Tensor | None = None,
+        fill: Tensor | None = None,
+        region_iou: Tensor | None = None,
+        region_contact: Tensor | None = None,
         cfa_predicate_labels: Tensor | None = None,
     ) -> ApachePairEvidenceOutputs:
         if (
@@ -1483,6 +1488,7 @@ class KFRelationModel(nn.Module):
             region_features = self.apache_spatial_pool(
                 patch_features,
                 boxes,
+                coverage=coverage_grid,
             )
             region_features = (
                 region_features
@@ -1514,20 +1520,83 @@ class KFRelationModel(nn.Module):
             object_boxes,
         )
 
+        pool_coverage = None
+        if coverage_grid is not None:
+            subject_coverage = _batch_gather(
+                coverage_grid,
+                subject_index,
+            )
+            object_coverage = _batch_gather(
+                coverage_grid,
+                object_index,
+            )
+            union_coverage = torch.maximum(
+                subject_coverage,
+                object_coverage,
+            )
+            contact_coverage = union_coverage.new_full(
+                union_coverage.shape,
+                1.0 - 1.0e-4,
+            )
+            pool_coverage = torch.cat(
+                (union_coverage, contact_coverage),
+                dim=1,
+            )
+
         pooled = self.apache_spatial_pool(
             patch_features,
             torch.cat(
                 (union_boxes, contact_boxes),
                 dim=1,
             ),
+            coverage=pool_coverage,
         )
         pair_count = subject_index.shape[1]
         union_features = pooled[:, :pair_count]
         contact_features = pooled[:, pair_count:]
 
+        region_metrics = None
+        if coverage_grid is not None:
+            if (
+                fill is None
+                or region_iou is None
+                or region_contact is None
+            ):
+                raise ValueError(
+                    "mask-aware Apache pair evidence requires fill/iou/contact"
+                )
+            batch_index = torch.arange(
+                boxes.shape[0],
+                device=boxes.device,
+                dtype=torch.int64,
+            ).unsqueeze(1).expand_as(subject_index)
+            region_metrics = (
+                torch.gather(
+                    fill,
+                    1,
+                    subject_index,
+                ),
+                torch.gather(
+                    fill,
+                    1,
+                    object_index,
+                ),
+                region_iou[
+                    batch_index,
+                    subject_index,
+                    object_index,
+                ],
+                region_contact[
+                    batch_index,
+                    subject_index,
+                    object_index,
+                ],
+            )
+
         geometry_features = self.apache_geometry_encoder(
             subject_boxes,
             object_boxes,
+            region_metrics,
         )
 
         valid_float = selected_valid.to(
@@ -1626,6 +1695,8 @@ class KFRelationModel(nn.Module):
         pair_targets: Tensor | None = None,
         cfa_predicate_labels: Tensor | None = None,
         entity_labels: Tensor | None = None,
+        coverage: Tensor | None = None,
+        fill: Tensor | None = None,
     ) -> tuple[
         tuple[Tensor, ...],
         Tensor,
@@ -1674,6 +1745,14 @@ class KFRelationModel(nn.Module):
             raise ValueError("box_counts must be [B]")
         if boxes.shape[0] != image.shape[0]:
             raise ValueError("image and boxes batch sizes must match")
+        if coverage is not None and self.config.pair_evidence_contract != "apache":
+            raise ValueError(
+                "region coverage is supported only by the Apache pair-evidence contract"
+            )
+        if fill is not None and coverage is None:
+            raise ValueError(
+                "region fill requires region coverage"
+            )
 
         batch = image.shape[0]
         box_index = torch.arange(
@@ -1685,7 +1764,87 @@ class KFRelationModel(nn.Module):
         not_self = box_index.view(1, -1, 1) != box_index.view(1, 1, -1)
         valid_pairs = subject_valid & object_valid & not_self
 
+        region_iou = None
+        region_contact = None
+        coverage_grid = None
+        normalized_fill = None
+        if coverage is not None:
+            if (
+                coverage.ndim != 4
+                or coverage.shape[0] != batch
+                or coverage.shape[1] != self.config.max_boxes
+                or coverage.shape[2] <= 0
+                or coverage.shape[3] <= 0
+            ):
+                raise ValueError(
+                    "coverage must be [B,max_boxes,g,g]"
+                )
+            if coverage.dtype == torch.uint8:
+                normalized_coverage = coverage.float() / 255.0
+            else:
+                normalized_coverage = coverage.to(
+                    device=boxes.device,
+                    dtype=boxes.dtype,
+                )
+            normalized_coverage = normalized_coverage.to(
+                device=boxes.device,
+                dtype=boxes.dtype,
+            )
+            if (
+                not torch.isfinite(normalized_coverage).all()
+                or (normalized_coverage < 0).any()
+                or (normalized_coverage > 1).any()
+            ):
+                raise ValueError(
+                    "coverage values must be finite within [0,1]"
+                )
+
+            if fill is None:
+                normalized_fill = torch.ones(
+                    (batch, self.config.max_boxes),
+                    dtype=boxes.dtype,
+                    device=boxes.device,
+                )
+            else:
+                if fill.shape != (batch, self.config.max_boxes):
+                    raise ValueError(
+                        "fill must be [B,max_boxes]"
+                    )
+                normalized_fill = fill.to(
+                    device=boxes.device,
+                    dtype=boxes.dtype,
+                )
+                if (
+                    not torch.isfinite(normalized_fill).all()
+                    or (normalized_fill < 0).any()
+                    or (normalized_fill > 1).any()
+                ):
+                    raise ValueError(
+                        "fill values must be finite within [0,1]"
+                    )
+
+            region_iou, region_contact = apache_coverage_pair_metrics(
+                normalized_coverage.flatten(2)
+            )
+
         patch_features = self._fused_patch_features(image)
+        if normalized_coverage is not None:
+            feature_height = int(patch_features.shape[2])
+            feature_width = int(patch_features.shape[3])
+            coverage_grid = F.adaptive_avg_pool2d(
+                normalized_coverage.reshape(
+                    batch * self.config.max_boxes,
+                    1,
+                    normalized_coverage.shape[2],
+                    normalized_coverage.shape[3],
+                ),
+                (feature_height, feature_width),
+            ).reshape(
+                batch,
+                self.config.max_boxes,
+                feature_height * feature_width,
+            )
+
         if self.config.pair_evidence_contract == "legacy":
             region_features = self._pool_regions(
                 patch_features,
@@ -1700,6 +1859,7 @@ class KFRelationModel(nn.Module):
             region_features = self.apache_spatial_pool(
                 patch_features,
                 boxes,
+                coverage=coverage_grid,
             )
             region_features = (
                 region_features
@@ -1847,6 +2007,10 @@ class KFRelationModel(nn.Module):
                 object_index,
                 selected_valid,
                 region_features=region_features,
+                coverage_grid=coverage_grid,
+                fill=normalized_fill,
+                region_iou=region_iou,
+                region_contact=region_contact,
                 cfa_predicate_labels=selected_cfa_labels,
             )
             tokens = reference_evidence.pair_tokens
@@ -2166,10 +2330,20 @@ class KFRelationModel(nn.Module):
         return runtime  # type: ignore[return-value]
 
     def forward(
-        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+        self,
+        image: Tensor,
+        boxes: Tensor,
+        box_counts: Tensor,
+        *,
+        coverage: Tensor | None = None,
+        fill: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         runtime, _, _, _, _, _, _, _, _, _, _, _, _ = self._forward_impl(
-            image, boxes, box_counts
+            image,
+            boxes,
+            box_counts,
+            coverage=coverage,
+            fill=fill,
         )
         return runtime
 
@@ -2181,6 +2355,8 @@ class KFRelationModel(nn.Module):
         pair_targets: Tensor | None = None,
         cfa_predicate_labels: Tensor | None = None,
         entity_labels: Tensor | None = None,
+        coverage: Tensor | None = None,
+        fill: Tensor | None = None,
     ) -> RelationTrainingOutputs:
         if (
             self.config.pair_sampler_contract == "apache"
@@ -2210,6 +2386,8 @@ class KFRelationModel(nn.Module):
             pair_targets=pair_targets,
             cfa_predicate_labels=cfa_predicate_labels,
             entity_labels=entity_labels,
+            coverage=coverage,
+            fill=fill,
         )
         return RelationTrainingOutputs(
             runtime=runtime,
