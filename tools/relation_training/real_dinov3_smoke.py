@@ -48,6 +48,7 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--max-boxes", type=int, default=4)
+    parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--opset", type=int, default=18)
     parser.add_argument(
         "--pair-evidence-contract",
@@ -83,6 +84,8 @@ def main() -> None:
         raise ValueError("image-size must be positive")
     if args.max_boxes < 4:
         raise ValueError("max-boxes must be at least 4 for the smoke fixture")
+    if args.hidden_dim <= 0 or args.hidden_dim % 8 != 0:
+        raise ValueError("hidden-dim must be positive and divisible by 8")
 
     torch.manual_seed(20260929)
     torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
@@ -129,7 +132,7 @@ def main() -> None:
         image_size=args.image_size,
         max_boxes=args.max_boxes,
         pair_budget=6,
-        hidden_dim=64,
+        hidden_dim=args.hidden_dim,
         geometry_dim=16,
         num_heads=4,
         num_layers=1,
