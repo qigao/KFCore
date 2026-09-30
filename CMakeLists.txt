@@ -98,7 +98,7 @@ add_subdirectory(kalman)
 
 include(CMakePackageConfigHelpers)
 
-install(FILES kalman/kalman_takasu.h kalman/kalman_udu.h kalman/kalman_ekf.h
+install(FILES kalman/kalman_status.h kalman/kalman_takasu.h kalman/kalman_udu.h kalman/kalman_ekf.h
               kalman/kalman_ukf.h kalman/signal_filters.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
 

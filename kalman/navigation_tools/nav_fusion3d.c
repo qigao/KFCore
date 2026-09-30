@@ -12,6 +12,9 @@
 #include "nav_fusion3d.h"
 #include "navtoolbox.h"
 
+#define NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS \
+    (2 * NAV_FUSION3D_ERROR_SIZE * NAV_FUSION3D_ERROR_SIZE + NAV_FUSION3D_ERROR_SIZE)
+
 static void fusion3d_set_identity(float* A, int n)
 {
     mateye(A, n);
@@ -60,10 +63,11 @@ static int fusion3d_update_error(nav_fusion3d* fusion, const float* dz, const fl
                                  const float* Ht, int m, float chi2_threshold, float* chi2)
 {
     float dx[NAV_FUSION3D_ERROR_SIZE] = { 0.0f };
+    float kalman_workspace[NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS];
     int   ret;
 
     ret = kalman_takasu(dx, fusion->P, dz, R, Ht, NAV_FUSION3D_ERROR_SIZE, m, chi2_threshold,
-                        chi2);
+                        chi2, kalman_workspace, NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS);
     if (ret == 0)
     {
         fusion3d_inject(fusion, dx);
@@ -129,6 +133,7 @@ int nav_fusion3d_predict_imu(nav_fusion3d* fusion, const float accel_body_m_s2[3
     float R_skew[9];
     float Phi[NAV_FUSION3D_ERROR_SIZE * NAV_FUSION3D_ERROR_SIZE];
     float G[NAV_FUSION3D_ERROR_SIZE * NAV_FUSION3D_ERROR_SIZE];
+    float kalman_workspace[NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS];
 
     if (!fusion || !accel_body_m_s2 || !gyro_rad_s || dt_s <= 0.0f)
     {
@@ -187,12 +192,14 @@ int nav_fusion3d_predict_imu(nav_fusion3d* fusion, const float accel_body_m_s2[3
     if (process_var_diag)
     {
         fusion3d_set_identity(G, NAV_FUSION3D_ERROR_SIZE);
-        kalman_predict(NULL, fusion->P, Phi, G, process_var_diag, NAV_FUSION3D_ERROR_SIZE,
-                       NAV_FUSION3D_ERROR_SIZE);
+        if (kalman_predict(NULL, fusion->P, Phi, G, process_var_diag, NAV_FUSION3D_ERROR_SIZE,
+                           NAV_FUSION3D_ERROR_SIZE, kalman_workspace,
+                           NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) return -1;
     }
     else
     {
-        kalman_predict(NULL, fusion->P, Phi, NULL, NULL, NAV_FUSION3D_ERROR_SIZE, 0);
+        if (kalman_predict(NULL, fusion->P, Phi, NULL, NULL, NAV_FUSION3D_ERROR_SIZE, 0,
+                           kalman_workspace, NAV_FUSION3D_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) return -1;
     }
 
     return 0;

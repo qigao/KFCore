@@ -42,6 +42,7 @@ int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn trans
 {
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+    float workspace[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE * 2 + KALMAN_MAX_STATE_SIZE];
 
     if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
         r < 0 || r > KALMAN_MAX_STATE_SIZE)
@@ -62,7 +63,7 @@ int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn trans
         return -1;
     }
 
-    kalman_predict(NULL, P, Phi, G, Q, n, r);
+    if (kalman_predict(NULL, P, Phi, G, Q, (size_t)n, (size_t)r, workspace, sizeof(workspace)/sizeof(workspace[0])) != KFCORE_KALMAN_OK) return -1;
     memcpy(x, x_pred, sizeof(x[0]) * n);
 
     return 0;
@@ -75,6 +76,7 @@ int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
     float z_pred[KALMAN_MAX_MEASUREMENTS];
     float dz[KALMAN_MAX_MEASUREMENTS];
     float Ht[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
+    float workspace[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS + KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS + KALMAN_MAX_MEASUREMENTS];
 
     if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
         m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
@@ -100,7 +102,7 @@ int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
         dz[i] = z[i] - z_pred[i];
     }
 
-    return kalman_takasu(x, P, dz, R, Ht, n, m, chi2_threshold, chi2);
+    return (int)kalman_takasu(x, P, dz, R, Ht, (size_t)n, (size_t)m, chi2_threshold, chi2, workspace, sizeof(workspace)/sizeof(workspace[0]));
 }
 
 int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_fn transition,
@@ -108,6 +110,7 @@ int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_f
 {
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+    float workspace[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE * 2 + KALMAN_MAX_STATE_SIZE * 2];
 
     if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
         r < 0 || r > KALMAN_MAX_STATE_SIZE)
@@ -128,7 +131,7 @@ int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_f
         return -1;
     }
 
-    kalman_udu_predict(NULL, U, d, Phi, G, Q, n, r);
+    if (kalman_udu_predict(NULL, U, d, Phi, G, Q, (size_t)n, (size_t)r, workspace, sizeof(workspace)/sizeof(workspace[0])) != KFCORE_KALMAN_OK) return -1;
     memcpy(x, x_pred, sizeof(x[0]) * n);
 
     return 0;
@@ -144,6 +147,7 @@ int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const fl
     float Ht[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
     float R_work[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
     float Reye[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
+    float scalar_workspace[KALMAN_MAX_STATE_SIZE * 2];
 
     if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
         m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
@@ -206,7 +210,7 @@ int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const fl
             }
         }
 
-        if (kalman_udu_scalar(x, U, d, dz[i], Rv, H_line, n) != 0)
+        if (kalman_udu_scalar(x, U, d, dz[i], Rv, H_line, (size_t)n, scalar_workspace, sizeof(scalar_workspace)/sizeof(scalar_workspace[0])) != KFCORE_KALMAN_OK)
         {
             retcode = -1;
         }

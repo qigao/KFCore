@@ -14,6 +14,8 @@
 #endif
 
 #include "kalman_takasu.h"
+
+#define TRACKER_KALMAN_WORKSPACE_FLOATS 136
 #include "linalg.h"
 
 #define TRACKERS_EPS 1.0e-6f
@@ -615,15 +617,18 @@ static void kf_xyxy_init(kf_xyxy_t* kf, box_t bbox) {
 }
 
 static void kf_xyxy_predict(kf_xyxy_t* kf) {
-    kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 8, 8);
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 8, 8,
+                         workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
 }
 
 static void kf_xyxy_update(kf_xyxy_t* kf, box_t bbox) {
     float z[4] = {bbox.x1, bbox.y1, bbox.x2, bbox.y2};
     float dz[4];
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
     memcpy(dz, z, sizeof(dz));
     matmul("T", "N", 4, 1, 8, -1.0f, kf->Ht, kf->x, 1.0f, dz);
-    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 8, 4, 0.0f, NULL);
+    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 8, 4, 0.0f, NULL, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
 }
 
 static box_t kf_xyxy_box(const kf_xyxy_t* kf) {
@@ -658,18 +663,22 @@ static void kf_xcycsr_predict(kf_xcycsr_t* kf) {
     if (kf->x[6] + kf->x[2] <= 0.0f) {
         kf->x[6] = 0.0f;
     }
-    kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7);
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
 }
 
 static void kf_xcycsr_predict_raw(kf_xcycsr_t* kf) {
-    kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7);
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7,
+                         workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
 }
 
 static void kf_xcycsr_update_measurement(kf_xcycsr_t* kf, const float z[4]) {
     float dz[4];
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
     memcpy(dz, z, sizeof(dz));
     matmul("T", "N", 4, 1, 7, -1.0f, kf->Ht, kf->x, 1.0f, dz);
-    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 7, 4, 0.0f, NULL);
+    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 7, 4, 0.0f, NULL, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
 }
 
 static void kf_xcycsr_update(kf_xcycsr_t* kf, box_t bbox) {

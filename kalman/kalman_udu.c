@@ -10,7 +10,6 @@
  ******************************************************************************/
 
 #include <math.h>
-#include <assert.h>
 #include <string.h> /* memcpy */
 
 /******************************************************************************
@@ -20,14 +19,12 @@
 #include "linalg.h"
 #include "miniblas.h" /* strmm_ */
 #include "kalman_udu.h"
+#include "kalman_workspace_internal.h"
 
 /******************************************************************************
  * DEFINES
  ******************************************************************************/
 
-#ifndef KALMAN_MAX_STATE_SIZE
-#define KALMAN_MAX_STATE_SIZE 32 /* kalman filter scratchpad buf size */
-#endif
 
 /******************************************************************************
  * TYPEDEFS
@@ -45,228 +42,291 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float R,
-                      const float* H_line, int n)
+kfcore_kalman_status kalman_udu_scalar_workspace_floats(size_t n, size_t* required)
 {
-    if (!x || !U || !d || !H_line ||
-        n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
-        !(R > 0.0f) || !isfinite(R))
+    kfcore_kalman_status status = kfcore_kalman_check_dim(n, 0);
+    if (status != KFCORE_KALMAN_OK || !required)
     {
-        return -1;
+        return status == KFCORE_KALMAN_OK ? KFCORE_KALMAN_INVALID_ARGUMENT : status;
+    }
+    return kfcore_kalman_checked_mul(n, 2U, required);
+}
+
+kfcore_kalman_status kalman_udu_scalar(float* x, float* U, float* d, float dz, float R,
+                                       const float* H_line, size_t n,
+                                       float* workspace, size_t workspace_floats)
+{
+    size_t required;
+    kfcore_kalman_status status = kalman_udu_scalar_workspace_floats(n, &required);
+    if (status != KFCORE_KALMAN_OK)
+    {
+        return status;
+    }
+    if (!x || !U || !d || !H_line || !(R > 0.0f) || !isfinite(R))
+    {
+        return KFCORE_KALMAN_INVALID_ARGUMENT;
+    }
+    status = kfcore_kalman_require_workspace(workspace, workspace_floats, required);
+    if (status != KFCORE_KALMAN_OK)
+    {
+        return status;
     }
 
-    assert(n <= KALMAN_MAX_STATE_SIZE);
-
-    float a[KALMAN_MAX_STATE_SIZE];
-    float b[KALMAN_MAX_STATE_SIZE];
+    float* a = workspace;
+    float* b = workspace + n;
     float alpha = R;
     float gamma = 1.0f / alpha;
+    int ni = (int)n;
+    int one = 1;
+    float onef = 1.0f;
 
+    memcpy(a, H_line, sizeof(float) * n);
+    strmm_("L", "U", "T", "U", &ni, &one, &onef, U, &ni, a, &ni);
+
+    for (size_t j = 0U; j < n; ++j)
     {
-        // calculate: a = U'*H'
-        int   tmpone   = 1;
-        float tmpalpha = 1.0f;
-        memcpy(a, H_line, sizeof(a[0]) * n); // preload with H_line
-        strmm_("L", "U", "T", "U", &n, &tmpone, &tmpalpha, U, &n, a, &n);
+        b[j] = d[j] * a[j];
     }
 
-    for (int j = 0; j < n; j++)
-    {
-        b[j] = d[j] * a[j]; // b = D*a = diag(d)*a
-    }
-
-    for (int j = 0; j < n; j++)
+    for (size_t j = 0U; j < n; ++j)
     {
         float beta = alpha;
         alpha += a[j] * b[j];
-        if (alpha <= 0.0f)
+        if (!(alpha > 0.0f) || !isfinite(alpha))
         {
-            return -1;
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
         }
-        float lambda = -a[j] * gamma;
 
+        const float lambda = -a[j] * gamma;
         gamma = 1.0f / alpha;
-
         d[j] *= beta * gamma;
-        for (int i = 0; i < j; i++)
+
+        for (size_t i = 0U; i < j; ++i)
         {
-            beta                    = MAT_ELEM(U, i, j, n, n);
+            beta = MAT_ELEM(U, i, j, n, n);
             MAT_ELEM(U, i, j, n, n) = beta + b[i] * lambda;
             b[i] += b[j] * beta;
         }
     }
 
-    for (int j = 0; j < n; j++)
+    for (size_t j = 0U; j < n; ++j)
     {
         x[j] += gamma * dz * b[j];
     }
-
-    return 0;
+    return KFCORE_KALMAN_OK;
 }
 
-int kalman_udu(float* x, float* U, float* d, const float* z, const float* R, const float* Ht, int n,
-               int m, float chi2_threshold, int downweight_outlier)
+kfcore_kalman_status kalman_udu_workspace_floats(size_t n, size_t* required)
 {
-    if (!x || !U || !d || !z || !R || !Ht ||
-        n <= 0 || n > KALMAN_MAX_STATE_SIZE || m <= 0)
+    return kalman_udu_scalar_workspace_floats(n, required);
+}
+
+kfcore_kalman_status kalman_udu(float* x, float* U, float* d, const float* z, const float* R,
+                                const float* Ht, size_t n, size_t m,
+                                float chi2_threshold, int downweight_outlier,
+                                float* workspace, size_t workspace_floats)
+{
+    size_t required;
+    kfcore_kalman_status status = kalman_udu_workspace_floats(n, &required);
+    if (status != KFCORE_KALMAN_OK)
     {
-        return -1;
+        return status;
+    }
+    if (kfcore_kalman_check_dim(m, 0) != KFCORE_KALMAN_OK ||
+        !x || !U || !d || !z || !R || !Ht)
+    {
+        return KFCORE_KALMAN_INVALID_ARGUMENT;
+    }
+    status = kfcore_kalman_require_workspace(workspace, workspace_floats, required);
+    if (status != KFCORE_KALMAN_OK)
+    {
+        return status;
     }
 
-    assert(n <= KALMAN_MAX_STATE_SIZE);
-
-    int retcode = 0;
-
-    for (int i = 0; i < m; i++, Ht += n) /* iterate over each measurement,
-                                            goto next line of H after each iteration */
+    for (size_t i = 0U; i < m; ++i)
     {
-        float Rv = MAT_ELEM(R, i, i, m, m); /// get scalar measurement variance
-        float dz = z[i];                    // calculate residual for current scalar measurement
-        matmul("N", "N", 1, 1, n, -1.0f, Ht, x, 1.0f, &dz); // dz = z - H(i,:)*x
+        const float* h = Ht + i * n;
+        float Rv = MAT_ELEM(R, i, i, m, m);
+        float dz = z[i];
 
-        // <robust>
+        matmul("N", "N", 1, 1, (int)n, -1.0f, h, x, 1.0f, &dz);
+
         if (chi2_threshold > 0.0f)
         {
-            float tmp[KALMAN_MAX_STATE_SIZE];
-            float s; // for chi2 test: s = H*U*diag(d)*U'*H' + R
-                     // Chang, G. (2014). Robust Kalman filtering based on
-                     // Mahalanobis distance as outlier judging criterion.
-                     // Journal of Geodesy, 88(4), 391-401.
-
-            float HPHT = 0.0f; // calc. scalar result of H_line*U*diag(d)*U'*H_line'
-            matmul("N", "N", 1, n, n, 1.0f, Ht, U, 0.0f, tmp); // tmp = H(i,:) * U
-            for (int j = 0; j < n; j++)
+            float HPHT = 0.0f;
+            matmul("N", "N", 1, (int)n, (int)n, 1.0f, h, U, 0.0f, workspace);
+            for (size_t j = 0U; j < n; ++j)
             {
-                HPHT += tmp[j] * tmp[j] * d[j];
+                HPHT += workspace[j] * workspace[j] * d[j];
             }
-            s = HPHT + Rv;
 
-            const float mahalanobis_dist_sq = dz * dz / s;
-            if (mahalanobis_dist_sq > chi2_threshold) // potential outlier?
+            const float innovation_variance = HPHT + Rv;
+            if (!(innovation_variance > 0.0f) || !isfinite(innovation_variance))
+            {
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
+            }
+
+            const float mahalanobis_distance_sq = dz * dz / innovation_variance;
+            if (mahalanobis_distance_sq > chi2_threshold)
             {
                 if (!downweight_outlier)
                 {
-                    continue; // just skip this measurement
+                    continue;
                 }
-                // process this measurement, but reduce the measurement precision
-                const float f = mahalanobis_dist_sq / chi2_threshold;
-                Rv            = (f - 1.0f) * HPHT + f * Rv;
+                const float factor = mahalanobis_distance_sq / chi2_threshold;
+                Rv = (factor - 1.0f) * HPHT + factor * Rv;
             }
         }
-        // </robust>
 
-        int status = kalman_udu_scalar(x, U, d, dz, Rv, Ht, n);
-        if (status != 0)
+        status = kalman_udu_scalar(x, U, d, dz, Rv, h, n, workspace, workspace_floats);
+        if (status != KFCORE_KALMAN_OK)
         {
-            retcode = -1; // still process rest of the measurement vector
+            return status;
         }
     }
-    return retcode;
+
+    return KFCORE_KALMAN_OK;
 }
 
-int decorrelate(float* z, float* Ht, float* R, int n, int m)
+kfcore_kalman_status decorrelate(float* z, float* Ht, float* R, size_t n, size_t m)
 {
-    if (!z || !Ht || !R || n <= 0 || m <= 0)
+    if (kfcore_kalman_check_dim(n, 0) != KFCORE_KALMAN_OK ||
+        kfcore_kalman_check_dim(m, 0) != KFCORE_KALMAN_OK ||
+        !z || !Ht || !R)
     {
-        return -1;
+        return KFCORE_KALMAN_INVALID_ARGUMENT;
+    }
+    if (cholesky(R, (int)m, 0) != 0)
+    {
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     }
 
-    /* Basic decorrelation in MATLAB
-    [G] = chol(R); % G'*G = R
-    zdecorr = (G')\z;
-    Hdecorr = (G')\H;
-    Rdecorr = eye(length(z)); */
-
-    // in-place cholesky so that L*L' = R:
-    int result = cholesky(R, m, 0 /* 0 means: fill upper part with zeros */);
-    if (result != 0)
-    {
-        return -1;
-    }
-    // L*H_decorr = H
-    // (L*H_decorr)' = H'
-    // H_decorr'*L' = H' solve for H_decorr
-    trisolveright(R /*L*/, Ht, m, n, "T");
-    trisolve(R /*L*/, z, m, 1, "N");
-
-    return 0;
+    trisolveright(R, Ht, (int)m, (int)n, "T");
+    trisolve(R, z, (int)m, 1, "N");
+    return KFCORE_KALMAN_OK;
 }
 
-void kalman_udu_predict(float* x, float* U, float* d, const float* Phi, const float* G,
-                        const float* Q, int n, int r)
+kfcore_kalman_status kalman_udu_predict_workspace_floats(size_t n, size_t r, size_t* required)
 {
-    if (!U || !d || !Phi ||
-        n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
-        r < 0 || r > KALMAN_MAX_STATE_SIZE ||
-        (r > 0 && (!G || !Q)))
+    size_t nn;
+    size_t nr;
+    size_t total;
+    kfcore_kalman_status status;
+
+    if ((status = kfcore_kalman_check_dim(n, 0)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_check_dim(r, 1)) != KFCORE_KALMAN_OK ||
+        !required)
     {
-        return;
+        return status == KFCORE_KALMAN_OK ? KFCORE_KALMAN_INVALID_ARGUMENT : status;
+    }
+    if ((status = kfcore_kalman_checked_mul(n, n, &nn)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_mul(n, r, &nr)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(nn, nr, &total)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(total, n, &total)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(total, n, required)) != KFCORE_KALMAN_OK)
+    {
+        return status;
+    }
+    return KFCORE_KALMAN_OK;
+}
+
+kfcore_kalman_status kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
+                                        const float* G, const float* Q, size_t n, size_t r,
+                                        float* workspace, size_t workspace_floats)
+{
+    size_t required;
+    size_t nn;
+    size_t nr;
+    kfcore_kalman_status status = kalman_udu_predict_workspace_floats(n, r, &required);
+    if (status != KFCORE_KALMAN_OK)
+    {
+        return status;
+    }
+    if (!U || !d || !Phi || (r > 0U && (!G || !Q)))
+    {
+        return KFCORE_KALMAN_INVALID_ARGUMENT;
+    }
+    status = kfcore_kalman_require_workspace(workspace, workspace_floats, required);
+    if (status != KFCORE_KALMAN_OK)
+    {
+        return status;
     }
 
-    assert(n <= KALMAN_MAX_STATE_SIZE);
-    assert(r <= KALMAN_MAX_STATE_SIZE);
+    (void)kfcore_kalman_checked_mul(n, n, &nn);
+    (void)kfcore_kalman_checked_mul(n, r, &nr);
 
-    if (x) //  if prediction of state vector is requested: x = Phi*x;
+    float* tmp = workspace;
+    float* G_tmp = tmp + n;
+    float* PhiU = G_tmp + nr;
+    float* din = PhiU + nn;
+
+    if (x)
     {
-        float tmp[KALMAN_MAX_STATE_SIZE];
-        memcpy(tmp, x, sizeof(x[0]) * n);
-        matmul("N", "N", n, 1, n, 1.0f, Phi, tmp, 0.0f, x);
+        memcpy(tmp, x, sizeof(float) * n);
+        matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x);
     }
-
-    // G_tmp = G; // move to internal array for destructive updates
-    float G_tmp[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-    if (r > 0)
+    if (r > 0U)
     {
-        memcpy(G_tmp, G, sizeof(G_tmp[0]) * n * r);
+        memcpy(G_tmp, G, sizeof(float) * nr);
     }
+    memcpy(PhiU, Phi, sizeof(float) * nn);
 
-    // PhiU  = Phi*U; // rows of [PhiU,G] are to be orthogonalized
-    float PhiU[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-    float tmpalpha = 1.0f;
-    memcpy(PhiU, Phi, sizeof(Phi[0]) * n * n);
-    strmm_("R", "U", "N", "U", &n, &n, &tmpalpha, U, &n, PhiU, &n);
+    int ni = (int)n;
+    float one = 1.0f;
+    strmm_("R", "U", "N", "U", &ni, &ni, &one, U, &ni, PhiU, &ni);
 
-    mateye(U, n); // U = eye(n)
+    mateye(U, (int)n);
+    memcpy(din, d, sizeof(float) * n);
 
-    // save origin input d vector
-    float din[KALMAN_MAX_STATE_SIZE];
-    memcpy(din, d, sizeof(d[0]) * n); // din = d
-
-    for (int i = n - 1; i >= 0; i--)
+    for (size_t i = n; i-- > 0U;)
     {
         float sigma = 0.0f;
-        for (int j = 0; j < n; j++)
+        for (size_t j = 0U; j < n; ++j)
         {
-            sigma += MAT_ELEM(PhiU, i, j, n, n) * MAT_ELEM(PhiU, i, j, n, n) * din[j];
+            sigma += MAT_ELEM(PhiU, i, j, n, n) *
+                     MAT_ELEM(PhiU, i, j, n, n) * din[j];
             if (j < r)
             {
-                sigma += MAT_ELEM(G_tmp, i, j, n, r) * MAT_ELEM(G_tmp, i, j, n, r) * Q[j];
+                sigma += MAT_ELEM(G_tmp, i, j, n, r) *
+                         MAT_ELEM(G_tmp, i, j, n, r) * Q[j];
             }
         }
+
+        if (!(sigma > 0.0f) || !isfinite(sigma))
+        {
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
+        }
         d[i] = sigma;
-        for (int j = 0; j < i; j++)
+
+        for (size_t j = 0U; j < i; ++j)
         {
             sigma = 0.0f;
-            for (int k = 0; k < n; k++)
+            for (size_t k = 0U; k < n; ++k)
             {
-                sigma += MAT_ELEM(PhiU, i, k, n, n) * din[k] * MAT_ELEM(PhiU, j, k, n, n);
+                sigma += MAT_ELEM(PhiU, i, k, n, n) *
+                         din[k] * MAT_ELEM(PhiU, j, k, n, n);
             }
-            for (int k = 0; k < r; k++)
+            for (size_t k = 0U; k < r; ++k)
             {
-                sigma += MAT_ELEM(G_tmp, i, k, n, r) * Q[k] * MAT_ELEM(G_tmp, j, k, n, r);
+                sigma += MAT_ELEM(G_tmp, i, k, n, r) *
+                         Q[k] * MAT_ELEM(G_tmp, j, k, n, r);
             }
+
             MAT_ELEM(U, j, i, n, n) = sigma / d[i];
-            for (int k = 0; k < n; k++)
+            for (size_t k = 0U; k < n; ++k)
             {
-                MAT_ELEM(PhiU, j, k, n, n) -= MAT_ELEM(U, j, i, n, n) * MAT_ELEM(PhiU, i, k, n, n);
+                MAT_ELEM(PhiU, j, k, n, n) -=
+                    MAT_ELEM(U, j, i, n, n) * MAT_ELEM(PhiU, i, k, n, n);
             }
-            for (int k = 0; k < r; k++)
+            for (size_t k = 0U; k < r; ++k)
             {
                 MAT_ELEM(G_tmp, j, k, n, r) -=
                     MAT_ELEM(U, j, i, n, n) * MAT_ELEM(G_tmp, i, k, n, r);
             }
         }
     }
+
+    return KFCORE_KALMAN_OK;
 }
 
 /* @} */
