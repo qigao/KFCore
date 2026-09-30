@@ -1175,6 +1175,16 @@ def main() -> None:
                     if reference_recipe_config is not None
                     else None
                 ),
+                "effective_batch_size": (
+                    reference_recipe_config.effective_batch_size
+                    if reference_recipe_config is not None
+                    else None
+                ),
+                "multi_scale_resolutions": (
+                    list(multi_scale_resolutions)
+                    if multi_scale_resolutions is not None
+                    else None
+                ),
                 "optimizer": optimizer_report,
                 "scheduler": scheduler_report,
                 "backbone_trainable_parameter_count": (
@@ -1265,6 +1275,16 @@ def main() -> None:
                 if reference_recipe_config is not None
                 else None
             ),
+            "effective_batch_size": (
+                reference_recipe_config.effective_batch_size
+                if reference_recipe_config is not None
+                else None
+            ),
+            "multi_scale_resolutions": (
+                list(multi_scale_resolutions)
+                if multi_scale_resolutions is not None
+                else None
+            ),
             "optimizer": optimizer_report,
             "scheduler": scheduler_report,
             "backbone_trainable_parameter_count": (
@@ -1311,6 +1331,11 @@ def main() -> None:
             ),
             "apache_pair_negative_floor": (
                 model.config.apache_pair_negative_floor
+            ),
+            "apache_cfa_prob": model.config.apache_cfa_prob,
+            "apache_cfa_alpha": model.config.apache_cfa_alpha,
+            "allow_training_multiscale": (
+                model.config.allow_training_multiscale
             ),
         },
         "baseline_config": config_payload(baseline_config),
