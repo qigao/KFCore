@@ -32,6 +32,7 @@ struct PredicateVocabulary
     std::string text_encoder_provenance;
     std::string tokenizer_provenance;
     std::string template_provenance;
+    std::string routing_gate_provenance;
 };
 
 [[nodiscard]] PredicateVocabulary normalize_predicate_vocabulary(

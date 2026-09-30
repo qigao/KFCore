@@ -2,6 +2,7 @@ add_library(kfcore_relation_core STATIC
   src/decode.cpp
   src/vocabulary_score.cpp
   src/predicate_text_encoder.cpp
+  src/predicate_routing_gate.cpp
   src/relate_anything.cpp
   src/open_vocabulary_relation.cpp)
 target_include_directories(kfcore_relation_core

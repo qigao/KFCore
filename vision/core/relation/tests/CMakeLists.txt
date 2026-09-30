@@ -24,3 +24,11 @@ cmake_add_test(
   LIBS KFCore::relation_core Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_relation_test_folder}")
+
+
+cmake_add_test(
+  NAME test_relation_predicate_routing_gate_api
+  SOURCES test_predicate_routing_gate_api.cpp
+  LIBS KFCore::relation_core Salts::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_relation_test_folder}")
