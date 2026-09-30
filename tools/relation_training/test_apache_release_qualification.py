@@ -96,6 +96,7 @@ def training() -> dict:
                 "micro_batch_size": 32,
                 "grad_accum": 4,
                 "ema_decay": 0.9998,
+                "augment": 0.3,
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
@@ -107,6 +108,15 @@ def training() -> dict:
                 "state_sha256": h("c"),
                 "raw_state_sha256": h("d"),
                 "weights_source": "ema",
+            },
+            "augmentation": {
+                "kind": "brightness-contrast-saturation",
+                "strength": 0.3,
+                "horizontal_flip": False,
+                "geometry_transform": False,
+                "rng_source": "ambient-torch-rng",
+                "rng_equivalence": "stochastic-distribution",
+                "worker_trajectory_equivalence": False,
             },
         },
         "train_mixture": {
@@ -208,6 +218,15 @@ class ApacheReleaseQualificationTest(
             result["ema_state_sha256"],
             h("c"),
         )
+        self.assertEqual(
+            result["augmentation"]["strength"],
+            0.3,
+        )
+        self.assertFalse(
+            result["augmentation"][
+                "worker_trajectory_equivalence"
+            ]
+        )
 
     def test_unresolved_source_is_representable_but_blocks_qualification(self):
         value = corpus()
@@ -279,6 +298,47 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "max_boxes=40",
+        ):
+            validate_training_run(run)
+
+    def test_released_reference_requires_photometric_augment(self):
+        run = training()
+        run["training_recipe"]["config"][
+            "augment"
+        ] = 0.0
+        with self.assertRaisesRegex(
+            ValueError,
+            "augment=0.3",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"][
+            "augmentation"
+        ]["strength"] = 0.2
+        with self.assertRaisesRegex(
+            ValueError,
+            "augment=0.3",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"][
+            "augmentation"
+        ]["horizontal_flip"] = True
+        with self.assertRaisesRegex(
+            ValueError,
+            "preserve geometry",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"][
+            "augmentation"
+        ]["rng_source"] = "custom"
+        with self.assertRaisesRegex(
+            ValueError,
+            "RNG source",
         ):
             validate_training_run(run)
 
