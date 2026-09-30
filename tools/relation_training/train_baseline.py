@@ -56,6 +56,9 @@ from apache_training_recipe import (
 from apache_object_bank import (
     load_object_text_bank,
 )
+from apache_text_bank import (
+    load_predicate_text_bank,
+)
 from apache_objective import (
     ApacheObjectiveConfig,
     ApacheReferenceObjective,
@@ -156,7 +159,15 @@ def main() -> None:
     parser.add_argument("--validation-annotations", required=True)
     parser.add_argument("--vocabulary", required=True)
     parser.add_argument("--image-root", required=True)
-    parser.add_argument("--predicate-embeddings", required=True)
+    parser.add_argument(
+        "--predicate-embeddings",
+        required=True,
+        help=(
+            "Predicate text bank. apache-reference requires the released "
+            "named NPZ contract (predicates + embeddings + exact 3 templates); "
+            "legacy accepts the historical tensor file."
+        ),
+    )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     parser.add_argument(
@@ -951,10 +962,33 @@ def main() -> None:
         )
 
     seed_everything(baseline_config.seed)
-    predicate_embeddings = load_predicate_embeddings(
-        args.predicate_embeddings,
-        len(vocabulary.predicates),
-    )
+    predicate_bank_report = None
+    if reference_training:
+        (
+            predicate_embeddings,
+            predicate_bank_report,
+        ) = load_predicate_text_bank(
+            args.predicate_embeddings,
+            vocabulary.predicates,
+        )
+        if (
+            predicate_bank_report[
+                "artifact_sha256"
+            ]
+            != sha256(
+                Path(
+                    args.predicate_embeddings
+                )
+            )
+        ):
+            raise RuntimeError(
+                "predicate-bank provenance hash does not match input file"
+            )
+    else:
+        predicate_embeddings = load_predicate_embeddings(
+            args.predicate_embeddings,
+            len(vocabulary.predicates),
+        )
     validate_training_text_dim(
         int(predicate_embeddings.shape[1]),
         recipe=args.training_recipe,
@@ -1739,6 +1773,7 @@ def main() -> None:
         "predicate_embeddings_sha256": sha256(
             Path(args.predicate_embeddings)
         ),
+        "predicate_bank": predicate_bank_report,
         "predicate_embedding_shape": list(
             predicate_embeddings.shape
         ),

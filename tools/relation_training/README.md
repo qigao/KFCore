@@ -1607,7 +1607,8 @@ The command fails unless the run has all of the following:
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
 - deterministic pair-opportunity rebuild evidence from the same MegaSG pack;
-- matching vocabulary, predicate-embedding, named object-bank and derived spatial-routing hashes;
+- matching vocabulary, named predicate/object banks and derived spatial-routing hashes;
+- deterministic predicate/object bank derivation from the released text student + tokenizer bundle;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
 - 12 complete epochs;
@@ -1739,6 +1740,61 @@ Full-reference qualification binds the training warm-start's
 `spatial_flags_sha256` to this derivation and cross-checks the derived
 spatial/semantic counts against the predicate-bank row count. An arbitrary
 hand-authored sidecar cannot qualify as the released routing input.
+
+### Released text-bank derivation
+
+The released predicate and object text banks share one distilled text student,
+but they do **not** share the same prompt ensemble. Released model metadata pins
+the student checkpoint to:
+
+```text
+runs/packed/text_student_v2_512/student.pt
+sha256 =
+e0317830b68ea51e6711fc90d4a35954d0528e5bd78a8d5afd966601ce4ed119
+```
+
+The student architecture is fixed at vocab 49,408, token width 128, model width
+256, six blocks, four heads, FFN 1,024, output width 512 and max length 32. A
+released rebuild uses the colocated local CLIP tokenizer bundle corresponding
+to `openai/clip-vit-base-patch32`; the released environment records
+`transformers==5.14.1`.
+
+Predicate bank prompts:
+
+```text
+"{p}"
+"one object is {p} another object"
+"a photo of something {p} something"
+```
+
+Object bank prompts:
+
+```text
+"{p}"
+"a photo of a {p}"
+```
+
+For each bank, each template is encoded separately, the already-normalized
+template vectors are **summed**, and one final L2 normalization is applied.
+KFCore's `apache_text_bank.py` reproduces this rule and writes deterministic
+named NPZ artifacts plus `kfcore.apache-text-bank-derivation/1` evidence.
+
+```bash
+python tools/relation_training/apache_text_bank.py \
+  --student-checkpoint /release/text_student.pt \
+  --tokenizer-dir /release/tokenizer \
+  --vocabulary released-vocab.json \
+  --predicate-out pred_embeds_student_photo.npz \
+  --object-out obj_embeds.npz \
+  --evidence text-bank-derivation.json
+```
+
+For `apache-reference`, `--predicate-embeddings` must be the named predicate
+NPZ (`predicates + embeddings + templates`), not a bare tensor. Qualification
+binds the student SHA, exact student config, tokenizer file hashes, transformers
+version, both template sets, label-order hashes, tensor hashes and the final
+predicate/object artifact hashes. Legacy training continues to accept the
+historical bare predicate tensor.
 
 ### Released object text bank
 
