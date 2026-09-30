@@ -6,6 +6,7 @@
 #include "kfcore/yolo/detector.hpp"
 #include "kfcore/yolo/tracking.hpp"
 
+#include <cstdint>
 #include <memory>
 
 namespace kfcore::pipelines
