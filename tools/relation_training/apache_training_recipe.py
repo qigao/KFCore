@@ -15,6 +15,7 @@ LEGACY_DEFAULT_MAX_BOXES = 32
 RELEASED_MAX_BOXES = 40
 LEGACY_DEFAULT_HIDDEN_DIM = 256
 RELEASED_D_MODEL = 512
+RELEASED_TEXT_DIM = 512
 RELEASED_EMA_DECAY = 0.9998
 LEGACY_DEFAULT_AUGMENT = 0.0
 RELEASED_PHOTOMETRIC_AUGMENT = 0.3
@@ -75,6 +76,31 @@ def resolve_training_max_boxes(
         )
     return value
 
+
+
+def validate_training_text_dim(
+    dimension: int,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    if (
+        isinstance(dimension, bool)
+        or not isinstance(dimension, int)
+        or dimension <= 0
+    ):
+        raise ValueError(
+            "predicate text dimension must be a positive integer"
+        )
+    if (
+        recipe == "apache-reference"
+        and dimension != RELEASED_TEXT_DIM
+    ):
+        raise ValueError(
+            "apache-reference requires released text_dim=512"
+        )
+    return dimension
 
 
 def resolve_training_augment(
@@ -300,6 +326,7 @@ class ApacheTrainingRecipeConfig:
     cfa_alpha: float = 1.0
     ema_decay: float = RELEASED_EMA_DECAY
     augment: float = RELEASED_PHOTOMETRIC_AUGMENT
+    text_dim: int = RELEASED_TEXT_DIM
 
     def __post_init__(self) -> None:
         for name in (
@@ -372,6 +399,18 @@ class ApacheTrainingRecipeConfig:
         ):
             raise ValueError(
                 "ema_decay must be finite within [0,1)"
+            )
+        if (
+            isinstance(self.text_dim, bool)
+            or not isinstance(self.text_dim, int)
+            or self.text_dim <= 0
+        ):
+            raise ValueError(
+                "text_dim must be a positive integer"
+            )
+        if self.text_dim != RELEASED_TEXT_DIM:
+            raise ValueError(
+                "Apache released recipe requires text_dim=512"
             )
         if (
             not math.isfinite(self.augment)
