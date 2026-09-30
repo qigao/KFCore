@@ -264,20 +264,27 @@ def load_relation_mixture(
     annotation_hashes: list[str] = []
 
     for source_id, source in enumerate(config.sources):
-        manifest = DatasetManifest.load(
+        raw_manifest = DatasetManifest.load(
             source.annotations,
             vocabulary,
         )
+        manifest = DatasetManifest(
+            examples=tuple(
+                replace(
+                    example,
+                    source_id=source_id,
+                )
+                for example in raw_manifest.examples
+            ),
+            annotations_sha256=raw_manifest.annotations_sha256,
+            vocabulary_sha256=raw_manifest.vocabulary_sha256,
+        )
         manifests.append(manifest)
         annotation_hashes.append(
-            manifest.annotations_sha256
+            raw_manifest.annotations_sha256
         )
         combined_examples.extend(
-            replace(
-                example,
-                source_id=source_id,
-            )
-            for example in manifest.examples
+            manifest.examples
         )
         source_index_parts.append(
             np.full(
