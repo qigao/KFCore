@@ -87,6 +87,7 @@ def training() -> dict:
         "schema": "kfcore.relation-training-run/1",
         "backbone": "hf_hub:timm/vit_small_patch16_dinov3.lvd1689m",
         "frozen_backbone": False,
+        "device": "cuda:0",
         "training_recipe": {
             "name": "apache-reference",
             "released_epoch_target": 12,
@@ -101,6 +102,8 @@ def training() -> dict:
                 "image_size": 448,
                 "geo_budget": 400,
                 "final_budget": 128,
+                "amp": True,
+                "amp_dtype": "bf16",
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
@@ -121,6 +124,14 @@ def training() -> dict:
                 "rng_source": "ambient-torch-rng",
                 "rng_equivalence": "stochastic-distribution",
                 "worker_trajectory_equivalence": False,
+            },
+            "precision": {
+                "amp_requested": True,
+                "amp_dtype": "bf16",
+                "autocast_device_type": "cuda",
+                "autocast_executed": True,
+                "grad_scaler": False,
+                "released_cuda_execution": True,
             },
             "sampler_budget": {
                 "geo_budget": 400,
@@ -244,6 +255,15 @@ class ApacheReleaseQualificationTest(
             512,
         )
         self.assertEqual(
+            result["precision"]["amp_dtype"],
+            "bf16",
+        )
+        self.assertTrue(
+            result["precision"][
+                "released_cuda_execution"
+            ]
+        )
+        self.assertEqual(
             result["image_size"],
             448,
         )
@@ -326,6 +346,61 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "max_boxes=40",
+        ):
+            validate_training_run(run)
+
+    def test_released_reference_requires_cuda_bf16_amp(self):
+        run = training()
+        run["training_recipe"]["config"][
+            "amp"
+        ] = False
+        with self.assertRaisesRegex(
+            ValueError,
+            "amp=true",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["config"][
+            "amp_dtype"
+        ] = "fp16"
+        with self.assertRaisesRegex(
+            ValueError,
+            "amp_dtype=bf16",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["precision"][
+            "autocast_executed"
+        ] = False
+        with self.assertRaisesRegex(
+            ValueError,
+            "executed autocast",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"]["precision"][
+            "grad_scaler"
+        ] = True
+        with self.assertRaisesRegex(
+            ValueError,
+            "must not use GradScaler",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["device"] = "cpu"
+        run["training_recipe"]["precision"][
+            "autocast_device_type"
+        ] = "cpu"
+        run["training_recipe"]["precision"][
+            "released_cuda_execution"
+        ] = False
+        with self.assertRaisesRegex(
+            ValueError,
+            "CUDA autocast|CUDA BF16|CUDA training device",
         ):
             validate_training_run(run)
 
