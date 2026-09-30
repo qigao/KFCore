@@ -777,6 +777,19 @@ class ApacheReleaseQualificationTest(
         ):
             validate_training_run(run)
 
+        value = corpus()
+        value[
+            "predicate_spatial_flags_derivation"
+        ]["spatial_union_predicate_count"] = 2
+        with self.assertRaisesRegex(
+            ValueError,
+            "spatial derivation count",
+        ):
+            qualify_training_run(
+                value,
+                training(),
+            )
+
     def test_object_bank_provenance_is_required_and_bound(self):
         value = corpus()
         del value["object_embeddings_sha256"]
