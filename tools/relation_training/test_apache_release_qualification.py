@@ -3,6 +3,11 @@ from __future__ import annotations
 import copy
 import unittest
 
+from make_apache_object_embeddings import (
+    OBJECT_BANK_SCHEMA,
+    OBJECT_TEMPLATES,
+    ordered_strings_sha256,
+)
 from apache_mixture import (
     RELEASED_MIX_FRACTIONS,
     RELEASED_SAMPLES_PER_EPOCH,
@@ -84,6 +89,14 @@ def corpus() -> dict:
         "ontology_npz_sha256": h("7"),
         "neg_rate_table_sha256": h("8"),
         "predicate_embeddings_sha256": h("9"),
+        "text_student_sha256": h("e"),
+        "tokenizer_contract_sha256": h("f"),
+        "object_embeddings_tensor_sha256": h("0"),
+        "object_labels_sha256": (
+            ordered_strings_sha256(
+                ("person", "horse")
+            )
+        ),
         "vocabulary_sha256": h("a"),
     }
 
@@ -222,6 +235,27 @@ def training() -> dict:
         "apache_reference_objective": {
             "config": objective_scalars,
             "assets": {
+                "object_embeddings": {
+                    "schema": OBJECT_BANK_SCHEMA,
+                    "templates": list(
+                        OBJECT_TEMPLATES
+                    ),
+                    "object_labels": [
+                        "person",
+                        "horse",
+                    ],
+                    "object_labels_sha256": (
+                        ordered_strings_sha256(
+                            ("person", "horse")
+                        )
+                    ),
+                    "output_dim": 512,
+                    "row_normalized": True,
+                    "tensor_sha256": h("0"),
+                    "tensor_file_sha256": h("b"),
+                    "text_student_sha256": h("e"),
+                    "tokenizer_contract_sha256": h("f"),
+                },
                 "source_column_allow_sha256": c[
                     "source_column_allow_sha256"
                 ],
@@ -616,6 +650,53 @@ class ApacheReleaseQualificationTest(
             "epoch sequence",
         ):
             validate_training_run(run)
+
+    def test_object_bank_provenance_drift_is_rejected(self):
+        run = training()
+        del run["apache_reference_objective"][
+            "assets"
+        ]["object_embeddings"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "object-bank provenance",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["apache_reference_objective"][
+            "assets"
+        ]["object_embeddings"][
+            "templates"
+        ][1] = "photo {p}"
+        with self.assertRaisesRegex(
+            ValueError,
+            "templates",
+        ):
+            validate_training_run(run)
+
+        value = corpus()
+        value["text_student_sha256"] = h("7")
+        with self.assertRaisesRegex(
+            ValueError,
+            "text_student_sha256",
+        ):
+            qualify_training_run(
+                value,
+                training(),
+            )
+
+        value = corpus()
+        value[
+            "object_embeddings_tensor_sha256"
+        ] = h("8")
+        with self.assertRaisesRegex(
+            ValueError,
+            "tensor_sha256",
+        ):
+            qualify_training_run(
+                value,
+                training(),
+            )
 
     def test_objective_asset_drift_is_rejected(self):
         run = training()
