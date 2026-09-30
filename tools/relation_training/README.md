@@ -492,6 +492,38 @@ cardinality:
   pair_states_mean
 ```
 
+Collect production timing samples from the typed pipeline:
+
+```cpp
+auto timed = pipeline->process_timed(image, seconds);
+timing_log
+    << kfcore::scene_interaction::scene_behavior_timing_json(
+           timed.timing)
+    << '\n';
+```
+
+Each line uses:
+
+```text
+kfcore.scene-behavior-timing-sample/1
+```
+
+and carries the exact stage timings/cardinalities from
+`SceneBehaviorTiming`.
+
+Aggregate the JSONL samples under the same qualification context:
+
+```bash
+python tools/relation_training/summarize_scene_behavior_latency.py \
+  --context qualification-context.json \
+  --samples-jsonl timing.jsonl \
+  --out scene-behavior-latency.json
+```
+
+Percentiles use the deterministic nearest-rank definition. The summary validates
+finite/non-negative stage values, count fields, and that scene-graph/temporal
+timings do not exceed total frame timing.
+
 Create the final JSON + Markdown report with:
 
 ```bash
