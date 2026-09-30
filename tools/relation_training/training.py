@@ -710,12 +710,16 @@ def train_epoch(
         report["micro_batches"] = float(micro_batches)
         report["optimizer_steps"] = float(optimizer_steps)
         report["grad_accum"] = float(grad_accum)
-        report["resolution_counts"] = {
-            str(key): int(value)
-            for key, value in sorted(
-                resolution_counts.items()
+        if resolution_counts:
+            report["training_resolution_min"] = float(
+                min(resolution_counts)
             )
-        }
+            report["training_resolution_max"] = float(
+                max(resolution_counts)
+            )
+            report["training_resolution_distinct"] = float(
+                len(resolution_counts)
+            )
         if scheduler is not None:
             learning_rates = scheduler.get_last_lr()
             report["learning_rate_min"] = float(
@@ -746,12 +750,16 @@ def train_epoch(
     report["micro_batches"] = float(micro_batches)
     report["optimizer_steps"] = float(optimizer_steps)
     report["grad_accum"] = float(grad_accum)
-    report["resolution_counts"] = {
-        str(key): int(value)
-        for key, value in sorted(
-            resolution_counts.items()
+    if resolution_counts:
+        report["training_resolution_min"] = float(
+            min(resolution_counts)
         )
-    }
+        report["training_resolution_max"] = float(
+            max(resolution_counts)
+        )
+        report["training_resolution_distinct"] = float(
+            len(resolution_counts)
+        )
     if scheduler is not None:
         learning_rates = scheduler.get_last_lr()
         report["learning_rate_min"] = float(
