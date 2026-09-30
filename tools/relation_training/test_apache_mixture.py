@@ -11,15 +11,26 @@ import torch
 
 from apache_mixture import (
     MIXTURE_SCHEMA,
+    RELEASED_MICRO_BATCH_SIZE,
     RELEASED_MIX_FRACTIONS,
+    RELEASED_SAMPLES_PER_EPOCH,
+    RELEASED_SEED,
     RELEASED_SOURCE_NAMES,
+    RELEASED_WORLD_SIZE,
+    ApacheReleasedBatchSampler,
     DistributedWeightedSampler,
+    LoadedRelationMixture,
     RelationMixtureConfig,
+    RelationMixtureSource,
     load_relation_mixture,
     realized_source_draws,
     sample_weights_from_fractions,
 )
-from benchmark import DatasetManifest, RelationVocabulary
+from benchmark import (
+    DatasetManifest,
+    RelationExample,
+    RelationVocabulary,
+)
 from training import (
     FrozenBaselineConfig,
     RelationMixtureTrainingDataset,
@@ -27,13 +38,12 @@ from training import (
 )
 
 
-def _write_example(
-    path: Path,
+def _example_payload(
     *,
     image: str,
     predicate: int = 0,
     source_id: int | None = None,
-) -> None:
+) -> dict[str, object]:
     payload: dict[str, object] = {
         "image": image,
         "width": 8,
@@ -47,9 +57,38 @@ def _write_example(
     }
     if source_id is not None:
         payload["source_id"] = source_id
+    return payload
+
+
+def _write_examples(
+    path: Path,
+    payloads: list[dict[str, object]],
+) -> None:
     path.write_text(
-        json.dumps(payload) + "\n",
+        "".join(
+            json.dumps(payload) + "\n"
+            for payload in payloads
+        ),
         encoding="utf-8",
+    )
+
+
+def _write_example(
+    path: Path,
+    *,
+    image: str,
+    predicate: int = 0,
+    source_id: int | None = None,
+) -> None:
+    _write_examples(
+        path,
+        [
+            _example_payload(
+                image=image,
+                predicate=predicate,
+                source_id=source_id,
+            )
+        ],
     )
 
 
@@ -57,8 +96,14 @@ class ApacheMixtureTest(unittest.TestCase):
     def test_reference_fractions_and_names_are_exact(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            exclude_path = root / "indoorvg_holdout.json"
+            exclude_path.write_text(
+                json.dumps({"stems": []}),
+                encoding="utf-8",
+            )
             payload = {
                 "schema": MIXTURE_SCHEMA,
+                "exclude_ids": exclude_path.name,
                 "sources": [
                     {
                         "name": name,
@@ -93,6 +138,140 @@ class ApacheMixtureTest(unittest.TestCase):
                 rtol=0.0,
                 atol=1.0e-12,
             )
+        )
+        self.assertEqual(config.seed, RELEASED_SEED)
+        self.assertEqual(config.samples_per_epoch, 0)
+        self.assertTrue(config.exclude_ids_sha256)
+
+    def test_released_config_gate_rejects_recipe_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exclude_path = root / "holdout.json"
+            exclude_path.write_text(
+                json.dumps({"stems": []}),
+                encoding="utf-8",
+            )
+            sources = [
+                {
+                    "name": name,
+                    "annotations": f"{name}.jsonl",
+                    "image_root": name,
+                    "fraction": fraction,
+                }
+                for name, fraction in zip(
+                    RELEASED_SOURCE_NAMES,
+                    RELEASED_MIX_FRACTIONS,
+                )
+            ]
+
+            def load(**extra):
+                payload = {
+                    "schema": MIXTURE_SCHEMA,
+                    "sources": sources,
+                    **extra,
+                }
+                path = root / "mixture.json"
+                path.write_text(
+                    json.dumps(payload),
+                    encoding="utf-8",
+                )
+                return RelationMixtureConfig.load(path)
+
+            self.assertFalse(
+                load().matches_released_mixture()
+            )
+            self.assertFalse(
+                load(
+                    exclude_ids=exclude_path.name,
+                    seed=99,
+                ).matches_released_mixture()
+            )
+            self.assertFalse(
+                load(
+                    exclude_ids=exclude_path.name,
+                    samples_per_epoch=RELEASED_SAMPLES_PER_EPOCH,
+                ).matches_released_mixture()
+            )
+            self.assertTrue(
+                load(
+                    exclude_ids=exclude_path.name,
+                    seed=RELEASED_SEED,
+                    samples_per_epoch=0,
+                ).matches_released_mixture()
+            )
+
+    def test_exclude_ids_filters_before_source_weighting(self):
+        vocabulary = RelationVocabulary(
+            ("riding",),
+            ("person", "horse"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = []
+            for name in ("left", "right"):
+                annotations = root / f"{name}.jsonl"
+                _write_examples(
+                    annotations,
+                    [
+                        _example_payload(
+                            image=f"{name}_keep.jpg",
+                        ),
+                        _example_payload(
+                            image=f"{name}_held.jpg",
+                        ),
+                    ],
+                )
+                sources.append(
+                    {
+                        "name": name,
+                        "annotations": annotations.name,
+                        "image_root": name,
+                        "fraction": 0.5,
+                    }
+                )
+
+            exclude_path = root / "holdout.json"
+            exclude_path.write_text(
+                json.dumps(
+                    {
+                        "stems": [
+                            "left_held",
+                            "right_held",
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mixture_path = root / "mixture.json"
+            mixture_path.write_text(
+                json.dumps(
+                    {
+                        "schema": MIXTURE_SCHEMA,
+                        "sources": sources,
+                        "exclude_ids": exclude_path.name,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mixture = load_relation_mixture(
+                mixture_path,
+                vocabulary,
+            )
+
+        self.assertEqual(
+            mixture.source_excluded_counts,
+            (1, 1),
+        )
+        self.assertEqual(
+            len(mixture.combined_manifest.examples),
+            2,
+        )
+        self.assertEqual(
+            mixture.source_of_index.tolist(),
+            [0, 1],
+        )
+        self.assertTrue(
+            mixture.config.exclude_ids_sha256
         )
 
     def test_sample_weights_realize_source_fractions_not_source_sizes(self):
@@ -386,6 +565,151 @@ class ApacheMixtureTest(unittest.TestCase):
             self.assertIn(resolutions[0], (8, 16))
         self.assertFalse(
             torch.equal(first_draw, second_draw)
+        )
+
+    def test_released_logical_rank_sampler_matches_apache_topology(self):
+        weights = np.asarray(
+            [0.1, 0.2, 0.3, 0.4],
+            dtype=np.float64,
+        )
+        sampler = ApacheReleasedBatchSampler(
+            weights,
+            resolutions=(224, 304),
+        )
+        self.assertEqual(
+            sampler.global_sampler.total_size,
+            503_756,
+        )
+        self.assertEqual(
+            sampler.global_sampler.num_samples,
+            125_939,
+        )
+        self.assertEqual(
+            sampler.optimizer_steps_per_epoch,
+            3_935,
+        )
+        self.assertEqual(
+            len(sampler),
+            15_740,
+        )
+        self.assertTrue(
+            sampler.matches_released_topology()
+        )
+
+        iterator = iter(sampler)
+        logical_rank_batches = [
+            next(iterator)
+            for _ in range(RELEASED_WORLD_SIZE)
+        ]
+        global_draw = sampler.last_global_indices
+        assert global_draw is not None
+        for rank, batch in enumerate(logical_rank_batches):
+            indices = [
+                int(value[0])
+                for value in batch
+            ]
+            resolutions = {
+                int(value[1])
+                for value in batch
+            }
+            self.assertEqual(
+                indices,
+                global_draw[
+                    rank :
+                    rank
+                    + RELEASED_WORLD_SIZE
+                    * RELEASED_MICRO_BATCH_SIZE :
+                    RELEASED_WORLD_SIZE
+                ].tolist(),
+            )
+            self.assertEqual(len(resolutions), 1)
+
+        self.assertEqual(
+            logical_rank_batches[0][0][1],
+            logical_rank_batches[1][0][1],
+        )
+        self.assertEqual(
+            logical_rank_batches[1][0][1],
+            logical_rank_batches[2][0][1],
+        )
+        self.assertEqual(
+            logical_rank_batches[2][0][1],
+            logical_rank_batches[3][0][1],
+        )
+
+    def test_loaded_released_gate_requires_exact_post_exclusion_epoch(self):
+        example = RelationExample(
+            image="x.jpg",
+            width=8,
+            height=8,
+            boxes_xyxy=(
+                (0.0, 0.0, 4.0, 4.0),
+                (4.0, 4.0, 8.0, 8.0),
+            ),
+            object_labels=("person", "horse"),
+            relations=((0, 0, 1),),
+            source_id=0,
+        )
+        examples = (
+            (example,)
+            * RELEASED_SAMPLES_PER_EPOCH
+        )
+        source = np.zeros(
+            RELEASED_SAMPLES_PER_EPOCH,
+            dtype=np.int64,
+        )
+        source[-2] = 1
+        source[-1] = 2
+        config = RelationMixtureConfig(
+            sources=tuple(
+                RelationMixtureSource(
+                    name=name,
+                    annotations=Path(f"{name}.jsonl"),
+                    image_root=Path(name),
+                    fraction=fraction,
+                )
+                for name, fraction in zip(
+                    RELEASED_SOURCE_NAMES,
+                    RELEASED_MIX_FRACTIONS,
+                )
+            ),
+            samples_per_epoch=0,
+            seed=RELEASED_SEED,
+            exclude_ids=Path("holdout.json"),
+            exclude_ids_sha256="golden",
+        )
+        manifest = DatasetManifest(
+            examples=examples,
+            annotations_sha256="manifest",
+            vocabulary_sha256="vocab",
+        )
+        mixture = LoadedRelationMixture(
+            config=config,
+            manifests=(),
+            combined_manifest=manifest,
+            source_of_index=source,
+            source_annotation_sha256=(),
+            source_excluded_counts=(),
+        )
+        self.assertTrue(
+            mixture.matches_released_sampling_contract()
+        )
+
+        short_manifest = DatasetManifest(
+            examples=examples[:-1],
+            annotations_sha256="manifest-short",
+            vocabulary_sha256="vocab",
+        )
+        short = LoadedRelationMixture(
+            config=config,
+            manifests=(),
+            combined_manifest=short_manifest,
+            source_of_index=source[:-1],
+            source_annotation_sha256=(),
+            source_excluded_counts=(),
+        )
+        self.assertFalse(
+            short.matches_released_sampling_contract()
         )
 
     def test_realized_draw_report_uses_global_padded_draw(self):
