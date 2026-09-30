@@ -8,6 +8,7 @@
 #include "kfcore/yolo/detector.hpp"
 #include "kfcore/yolo/tracking.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -20,6 +21,26 @@ struct SceneGraphFrame
 {
     yolo::TrackFrame objects;
     relation::RelationFrame relations;
+};
+
+struct SceneGraphTiming
+{
+    double detector_ms = 0.0;
+    double tracker_ms = 0.0;
+    double region_prepare_ms = 0.0;
+    double relation_ms = 0.0;
+    double assembly_ms = 0.0;
+    double total_ms = 0.0;
+
+    std::size_t detection_count = 0U;
+    std::size_t tracked_object_count = 0U;
+    std::size_t relation_edge_count = 0U;
+};
+
+struct TimedSceneGraphFrame
+{
+    SceneGraphFrame frame;
+    SceneGraphTiming timing;
 };
 
 struct SceneGraphPipelineOptions
@@ -53,6 +74,9 @@ public:
            const SceneGraphPipelineOptions& options = {});
 
     [[nodiscard]] SceneGraphFrame process(const image::ImageView& image);
+
+    [[nodiscard]] TimedSceneGraphFrame
+    process_timed(const image::ImageView& image);
 
     // Dynamic-vocabulary control is available only when this pipeline was
     // created with OpenVocabularyRelation. Vocabulary changes do not reset
