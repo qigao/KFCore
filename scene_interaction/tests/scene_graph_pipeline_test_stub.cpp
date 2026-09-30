@@ -4,6 +4,28 @@
 #include <stdexcept>
 #include <utility>
 
+namespace kfcore::yolo
+{
+
+struct YoloDetector::Impl final
+{
+};
+
+YoloDetector::~YoloDetector() = default;
+
+} // namespace kfcore::yolo
+
+namespace kfcore::relation
+{
+
+struct OpenVocabularyRelation::Impl final
+{
+};
+
+OpenVocabularyRelation::~OpenVocabularyRelation() = default;
+
+} // namespace kfcore::relation
+
 namespace kfcore::pipelines
 {
 
@@ -23,29 +45,7 @@ SceneGraphPipeline::~SceneGraphPipeline() = default;
 std::unique_ptr<SceneGraphPipeline>
 SceneGraphPipeline::create(
     std::unique_ptr<yolo::YoloDetector>,
-    std::unique_ptr<relation::RelateAnything>,
-    const SceneGraphPipelineOptions&)
-{
-    return std::unique_ptr<SceneGraphPipeline>(
-        new SceneGraphPipeline(std::make_unique<Impl>()));
-}
-
-std::unique_ptr<SceneGraphPipeline>
-SceneGraphPipeline::create(
-    std::unique_ptr<yolo::YoloDetector>,
     std::unique_ptr<relation::OpenVocabularyRelation>,
-    const SceneGraphPipelineOptions&)
-{
-    return std::unique_ptr<SceneGraphPipeline>(
-        new SceneGraphPipeline(std::make_unique<Impl>()));
-}
-
-std::unique_ptr<SceneGraphPipeline>
-SceneGraphPipeline::create(
-    std::unique_ptr<yolo::YoloDetector>,
-    std::unique_ptr<relation::OpenVocabularyRelation>,
-    std::unique_ptr<relation::PredicateTextEncoder>,
-    std::unique_ptr<relation::PredicateRoutingGate>,
     const SceneGraphPipelineOptions&)
 {
     return std::unique_ptr<SceneGraphPipeline>(
