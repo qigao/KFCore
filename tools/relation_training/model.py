@@ -2343,7 +2343,6 @@ class KFRelationModel(nn.Module):
         image: Tensor,
         boxes: Tensor,
         box_counts: Tensor,
-        *,
         coverage: Tensor | None = None,
         fill: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
