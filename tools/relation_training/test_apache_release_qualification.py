@@ -9,6 +9,12 @@ from apache_mixture import (
     RELEASED_SEED,
     RELEASED_SOURCE_NAMES,
 )
+from apache_release_scalars import (
+    MODEL_SCALARS,
+    OBJECTIVE_SCALARS,
+    RECIPE_SCALARS,
+    validate_released_scalar_contract,
+)
 from apache_release_qualification import (
     CORPUS_SCHEMA,
     QUALIFICATION_SCHEMA,
@@ -83,6 +89,39 @@ def corpus() -> dict:
 
 def training() -> dict:
     c = corpus()
+    recipe_config = {
+        "epochs": 12,
+        "micro_batch_size": 32,
+        "grad_accum": 4,
+        "ema_decay": 0.9998,
+        "augment": 0.3,
+        "text_dim": 512,
+        "image_size": 448,
+        "geo_budget": 400,
+        "final_budget": 128,
+        **RECIPE_SCALARS,
+    }
+    model_config = {
+        "image_size": 448,
+        "max_boxes": 40,
+        "pair_budget": 128,
+        "hidden_dim": 512,
+        "pair_evidence_contract": "apache",
+        "pair_sampler_contract": "apache",
+        "relation_context_contract": "apache",
+        "predicate_head_contract": "apache",
+        **MODEL_SCALARS,
+    }
+    objective_config = dict(
+        OBJECTIVE_SCALARS
+    )
+    scalar_contract = (
+        validate_released_scalar_contract(
+            recipe_config,
+            model_config,
+            objective_config,
+        )
+    )
     return {
         "schema": "kfcore.relation-training-run/1",
         "backbone": "hf_hub:timm/vit_small_patch16_dinov3.lvd1689m",
@@ -91,17 +130,7 @@ def training() -> dict:
             "name": "apache-reference",
             "released_epoch_target": 12,
             "matches_released_epoch_count": True,
-            "config": {
-                "epochs": 12,
-                "micro_batch_size": 32,
-                "grad_accum": 4,
-                "ema_decay": 0.9998,
-                "augment": 0.3,
-                "text_dim": 512,
-                "image_size": 448,
-                "geo_budget": 400,
-                "final_budget": 128,
-            },
+            "config": recipe_config,
             "effective_batch_size": 128,
             "weight_source": "ema",
             "ema": {
@@ -127,6 +156,7 @@ def training() -> dict:
                 "final_budget": 128,
                 "matches_released": True,
             },
+            "scalar_contract": scalar_contract,
         },
         "train_mixture": {
             "source_names": list(
@@ -156,16 +186,7 @@ def training() -> dict:
             {"epoch": epoch, "loss": 1.0}
             for epoch in range(1, 13)
         ],
-        "model_config": {
-            "image_size": 448,
-            "max_boxes": 40,
-            "pair_budget": 128,
-            "hidden_dim": 512,
-            "pair_evidence_contract": "apache",
-            "pair_sampler_contract": "apache",
-            "relation_context_contract": "apache",
-            "predicate_head_contract": "apache",
-        },
+        "model_config": model_config,
         "checkpoint_sha256": h("b"),
         "predicate_embedding_shape": [3, 512],
         "predicate_embeddings_sha256": c[
@@ -175,6 +196,7 @@ def training() -> dict:
             "vocabulary_sha256"
         ],
         "apache_reference_objective": {
+            "config": objective_config,
             "assets": {
                 "source_column_allow_sha256": c[
                     "source_column_allow_sha256"
@@ -188,7 +210,7 @@ def training() -> dict:
                 "neg_rate_table_sha256": c[
                     "neg_rate_table_sha256"
                 ],
-            }
+            },
         },
     }
 
@@ -196,6 +218,32 @@ def training() -> dict:
 class ApacheReleaseQualificationTest(
     unittest.TestCase
 ):
+    def test_raw_scalar_drift_and_report_tampering_fail_closed(self):
+        run = training()
+        run["training_recipe"]["config"][
+            "head_lr"
+        ] = 1.0e-3
+        with self.assertRaisesRegex(
+            ValueError,
+            "head_lr",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["training_recipe"][
+            "scalar_contract"
+        ] = {
+            **run["training_recipe"][
+                "scalar_contract"
+            ],
+            "matches_released": False,
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            "reported released scalar contract",
+        ):
+            validate_training_run(run)
+
     def test_resolved_corpus_and_training_qualify(self):
         result = qualify_training_run(
             corpus(),
