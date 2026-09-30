@@ -498,3 +498,31 @@ class DistributedWeightedSampler(Sampler[int]):
 
     def __len__(self) -> int:
         return self.num_samples
+
+
+
+def validate_mixture_disjoint_validation(
+    mixture: LoadedRelationMixture,
+    validation_manifest: DatasetManifest,
+    *,
+    validation_image_root: str | Path,
+) -> None:
+    validation_root = Path(validation_image_root).resolve()
+    validation_paths = {
+        (validation_root / example.image).resolve()
+        for example in validation_manifest.examples
+    }
+    for source, manifest in zip(
+        mixture.config.sources,
+        mixture.manifests,
+    ):
+        source_root = source.image_root.resolve()
+        for example in manifest.examples:
+            path = (
+                source_root / example.image
+            ).resolve()
+            if path in validation_paths:
+                raise ValueError(
+                    "train/validation image leakage: "
+                    + str(path)
+                )
