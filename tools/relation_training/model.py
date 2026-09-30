@@ -1767,6 +1767,7 @@ class KFRelationModel(nn.Module):
         region_iou = None
         region_contact = None
         coverage_grid = None
+        normalized_coverage = None
         normalized_fill = None
         if coverage is not None:
             if (
@@ -2315,13 +2316,21 @@ class KFRelationModel(nn.Module):
         )
 
     def forward_encoder(
-        self, image: Tensor, boxes: Tensor, box_counts: Tensor
+        self,
+        image: Tensor,
+        boxes: Tensor,
+        box_counts: Tensor,
+        *,
+        coverage: Tensor | None = None,
+        fill: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         runtime, _, _, _, _, _, _, _, _, _, _, _, _ = self._forward_impl(
             image,
             boxes,
             box_counts,
             encoder_only=True,
+            coverage=coverage,
+            fill=fill,
         )
         if len(runtime) != 6:
             raise RuntimeError(
