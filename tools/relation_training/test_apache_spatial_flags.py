@@ -225,6 +225,24 @@ class ApacheSpatialFlagsTest(
                     ("holding", "beside"),
                 )
 
+    def test_negative_relation_flags_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pack = write_pack(
+                root,
+                "bad-flags",
+                predicates=["holding"],
+                rows=[(0, -1)],
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "non-negative bitfields",
+            ):
+                derive_spatial_flags(
+                    [pack],
+                    ("holding", "beside"),
+                )
+
     def test_malformed_relation_table_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
