@@ -1,0 +1,72 @@
+name: Kalman target contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'kalman/CMakeLists.txt'
+      - 'kalman/tests/CMakeLists.txt'
+      - 'trackers/CMakeLists.txt'
+      - 'trackers/tests/CMakeLists.txt'
+      - 'vision/core/yolo/tests/CMakeLists.txt'
+      - 'cmake/tests/kalman_target_contract/**'
+      - '.github/workflows/kalman-target-contract.yml'
+  pull_request:
+    branches: [master, fix/backend-neutral-package]
+    paths:
+      - 'kalman/CMakeLists.txt'
+      - 'kalman/tests/CMakeLists.txt'
+      - 'trackers/CMakeLists.txt'
+      - 'trackers/tests/CMakeLists.txt'
+      - 'vision/core/yolo/tests/CMakeLists.txt'
+      - 'cmake/tests/kalman_target_contract/**'
+      - '.github/workflows/kalman-target-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kalman-target-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cmake-target-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Reject obsolete live target references
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if git grep -n -F 'KFCore::kfcore' -- '*CMakeLists.txt'; then
+            echo "live CMake still references obsolete KFCore::kfcore" >&2
+            exit 1
+          fi
+
+      - name: Configure focused target contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake             -S cmake/tests/kalman_target_contract             -B "$RUNNER_TEMP/kalman-target-contract"             -DKFCORE_SOURCE_DIR="$GITHUB_WORKSPACE"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
