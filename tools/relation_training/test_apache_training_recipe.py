@@ -35,7 +35,7 @@ class DummyDinoInner(nn.Module):
             8,
             kernel_size=2,
             stride=2,
-            bias=False,
+            bias=True,
         )
         self.norm = nn.LayerNorm(8)
         self.embeddings = DummyEmbeddings()
