@@ -80,6 +80,7 @@ jobs:
             tools/relation_training/compare_pair_visual_evidence.py \
             tools/relation_training/compare_pair_geometry_evidence.py \
             tools/relation_training/tensorrt_dynamic_vocab_profile.py \
+            tools/relation_training/build_dynamic_vocab_tensorrt.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
@@ -91,6 +92,7 @@ jobs:
             tools/relation_training/test_apache_vocab_head.py \
             tools/relation_training/test_apache_text_student.py \
             tools/relation_training/test_tensorrt_dynamic_vocab_profile.py \
+            tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_training.py \
             tools/relation_training/test_openimages.py
@@ -100,7 +102,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_tensorrt_dynamic_vocab_profile.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
