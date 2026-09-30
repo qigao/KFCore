@@ -260,6 +260,7 @@ class ApacheTrainingRecipeConfig:
     multi_scale_n: int = 7
     cfa_prob: float = 0.5
     cfa_alpha: float = 1.0
+    ema_decay: float = RELEASED_EMA_DECAY
 
     def __post_init__(self) -> None:
         for name in (
@@ -324,6 +325,14 @@ class ApacheTrainingRecipeConfig:
         ):
             raise ValueError(
                 "cfa_alpha must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.ema_decay)
+            or self.ema_decay < 0.0
+            or self.ema_decay >= 1.0
+        ):
+            raise ValueError(
+                "ema_decay must be finite within [0,1)"
             )
         if self.multi_scale:
             parts = self.multi_scale.split(",")
