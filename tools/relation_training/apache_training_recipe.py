@@ -67,6 +67,23 @@ def backbone_provenance(
     }
 
 
+def resolve_training_epochs(
+    requested: int | None,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        int(requested)
+        if requested is not None
+        else (12 if recipe == "apache-reference" else 5)
+    )
+    if value <= 0:
+        raise ValueError("training epochs must be positive")
+    return value
+
+
 @dataclass(frozen=True)
 class ApacheTrainingRecipeConfig:
     head_lr: float = 4.0e-4
