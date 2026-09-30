@@ -1614,6 +1614,29 @@ The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
 
+### Released photometric augmentation contract
+
+The Apache released recipe uses training-only photometric jitter with strength
+`0.3`. KFCore reproduces the same transform order and math after square resize:
+
+```text
+brightness factor ~ U(0.7, 1.3)
+contrast factor   ~ U(0.7, 1.3)
+saturation factor ~ U(0.7, 1.3)
+clamp [0,1]
+```
+
+Contrast is around each channel's spatial mean; saturation is around luma
+weights `[0.299, 0.587, 0.114]`. No horizontal flip or geometry transform is
+permitted because directional predicates would be falsified. Validation and
+qualification evaluation remain unaugmented.
+
+The reference implementation draws factors from ambient `torch.rand` inside
+real DDP DataLoader workers. KFCore preserves that stochastic distribution and
+records it explicitly, but the single-process logical-DDP runner does **not**
+claim bitwise identity with the upstream 4-rank × 16-worker random-call
+trajectory.
+
 ### Released EMA weight contract
 
 The Apache released model is the EMA model, not the final raw optimizer state.
