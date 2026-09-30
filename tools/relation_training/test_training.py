@@ -582,7 +582,7 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
                     cpu_autocast_enabled()
                 )
                 return {
-                    "loss": outputs[0]
+                    "loss": outputs.runtime[0]
                     .float()
                     .square()
                     .mean()
