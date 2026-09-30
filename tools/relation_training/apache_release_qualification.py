@@ -15,6 +15,13 @@ from apache_released_contract import (
     validate_released_scalar_contract,
     validate_released_structure_report,
 )
+from apache_spatial_flags import (
+    DERIVATION_ALGORITHM,
+    DERIVATION_SCHEMA,
+    MAJORITY_COMPARATOR,
+    MAJORITY_THRESHOLD,
+    SPATIAL_BIT,
+)
 from apache_training_recipe import (
     RELEASED_AMP,
     RELEASED_AMP_DTYPE,
@@ -121,6 +128,254 @@ def _require_positive_int(
             f"{name} must be a positive integer"
         )
     return value
+
+
+def _require_non_negative_int(
+    value: object,
+    name: str,
+) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+    ):
+        raise ValueError(
+            f"{name} must be a non-negative integer"
+        )
+    return value
+
+
+def _finite_number(
+    value: object,
+    name: str,
+) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise ValueError(
+            f"{name} must be finite"
+        )
+    return float(value)
+
+
+def _validate_spatial_derivation(
+    payload: object,
+    *,
+    sidecar_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "predicate spatial-flags derivation must be an object"
+        )
+    if payload.get("schema") != DERIVATION_SCHEMA:
+        raise ValueError(
+            "unsupported predicate spatial-flags derivation schema"
+        )
+    if payload.get("algorithm") != DERIVATION_ALGORITHM:
+        raise ValueError(
+            "predicate spatial-flags derivation algorithm differs from Apache"
+        )
+    if payload.get("spatial_bit") != SPATIAL_BIT:
+        raise ValueError(
+            "predicate spatial-flags derivation must use relation flag bit 0"
+        )
+    threshold = _finite_number(
+        payload.get("majority_threshold"),
+        "predicate spatial majority threshold",
+    )
+    if not math.isclose(
+        threshold,
+        MAJORITY_THRESHOLD,
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    ):
+        raise ValueError(
+            "predicate spatial majority threshold must be 0.5"
+        )
+    if (
+        payload.get("majority_comparator")
+        != MAJORITY_COMPARATOR
+    ):
+        raise ValueError(
+            "predicate spatial majority comparator must be >="
+        )
+    derived_sha = require_sha256(
+        payload.get("sidecar_sha256"),
+        "predicate spatial sidecar_sha256",
+    )
+    if derived_sha != sidecar_sha256:
+        raise ValueError(
+            "predicate spatial derivation sidecar hash does not match corpus"
+        )
+
+    sources = payload.get("sources")
+    if (
+        not isinstance(sources, list)
+        or len(sources)
+        != len(RELEASED_SOURCE_NAMES)
+    ):
+        raise ValueError(
+            "predicate spatial derivation must describe all released sources"
+        )
+    normalized_sources: list[
+        dict[str, Any]
+    ] = []
+    names: list[str] = []
+    for index, source in enumerate(
+        sources
+    ):
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"predicate spatial source {index} must be an object"
+            )
+        name = require_non_empty_string(
+            source.get("source_name"),
+            f"predicate spatial source {index} name",
+        )
+        names.append(name)
+        local_predicate_count = _require_positive_int(
+            source.get(
+                "local_predicate_count"
+            ),
+            f"{name} local_predicate_count",
+        )
+        supported = _require_non_negative_int(
+            source.get(
+                "supported_predicate_count"
+            ),
+            f"{name} supported_predicate_count",
+        )
+        spatial = _require_non_negative_int(
+            source.get(
+                "local_spatial_majority_count"
+            ),
+            f"{name} local_spatial_majority_count",
+        )
+        relations = _require_non_negative_int(
+            source.get("relations"),
+            f"{name} relations",
+        )
+        if (
+            supported > local_predicate_count
+            or spatial > supported
+        ):
+            raise ValueError(
+                f"{name} predicate spatial counts are inconsistent"
+            )
+        ignored = source.get(
+            "ignored_predicates"
+        )
+        if (
+            not isinstance(ignored, list)
+            or any(
+                not isinstance(value, str)
+                or not value
+                for value in ignored
+            )
+        ):
+            raise ValueError(
+                f"{name} ignored_predicates must be strings"
+            )
+        normalized_sources.append(
+            {
+                "source_name": name,
+                "pack_split": require_non_empty_string(
+                    source.get("pack_split"),
+                    f"{name} pack_split",
+                ),
+                "meta_sha256": require_sha256(
+                    source.get("meta_sha256"),
+                    f"{name} meta_sha256",
+                ),
+                "rels_sha256": require_sha256(
+                    source.get("rels_sha256"),
+                    f"{name} rels_sha256",
+                ),
+                "relations": relations,
+                "local_predicate_count": (
+                    local_predicate_count
+                ),
+                "supported_predicate_count": (
+                    supported
+                ),
+                "local_spatial_majority_count": (
+                    spatial
+                ),
+                "ignored_predicates": list(
+                    ignored
+                ),
+            }
+        )
+    if tuple(names) != RELEASED_SOURCE_NAMES:
+        raise ValueError(
+            "predicate spatial derivation source order differs from release"
+        )
+
+    union_count = _require_positive_int(
+        payload.get(
+            "union_predicate_count"
+        ),
+        "union_predicate_count",
+    )
+    supported_union = _require_positive_int(
+        payload.get(
+            "supported_union_predicate_count"
+        ),
+        "supported_union_predicate_count",
+    )
+    spatial_union = _require_positive_int(
+        payload.get(
+            "spatial_union_predicate_count"
+        ),
+        "spatial_union_predicate_count",
+    )
+    if (
+        supported_union > union_count
+        or spatial_union > supported_union
+    ):
+        raise ValueError(
+            "predicate spatial union counts are inconsistent"
+        )
+    unsupported = payload.get(
+        "unsupported_predicates"
+    )
+    if (
+        not isinstance(unsupported, list)
+        or any(
+            not isinstance(value, str)
+            or not value
+            for value in unsupported
+        )
+    ):
+        raise ValueError(
+            "unsupported_predicates must be strings"
+        )
+
+    return {
+        "schema": DERIVATION_SCHEMA,
+        "algorithm": DERIVATION_ALGORITHM,
+        "spatial_bit": SPATIAL_BIT,
+        "majority_threshold": (
+            MAJORITY_THRESHOLD
+        ),
+        "majority_comparator": (
+            MAJORITY_COMPARATOR
+        ),
+        "sources": normalized_sources,
+        "union_predicate_count": union_count,
+        "supported_union_predicate_count": (
+            supported_union
+        ),
+        "spatial_union_predicate_count": (
+            spatial_union
+        ),
+        "unsupported_predicates": list(
+            unsupported
+        ),
+        "sidecar_sha256": derived_sha,
+    }
 
 
 def validate_corpus(
@@ -249,11 +504,25 @@ def validate_corpus(
             payload.get("object_embeddings_sha256"),
             "object_embeddings_sha256",
         ),
+        "predicate_spatial_flags_sha256": require_sha256(
+            payload.get("predicate_spatial_flags_sha256"),
+            "predicate_spatial_flags_sha256",
+        ),
         "vocabulary_sha256": require_sha256(
             payload.get("vocabulary_sha256"),
             "vocabulary_sha256",
         ),
     }
+    normalized_payload[
+        "predicate_spatial_flags_derivation"
+    ] = _validate_spatial_derivation(
+        payload.get(
+            "predicate_spatial_flags_derivation"
+        ),
+        sidecar_sha256=normalized_payload[
+            "predicate_spatial_flags_sha256"
+        ],
+    )
     return normalized_payload
 
 
@@ -785,6 +1054,73 @@ def validate_training_run(
         "training exclude_ids_sha256",
     )
 
+    routing = payload.get(
+        "routing_warm_start"
+    )
+    if not isinstance(routing, dict):
+        raise ValueError(
+            "released qualification requires routing warm-start evidence"
+        )
+    if (
+        routing.get("schema")
+        != "kfcore.apache-routing-warm-start/1"
+    ):
+        raise ValueError(
+            "unsupported routing warm-start schema"
+        )
+    require_sha256(
+        routing.get(
+            "spatial_flags_sha256"
+        ),
+        "routing spatial_flags_sha256",
+    )
+    spatial_count = _require_positive_int(
+        routing.get("spatial_count"),
+        "routing spatial_count",
+    )
+    semantic_count = _require_positive_int(
+        routing.get("semantic_count"),
+        "routing semantic_count",
+    )
+    if (
+        spatial_count
+        + semantic_count
+        != predicate_shape[0]
+    ):
+        raise ValueError(
+            "routing spatial/semantic counts do not match predicate vocabulary"
+        )
+    for key in (
+        "target_alpha_mean",
+        "target_alpha_spatial_mean",
+        "target_alpha_semantic_mean",
+        "mse_before",
+        "mse_after",
+        "reported_final_mse",
+    ):
+        value = _finite_number(
+            routing.get(key),
+            f"routing {key}",
+        )
+        if key.startswith("target_alpha") and not (
+            0.0 <= value <= 1.0
+        ):
+            raise ValueError(
+                f"routing {key} must be within [0,1]"
+            )
+        if key.startswith("mse_") or key == "reported_final_mse":
+            if value < 0.0:
+                raise ValueError(
+                    f"routing {key} must be non-negative"
+                )
+    if not (
+        float(routing["mse_after"])
+        < float(routing["mse_before"])
+    ):
+        raise ValueError(
+            "routing warm start must improve MSE"
+        )
+
     return dict(payload)
 
 
@@ -882,6 +1218,18 @@ def qualify_training_run(
         raise ValueError(
             "vocabulary asset does not match corpus manifest"
         )
+    routing = training[
+        "routing_warm_start"
+    ]
+    if (
+        routing["spatial_flags_sha256"]
+        != corpus[
+            "predicate_spatial_flags_sha256"
+        ]
+    ):
+        raise ValueError(
+            "predicate spatial-flags hash does not match corpus manifest"
+        )
 
     return {
         "schema": QUALIFICATION_SCHEMA,
@@ -932,6 +1280,12 @@ def qualify_training_run(
         "object_embeddings_shape": training[
             "apache_reference_objective"
         ]["assets"]["object_embeddings_shape"],
+        "predicate_spatial_flags_sha256": corpus[
+            "predicate_spatial_flags_sha256"
+        ],
+        "predicate_spatial_flags_derivation": corpus[
+            "predicate_spatial_flags_derivation"
+        ],
         "precision": training[
             "training_recipe"
         ]["precision"],
