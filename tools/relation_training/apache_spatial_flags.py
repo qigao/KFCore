@@ -136,7 +136,13 @@ def _load_pack_flags(
         )
     )
 
+    source_name = (
+        split_dir.parent.name
+        if split_dir.name == "train"
+        else split_dir.name
+    )
     report = {
+        "source_name": source_name,
         "pack_split": str(
             split_dir.resolve()
         ),
