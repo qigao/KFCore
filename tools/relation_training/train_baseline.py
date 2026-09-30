@@ -37,7 +37,9 @@ from apache_training_recipe import (
     resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
+    resolve_training_image_size,
     resolve_training_max_boxes,
+    resolve_training_pair_budget,
     select_artifact_model,
     validate_training_text_dim,
 )
@@ -144,7 +146,15 @@ def main() -> None:
     parser.add_argument("--predicate-embeddings", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
-    parser.add_argument("--image-size", type=int, default=448)
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=None,
+        help=(
+            "Square model input. Defaults to 448. apache-reference rejects "
+            "any value other than released img_size=448."
+        ),
+    )
     parser.add_argument(
         "--augment",
         type=float,
@@ -164,7 +174,15 @@ def main() -> None:
             "and 32 for legacy. apache-reference rejects any value other than 40."
         ),
     )
-    parser.add_argument("--pair-budget", type=int, default=128)
+    parser.add_argument(
+        "--pair-budget",
+        type=int,
+        default=None,
+        help=(
+            "Final ordered-pair budget. Defaults to 128. apache-reference "
+            "rejects any value other than released final_budget=128."
+        ),
+    )
     parser.add_argument(
         "--hidden-dim",
         type=int,
@@ -535,6 +553,14 @@ def main() -> None:
         if args.batch_size is not None
         else (32 if reference_training else 4)
     )
+    resolved_image_size = resolve_training_image_size(
+        args.image_size,
+        recipe=args.training_recipe,
+    )
+    resolved_pair_budget = resolve_training_pair_budget(
+        args.pair_budget,
+        recipe=args.training_recipe,
+    )
     resolved_max_boxes = resolve_training_max_boxes(
         args.max_boxes,
         recipe=args.training_recipe,
@@ -638,9 +664,9 @@ def main() -> None:
         seed=resolved_seed,
     )
     model_config = RelationModelConfig(
-        image_size=args.image_size,
+        image_size=resolved_image_size,
         max_boxes=resolved_max_boxes,
-        pair_budget=args.pair_budget,
+        pair_budget=resolved_pair_budget,
         hidden_dim=resolved_hidden_dim,
         geometry_dim=args.geometry_dim,
         num_heads=args.num_heads,
@@ -1250,6 +1276,8 @@ def main() -> None:
             cfa_alpha=args.apache_cfa_alpha,
             augment=resolved_augment,
             text_dim=int(predicate_embeddings.shape[1]),
+            image_size=resolved_image_size,
+            final_budget=resolved_pair_budget,
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
