@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict
 import hashlib
 import unittest
 
@@ -31,6 +32,20 @@ from apache_spatial_flags import (
     MAJORITY_THRESHOLD,
     SPATIAL_BIT,
 )
+from apache_text_bank import (
+    NPZ_FORMAT as TEXT_BANK_NPZ_FORMAT,
+    PREDICATE_BANK_SCHEMA,
+    RELEASED_OBJECT_TEMPLATES,
+    RELEASED_PREDICATE_TEMPLATES,
+    RELEASED_TEXT_STUDENT_SHA256,
+    RELEASED_TOKENIZER_ID,
+    RELEASED_TRANSFORMERS_VERSION,
+    TEXT_BANK_DERIVATION_SCHEMA,
+    TOKENIZER_BUNDLE_SCHEMA,
+)
+from apache_text_student import (
+    PredicateTextStudentConfig,
+)
 from apache_release_qualification import (
     CORPUS_SCHEMA,
     QUALIFICATION_SCHEMA,
@@ -50,6 +65,24 @@ def names_h(names: tuple[str, ...]) -> str:
     digest = hashlib.sha256()
     for name in names:
         digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def tokenizer_bundle_h(
+    files: dict[str, str],
+) -> str:
+    digest = hashlib.sha256()
+    for filename in sorted(files):
+        digest.update(
+            filename.encode("utf-8")
+        )
+        digest.update(b"\0")
+        digest.update(
+            files[filename].encode(
+                "ascii"
+            )
+        )
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -136,6 +169,70 @@ def corpus() -> dict:
             "spatial_union_predicate_count": 1,
             "unsupported_predicates": [],
             "sidecar_sha256": h("0"),
+        },
+        "text_bank_derivation": {
+            "schema": TEXT_BANK_DERIVATION_SCHEMA,
+            "student_checkpoint_sha256": (
+                RELEASED_TEXT_STUDENT_SHA256
+            ),
+            "student_config": asdict(
+                PredicateTextStudentConfig()
+            ),
+            "tokenizer": {
+                "schema": TOKENIZER_BUNDLE_SCHEMA,
+                "tokenizer_id": RELEASED_TOKENIZER_ID,
+                "source_kind": "local-bundle",
+                "path": "/release/tokenizer",
+                "files": {
+                    "tokenizer.json": h("a"),
+                    "tokenizer_config.json": h("b"),
+                },
+                "bundle_sha256": tokenizer_bundle_h(
+                    {
+                        "tokenizer.json": h("a"),
+                        "tokenizer_config.json": h("b"),
+                    }
+                ),
+            },
+            "transformers_version": (
+                RELEASED_TRANSFORMERS_VERSION
+            ),
+            "encoding_semantics": (
+                "encode-each-template,sum-template-vectors,l2-normalize-once"
+            ),
+            "predicate_bank": {
+                "templates": list(
+                    RELEASED_PREDICATE_TEMPLATES
+                ),
+                "label_order_sha256": names_h(
+                    (
+                        "above",
+                        "over",
+                        "below",
+                    )
+                ),
+                "label_count": 3,
+                "shape": [3, 512],
+                "tensor_sha256": h("c"),
+                "artifact_sha256": h("9"),
+                "npz_format": TEXT_BANK_NPZ_FORMAT,
+            },
+            "object_bank": {
+                "templates": list(
+                    RELEASED_OBJECT_TEMPLATES
+                ),
+                "label_order_sha256": names_h(
+                    (
+                        "person",
+                        "horse",
+                    )
+                ),
+                "label_count": 2,
+                "shape": [2, 512],
+                "tensor_sha256": h("d"),
+                "artifact_sha256": h("e"),
+                "npz_format": TEXT_BANK_NPZ_FORMAT,
+            },
         },
         "pair_opportunity_rebuild": {
             "schema": PAIR_OPPORTUNITY_REBUILD_SCHEMA,
@@ -329,6 +426,35 @@ def training() -> dict:
         "predicate_embeddings_sha256": c[
             "predicate_embeddings_sha256"
         ],
+        "predicate_bank": {
+            "schema": PREDICATE_BANK_SCHEMA,
+            "artifact_sha256": c[
+                "predicate_embeddings_sha256"
+            ],
+            "shape": [3, 512],
+            "source_dtype": "float16",
+            "runtime_dtype": "torch.float32",
+            "predicate_count": 3,
+            "predicate_order": [
+                "above",
+                "over",
+                "below",
+            ],
+            "predicate_order_sha256": names_h(
+                (
+                    "above",
+                    "over",
+                    "below",
+                )
+            ),
+            "templates": list(
+                RELEASED_PREDICATE_TEMPLATES
+            ),
+            "templates_sha256": names_h(
+                RELEASED_PREDICATE_TEMPLATES
+            ),
+            "text_dim": 512,
+        },
         "vocabulary_sha256": c[
             "vocabulary_sha256"
         ],
@@ -371,7 +497,12 @@ def training() -> dict:
                         "person",
                         "horse",
                     ],
-                    "object_label_order_sha256": h("f"),
+                    "object_label_order_sha256": names_h(
+                        (
+                            "person",
+                            "horse",
+                        )
+                    ),
                     "text_dim": 512,
                 },
             }
@@ -448,6 +579,20 @@ class ApacheReleaseQualificationTest(
                 "min_support"
             ],
             50,
+        )
+        self.assertEqual(
+            result["text_bank_derivation"][
+                "student_checkpoint_sha256"
+            ],
+            RELEASED_TEXT_STUDENT_SHA256,
+        )
+        self.assertEqual(
+            result["text_bank_derivation"][
+                "predicate_bank"
+            ]["templates"],
+            list(
+                RELEASED_PREDICATE_TEMPLATES
+            ),
         )
         self.assertEqual(
             result["predicate_spatial_flags_sha256"],
@@ -786,6 +931,99 @@ class ApacheReleaseQualificationTest(
             "epoch sequence",
         ):
             validate_training_run(run)
+
+    def test_text_bank_derivation_is_bound(self):
+        value = corpus()
+        value["text_bank_derivation"][
+            "student_checkpoint_sha256"
+        ] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "released text-student",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["text_bank_derivation"][
+            "predicate_bank"
+        ]["templates"] = [
+            "{p}",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "predicate text-bank templates",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["text_bank_derivation"][
+            "tokenizer"
+        ]["bundle_sha256"] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "tokenizer bundle hash",
+        ):
+            validate_corpus(value)
+
+        run = training()
+        run["predicate_bank"][
+            "predicate_order"
+        ] = [
+            "over",
+            "above",
+            "below",
+        ]
+        run["predicate_bank"][
+            "predicate_order_sha256"
+        ] = names_h(
+            (
+                "over",
+                "above",
+                "below",
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "predicate-bank order",
+        ):
+            qualify_training_run(
+                corpus(),
+                run,
+            )
+
+        run = training()
+        run[
+            "apache_reference_objective"
+        ]["assets"]["object_bank"][
+            "object_label_order"
+        ] = [
+            "horse",
+            "person",
+        ]
+        run[
+            "apache_reference_objective"
+        ]["assets"]["object_bank"][
+            "object_label_order_sha256"
+        ] = names_h(
+            (
+                "horse",
+                "person",
+            )
+        )
+        run[
+            "apache_reference_objective"
+        ]["assets"]["object_label_order"] = [
+            "horse",
+            "person",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "object-bank order",
+        ):
+            qualify_training_run(
+                corpus(),
+                run,
+            )
 
     def test_pair_opportunity_rebuild_is_bound(self):
         value = corpus()
