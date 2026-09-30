@@ -15,6 +15,7 @@ from apache_objective import (
     ApacheObjectiveConfig,
     ApacheReferenceObjective,
     BatchLocalInfoNCE,
+    PairOpportunityTable,
     PredicateOntology,
     load_source_column_allow,
     swap_direction_hinge_dense,
@@ -203,6 +204,93 @@ class ApacheObjectiveTest(unittest.TestCase):
             float(loaded.neg_lw[0, 3]),
             0.0,
         )
+
+    def test_pair_opportunity_loader_and_pu_weights_match_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pair-opportunity.npz"
+            np.savez(
+                path,
+                rate=np.asarray(
+                    [
+                        0.0, 0.8,
+                        0.1, 0.0,
+                    ],
+                    dtype=np.float32,
+                ),
+                opportunities=np.asarray(
+                    [100, 100, 10, 100],
+                    dtype=np.int64,
+                ),
+                relations=np.asarray(
+                    [0, 80, 1, 0],
+                    dtype=np.int64,
+                ),
+                num_cats=np.int32(2),
+                min_support=np.int32(50),
+            )
+            table = PairOpportunityTable.load(
+                path,
+                expected_num_categories=2,
+            )
+
+        self.assertTrue(
+            torch.equal(
+                table.trusted,
+                torch.tensor([True, True, False, True]),
+            )
+        )
+        self.assertEqual(table.num_categories, 2)
+        self.assertEqual(table.min_support, 50)
+
+        from apache_pair_sampler import ApacheRelatednessPairSampler
+
+        sampler = ApacheRelatednessPairSampler(
+            feature_dim=4,
+            geo_budget=4,
+            final_budget=2,
+            rel_dim=4,
+            negative_weight=0.3,
+        )
+        sampler.set_negative_rates(
+            table.rate,
+            table.trusted,
+            num_categories=table.num_categories,
+        )
+        like = torch.zeros(4)
+        weight = sampler._pu_negative_weight(
+            torch.tensor([0, 1, 0, -1]),
+            torch.tensor([1, 0, 0, 1]),
+            like,
+        )
+        self.assertTrue(
+            torch.allclose(
+                weight,
+                torch.tensor(
+                    [
+                        0.3,  # trusted rate=.8 -> max(.2, floor)
+                        0.3,  # untrusted -> floor
+                        1.0,  # trusted rate=0 -> 1
+                        0.3,  # unknown category -> floor
+                    ]
+                ),
+            )
+        )
+
+    def test_pair_opportunity_rejects_object_vocabulary_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pair-opportunity.npz"
+            np.savez(
+                path,
+                rate=np.zeros(4, dtype=np.float32),
+                opportunities=np.ones(4, dtype=np.int64),
+                num_cats=np.int32(2),
+                min_support=np.int32(1),
+            )
+            with self.assertRaises(ValueError):
+                PairOpportunityTable.load(
+                    path,
+                    expected_num_categories=3,
+                )
 
     def test_source_allow_requires_exact_known_predicates(self):
         with tempfile.TemporaryDirectory() as directory:
