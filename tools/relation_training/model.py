@@ -46,6 +46,7 @@ class RelationModelConfig:
     relation_context_contract: str = "legacy"
     apache_context_dropout: float = 0.2
     apache_box_token_dropout: float = 0.3
+    apache_pair_negative_floor: float = 0.3
     predicate_head_contract: str = "legacy"
 
     def __post_init__(self) -> None:
@@ -153,6 +154,16 @@ class RelationModelConfig:
         if not 0.0 <= self.apache_box_token_dropout <= 1.0:
             raise ValueError(
                 "apache_box_token_dropout must be within [0,1]"
+            )
+        if (
+            not torch.isfinite(
+                torch.tensor(self.apache_pair_negative_floor)
+            )
+            or self.apache_pair_negative_floor < 0.0
+            or self.apache_pair_negative_floor > 1.0
+        ):
+            raise ValueError(
+                "apache_pair_negative_floor must be finite within [0,1]"
             )
         if self.predicate_head_contract not in {
             "legacy",
@@ -980,7 +991,7 @@ class KFRelationModel(nn.Module):
                 geo_budget=400,
                 final_budget=config.pair_budget,
                 rel_dim=256,
-                negative_weight=0.3,
+                negative_weight=config.apache_pair_negative_floor,
                 swap_include=True,
             )
             # Apache stage-1 geometry scoring and stage-2 relatedness replace
@@ -1442,6 +1453,7 @@ class KFRelationModel(nn.Module):
         *,
         encoder_only: bool = False,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> tuple[
         tuple[Tensor, ...],
         Tensor,
@@ -1517,6 +1529,7 @@ class KFRelationModel(nn.Module):
                 region_features,
                 box_counts,
                 pair_targets=pair_targets,
+                entity_labels=entity_labels,
             )
             subject_index = sampler_out.sub_idx
             object_index = sampler_out.obj_idx
@@ -1937,6 +1950,7 @@ class KFRelationModel(nn.Module):
         boxes: Tensor,
         box_counts: Tensor,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> RelationTrainingOutputs:
         if (
             self.config.pair_sampler_contract == "apache"
@@ -1964,6 +1978,7 @@ class KFRelationModel(nn.Module):
             boxes,
             box_counts,
             pair_targets=pair_targets,
+            entity_labels=entity_labels,
         )
         return RelationTrainingOutputs(
             runtime=runtime,

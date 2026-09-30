@@ -417,6 +417,11 @@ def train_epoch(
         box_counts = batch["box_count"].to(device)
         pair_targets = batch["pair_targets"].to(device)
         predicate_targets = batch["predicate_targets"].to(device)
+        object_label_indices = batch.get(
+            "object_label_indices"
+        )
+        if object_label_indices is not None:
+            object_label_indices = object_label_indices.to(device)
         batch_size = int(image.shape[0])
 
         optimizer.zero_grad(set_to_none=True)
@@ -425,14 +430,14 @@ def train_epoch(
             boxes,
             box_counts,
             pair_targets=pair_targets,
+            entity_labels=(
+                object_label_indices
+                if apache_objective is not None
+                else None
+            ),
         )
         if apache_objective is not None:
             source_ids = batch["source_id"].to(device)
-            object_label_indices = batch.get(
-                "object_label_indices"
-            )
-            if object_label_indices is not None:
-                object_label_indices = object_label_indices.to(device)
             losses = apache_objective(
                 outputs,
                 predicate_targets,

@@ -13,6 +13,7 @@ from benchmark import (
     RelationVocabulary,
     stable_report_json,
 )
+from apache_pair_sampler import PairOpportunityTable
 from apache_objective import (
     ApacheObjectiveConfig,
     ApacheReferenceObjective,
@@ -302,6 +303,14 @@ def main() -> None:
         default="",
         help="Object-category text embedding tensor [O,D]; required for lambda_obj > 0.",
     )
+    parser.add_argument(
+        "--apache-neg-rate-table",
+        default="",
+        help=(
+            "Apache pair_opportunity.npz interaction-rate table; required "
+            "for apache-reference relatedness/background PU weighting."
+        ),
+    )
     parser.add_argument("--apache-n-neg", type=int, default=512)
     parser.add_argument("--apache-hard-frac", type=float, default=0.5)
     parser.add_argument("--apache-lambda-obj", type=float, default=0.10)
@@ -356,21 +365,23 @@ def main() -> None:
             "--apache-source-column-allow": (
                 args.apache_source_column_allow
             ),
+            "--apache-neg-rate-table": args.apache_neg_rate_table,
         }
         for flag, value in required_assets.items():
             if not value:
                 raise ValueError(
                     f"{flag} is required for apache-reference"
                 )
+        if not vocabulary.object_labels:
+            raise ValueError(
+                "Apache reference sampler requires vocabulary objects "
+                "for pair-opportunity PU weighting"
+            )
         if args.apache_lambda_obj > 0.0:
             if not args.apache_object_embeddings:
                 raise ValueError(
                     "--apache-object-embeddings is required when "
                     "--apache-lambda-obj > 0"
-                )
-            if not vocabulary.object_labels:
-                raise ValueError(
-                    "Apache object-text loss requires vocabulary objects"
                 )
         if (
             args.holdout_predicate
@@ -417,6 +428,7 @@ def main() -> None:
         predicate_head_contract=args.predicate_head_contract,
         apache_context_dropout=args.apache_context_dropout,
         apache_box_token_dropout=args.apache_box_token_dropout,
+        apache_pair_negative_floor=args.apache_pair_negative_floor,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -647,6 +659,7 @@ def main() -> None:
     apache_source_names: tuple[str, ...] = ()
     apache_source_allow = None
     apache_object_embeddings = None
+    apache_pair_opportunity = None
     apache_asset_report = None
     if apache_mode:
         apache_ontology = PredicateOntology.from_soft_supervision(
@@ -672,6 +685,17 @@ def main() -> None:
             raise ValueError(
                 "training source_id exceeds Apache source-column table"
             )
+        apache_pair_opportunity = PairOpportunityTable.load(
+            args.apache_neg_rate_table
+        )
+        if (
+            apache_pair_opportunity.num_cats
+            != len(vocabulary.object_labels)
+        ):
+            raise ValueError(
+                "Apache pair-opportunity num_cats must match "
+                "vocabulary object-label count"
+            )
         if args.apache_lambda_obj > 0.0:
             apache_object_embeddings = load_predicate_embeddings(
                 args.apache_object_embeddings,
@@ -696,6 +720,17 @@ def main() -> None:
             ),
             "source_names": list(apache_source_names),
             "ontology": apache_ontology.stats(),
+            "neg_rate_table_sha256": sha256(
+                Path(args.apache_neg_rate_table)
+            ),
+            "pair_opportunity": (
+                apache_pair_opportunity.stats(
+                    negative_floor=args.apache_pair_negative_floor
+                )
+                if apache_pair_opportunity is not None
+                else None
+            ),
+            "object_label_order": list(vocabulary.object_labels),
             "object_embeddings_sha256": (
                 sha256(Path(args.apache_object_embeddings))
                 if args.apache_object_embeddings
@@ -716,6 +751,20 @@ def main() -> None:
 
     device = resolve_device(args.device)
     model.to(device)
+
+    if apache_mode:
+        if (
+            model.apache_pair_sampler is None
+            or apache_pair_opportunity is None
+        ):
+            raise RuntimeError(
+                "Apache reference sampler/table is unavailable"
+            )
+        model.apache_pair_sampler.set_negative_rates(
+            apache_pair_opportunity.rate.to(device),
+            apache_pair_opportunity.trusted.to(device),
+            apache_pair_opportunity.num_cats,
+        )
 
     routing_warm_start = None
     if args.predicate_head_contract == "apache":
@@ -993,6 +1042,9 @@ def main() -> None:
             "apache_context_dropout": model.config.apache_context_dropout,
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
+            ),
+            "apache_pair_negative_floor": (
+                model.config.apache_pair_negative_floor
             ),
         },
         "baseline_config": config_payload(baseline_config),

@@ -2,12 +2,156 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from pathlib import Path
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
 from apache_pair_evidence import RelGeomEncoder
+
+
+@dataclass(frozen=True)
+class PairOpportunityTable:
+    rate: Tensor
+    trusted: Tensor
+    num_cats: int
+    min_support: int
+    opportunities: Tensor
+    relations: Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.num_cats, bool)
+            or not isinstance(self.num_cats, int)
+            or self.num_cats <= 0
+        ):
+            raise ValueError(
+                "pair opportunity num_cats must be a positive integer"
+            )
+        expected = self.num_cats * self.num_cats
+        if self.rate.shape != (expected,):
+            raise ValueError(
+                "pair opportunity rate must be flat [num_cats^2]"
+            )
+        if self.trusted.shape != (expected,):
+            raise ValueError(
+                "pair opportunity trusted mask must be flat [num_cats^2]"
+            )
+        if self.opportunities.shape != (expected,):
+            raise ValueError(
+                "pair opportunity opportunities must be flat [num_cats^2]"
+            )
+        if self.relations.shape != (expected,):
+            raise ValueError(
+                "pair opportunity relations must be flat [num_cats^2]"
+            )
+        if self.trusted.dtype != torch.bool:
+            raise ValueError(
+                "pair opportunity trusted mask must be bool"
+            )
+        if not torch.isfinite(self.rate).all():
+            raise ValueError(
+                "pair opportunity rates must be finite"
+            )
+        if (self.rate < 0).any() or (self.rate > 1).any():
+            raise ValueError(
+                "pair opportunity rates must be within [0,1]"
+            )
+        if (self.opportunities < 0).any() or (self.relations < 0).any():
+            raise ValueError(
+                "pair opportunity counts must be non-negative"
+            )
+        if self.min_support <= 0:
+            raise ValueError(
+                "pair opportunity min_support must be positive"
+            )
+        if not torch.equal(
+            self.trusted,
+            self.opportunities >= self.min_support,
+        ):
+            raise ValueError(
+                "pair opportunity trusted mask does not match min_support"
+            )
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+    ) -> "PairOpportunityTable":
+        with np.load(path, allow_pickle=False) as data:
+            required = {
+                "rate",
+                "opportunities",
+                "relations",
+                "num_cats",
+                "min_support",
+            }
+            missing = required - set(data.files)
+            if missing:
+                raise ValueError(
+                    "pair opportunity table is missing "
+                    + ", ".join(sorted(missing))
+                )
+            num_cats = int(data["num_cats"])
+            min_support = int(data["min_support"])
+            rate_np = np.asarray(
+                data["rate"],
+                dtype=np.float32,
+            ).reshape(-1)
+            opportunities_np = np.asarray(
+                data["opportunities"],
+                dtype=np.int64,
+            ).reshape(-1)
+            relations_np = np.asarray(
+                data["relations"],
+                dtype=np.int64,
+            ).reshape(-1)
+
+        opportunities = torch.from_numpy(
+            opportunities_np.copy()
+        )
+        return cls(
+            rate=torch.from_numpy(rate_np.copy()),
+            trusted=opportunities >= min_support,
+            num_cats=num_cats,
+            min_support=min_support,
+            opportunities=opportunities,
+            relations=torch.from_numpy(
+                relations_np.copy()
+            ),
+        )
+
+    def stats(
+        self,
+        *,
+        negative_floor: float = 0.3,
+    ) -> dict[str, float | int]:
+        trusted_rate = self.rate[self.trusted]
+        if trusted_rate.numel() == 0:
+            median_weight = float(negative_floor)
+        else:
+            median_weight = float(
+                (
+                    1.0 - trusted_rate.float().median()
+                )
+                .clamp(
+                    min=negative_floor,
+                    max=1.0,
+                )
+                .item()
+            )
+        return {
+            "num_cats": self.num_cats,
+            "min_support": self.min_support,
+            "trusted_category_pairs": int(
+                self.trusted.sum().item()
+            ),
+            "median_trusted_negative_weight": (
+                median_weight
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -56,6 +200,17 @@ class ApacheRelatednessPairSampler(nn.Module):
         self.rel_dim = int(rel_dim)
         self.negative_weight = float(negative_weight)
         self.swap_include = bool(swap_include)
+        self.num_cats = 0
+        self.register_buffer(
+            "neg_rate",
+            None,
+            persistent=False,
+        )
+        self.register_buffer(
+            "neg_trusted",
+            None,
+            persistent=False,
+        )
 
         self.geo_scorer = nn.Sequential(
             nn.Linear(RelGeomEncoder.NUM_GEO, 64),
@@ -73,6 +228,87 @@ class ApacheRelatednessPairSampler(nn.Module):
             nn.Linear(feature_dim, rel_dim),
             nn.GELU(),
             nn.Linear(rel_dim, rel_dim),
+        )
+
+    def set_negative_rates(
+        self,
+        rate: Tensor,
+        trusted: Tensor,
+        num_cats: int,
+    ) -> None:
+        if (
+            isinstance(num_cats, bool)
+            or not isinstance(num_cats, int)
+            or num_cats <= 0
+        ):
+            raise ValueError(
+                "negative-rate num_cats must be a positive integer"
+            )
+        expected = num_cats * num_cats
+        if rate.shape != (expected,):
+            raise ValueError(
+                "negative-rate table must be flat [num_cats^2]"
+            )
+        if trusted.shape != (expected,) or trusted.dtype != torch.bool:
+            raise ValueError(
+                "negative-rate trusted mask must be bool [num_cats^2]"
+            )
+        if not torch.isfinite(rate).all():
+            raise ValueError(
+                "negative-rate values must be finite"
+            )
+        if (rate < 0).any() or (rate > 1).any():
+            raise ValueError(
+                "negative-rate values must be within [0,1]"
+            )
+        self.neg_rate = rate
+        self.neg_trusted = trusted
+        self.num_cats = int(num_cats)
+
+    def _pu_neg_weight(
+        self,
+        subject_category: Tensor | None,
+        object_category: Tensor | None,
+        like: Tensor,
+    ) -> Tensor:
+        negative = torch.full_like(
+            like,
+            self.negative_weight,
+        )
+        if (
+            self.neg_rate is None
+            or self.neg_trusted is None
+            or subject_category is None
+            or object_category is None
+        ):
+            return negative
+
+        subject_category = subject_category.to(torch.int64)
+        object_category = object_category.to(torch.int64)
+        known = (
+            (subject_category >= 0)
+            & (object_category >= 0)
+            & (subject_category < self.num_cats)
+            & (object_category < self.num_cats)
+        )
+        flat = (
+            subject_category.clamp_min(0) * self.num_cats
+            + object_category.clamp_min(0)
+        ).clamp(
+            max=self.neg_rate.numel() - 1
+        )
+        rate = self.neg_rate[flat].float()
+        trusted = self.neg_trusted[flat] & known
+        statistical = (
+            1.0 - rate
+        ).clamp(
+            min=self.negative_weight,
+            max=1.0,
+        )
+        return torch.where(
+            trusted,
+            statistical.to(like.dtype),
+            negative,
         )
 
     @staticmethod
@@ -142,6 +378,7 @@ class ApacheRelatednessPairSampler(nn.Module):
         box_counts: Tensor,
         *,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> ApachePairSamplerOutput:
         if boxes.ndim != 3 or boxes.shape[-1] != 4:
             raise ValueError("boxes must be [B,N,4]")
@@ -154,6 +391,15 @@ class ApacheRelatednessPairSampler(nn.Module):
             )
         if box_counts.shape != (boxes.shape[0],):
             raise ValueError("box_counts must be [B]")
+        if entity_labels is not None:
+            if entity_labels.shape != boxes.shape[:2]:
+                raise ValueError(
+                    "entity_labels must be [B,N] matching boxes"
+                )
+            if entity_labels.dtype != torch.int64:
+                raise ValueError(
+                    "entity_labels must be int64"
+                )
 
         batch, count, _ = boxes.shape
         pair_valid = self._pair_valid(box_counts, count)
@@ -273,13 +519,27 @@ class ApacheRelatednessPairSampler(nn.Module):
                 1,
                 stage1,
             )
+            subject_category_1 = object_category_1 = None
+            if self.neg_rate is not None and entity_labels is not None:
+                subject_category_1 = torch.gather(
+                    entity_labels,
+                    1,
+                    subject_index_1,
+                )
+                object_category_1 = torch.gather(
+                    entity_labels,
+                    1,
+                    object_index_1,
+                )
+            negative_weights_1 = self._pu_neg_weight(
+                subject_category_1,
+                object_category_1,
+                stage1_relatedness,
+            )
             weights = torch.where(
                 gt_stage1 > 0.5,
                 torch.ones_like(stage1_relatedness),
-                torch.full_like(
-                    stage1_relatedness,
-                    self.negative_weight,
-                ),
+                negative_weights_1,
             )
             probability = torch.sigmoid(
                 stage1_relatedness
@@ -350,13 +610,28 @@ class ApacheRelatednessPairSampler(nn.Module):
                 1,
                 flat_pair,
             )
+            selected_subject_category = None
+            selected_object_category = None
+            if self.neg_rate is not None and entity_labels is not None:
+                selected_subject_category = torch.gather(
+                    entity_labels,
+                    1,
+                    flat_pair // count,
+                )
+                selected_object_category = torch.gather(
+                    entity_labels,
+                    1,
+                    flat_pair % count,
+                )
+            selected_negative = self._pu_neg_weight(
+                selected_subject_category,
+                selected_object_category,
+                pair_logits,
+            )
             pair_negative_weights = torch.where(
                 selected_gt,
                 torch.ones_like(pair_logits),
-                torch.full_like(
-                    pair_logits,
-                    self.negative_weight,
-                ),
+                selected_negative,
             )
         sub_idx = flat_pair // count
         obj_idx = flat_pair % count
