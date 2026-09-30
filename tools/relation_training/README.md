@@ -1605,7 +1605,7 @@ The command fails unless the run has all of the following:
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
-- matching exclusion, source-column, ontology and pair-opportunity hashes;
+- matching exclusion, deterministically derived source-column, ontology and pair-opportunity hashes;
 - matching vocabulary, predicate-embedding, named object-bank and derived spatial-routing hashes;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
@@ -1677,6 +1677,26 @@ CPU tests may exercise the BF16 autocast software path, but a released-run
 qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
+
+### Released source-aware predicate columns
+
+The released recipe restricts negative predicate columns only for
+`hicodet`. KFCore derives the existing
+`kfcore.predicate-source-allow/1` sidecar directly from the three training
+pack metadata files:
+
+```text
+megasg_clean -> all union predicate columns
+vg_raw       -> all union predicate columns
+hicodet      -> hicodet.meta.predicates ∩ union predicates
+```
+
+The HICO intersection is emitted in union-vocabulary order, so local predicate
+ordering cannot change the sidecar. Derivation evidence records each pack
+`meta.json` SHA-256, the exact restricted-source set, allowed-column counts
+and the emitted sidecar SHA-256. Full-reference qualification binds this
+derivation to the source-column hash actually used by the objective and requires
+the released source order `megasg_clean / vg_raw / hicodet`.
 
 ### Released spatial routing derivation
 
