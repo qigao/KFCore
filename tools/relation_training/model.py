@@ -47,6 +47,8 @@ class RelationModelConfig:
     apache_context_dropout: float = 0.2
     apache_box_token_dropout: float = 0.3
     apache_pair_negative_floor: float = 0.3
+    apache_cfa_prob: float = 0.0
+    apache_cfa_alpha: float = 1.0
     predicate_head_contract: str = "legacy"
 
     def __post_init__(self) -> None:
@@ -164,6 +166,28 @@ class RelationModelConfig:
         ):
             raise ValueError(
                 "apache_pair_negative_floor must be finite within [0,1]"
+            )
+        if (
+            not torch.isfinite(torch.tensor(self.apache_cfa_prob))
+            or self.apache_cfa_prob < 0.0
+            or self.apache_cfa_prob > 1.0
+        ):
+            raise ValueError(
+                "apache_cfa_prob must be finite within [0,1]"
+            )
+        if (
+            not torch.isfinite(torch.tensor(self.apache_cfa_alpha))
+            or self.apache_cfa_alpha <= 0.0
+        ):
+            raise ValueError(
+                "apache_cfa_alpha must be finite and positive"
+            )
+        if (
+            self.apache_cfa_prob > 0.0
+            and self.pair_evidence_contract != "apache"
+        ):
+            raise ValueError(
+                "Apache CFA requires apache pair evidence"
             )
         if self.predicate_head_contract not in {
             "legacy",
@@ -1311,6 +1335,122 @@ class KFRelationModel(nn.Module):
             dim=-1,
         )
 
+    @staticmethod
+    def _apache_cfa_partners(
+        labels: Tensor,
+        eligible: Tensor,
+    ) -> tuple[Tensor, Tensor] | None:
+        """Reference same-predicate partner matching on flattened slots."""
+        selected = eligible.reshape(-1).nonzero(
+            as_tuple=True
+        )[0]
+        if selected.numel() < 2:
+            return None
+
+        group = labels.reshape(-1)[selected]
+        order = torch.argsort(group)
+        _, counts = torch.unique_consecutive(
+            group[order],
+            return_counts=True,
+        )
+        starts = torch.cumsum(counts, 0) - counts
+        start_per = torch.repeat_interleave(
+            starts,
+            counts,
+        )
+        count_per = torch.repeat_interleave(
+            counts,
+            counts,
+        )
+        position = (
+            torch.arange(
+                group.shape[0],
+                device=group.device,
+            )
+            - start_per
+        )
+        random_partner = (
+            torch.rand(
+                group.shape[0],
+                device=group.device,
+            )
+            * (count_per - 1).clamp_min(1)
+        ).long()
+        random_partner = torch.minimum(
+            random_partner,
+            (count_per - 2).clamp_min(0),
+        )
+        random_partner = (
+            random_partner
+            + (random_partner >= position).long()
+        )
+        keep = count_per > 1
+        if not bool(keep.any()):
+            return None
+
+        source = selected[order[keep]]
+        destination = selected[
+            order[(start_per + random_partner)[keep]]
+        ]
+        return (
+            (source, destination)
+            if source.numel()
+            else None
+        )
+
+    def _apache_cfa_mix(
+        self,
+        subject_features: Tensor,
+        object_features: Tensor,
+        labels: Tensor,
+        eligible: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        partners = self._apache_cfa_partners(
+            labels,
+            eligible,
+        )
+        if partners is None:
+            return subject_features, object_features
+
+        source, destination = partners
+        count = source.shape[0]
+        concentration = torch.full(
+            (1,),
+            float(self.config.apache_cfa_alpha),
+            device=source.device,
+        )
+        lam = torch.distributions.Beta(
+            concentration,
+            concentration,
+        ).sample((count,)).reshape(count)
+        lam = torch.where(
+            torch.rand(
+                count,
+                device=source.device,
+            ) < self.config.apache_cfa_prob,
+            lam,
+            torch.ones_like(lam),
+        ).unsqueeze(-1)
+
+        outputs: list[Tensor] = []
+        for value in (
+            subject_features,
+            object_features,
+        ):
+            flat = value.reshape(
+                -1,
+                value.shape[-1],
+            )
+            mixed = flat.clone()
+            mixed[source] = (
+                lam * flat[source]
+                + (1.0 - lam) * flat[destination]
+            )
+            outputs.append(
+                mixed.reshape(value.shape)
+            )
+        return outputs[0], outputs[1]
+
     def _apache_pair_evidence(
         self,
         patch_features: Tensor,
@@ -1320,6 +1460,7 @@ class KFRelationModel(nn.Module):
         object_index: Tensor,
         selected_valid: Tensor,
         region_features: Tensor | None = None,
+        cfa_pair_labels: Tensor | None = None,
     ) -> ApachePairEvidenceOutputs:
         if (
             self.apache_spatial_pool is None
@@ -1391,6 +1532,28 @@ class KFRelationModel(nn.Module):
         contact_features = contact_features * valid_float
         geometry_features = geometry_features * valid_float
 
+        if (
+            self.training
+            and self.config.apache_cfa_prob > 0.0
+            and cfa_pair_labels is not None
+        ):
+            if cfa_pair_labels.shape != selected_valid.shape:
+                raise ValueError(
+                    "CFA pair labels must match selected pair slots"
+                )
+            cfa_eligible = (
+                (cfa_pair_labels >= 0)
+                & selected_valid
+            )
+            subject_features, object_features = (
+                self._apache_cfa_mix(
+                    subject_features,
+                    object_features,
+                    cfa_pair_labels,
+                    cfa_eligible,
+                )
+            )
+
         pair_input = torch.cat(
             (
                 subject_features,
@@ -1454,6 +1617,8 @@ class KFRelationModel(nn.Module):
         encoder_only: bool = False,
         pair_targets: Tensor | None = None,
         entity_labels: Tensor | None = None,
+        cfa_pair_labels: Tensor | None = None,
+        allow_dynamic_image_size: bool = False,
     ) -> tuple[
         tuple[Tensor, ...],
         Tensor,
@@ -1471,8 +1636,29 @@ class KFRelationModel(nn.Module):
     ]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
-        if image.shape[2] != self.config.image_size or image.shape[3] != self.config.image_size:
-            raise ValueError("image spatial size does not match RelationModelConfig")
+        height = int(image.shape[2])
+        width = int(image.shape[3])
+        if height != width:
+            raise ValueError("relation images must be square")
+        if allow_dynamic_image_size:
+            if not self.training:
+                raise ValueError(
+                    "dynamic image size is training-only"
+                )
+            if (
+                height <= 0
+                or height % self.backbone.patch_size != 0
+            ):
+                raise ValueError(
+                    "dynamic training image size must be patch-aligned"
+                )
+        elif (
+            height != self.config.image_size
+            or width != self.config.image_size
+        ):
+            raise ValueError(
+                "image spatial size does not match RelationModelConfig"
+            )
         if boxes.ndim != 3 or boxes.shape[1:] != (self.config.max_boxes, 4):
             raise ValueError("boxes must be [B,max_boxes,4]")
         if box_counts.ndim != 1 or box_counts.shape[0] != image.shape[0]:
@@ -1610,6 +1796,27 @@ class KFRelationModel(nn.Module):
                 pair_slot,
             )
 
+        selected_cfa_labels = None
+        if cfa_pair_labels is not None:
+            if cfa_pair_labels.shape != (
+                batch,
+                self.config.max_boxes,
+                self.config.max_boxes,
+            ):
+                raise ValueError(
+                    "cfa_pair_labels must be [B,N,N]"
+                )
+            batch_index = torch.arange(
+                batch,
+                device=boxes.device,
+                dtype=torch.int64,
+            ).unsqueeze(1)
+            selected_cfa_labels = cfa_pair_labels[
+                batch_index,
+                subject_index.to(torch.int64),
+                object_index.to(torch.int64),
+            ]
+
         if self.config.pair_evidence_contract == "apache":
             reference_evidence = self._apache_pair_evidence(
                 patch_features,
@@ -1619,6 +1826,7 @@ class KFRelationModel(nn.Module):
                 object_index,
                 selected_valid,
                 region_features=region_features,
+                cfa_pair_labels=selected_cfa_labels,
             )
             tokens = reference_evidence.pair_tokens
             _reference_box_tokens = reference_evidence.box_tokens
@@ -1951,6 +2159,8 @@ class KFRelationModel(nn.Module):
         box_counts: Tensor,
         pair_targets: Tensor | None = None,
         entity_labels: Tensor | None = None,
+        cfa_pair_labels: Tensor | None = None,
+        allow_dynamic_image_size: bool = False,
     ) -> RelationTrainingOutputs:
         if (
             self.config.pair_sampler_contract == "apache"
@@ -1979,6 +2189,8 @@ class KFRelationModel(nn.Module):
             box_counts,
             pair_targets=pair_targets,
             entity_labels=entity_labels,
+            cfa_pair_labels=cfa_pair_labels,
+            allow_dynamic_image_size=allow_dynamic_image_size,
         )
         return RelationTrainingOutputs(
             runtime=runtime,
