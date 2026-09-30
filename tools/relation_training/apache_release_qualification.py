@@ -11,6 +11,7 @@ from apache_training_recipe import (
     RELEASED_D_MODEL,
     RELEASED_EMA_DECAY,
     RELEASED_MAX_BOXES,
+    RELEASED_PHOTOMETRIC_AUGMENT,
 )
 from apache_mixture import (
     RELEASED_MICRO_BATCH_SIZE,
@@ -322,6 +323,21 @@ def validate_training_run(
         raise ValueError(
             "logical rank/gradient accumulation differs from release"
         )
+    config_augment = config.get("augment")
+    if (
+        isinstance(config_augment, bool)
+        or not isinstance(config_augment, (int, float))
+        or not math.isclose(
+            float(config_augment),
+            RELEASED_PHOTOMETRIC_AUGMENT,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "Apache recipe config requires augment=0.3"
+        )
+
     config_ema_decay = config.get("ema_decay")
     if (
         isinstance(config_ema_decay, bool)
@@ -390,6 +406,45 @@ def validate_training_run(
     if ema["state_sha256"] == ema["raw_state_sha256"]:
         raise ValueError(
             "released EMA state must differ from raw training state"
+        )
+
+    augmentation = recipe.get("augmentation")
+    if not isinstance(augmentation, dict):
+        raise ValueError(
+            "released qualification requires augmentation evidence"
+        )
+    if augmentation.get("kind") != "brightness-contrast-saturation":
+        raise ValueError(
+            "released qualification requires photometric augmentation contract"
+        )
+    strength = augmentation.get("strength")
+    if (
+        isinstance(strength, bool)
+        or not isinstance(strength, (int, float))
+        or not math.isclose(
+            float(strength),
+            RELEASED_PHOTOMETRIC_AUGMENT,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "released qualification requires augment=0.3"
+        )
+    if (
+        augmentation.get("horizontal_flip") is not False
+        or augmentation.get("geometry_transform") is not False
+    ):
+        raise ValueError(
+            "released augmentation must preserve geometry and direction"
+        )
+    if augmentation.get("rng_source") != "ambient-torch-rng":
+        raise ValueError(
+            "released augmentation RNG source differs from Apache contract"
+        )
+    if augmentation.get("rng_equivalence") != "stochastic-distribution":
+        raise ValueError(
+            "released augmentation must claim stochastic-distribution equivalence"
         )
 
     mixture = payload.get("train_mixture")
@@ -672,6 +727,9 @@ def qualify_training_run(
         "ema_state_sha256": training[
             "training_recipe"
         ]["ema"]["state_sha256"],
+        "augmentation": training[
+            "training_recipe"
+        ]["augmentation"],
     }
 
 
