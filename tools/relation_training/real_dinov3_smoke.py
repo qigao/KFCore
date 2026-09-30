@@ -517,6 +517,7 @@ def main() -> None:
         ),
         "valid_pair_count": int(valid_mask.sum().item()),
         "dynamic_vocabulary": dynamic_report,
+        "mask_coverage_contract": mask_contract,
         "full_finetune": finetune_report,
     }
     report_path.write_text(
