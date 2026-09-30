@@ -288,6 +288,7 @@ jobs:
             --image-size 224 \
             --max-boxes 40 \
             --hidden-dim 512 \
+            --predicate-dim 512 \
             --pair-evidence-contract apache \
             --pair-sampler-contract apache \
             --relation-context-contract apache \
