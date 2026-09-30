@@ -29,6 +29,10 @@ from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
 )
+from apache_released_contract import (
+    validate_released_scalar_contract,
+    validate_released_structure,
+)
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
@@ -742,6 +746,27 @@ def main() -> None:
         if apache_mode
         else None
     )
+    released_scalar_report = None
+    if reference_training:
+        assert apache_objective_config is not None
+        released_scalar_report = (
+            validate_released_scalar_contract(
+                recipe={
+                    "head_lr": args.apache_head_lr,
+                    "backbone_lr": args.apache_backbone_lr,
+                    "weight_decay": args.weight_decay,
+                    "warmup_steps": args.apache_warmup_steps,
+                    "min_lr_factor": args.apache_min_lr_factor,
+                    "clip_grad": args.apache_clip_grad,
+                    "multi_scale": args.apache_multi_scale,
+                    "multi_scale_n": args.apache_multi_scale_n,
+                    "cfa_prob": args.apache_cfa_prob,
+                    "cfa_alpha": args.apache_cfa_alpha,
+                },
+                model=model_config,
+                objective=apache_objective_config,
+            )
+        )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
         pair_weight=args.pair_weight,
@@ -1029,6 +1054,11 @@ def main() -> None:
         backbone,
         predicate_embeddings,
         model_config,
+    )
+    released_structure_report = (
+        validate_released_structure(model)
+        if reference_training
+        else None
     )
     if not reference_training:
         freeze_backbone(model)
@@ -1569,6 +1599,8 @@ def main() -> None:
                 "ema": ema_report,
                 "augmentation": augmentation_report,
                 "precision": precision_report,
+                "scalar_contract": released_scalar_report,
+                "structure_contract": released_structure_report,
                 "sampler_budget": reference_sampler_report,
                 "source_mixture": mixture_report,
             },
@@ -1676,6 +1708,8 @@ def main() -> None:
             "ema": ema_report,
             "augmentation": augmentation_report,
             "precision": precision_report,
+            "scalar_contract": released_scalar_report,
+            "structure_contract": released_structure_report,
             "sampler_budget": reference_sampler_report,
             "source_mixture": mixture_report,
         },
