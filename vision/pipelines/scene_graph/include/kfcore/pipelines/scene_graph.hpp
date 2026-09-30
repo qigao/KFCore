@@ -42,6 +42,14 @@ public:
 
     [[nodiscard]] SceneGraphFrame process(const image::ImageView& image);
 
+    // Dynamic-vocabulary control is available only when this pipeline was
+    // created with OpenVocabularyRelation. Vocabulary changes do not reset
+    // ByteTrack identity; RelationFrame::vocabulary_version tells temporal
+    // consumers when predicate-index semantics changed.
+    [[nodiscard]] bool supports_dynamic_vocabulary() const noexcept;
+    void set_vocabulary(relation::PredicateVocabulary vocabulary);
+    [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
+
     void reset_tracking() noexcept;
 
 private:
