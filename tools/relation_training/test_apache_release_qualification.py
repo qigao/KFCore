@@ -991,38 +991,22 @@ class ApacheReleaseQualificationTest(
                 run,
             )
 
-        run = training()
-        run[
-            "apache_reference_objective"
-        ]["assets"]["object_bank"][
-            "object_label_order"
-        ] = [
-            "horse",
-            "person",
-        ]
-        run[
-            "apache_reference_objective"
-        ]["assets"]["object_bank"][
-            "object_label_order_sha256"
-        ] = names_h(
+        value = corpus()
+        value["text_bank_derivation"][
+            "object_bank"
+        ]["label_order_sha256"] = names_h(
             (
                 "horse",
                 "person",
             )
         )
-        run[
-            "apache_reference_objective"
-        ]["assets"]["object_label_order"] = [
-            "horse",
-            "person",
-        ]
         with self.assertRaisesRegex(
             ValueError,
             "object-bank order",
         ):
             qualify_training_run(
-                corpus(),
-                run,
+                value,
+                training(),
             )
 
     def test_pair_opportunity_rebuild_is_bound(self):
