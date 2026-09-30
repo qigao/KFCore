@@ -227,6 +227,22 @@ enum class ScoringMode
     BackendLogits,
 };
 
+ScoringMode scoring_mode_from_model_type(
+    std::string_view model_type)
+{
+    if (model_type == kDynamicOpenVocabularyRelationModelType)
+    {
+        return ScoringMode::BackendLogits;
+    }
+    if (model_type == kOpenVocabularyRelationModelType)
+    {
+        return ScoringMode::HostQueries;
+    }
+    throw_contract(
+        "model_type must be 'relation.open-vocabulary-encoder' or "
+        "'relation.open-vocabulary'");
+}
+
 void require_dynamic_dimension(
     std::int64_t declared,
     const char* subject)
@@ -554,28 +570,50 @@ OpenVocabularyRelation::load(
     const runtime::ExecutionPolicy& policy,
     const OpenVocabularyRelationOptions& options)
 {
-    validate_options(options);
-
-    ScoringMode mode = ScoringMode::HostQueries;
-    if (package.model_type() == kDynamicOpenVocabularyRelationModelType)
-    {
-        mode = ScoringMode::BackendLogits;
-    }
-    else if (package.model_type() != kOpenVocabularyRelationModelType)
-    {
-        throw_contract(
-            "ModelPackage model_type must be "
-            "'relation.open-vocabulary-encoder' or "
-            "'relation.open-vocabulary'");
-    }
-
     try
     {
         auto resolved = runtime.load_model(package, policy);
+        return load_resolved(
+            std::move(resolved),
+            package.model_type(),
+            options);
+    }
+    catch (const RelationError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("model allocation failed");
+    }
+}
+
+std::unique_ptr<OpenVocabularyRelation>
+OpenVocabularyRelation::load_resolved(
+    runtime::ResolvedModel resolved,
+    std::string_view model_type,
+    const OpenVocabularyRelationOptions& options)
+{
+    validate_options(options);
+    if (!resolved.model)
+    {
+        throw_invalid("resolved model must not be null");
+    }
+    const ScoringMode mode =
+        scoring_mode_from_model_type(model_type);
+
+    try
+    {
         return std::unique_ptr<OpenVocabularyRelation>(
             new OpenVocabularyRelation(
                 std::make_unique<Impl>(
-                    std::move(resolved), options, mode)));
+                    std::move(resolved),
+                    options,
+                    mode)));
     }
     catch (const RelationError&)
     {
