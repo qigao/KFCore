@@ -40,6 +40,26 @@ struct PredicateVocabulary
     std::size_t expected_embedding_dim,
     std::size_t max_bytes);
 
+struct RelationInferenceTiming
+{
+    double preprocess_ms = 0.0;
+    double runtime_ms = 0.0;
+    double scoring_ms = 0.0;
+    double decode_ms = 0.0;
+    double total_ms = 0.0;
+
+    std::size_t region_count = 0U;
+    std::size_t predicate_count = 0U;
+    std::size_t selected_pair_count = 0U;
+    std::size_t edge_count = 0U;
+};
+
+struct TimedRelationFrame
+{
+    RelationFrame frame;
+    RelationInferenceTiming timing;
+};
+
 struct OpenVocabularyRelationOptions
 {
     std::int32_t input_size = 0;
@@ -89,6 +109,10 @@ public:
 
     [[nodiscard]] RelationFrame infer(const image::ImageView& image,
                                       const std::vector<Region>& regions);
+
+    [[nodiscard]] TimedRelationFrame
+    infer_timed(const image::ImageView& image,
+                const std::vector<Region>& regions);
 
     [[nodiscard]] std::int32_t input_size() const noexcept;
     [[nodiscard]] std::size_t max_boxes() const noexcept;
