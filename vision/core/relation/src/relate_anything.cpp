@@ -552,6 +552,7 @@ RelationFrame RelateAnything::infer(const image::ImageView& image,
         RelationFrame result;
         result.image_width = source.width;
         result.image_height = source.height;
+        result.vocabulary_version = 1U;
         result.edges =
             detail::decode_relation_outputs(raw, regions, impl_->options);
         return result;

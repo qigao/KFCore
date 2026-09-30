@@ -17,7 +17,8 @@ namespace
 pipelines::SceneGraphFrame make_frame(
     float relation_score = 1.0F,
     std::optional<std::uint64_t> subject_track = std::uint64_t{101},
-    std::optional<std::uint64_t> object_track = std::uint64_t{202})
+    std::optional<std::uint64_t> object_track = std::uint64_t{202},
+    std::uint64_t vocabulary_version = 0U)
 {
     pipelines::SceneGraphFrame frame;
     frame.objects.image_width = 100;
@@ -29,16 +30,19 @@ pipelines::SceneGraphFrame make_frame(
 
     frame.relations.image_width = 100;
     frame.relations.image_height = 100;
+    frame.relations.vocabulary_version = vocabulary_version;
     frame.relations.edges = {
         {0U, 1U, 0U, relation_score, subject_track, object_track},
     };
     return frame;
 }
 
-scene_interaction::SceneBehaviorModel make_model()
+scene_interaction::SceneBehaviorModel make_model(
+    std::uint64_t vocabulary_version = 0U)
 {
     scene_interaction::SceneBehaviorModel model;
     model.predicate_count = 1U;
+    model.vocabulary_version = vocabulary_version;
     model.reservoir_size = 1;
     model.leak_rate = 1.0F;
     model.neutral_index = 0U;
@@ -197,6 +201,63 @@ spec("pair-centric scene ESN behavior lifecycle")
         check_throws_as(interaction.process(frame, 0.0),
                         std::length_error);
         check(interaction.pair_state_count() == std::size_t{0U});
+    }
+
+    it("cancels active behavior and ignores frames from a new vocabulary")
+    {
+        scene_interaction::SceneInteraction interaction(make_options());
+        (void)interaction.configure_model(make_model(7U), 0.0);
+        (void)interaction.process(
+            make_frame(
+                1.0F,
+                std::uint64_t{101},
+                std::uint64_t{202},
+                7U),
+            0.0);
+        const auto started = interaction.process(
+            make_frame(
+                1.0F,
+                std::uint64_t{101},
+                std::uint64_t{202},
+                7U),
+            0.20);
+        check(started.size() == std::size_t{1U});
+        check(interaction.pair_state_count() == std::size_t{1U});
+
+        const auto cancelled = interaction.process(
+            make_frame(
+                1.0F,
+                std::uint64_t{101},
+                std::uint64_t{202},
+                8U),
+            0.30);
+        check(cancelled.size() == std::size_t{1U});
+        check(cancelled[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorCancelled);
+        check(cancelled[0].reason ==
+              scene_interaction::SceneBehaviorEventReason::VocabularyChanged);
+        check(interaction.pair_state_count() == std::size_t{0U});
+
+        const auto ignored = interaction.process(
+            make_frame(
+                1.0F,
+                std::uint64_t{101},
+                std::uint64_t{202},
+                8U),
+            0.40);
+        check(ignored.empty());
+        check(interaction.pair_state_count() == std::size_t{0U});
+
+        (void)interaction.configure_model(make_model(8U), 0.40);
+        const auto resumed = interaction.process(
+            make_frame(
+                1.0F,
+                std::uint64_t{101},
+                std::uint64_t{202},
+                8U),
+            0.50);
+        check(resumed.empty());
+        check(interaction.pair_state_count() == std::size_t{1U});
     }
 
     it("cancels active behavior when the model is replaced")

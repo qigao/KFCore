@@ -33,6 +33,11 @@ struct RelationFrame
     std::int32_t image_width = 0;
     std::int32_t image_height = 0;
     std::vector<RelationEdge> edges;
+
+    // Immutable for all predicate_index values in this frame.
+    // Zero means unspecified/legacy external frame; runtime relation models
+    // emitted by KFCore use positive monotonically-scoped versions.
+    std::uint64_t vocabulary_version = 0U;
 };
 
 } // namespace kfcore::relation

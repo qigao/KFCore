@@ -8,10 +8,63 @@
 
 namespace kfcore::pipelines
 {
+namespace
+{
+
+class RelationRunner
+{
+public:
+    virtual ~RelationRunner() = default;
+
+    [[nodiscard]] virtual std::size_t max_boxes() const noexcept = 0;
+    [[nodiscard]] virtual relation::RelationFrame
+    infer(const image::ImageView& image,
+          const std::vector<relation::Region>& regions) = 0;
+};
+
+template <typename Model>
+class TypedRelationRunner final : public RelationRunner
+{
+public:
+    explicit TypedRelationRunner(std::unique_ptr<Model> model)
+        : model_(std::move(model))
+    {
+        if (!model_)
+        {
+            throw std::invalid_argument(
+                "SceneGraphPipeline relation model must not be null");
+        }
+    }
+
+    std::size_t max_boxes() const noexcept override
+    {
+        return model_->max_boxes();
+    }
+
+    relation::RelationFrame
+    infer(const image::ImageView& image,
+          const std::vector<relation::Region>& regions) override
+    {
+        return model_->infer(image, regions);
+    }
+
+private:
+    std::unique_ptr<Model> model_;
+};
+
+template <typename Model>
+std::unique_ptr<RelationRunner>
+make_relation_runner(std::unique_ptr<Model> model)
+{
+    return std::make_unique<TypedRelationRunner<Model>>(
+        std::move(model));
+}
+
+} // namespace
 struct SceneGraphPipeline::Impl final
 {
     Impl(std::unique_ptr<yolo::YoloDetector> detector_value,
-         std::unique_ptr<relation::RelateAnything> relation_value,
+         std::unique_ptr<RelationRunner> relation_value,
          const SceneGraphPipelineOptions& options)
         : detector(std::move(detector_value))
         , relation_model(std::move(relation_value))
@@ -20,7 +73,7 @@ struct SceneGraphPipeline::Impl final
     }
 
     std::unique_ptr<yolo::YoloDetector> detector;
-    std::unique_ptr<relation::RelateAnything> relation_model;
+    std::unique_ptr<RelationRunner> relation_model;
     yolo::ByteTrackSession tracking;
 };
 
@@ -44,7 +97,29 @@ SceneGraphPipeline::create(
     }
 
     auto impl = std::make_unique<Impl>(
-        std::move(detector), std::move(relation_model), options);
+        std::move(detector),
+        make_relation_runner(std::move(relation_model)),
+        options);
+    return std::unique_ptr<SceneGraphPipeline>(
+        new SceneGraphPipeline(std::move(impl)));
+}
+
+std::unique_ptr<SceneGraphPipeline>
+SceneGraphPipeline::create(
+    std::unique_ptr<yolo::YoloDetector> detector,
+    std::unique_ptr<relation::OpenVocabularyRelation> relation_model,
+    const SceneGraphPipelineOptions& options)
+{
+    if (!detector || !relation_model)
+    {
+        throw std::invalid_argument(
+            "SceneGraphPipeline requires detector and relation model instances");
+    }
+
+    auto impl = std::make_unique<Impl>(
+        std::move(detector),
+        make_relation_runner(std::move(relation_model)),
+        options);
     return std::unique_ptr<SceneGraphPipeline>(
         new SceneGraphPipeline(std::move(impl)));
 }

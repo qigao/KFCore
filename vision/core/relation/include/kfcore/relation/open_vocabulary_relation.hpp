@@ -86,6 +86,7 @@ public:
     [[nodiscard]] std::size_t max_pairs() const noexcept;
     [[nodiscard]] std::size_t query_dim() const noexcept;
     [[nodiscard]] std::size_t predicate_count() const noexcept;
+    [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
     [[nodiscard]] bool backend_scoring() const noexcept;
     [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;

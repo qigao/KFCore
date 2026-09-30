@@ -420,6 +420,17 @@ struct SceneInteraction::Impl
                 "scene interaction model is not configured");
         }
 
+        if (model->vocabulary_version != 0U &&
+            frame.relations.vocabulary_version !=
+                model->vocabulary_version)
+        {
+            cancel_all(events,
+                       SceneBehaviorEventReason::VocabularyChanged,
+                       seconds);
+            last_frame = seconds;
+            return;
+        }
+
         if (last_frame &&
             seconds - *last_frame > options.maximum_gap_seconds)
         {
@@ -577,6 +588,8 @@ const char* event_reason_name(SceneBehaviorEventReason reason)
         return "reset";
     case SceneBehaviorEventReason::ModelChanged:
         return "model changed";
+    case SceneBehaviorEventReason::VocabularyChanged:
+        return "vocabulary changed";
     }
     throw std::invalid_argument("invalid scene behavior event reason");
 }

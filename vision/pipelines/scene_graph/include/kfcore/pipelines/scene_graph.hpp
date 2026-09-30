@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kfcore/image_processor/types.hpp"
+#include "kfcore/relation/open_vocabulary_relation.hpp"
 #include "kfcore/relation/relate_anything.hpp"
 #include "kfcore/yolo/detector.hpp"
 #include "kfcore/yolo/tracking.hpp"
@@ -32,6 +33,11 @@ public:
     [[nodiscard]] static std::unique_ptr<SceneGraphPipeline>
     create(std::unique_ptr<yolo::YoloDetector> detector,
            std::unique_ptr<relation::RelateAnything> relation_model,
+           const SceneGraphPipelineOptions& options = {});
+
+    [[nodiscard]] static std::unique_ptr<SceneGraphPipeline>
+    create(std::unique_ptr<yolo::YoloDetector> detector,
+           std::unique_ptr<relation::OpenVocabularyRelation> relation_model,
            const SceneGraphPipelineOptions& options = {});
 
     [[nodiscard]] SceneGraphFrame process(const image::ImageView& image);
