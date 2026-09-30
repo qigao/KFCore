@@ -10,8 +10,12 @@ from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     build_reference_optimizer,
     build_reference_scheduler,
+    backbone_provenance,
     configure_backbone_trainability,
     gradient_health,
+    module_state_sha256,
+    resolve_training_epochs,
+    tap_fusion_weights,
 )
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from test_model import boxes
@@ -76,6 +80,66 @@ def build_model() -> KFRelationModel:
 
 
 class ApacheTrainingRecipeTest(unittest.TestCase):
+    def test_recipe_epoch_defaults_preserve_legacy_and_reference(self):
+        self.assertEqual(
+            resolve_training_epochs(None, recipe="legacy"),
+            5,
+        )
+        self.assertEqual(
+            resolve_training_epochs(
+                None,
+                recipe="apache-reference",
+            ),
+            12,
+        )
+        self.assertEqual(
+            resolve_training_epochs(
+                7,
+                recipe="apache-reference",
+            ),
+            7,
+        )
+        with self.assertRaises(ValueError):
+            resolve_training_epochs(
+                0,
+                recipe="apache-reference",
+            )
+
+    def test_backbone_provenance_hash_and_tap_weights_are_deterministic(self):
+        torch.manual_seed(90)
+        model = build_model()
+        first_hash = module_state_sha256(model.backbone)
+        second_hash = module_state_sha256(model.backbone)
+        self.assertEqual(first_hash, second_hash)
+
+        weights = tap_fusion_weights(model)
+        self.assertEqual(len(weights), 3)
+        self.assertAlmostEqual(sum(weights), 1.0, places=6)
+        self.assertTrue(
+            all(abs(value - 1.0 / 3.0) < 1.0e-6 for value in weights)
+        )
+
+        report = backbone_provenance(
+            model,
+            model_name="synthetic/backbone",
+            mode="frozen",
+        )
+        self.assertEqual(
+            report["state_sha256"],
+            first_hash,
+        )
+        self.assertEqual(
+            report["tap_indices"],
+            [-3, -2, -1],
+        )
+
+        with torch.no_grad():
+            model.backbone.model.conv.weight.add_(0.01)
+        self.assertNotEqual(
+            module_state_sha256(model.backbone),
+            first_hash,
+        )
+
     def test_reference_defaults(self):
         config = ApacheTrainingRecipeConfig()
         self.assertEqual(config.head_lr, 4.0e-4)
