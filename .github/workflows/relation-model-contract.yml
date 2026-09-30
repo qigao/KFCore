@@ -95,6 +95,8 @@ jobs:
             tools/relation_training/build_dynamic_vocab_tensorrt.py \
             tools/relation_training/make_relation_qualification_report.py \
             tools/relation_training/summarize_scene_behavior_latency.py \
+            tools/relation_training/make_gtbox_ort_native_fixture.py \
+            tools/relation_training/compare_gtbox_ort_native.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
