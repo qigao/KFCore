@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 using namespace kfcore;
@@ -37,6 +38,30 @@ relation::RelationFrame relation_frame()
 }
 
 } // namespace
+
+spec("scene graph pipeline dynamic vocabulary API")
+{
+    it("exposes typed dynamic-vocabulary control without changing frame ABI")
+    {
+        using Pipeline = pipelines::SceneGraphPipeline;
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .supports_dynamic_vocabulary()),
+                bool>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .vocabulary_version()),
+                std::uint64_t>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>().set_vocabulary(
+                    std::declval<relation::PredicateVocabulary>())),
+                void>);
+        check(true);
+    }
+}
 
 spec("scene graph pipeline composition")
 {
