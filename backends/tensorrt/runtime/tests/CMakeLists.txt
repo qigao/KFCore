@@ -42,6 +42,8 @@ set(KFCORE_TENSORRT_TEST_ENGINE_ARCFACE "" CACHE FILEPATH
     "Optional TensorRT ArcFace engine used by the runtime integration test")
 set(KFCORE_TENSORRT_TEST_ENGINE_PALM "" CACHE FILEPATH
     "Optional TensorRT palm-detection engine used by the dynamic-output integration test")
+set(KFCORE_TENSORRT_TEST_ENGINE_RELATION "" CACHE FILEPATH
+    "Optional TensorRT dynamic-vocabulary relation engine used by the runtime integration test")
 
 if(KFCORE_TENSORRT_TEST_ENGINE_ARCFACE)
   cmake_add_test(
@@ -71,6 +73,20 @@ if(KFCORE_TENSORRT_TEST_ENGINE_PALM)
       WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 endif()
 
+if(KFCORE_TENSORRT_TEST_ENGINE_RELATION)
+  cmake_add_test(
+    NAME test_runtime_tensorrt_relation_dynamic_v_integration
+    TEST_NAME test_runtime_tensorrt_relation_dynamic_v
+    SOURCES test_runtime_tensorrt_relation_dynamic_v_integration.cpp
+    LIBS KFCore::runtime_tensorrt CUDA::cudart_static Salts::TinyTest
+    COMPILE_FEATURES cxx_std_17
+    FOLDER "${_runtime_tensorrt_test_folder}"
+    TEST_PROPERTIES
+      ENVIRONMENT
+        "KFCORE_RUNTIME_TENSORRT_TEST_ENGINE_RELATION=${KFCORE_TENSORRT_TEST_ENGINE_RELATION}"
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+endif()
+
 if(WIN32)
   set(_runtime_tensorrt_windows_tests test_runtime_tensorrt_contract)
   if(KFCORE_TENSORRT_TEST_ENGINE_ARCFACE)
@@ -78,6 +94,9 @@ if(WIN32)
   endif()
   if(KFCORE_TENSORRT_TEST_ENGINE_PALM)
     list(APPEND _runtime_tensorrt_windows_tests test_runtime_tensorrt_dynamic_output)
+  endif()
+  if(KFCORE_TENSORRT_TEST_ENGINE_RELATION)
+    list(APPEND _runtime_tensorrt_windows_tests test_runtime_tensorrt_relation_dynamic_v)
   endif()
   set_tests_properties(
     ${_runtime_tensorrt_windows_tests}
