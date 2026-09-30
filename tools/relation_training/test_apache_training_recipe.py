@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -25,8 +27,10 @@ from apache_training_recipe import (
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
     select_artifact_model,
+    state_dict_sha256,
     tap_fusion_weights,
 )
+from checkpoint import load_payload, save_checkpoint
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from test_model import boxes
 
@@ -288,6 +292,9 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
     def test_artifact_selection_uses_ema_only_for_reference(self):
         model = build_model()
         ema = ModelEMA(model)
+        with torch.no_grad():
+            next(model.parameters()).add_(0.5)
+        ema.update(model)
         selected, source = select_artifact_model(
             model,
             ema,
@@ -298,6 +305,31 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             ema.ema_model,
         )
         self.assertEqual(source, "ema")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ema.pt"
+            save_checkpoint(
+                path,
+                selected,
+                backbone_model="synthetic/backbone",
+                predicates=["a", "b", "c"],
+                extra={"weight_source": source},
+            )
+            payload = load_payload(path)
+        self.assertEqual(
+            state_dict_sha256(
+                payload["state_dict"]
+            ),
+            module_state_sha256(
+                ema.ema_model
+            ),
+        )
+        self.assertNotEqual(
+            state_dict_sha256(
+                payload["state_dict"]
+            ),
+            module_state_sha256(model),
+        )
 
         selected, source = select_artifact_model(
             model,
