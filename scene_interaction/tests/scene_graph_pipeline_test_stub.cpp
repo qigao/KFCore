@@ -31,7 +31,7 @@ namespace kfcore::pipelines
 
 struct SceneGraphPipeline::Impl final
 {
-    std::uint64_t vocabulary_version = 0U;
+    std::uint64_t vocabulary_version = 7U;
     std::vector<std::string> predicates {"interacting"};
 };
 
