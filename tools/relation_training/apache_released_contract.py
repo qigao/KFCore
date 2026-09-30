@@ -103,6 +103,227 @@ def _validate_group(
     return result
 
 
+
+
+RELEASED_STRUCTURE: dict[str, object] = {
+    "context_self_layers": 2,
+    "context_cross_layers": 2,
+    "interaction_dependency_layers": 2,
+    "interaction_grounding_layers": 1,
+    "attention_heads": 8,
+    "ffn_ratio": 2.0,
+    "deformable_points": 4,
+    "deformable_heads": 8,
+    "deformable_nulls": 2,
+    "pe_num_freqs": 16,
+    "pe_max_octave": 7.0,
+    "vocab_projection_layers": 2,
+    "logit_scale_init": 5.0,
+}
+
+
+def validate_released_structure(
+    model: object,
+) -> dict[str, object]:
+    """Validate the Apache hard-coded structure without exposing new knobs."""
+    relation = getattr(
+        model,
+        "apache_relation_transformer",
+        None,
+    )
+    deformable = getattr(
+        model,
+        "apache_deformable_read",
+        None,
+    )
+    interaction = getattr(
+        model,
+        "apache_relation_interaction",
+        None,
+    )
+    spatial_pool = getattr(
+        model,
+        "apache_spatial_pool",
+        None,
+    )
+    box_prompt = getattr(
+        model,
+        "apache_box_prompt_encoder",
+        None,
+    )
+    vocab = getattr(
+        model,
+        "apache_vocab_head",
+        None,
+    )
+    if any(
+        value is None
+        for value in (
+            relation,
+            deformable,
+            interaction,
+            spatial_pool,
+            box_prompt,
+            vocab,
+        )
+    ):
+        raise ValueError(
+            "released structure requires the full Apache model stack"
+        )
+
+    context_self_layers = len(
+        relation.self_layers
+    )
+    context_cross_layers = (
+        len(relation.cross_layers) + 1
+    )
+    dependency_layers = len(
+        interaction.dependency_layers
+    )
+    grounding_layers = len(
+        interaction.grounding_layers
+    )
+    heads = {
+        int(layer.self_attn.num_heads)
+        for layer in relation.self_layers
+    }
+    heads.update(
+        int(layer.self_attn.num_heads)
+        for layer in relation.cross_layers
+    )
+    heads.add(
+        int(relation.last_cross.self_attn.num_heads)
+    )
+    heads.add(
+        int(relation.last_cross.cross_attn.num_heads)
+    )
+    heads.update(
+        int(layer.self_attn.num_heads)
+        for layer in interaction.dependency_layers
+    )
+    heads.update(
+        int(layer.self_attn.num_heads)
+        for layer in interaction.grounding_layers
+    )
+    heads.add(
+        int(spatial_pool.n_heads)
+    )
+    heads.add(
+        int(deformable.n_heads)
+    )
+    if heads != {8}:
+        raise ValueError(
+            "Apache released structure requires 8 attention heads"
+        )
+
+    d_model = int(vocab.d_model)
+    ffn_dims = {
+        int(layer.linear1.out_features)
+        for layer in relation.self_layers
+    }
+    ffn_dims.update(
+        int(layer.linear1.out_features)
+        for layer in relation.cross_layers
+    )
+    ffn_dims.update(
+        int(layer.linear1.out_features)
+        for layer in interaction.dependency_layers
+    )
+    ffn_dims.update(
+        int(layer.linear1.out_features)
+        for layer in interaction.grounding_layers
+    )
+    ffn_dims.add(
+        int(
+            relation.last_cross.ffn[0].out_features
+        )
+    )
+    expected_ffn_dim = int(
+        d_model
+        * float(
+            RELEASED_STRUCTURE["ffn_ratio"]
+        )
+    )
+    if ffn_dims != {expected_ffn_dim}:
+        raise ValueError(
+            "Apache released structure requires ffn_ratio=2.0"
+        )
+
+    projection = vocab.proj
+    projection_layers = sum(
+        1
+        for module in projection.modules()
+        if module is not projection
+        and module.__class__.__name__ == "Linear"
+    )
+    logit_scale_init = float(
+        vocab.logit_scale.detach().exp().cpu().item()
+    )
+
+    report = {
+        "context_self_layers": context_self_layers,
+        "context_cross_layers": context_cross_layers,
+        "interaction_dependency_layers": dependency_layers,
+        "interaction_grounding_layers": grounding_layers,
+        "attention_heads": next(iter(heads)),
+        "ffn_ratio": (
+            float(expected_ffn_dim)
+            / float(d_model)
+        ),
+        "deformable_points": int(
+            deformable.n_points
+        ),
+        "deformable_heads": int(
+            deformable.n_heads
+        ),
+        "deformable_nulls": int(
+            deformable.null_slots
+        ),
+        "pe_num_freqs": int(
+            spatial_pool.scene_pe.num_freqs
+        ),
+        "pe_max_octave": float(
+            spatial_pool.scene_pe.max_octave
+        ),
+        "box_pe_num_freqs": int(
+            box_prompt.num_freqs
+        ),
+        "box_pe_max_octave": float(
+            box_prompt.max_octave
+        ),
+        "vocab_projection_layers": (
+            projection_layers
+        ),
+        "logit_scale_init": logit_scale_init,
+    }
+
+    expected = dict(RELEASED_STRUCTURE)
+    for key, target in expected.items():
+        actual = report[key]
+        if not _matches(actual, target):
+            raise ValueError(
+                f"Apache released structure {key} "
+                f"must be {target!r}; got {actual!r}"
+            )
+    if (
+        report["box_pe_num_freqs"]
+        != RELEASED_STRUCTURE["pe_num_freqs"]
+        or not _matches(
+            report["box_pe_max_octave"],
+            RELEASED_STRUCTURE["pe_max_octave"],
+        )
+    ):
+        raise ValueError(
+            "Apache released box positional encoding differs from 16/7"
+        )
+
+    return {
+        "schema": "kfcore.apache-released-structure/1",
+        "matches_released": True,
+        **report,
+    }
+
+
 def validate_released_scalar_contract(
     *,
     recipe: Mapping[str, Any] | object,
