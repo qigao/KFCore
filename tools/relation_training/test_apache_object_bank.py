@@ -55,6 +55,7 @@ class ApacheObjectBankTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = self.write_bank(root)
+            expected_hash = sha256_file(path)
             tensor, report = load_object_text_bank(
                 path,
                 ("person", "horse"),
@@ -70,7 +71,7 @@ class ApacheObjectBankTest(unittest.TestCase):
         )
         self.assertEqual(
             report["artifact_sha256"],
-            sha256_file(path),
+            expected_hash,
         )
         self.assertEqual(
             report["shape"],
