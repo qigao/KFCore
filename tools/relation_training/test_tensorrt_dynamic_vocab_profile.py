@@ -15,7 +15,7 @@ class DynamicVocabularyTensorRtProfileTest(unittest.TestCase):
             "vocabulary_dynamic": True,
             "vocabulary_graph_input": True,
             "image_size": 448,
-            "max_boxes": 32,
+            "max_boxes": 40,
             "query_dim": 512,
             "default_predicate_count": 243,
         }
@@ -36,6 +36,10 @@ class DynamicVocabularyTensorRtProfileTest(unittest.TestCase):
         self.assertEqual(
             profiles["boxes"]["min"],
             profiles["boxes"]["max"],
+        )
+        self.assertEqual(
+            profiles["boxes"]["min"],
+            [1, 40, 4],
         )
         self.assertEqual(
             profiles["W"]["min"],
