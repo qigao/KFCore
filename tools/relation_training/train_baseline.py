@@ -159,7 +159,15 @@ def main() -> None:
     parser.add_argument("--validation-annotations", required=True)
     parser.add_argument("--vocabulary", required=True)
     parser.add_argument("--image-root", required=True)
-    parser.add_argument("--predicate-embeddings", required=True)
+    parser.add_argument(
+        "--predicate-embeddings",
+        required=True,
+        help=(
+            "Predicate text bank. apache-reference requires the released "
+            "named NPZ contract (predicates + embeddings + exact 3 templates); "
+            "legacy accepts the historical tensor file."
+        ),
+    )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     parser.add_argument(
