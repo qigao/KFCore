@@ -7,6 +7,105 @@
 namespace kfcore::pipelines::detail
 {
 
+SceneGraphEngine::SceneGraphEngine(
+    std::unique_ptr<DetectionRunner> detector,
+    std::unique_ptr<RelationRunner> relation_model,
+    const SceneGraphPipelineOptions& options)
+    : detector_(std::move(detector))
+    , relation_model_(std::move(relation_model))
+    , tracking_(options.tracking)
+{
+    if (!detector_ || !relation_model_)
+    {
+        throw std::invalid_argument(
+            "SceneGraphEngine requires detector and relation runners");
+    }
+}
+
+SceneGraphFrame SceneGraphEngine::process(
+    const image::ImageView& image)
+{
+    const yolo::DetectionFrame detections =
+        detector_->detect(image);
+    yolo::TrackFrame tracks =
+        tracking_.update(detections);
+
+    if (tracks.detections.size() >
+        relation_model_->max_boxes())
+    {
+        throw std::length_error(
+            "SceneGraphPipeline tracked object count exceeds relation max_boxes");
+    }
+
+    const std::vector<relation::Region> regions =
+        regions_from_tracks(tracks);
+    relation::RelationFrame relations =
+        relation_model_->infer(
+            image,
+            regions);
+
+    return assemble_scene_graph(
+        std::move(tracks),
+        std::move(relations));
+}
+
+bool SceneGraphEngine::supports_dynamic_vocabulary() const noexcept
+{
+    return relation_model_ &&
+        relation_model_->supports_dynamic_vocabulary();
+}
+
+bool SceneGraphEngine::supports_live_predicates() const noexcept
+{
+    return relation_model_ &&
+        relation_model_->supports_live_predicates();
+}
+
+void SceneGraphEngine::set_vocabulary(
+    relation::PredicateVocabulary vocabulary)
+{
+    if (!relation_model_)
+    {
+        throw std::logic_error(
+            "SceneGraphEngine relation state is unavailable");
+    }
+    relation_model_->set_vocabulary(
+        std::move(vocabulary));
+}
+
+void SceneGraphEngine::set_predicates(
+    const std::vector<std::string>& predicates)
+{
+    if (!relation_model_)
+    {
+        throw std::logic_error(
+            "SceneGraphEngine relation state is unavailable");
+    }
+    relation_model_->set_predicates(predicates);
+}
+
+std::uint64_t
+SceneGraphEngine::vocabulary_version() const noexcept
+{
+    return relation_model_ ?
+        relation_model_->vocabulary_version() :
+        0U;
+}
+
+const std::vector<std::string>&
+SceneGraphEngine::predicates() const noexcept
+{
+    static const std::vector<std::string> empty;
+    return relation_model_ ?
+        relation_model_->predicates() :
+        empty;
+}
+
+void SceneGraphEngine::reset_tracking() noexcept
+{
+    tracking_.reset();
+}
+
 std::vector<relation::Region>
 regions_from_tracks(const yolo::TrackFrame& tracks)
 {
