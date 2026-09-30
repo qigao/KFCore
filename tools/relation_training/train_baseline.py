@@ -27,12 +27,16 @@ from apache_multiscale import scale_ladder
 from apache_pair_sampler import PairOpportunityTable
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
+    ModelEMA,
+    RELEASED_EMA_DECAY,
     backbone_provenance,
     build_reference_optimizer,
     build_reference_scheduler,
+    module_state_sha256,
     resolve_training_epochs,
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
+    select_artifact_model,
 )
 from apache_objective import (
     ApacheObjectiveConfig,
@@ -1073,6 +1077,15 @@ def main() -> None:
             object_text_bank=apache_object_embeddings,
         )
 
+    ema = (
+        ModelEMA(
+            model,
+            decay=RELEASED_EMA_DECAY,
+        )
+        if reference_training
+        else None
+    )
+
     if training_mixture is not None:
         train_dataset = RelationMixtureTrainingDataset(
             training_mixture,
@@ -1290,6 +1303,7 @@ def main() -> None:
                 if reference_training
                 else 1
             ),
+            ema=ema,
         )
         epoch_report: dict[str, object] = {
             "epoch": epoch,
@@ -1309,14 +1323,40 @@ def main() -> None:
         history.append(epoch_report)
         print(json.dumps(history[-1], sort_keys=True))
 
-    backbone_provenance_final = backbone_provenance(
+    backbone_provenance_final_raw = backbone_provenance(
         model,
         model_name=args.backbone,
         mode=("full" if reference_training else "frozen"),
     )
+    artifact_model, artifact_weight_source = select_artifact_model(
+        model,
+        ema,
+        recipe=args.training_recipe,
+    )
+    backbone_provenance_final = backbone_provenance(
+        artifact_model,
+        model_name=args.backbone,
+        mode=(
+            "full-ema"
+            if reference_training
+            else "frozen"
+        ),
+    )
+    ema_report = (
+        ema.report()
+        if ema is not None
+        else {
+            "enabled": False,
+            "weights_source": "raw",
+        }
+    )
+    if ema is not None:
+        ema_report["raw_state_sha256"] = (
+            module_state_sha256(model)
+        )
 
     benchmark_report = evaluate_gt_boxes(
-        model,
+        artifact_model,
         validation_manifest,
         image_root=args.image_root,
         device=device,
@@ -1329,8 +1369,8 @@ def main() -> None:
         ),
     )
 
-    source_bank = model.predicate_bank.detach().cpu()
-    effective_bank = model.effective_predicate_bank().detach().cpu()
+    source_bank = artifact_model.predicate_bank.detach().cpu()
+    effective_bank = artifact_model.effective_predicate_bank().detach().cpu()
     source_effective_cosine = torch.nn.functional.cosine_similarity(
         source_bank,
         effective_bank,
@@ -1355,7 +1395,7 @@ def main() -> None:
     checkpoint_path = output_dir / "relation-v1.pt"
     save_checkpoint(
         checkpoint_path,
-        model,
+        artifact_model,
         backbone_model=args.backbone,
         predicates=list(vocabulary.predicates),
         extra={
@@ -1390,7 +1430,10 @@ def main() -> None:
                     backbone_trainable_parameter_count
                 ),
                 "backbone_initial": backbone_provenance_initial,
+                "backbone_final_raw": backbone_provenance_final_raw,
                 "backbone_final": backbone_provenance_final,
+                "weight_source": artifact_weight_source,
+                "ema": ema_report,
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
@@ -1491,6 +1534,10 @@ def main() -> None:
             "backbone_trainable_parameter_count": (
                 backbone_trainable_parameter_count
             ),
+            "backbone_final_raw": backbone_provenance_final_raw,
+            "backbone_final": backbone_provenance_final,
+            "weight_source": artifact_weight_source,
+            "ema": ema_report,
             "source_mixture": mixture_report,
         },
         "device": str(device),
