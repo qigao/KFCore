@@ -19,7 +19,12 @@ from apache_objective import (
     load_source_column_allow,
     swap_direction_hinge_dense,
 )
-from model import RelationTrainingOutputs
+from model import (
+    KFRelationModel,
+    RelationModelConfig,
+    RelationTrainingOutputs,
+)
+from test_model import ToyBackbone, boxes
 
 
 def ontology() -> PredicateOntology:
@@ -334,6 +339,110 @@ class ApacheObjectiveTest(unittest.TestCase):
             margin=0.05,
         )
         self.assertEqual(float(symmetric), 0.0)
+
+    def test_full_model_forward_training_runs_reference_objective_backward(self):
+        torch.manual_seed(84)
+        config = RelationModelConfig(
+            image_size=8,
+            max_boxes=4,
+            pair_budget=6,
+            hidden_dim=16,
+            geometry_dim=8,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+            pair_evidence_contract="apache",
+            pair_sampler_contract="apache",
+            relation_context_contract="apache",
+            predicate_head_contract="apache",
+            apache_context_dropout=0.0,
+            apache_box_token_dropout=0.0,
+        )
+        model = KFRelationModel(
+            ToyBackbone(),
+            F.normalize(torch.randn(3, 6), dim=-1),
+            config,
+        )
+        model.train()
+
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+        pair_targets = torch.zeros(1, 4, 4)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 2, 3] = 1.0
+        predicate_targets = torch.zeros(1, 4, 4, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 2, 3, 2] = 1.0
+
+        outputs = model.forward_training(
+            image,
+            box_tensor[:1],
+            box_counts[:1],
+            pair_targets=pair_targets,
+        )
+
+        pos_w = torch.eye(3)
+        pos_w[0, 1] = 0.25
+        inverse = torch.zeros(3, 3, dtype=torch.bool)
+        inverse[0, 2] = True
+        inverse[2, 0] = True
+        objective = ApacheReferenceObjective(
+            PredicateOntology(
+                predicates=("above", "over", "below"),
+                pos_w=pos_w,
+                neg_lw=torch.zeros(3, 3),
+                sym=torch.tensor([0.0, 1.0, 0.0]),
+                inverse_mask=inverse,
+            ),
+            config=ApacheObjectiveConfig(
+                n_neg=2,
+                hard_frac=0.5,
+                bg_topk=2,
+            ),
+            source_column_allow=torch.ones(
+                1, 3, dtype=torch.bool
+            ),
+            object_text_bank=F.normalize(
+                torch.randn(3, 6),
+                dim=-1,
+            ),
+        )
+        losses = objective(
+            outputs,
+            predicate_targets,
+            source_ids=torch.tensor([0]),
+            object_label_indices=torch.tensor(
+                [[0, 1, 2, -1]]
+            ),
+        )
+        self.assertTrue(torch.isfinite(losses["loss"]))
+        losses["loss"].backward()
+
+        assert model.apache_vocab_head is not None
+        assert model.apache_spatial_proj is not None
+        assert model.apache_pair_sampler is not None
+        gate_grad = (
+            model.apache_vocab_head.gate_mlp[0].weight.grad
+        )
+        spatial_grad = model.apache_spatial_proj[0].weight.grad
+        sampler_grad = model.apache_pair_sampler.f_sub[1].weight.grad
+        for name, gradient in (
+            ("routing_gate", gate_grad),
+            ("spatial_query", spatial_grad),
+            ("pair_sampler", sampler_grad),
+        ):
+            self.assertIsNotNone(gradient, msg=name)
+            assert gradient is not None
+            self.assertTrue(
+                torch.isfinite(gradient).all(),
+                msg=name,
+            )
+            self.assertGreater(
+                float(gradient.abs().sum()),
+                0.0,
+                msg=name,
+            )
 
     def test_full_reference_objective_is_finite_weighted_and_differentiable(self):
         outputs = training_outputs()
