@@ -347,6 +347,32 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
                 predicate_count=2,
             )
 
+        released_overflow = RelationExample(
+            image=example.image,
+            width=example.width,
+            height=example.height,
+            boxes_xyxy=tuple(
+                (0.0, 0.0, 1.0, 1.0)
+                for _ in range(41)
+            ),
+            object_labels=tuple(
+                "a"
+                for _ in range(41)
+            ),
+            relations=(),
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "41 boxes",
+        ):
+            prepare_example(
+                released_overflow,
+                image_root=self.root,
+                image_size=8,
+                max_boxes=40,
+                predicate_count=2,
+            )
+
         wrong_size = RelationExample(
             image=example.image,
             width=9,
