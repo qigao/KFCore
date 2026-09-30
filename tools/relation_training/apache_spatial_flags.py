@@ -118,6 +118,10 @@ def _load_pack_flags(
         rels[:, 3],
         dtype=np.int64,
     )
+    if (flags < 0).any():
+        raise ValueError(
+            "Apache pack relation flags must be non-negative bitfields"
+        )
     spatial_bits = (
         flags & np.int64(1)
     ).astype(
