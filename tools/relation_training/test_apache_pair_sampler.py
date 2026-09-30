@@ -384,10 +384,17 @@ class ApacheRelatednessSamplerTest(unittest.TestCase):
 
     def test_checkpoint_round_trip_preserves_sampler_contract(self):
         torch.manual_seed(38)
+        config = sampler_config()
+        config = RelationModelConfig(
+            **{
+                **config.__dict__,
+                "apache_pair_negative_floor": 0.42,
+            }
+        )
         model = KFRelationModel(
             ToyBackbone(),
             torch.randn(3, 6),
-            sampler_config(),
+            config,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "apache-sampler.pt"
@@ -403,6 +410,11 @@ class ApacheRelatednessSamplerTest(unittest.TestCase):
         self.assertEqual(
             restored.pair_sampler_contract,
             "apache",
+        )
+        self.assertAlmostEqual(
+            restored.apache_pair_negative_floor,
+            0.42,
+            places=7,
         )
         self.assertIn(
             "apache_pair_sampler.geo_scorer.0.weight",
