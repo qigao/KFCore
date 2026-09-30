@@ -1452,6 +1452,10 @@ class KFRelationModel(nn.Module):
         Tensor | None,
         Tensor | None,
         Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
     ]:
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("image must be [B,3,H,W]")
