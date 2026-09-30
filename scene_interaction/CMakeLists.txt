@@ -1,6 +1,7 @@
 add_library(kfcore_scene_interaction STATIC
   src/scene_features.cpp
-  src/interaction.cpp)
+  src/interaction.cpp
+  src/pipeline.cpp)
 target_include_directories(kfcore_scene_interaction
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
