@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict
 import hashlib
 import importlib.metadata
 import io
+import json
 from pathlib import Path
 from typing import Callable, Sequence
 import zipfile
@@ -20,6 +22,7 @@ from apache_text_student import (
     load_apache_checkpoint,
 )
 from apache_training_recipe import RELEASED_TEXT_DIM
+from benchmark import RelationVocabulary
 
 
 PREDICATE_BANK_SCHEMA = "kfcore.apache-predicate-text-bank/1"
@@ -884,8 +887,6 @@ def rebuild_text_banks(
         parents=True,
         exist_ok=True,
     )
-    import json
-
     evidence_path.write_text(
         json.dumps(
             evidence,
@@ -898,3 +899,92 @@ def rebuild_text_banks(
         encoding="utf-8",
     )
     return evidence
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Rebuild the released Apache predicate/object text banks from "
+            "the exact text-student checkpoint and local CLIP tokenizer."
+        )
+    )
+    parser.add_argument(
+        "--student-checkpoint",
+        required=True,
+    )
+    parser.add_argument(
+        "--tokenizer-dir",
+        required=True,
+    )
+    parser.add_argument(
+        "--vocabulary",
+        required=True,
+    )
+    parser.add_argument(
+        "--predicate-out",
+        required=True,
+    )
+    parser.add_argument(
+        "--object-out",
+        required=True,
+    )
+    parser.add_argument(
+        "--evidence",
+        required=True,
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1024,
+    )
+    args = parser.parse_args()
+
+    vocabulary = RelationVocabulary.load(
+        args.vocabulary
+    )
+    if not vocabulary.object_labels:
+        raise ValueError(
+            "released text-bank rebuild requires object labels"
+        )
+
+    report = rebuild_text_banks(
+        student_checkpoint=(
+            args.student_checkpoint
+        ),
+        tokenizer_dir=(
+            args.tokenizer_dir
+        ),
+        predicates=(
+            vocabulary.predicates
+        ),
+        object_labels=(
+            vocabulary.object_labels
+        ),
+        predicate_output=(
+            args.predicate_out
+        ),
+        object_output=(
+            args.object_out
+        ),
+        evidence_output=(
+            args.evidence
+        ),
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    print(
+        json.dumps(
+            report,
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
