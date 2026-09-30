@@ -1442,6 +1442,7 @@ class KFRelationModel(nn.Module):
         *,
         encoder_only: bool = False,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> tuple[
         tuple[Tensor, ...],
         Tensor,
@@ -1517,6 +1518,7 @@ class KFRelationModel(nn.Module):
                 region_features,
                 box_counts,
                 pair_targets=pair_targets,
+                entity_labels=entity_labels,
             )
             subject_index = sampler_out.sub_idx
             object_index = sampler_out.obj_idx
@@ -1937,6 +1939,7 @@ class KFRelationModel(nn.Module):
         boxes: Tensor,
         box_counts: Tensor,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> RelationTrainingOutputs:
         if (
             self.config.pair_sampler_contract == "apache"
@@ -1964,6 +1967,7 @@ class KFRelationModel(nn.Module):
             boxes,
             box_counts,
             pair_targets=pair_targets,
+            entity_labels=entity_labels,
         )
         return RelationTrainingOutputs(
             runtime=runtime,
