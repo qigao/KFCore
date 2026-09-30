@@ -39,6 +39,7 @@ from apache_training_recipe import (
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
     select_artifact_model,
+    validate_training_text_dim,
 )
 from apache_objective import (
     ApacheObjectiveConfig,
@@ -891,6 +892,10 @@ def main() -> None:
         args.predicate_embeddings,
         len(vocabulary.predicates),
     )
+    validate_training_text_dim(
+        int(predicate_embeddings.shape[1]),
+        recipe=args.training_recipe,
+    )
 
     apache_ontology = None
     apache_source_names: tuple[str, ...] = ()
@@ -1244,6 +1249,7 @@ def main() -> None:
             cfa_prob=args.apache_cfa_prob,
             cfa_alpha=args.apache_cfa_alpha,
             augment=resolved_augment,
+            text_dim=int(predicate_embeddings.shape[1]),
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
