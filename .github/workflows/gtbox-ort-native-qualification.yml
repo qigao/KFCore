@@ -1,0 +1,205 @@
+name: GT-box ORT native qualification
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'runtime/abi/**'
+      - 'runtime/core/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/relation/**'
+      - 'vision/core/yolo/include/**'
+      - 'vision/pipelines/scene_graph/include/**'
+      - 'tools/relation_training/make_gtbox_ort_native_fixture.py'
+      - 'tools/relation_training/compare_gtbox_ort_native.py'
+      - 'tools/relation_training/gtbox_ort_native.cpp'
+      - 'tools/relation_training/gtbox_ort_runtime_stubs.cpp'
+      - 'tools/relation_training/export_onnx.py'
+      - 'tools/relation_training/model.py'
+      - '.github/workflows/gtbox-ort-native-qualification.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'runtime/abi/**'
+      - 'runtime/core/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/relation/**'
+      - 'vision/core/yolo/include/**'
+      - 'vision/pipelines/scene_graph/include/**'
+      - 'tools/relation_training/make_gtbox_ort_native_fixture.py'
+      - 'tools/relation_training/compare_gtbox_ort_native.py'
+      - 'tools/relation_training/gtbox_ort_native.cpp'
+      - 'tools/relation_training/gtbox_ort_runtime_stubs.cpp'
+      - 'tools/relation_training/export_onnx.py'
+      - 'tools/relation_training/model.py'
+      - '.github/workflows/gtbox-ort-native-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gtbox-ort-native-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-native-ort:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      ORT_VERSION: 1.20.1
+      ORT_ARCHIVE: onnxruntime-linux-x64-1.20.1.tgz
+      ORT_ARCHIVE_SIZE: '6191581'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact KFCore source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-ci.txt
+
+      - name: Install fixture/reference dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu \
+            -r tools/relation_training/requirements-ci-torch.txt
+          python -m pip install --disable-pip-version-check \
+            -r tools/relation_training/requirements-ci.txt
+
+      - name: Generate deterministic Apache-relation ORT fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          FIXTURE="$RUNNER_TEMP/gtbox-ort-fixture"
+          python tools/relation_training/make_gtbox_ort_native_fixture.py \
+            --out "$FIXTURE"
+          test -s "$FIXTURE/relation.onnx"
+          test -s "$FIXTURE/reference.json"
+          test -s "$FIXTURE/image.bgr"
+
+      - name: Download pinned ONNX Runtime CPU SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ARCHIVE="$RUNNER_TEMP/$ORT_ARCHIVE"
+          URL="https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/$ORT_ARCHIVE"
+          curl --fail --location --retry 3 --output "$ARCHIVE" "$URL"
+          test "$(stat -c '%s' "$ARCHIVE")" = "$ORT_ARCHIVE_SIZE"
+          sha256sum "$ARCHIVE" | tee "$RUNNER_TEMP/onnxruntime-archive.sha256"
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
+          ORT_ROOT="$RUNNER_TEMP/onnxruntime-linux-x64-$ORT_VERSION"
+          test -s "$ORT_ROOT/include/onnxruntime_cxx_api.h"
+          test -s "$ORT_ROOT/lib/libonnxruntime.so"
+          test -s "$ORT_ROOT/lib/libonnxruntime.so.$ORT_VERSION"
+          echo "ONNXRUNTIME_ROOT=$ORT_ROOT" >> "$GITHUB_ENV"
+          echo "ORT_ARCHIVE_PATH=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Build KFCore ONNX Runtime backend plugin
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD="$RUNNER_TEMP/gtbox-native"
+          mkdir -p "$BUILD"
+          c++ -std=c++17 -O2 -g -fPIC -shared \
+            -Wall -Wextra -Wpedantic \
+            -Iruntime/abi/include \
+            -I"$ONNXRUNTIME_ROOT/include" \
+            -DKFCORE_ONNX_RUNTIME_RELATIVE_PATH=\"lib/libonnxruntime.so.$ORT_VERSION\" \
+            backends/onnxruntime/plugin/src/plugin.cpp \
+            -ldl \
+            -o "$BUILD/libkfcore_backend_onnxruntime.so"
+          test -s "$BUILD/libkfcore_backend_onnxruntime.so"
+
+      - name: Build native GT-box qualification runner
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD="$RUNNER_TEMP/gtbox-native"
+          c++ -std=c++17 -O1 -g \
+            -Wall -Wextra -Wpedantic \
+            -Iruntime/abi/include \
+            -Iruntime/core/include \
+            -Iruntime/core/src \
+            -Ivision/core/image_processor/include \
+            -Ivision/core/image_processor/src \
+            -Ivision/image/cpu/include \
+            -Ivision/image/cpu/src \
+            -Ivision/core/relation/include \
+            -Ivision/core/relation/src \
+            -Ivision/core/yolo/include \
+            -Ivision/pipelines/scene_graph/include \
+            runtime/core/src/dynamic_library.cpp \
+            runtime/core/src/plugin.cpp \
+            vision/core/image_processor/src/error.cpp \
+            vision/image/cpu/src/cpu.cpp \
+            vision/core/relation/src/decode.cpp \
+            vision/core/relation/src/vocabulary_score.cpp \
+            vision/core/relation/src/open_vocabulary_relation.cpp \
+            tools/relation_training/gtbox_ort_runtime_stubs.cpp \
+            tools/relation_training/gtbox_ort_native.cpp \
+            -ldl -lm \
+            -o "$BUILD/gtbox_ort_native"
+          test -x "$BUILD/gtbox_ort_native"
+
+      - name: Execute one loaded native ORT model across dynamic vocabularies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD="$RUNNER_TEMP/gtbox-native"
+          FIXTURE="$RUNNER_TEMP/gtbox-ort-fixture"
+          export ONNXRUNTIME_ROOT
+          "$BUILD/gtbox_ort_native" \
+            "$BUILD/libkfcore_backend_onnxruntime.so" \
+            "$FIXTURE/relation.onnx" \
+            "$FIXTURE" \
+            "$RUNNER_TEMP/native.jsonl"
+          test "$(wc -l < "$RUNNER_TEMP/native.jsonl")" -eq 4
+          cat "$RUNNER_TEMP/native.jsonl"
+
+      - name: Compare native C++ decode against Python ORT reference
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/compare_gtbox_ort_native.py \
+            --fixture "$RUNNER_TEMP/gtbox-ort-fixture" \
+            --native-jsonl "$RUNNER_TEMP/native.jsonl" \
+            --plugin "$RUNNER_TEMP/gtbox-native/libkfcore_backend_onnxruntime.so" \
+            --ort-archive "$ORT_ARCHIVE_PATH" \
+            --out "$RUNNER_TEMP/qualification.json"
+          test -s "$RUNNER_TEMP/qualification.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtbox-ort-native-qualification-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/qualification.json
+            ${{ runner.temp }}/native.jsonl
+            ${{ runner.temp }}/gtbox-ort-fixture/reference.json
+            ${{ runner.temp }}/onnxruntime-archive.sha256
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
