@@ -1304,7 +1304,6 @@ def main() -> None:
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
-        "train_mixture": mixture_report,
             "train_mixture": mixture_report,
             "validation_annotations_sha256": (
                 validation_manifest.annotations_sha256
@@ -1408,6 +1407,7 @@ def main() -> None:
         "train_examples": len(train_manifest.examples),
         "validation_examples": len(validation_manifest.examples),
         "train_annotations_sha256": train_manifest.annotations_sha256,
+        "train_mixture": mixture_report,
         "validation_annotations_sha256": (
             validation_manifest.annotations_sha256
         ),
