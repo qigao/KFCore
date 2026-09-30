@@ -8,6 +8,8 @@ import numpy as np
 import torch
 
 from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
     ApacheRelatednessPairSampler,
     PairOpportunityTable,
 )
@@ -35,6 +37,19 @@ def sampler_config() -> RelationModelConfig:
 
 
 class ApacheRelatednessSamplerTest(unittest.TestCase):
+    def test_released_default_budgets_are_400_to_128(self):
+        sampler = ApacheRelatednessPairSampler(
+            feature_dim=8,
+        )
+        self.assertEqual(
+            sampler.geo_budget,
+            RELEASED_GEO_BUDGET,
+        )
+        self.assertEqual(
+            sampler.final_budget,
+            RELEASED_FINAL_BUDGET,
+        )
+
     def test_inference_keeps_only_valid_ordered_pairs_and_pads(self):
         torch.manual_seed(31)
         sampler = ApacheRelatednessPairSampler(
