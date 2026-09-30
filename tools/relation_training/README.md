@@ -500,6 +500,55 @@ Use `evaluate_detector_boxes()` to run the actual relation model on detector
 boxes.  The evaluator loads the image from the GT manifest, but the relation
 box tensor comes only from the detector manifest.
 
+## Executable detector-box qualification
+
+After generating a class-agnostic detector prediction manifest, run the exact
+relation checkpoint against those detector boxes:
+
+```bash
+python tools/relation_training/evaluate_detector_qualification.py \
+  --checkpoint artifacts/relation-v1.pt \
+  --vocabulary artifacts/vocabulary.json \
+  --annotations data/validation.jsonl \
+  --detector-predictions artifacts/detector-boxes.jsonl \
+  --image-root data/images \
+  --detector-id yolo-production-profile \
+  --detector-model-sha256 <64-hex-model-hash> \
+  --detector-config-sha256 <64-hex-config-hash> \
+  --iou-threshold 0.5 \
+  --top-k 20 50 100 \
+  --device auto \
+  --out artifacts/detector-relation-qualification.json
+```
+
+The tool restores the checkpoint's DINOv3 backbone/model config, verifies that
+the checkpoint predicate order exactly matches the supplied vocabulary, runs
+the relation model on detector boxes only, and writes:
+
+```text
+kfcore.detector-relation-qualification/1
+  relation
+    checkpoint_sha256
+    backbone_model
+    checkpoint_config
+    predicate_count
+    vocabulary_sha256
+    checkpoint_extra_keys
+  metrics
+    kfcore.detector-relation-ceiling/1
+    ...
+```
+
+The output path must not already exist. Detector model/config SHA-256 values are
+required and validated as 64 hexadecimal characters. A local backbone override
+may be supplied for offline execution; the override path/model id is recorded
+in the report.
+
+The detector runtime is intentionally outside this tool. Any KFCore YOLO,
+TensorRT, ORT, or external detector deployment can generate the standard
+`kfcore.detector-boxes/1` manifest. Class IDs are not accepted by the relation
+qualification schema and therefore cannot leak into the relation model.
+
 ## Open-world predicate objective v2
 
 The historical relation baseline uses exhaustive multi-label BCE. That remains
