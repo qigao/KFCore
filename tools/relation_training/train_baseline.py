@@ -13,6 +13,7 @@ from benchmark import (
     RelationVocabulary,
     stable_report_json,
 )
+from apache_multiscale import scale_ladder
 from apache_pair_sampler import PairOpportunityTable
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
@@ -218,7 +219,15 @@ def main() -> None:
             "apache-reference."
         ),
     )
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Micro-batch size. Defaults to 4 for legacy and 32 for the "
+            "Apache reference recipe."
+        ),
+    )
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
     parser.add_argument("--weight-decay", type=float, default=1.0e-4)
     parser.add_argument("--apache-head-lr", type=float, default=4.0e-4)
@@ -226,6 +235,38 @@ def main() -> None:
     parser.add_argument("--apache-warmup-steps", type=int, default=500)
     parser.add_argument("--apache-min-lr-factor", type=float, default=0.01)
     parser.add_argument("--apache-clip-grad", type=float, default=1.0)
+    parser.add_argument(
+        "--apache-grad-accum",
+        type=int,
+        default=4,
+        help=(
+            "Micro-batches per optimizer step for the single-process Apache "
+            "recipe. Default 4 with micro-batch 32 reproduces global batch 128."
+        ),
+    )
+    parser.add_argument(
+        "--apache-multi-scale",
+        default="0.5,1.5",
+        help=(
+            "Apache per-batch square scale range relative to --image-size; "
+            "empty string disables multi-scale."
+        ),
+    )
+    parser.add_argument(
+        "--apache-multi-scale-n",
+        type=int,
+        default=7,
+    )
+    parser.add_argument(
+        "--apache-cfa-prob",
+        type=float,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--apache-cfa-alpha",
+        type=float,
+        default=1.0,
+    )
     parser.add_argument("--sampler-loss-weight", type=float, default=1.0)
     parser.add_argument("--pair-loss-weight", type=float, default=1.0)
     parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
@@ -386,6 +427,35 @@ def main() -> None:
         args.epochs,
         recipe=args.training_recipe,
     )
+    resolved_batch_size = (
+        int(args.batch_size)
+        if args.batch_size is not None
+        else (32 if reference_training else 4)
+    )
+    if resolved_batch_size <= 0:
+        raise ValueError("batch size must be positive")
+    if (
+        isinstance(args.apache_grad_accum, bool)
+        or args.apache_grad_accum <= 0
+    ):
+        raise ValueError(
+            "--apache-grad-accum must be a positive integer"
+        )
+    if (
+        not torch.isfinite(torch.tensor(args.apache_cfa_prob))
+        or args.apache_cfa_prob < 0.0
+        or args.apache_cfa_prob > 1.0
+    ):
+        raise ValueError(
+            "--apache-cfa-prob must be within [0,1]"
+        )
+    if (
+        not torch.isfinite(torch.tensor(args.apache_cfa_alpha))
+        or args.apache_cfa_alpha <= 0.0
+    ):
+        raise ValueError(
+            "--apache-cfa-alpha must be positive"
+        )
     if reference_training and not apache_mode:
         raise ValueError(
             "--training-recipe apache-reference requires "
@@ -447,7 +517,7 @@ def main() -> None:
 
     baseline_config = FrozenBaselineConfig(
         epochs=resolved_epochs,
-        batch_size=args.batch_size,
+        batch_size=resolved_batch_size,
         learning_rate=(
             args.apache_head_lr
             if reference_training
@@ -476,6 +546,16 @@ def main() -> None:
         apache_context_dropout=args.apache_context_dropout,
         apache_box_token_dropout=args.apache_box_token_dropout,
         apache_pair_negative_floor=args.apache_pair_negative_floor,
+        apache_cfa_prob=(
+            args.apache_cfa_prob
+            if reference_training
+            else 0.0
+        ),
+        apache_cfa_alpha=args.apache_cfa_alpha,
+        allow_training_multiscale=(
+            reference_training
+            and bool(args.apache_multi_scale)
+        ),
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -906,8 +986,30 @@ def main() -> None:
             else ()
         ),
     )
+    multi_scale_resolutions = None
+    if reference_training and args.apache_multi_scale:
+        parts = [
+            value.strip()
+            for value in args.apache_multi_scale.split(",")
+        ]
+        if len(parts) != 2:
+            raise ValueError(
+                "--apache-multi-scale must be 'lo,hi' or empty"
+            )
+        lo, hi = (float(value) for value in parts)
+        multi_scale_resolutions = scale_ladder(
+            model.config.image_size,
+            lo,
+            hi,
+            args.apache_multi_scale_n,
+            patch=int(model.backbone.patch_size),
+        )
+
     loader = make_training_loader(
-        train_dataset, baseline_config
+        train_dataset,
+        baseline_config,
+        resolutions=multi_scale_resolutions,
+        drop_last=reference_training,
     )
     reference_recipe_config = None
     optimizer_report = None
@@ -923,6 +1025,16 @@ def main() -> None:
             min_lr_factor=args.apache_min_lr_factor,
             clip_grad=args.apache_clip_grad,
             backbone_mode="full",
+            micro_batch_size=resolved_batch_size,
+            grad_accum=args.apache_grad_accum,
+            multi_scale=(
+                args.apache_multi_scale
+                if args.apache_multi_scale
+                else ""
+            ),
+            multi_scale_n=args.apache_multi_scale_n,
+            cfa_prob=args.apache_cfa_prob,
+            cfa_alpha=args.apache_cfa_alpha,
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
@@ -931,7 +1043,11 @@ def main() -> None:
         scheduler, scheduler_report = build_reference_scheduler(
             optimizer,
             reference_recipe_config,
-            steps_per_epoch=len(loader),
+            steps_per_epoch=(
+                len(loader)
+                + args.apache_grad_accum
+                - 1
+            ) // args.apache_grad_accum,
         )
     else:
         parameters = trainable_parameters(model)
@@ -954,6 +1070,14 @@ def main() -> None:
 
     history: list[dict[str, object]] = []
     for epoch in range(1, baseline_config.epochs + 1):
+        batch_sampler = getattr(
+            loader,
+            "batch_sampler",
+            None,
+        )
+        if hasattr(batch_sampler, "set_epoch"):
+            batch_sampler.set_epoch(epoch - 1)
+
         losses = train_epoch(
             model,
             loader,
@@ -977,6 +1101,11 @@ def main() -> None:
                 else None
             ),
             record_gradient_health=reference_training,
+            grad_accum=(
+                args.apache_grad_accum
+                if reference_training
+                else 1
+            ),
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
