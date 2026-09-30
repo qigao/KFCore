@@ -65,6 +65,9 @@ from apache_vocab_head import (
 )
 from checkpoint import save_checkpoint
 from losses import RelationLossConfig
+from make_apache_object_embeddings import (
+    validate_object_bank_provenance,
+)
 from make_predicate_embeddings import gram_diagnostics, tensor_sha256
 from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 from training import (
@@ -466,6 +469,30 @@ def main() -> None:
         help="Object-category text embedding tensor [O,D]; required for lambda_obj > 0.",
     )
     parser.add_argument(
+        "--apache-object-embeddings-meta",
+        default="",
+        help=(
+            "Object-bank provenance JSON from make_apache_object_embeddings.py; "
+            "required for apache-reference when lambda_obj > 0."
+        ),
+    )
+    parser.add_argument(
+        "--apache-text-student",
+        default="",
+        help=(
+            "Exact Apache predicate text-student checkpoint used to derive the "
+            "object bank; provenance-only input for apache-reference."
+        ),
+    )
+    parser.add_argument(
+        "--apache-tokenizer-contract",
+        default="",
+        help=(
+            "Local CLIP tokenizer contract.json used to derive the object bank; "
+            "provenance-only input for apache-reference."
+        ),
+    )
+    parser.add_argument(
         "--apache-neg-rate-table",
         default="",
         help=(
@@ -643,6 +670,26 @@ def main() -> None:
                     "--apache-object-embeddings is required when "
                     "--apache-lambda-obj > 0"
                 )
+            if reference_training:
+                required_object_provenance = {
+                    "--apache-object-embeddings-meta": (
+                        args.apache_object_embeddings_meta
+                    ),
+                    "--apache-text-student": (
+                        args.apache_text_student
+                    ),
+                    "--apache-tokenizer-contract": (
+                        args.apache_tokenizer_contract
+                    ),
+                }
+                for flag, value in (
+                    required_object_provenance.items()
+                ):
+                    if not value:
+                        raise ValueError(
+                            f"{flag} is required for apache-reference "
+                            "object-bank provenance"
+                        )
         if (
             args.holdout_predicate
             or args.mask_zero_support_predicates
@@ -958,6 +1005,7 @@ def main() -> None:
     apache_source_names: tuple[str, ...] = ()
     apache_source_allow = None
     apache_object_embeddings = None
+    apache_object_bank_report = None
     apache_pair_opportunity = None
     apache_asset_report = None
     if apache_mode:
@@ -1016,6 +1064,28 @@ def main() -> None:
                 raise ValueError(
                     "object/predicate embeddings must share text dimension"
                 )
+            if reference_training:
+                apache_object_bank_report = (
+                    validate_object_bank_provenance(
+                        apache_object_embeddings,
+                        tensor_path=args.apache_object_embeddings,
+                        metadata_path=(
+                            args.apache_object_embeddings_meta
+                        ),
+                        object_labels=(
+                            vocabulary.object_labels
+                        ),
+                        text_student_path=(
+                            args.apache_text_student
+                        ),
+                        tokenizer_contract_path=(
+                            args.apache_tokenizer_contract
+                        ),
+                        required_dim=int(
+                            predicate_embeddings.shape[1]
+                        ),
+                    )
+                )
         apache_asset_report = {
             "ontology_meta_sha256": sha256(
                 Path(args.apache_ontology_meta)
@@ -1043,6 +1113,9 @@ def main() -> None:
                 sha256(Path(args.apache_object_embeddings))
                 if args.apache_object_embeddings
                 else None
+            ),
+            "object_embeddings": (
+                apache_object_bank_report
             ),
         }
 
