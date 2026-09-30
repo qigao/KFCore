@@ -1,6 +1,7 @@
 #include "scene_features.hpp"
 
 #include "kfcore/scene_interaction/interaction.hpp"
+#include "kfcore/scene_interaction/latency_report.hpp"
 #include "kfcore/scene_interaction/pipeline.hpp"
 #include "tinytest.hpp"
 
@@ -231,6 +232,58 @@ spec("scene behavior pipeline timing")
         check(std::isfinite(timed.timing.total_ms));
         check(timed.timing.temporal_ms >= 0.0);
         check(timed.timing.total_ms >= timed.timing.temporal_ms);
+    }
+}
+
+spec("scene behavior latency sample contract")
+{
+    it("serializes one stable JSONL timing sample")
+    {
+        scene_interaction::SceneBehaviorTiming timing;
+        timing.scene_graph.detector_ms = 1.25;
+        timing.scene_graph.tracker_ms = 0.25;
+        timing.scene_graph.region_prepare_ms = 0.10;
+        timing.scene_graph.relation_ms = 2.50;
+        timing.scene_graph.assembly_ms = 0.05;
+        timing.scene_graph.total_ms = 4.15;
+        timing.scene_graph.detection_count = 7U;
+        timing.scene_graph.tracked_object_count = 5U;
+        timing.scene_graph.relation_edge_count = 8U;
+        timing.temporal_ms = 0.20;
+        timing.total_ms = 4.35;
+        timing.event_count = 2U;
+        timing.pair_state_count = 4U;
+
+        const std::string json =
+            scene_interaction::scene_behavior_timing_json(
+                timing);
+
+        check(
+            json.find(
+                "\"schema\":\"kfcore.scene-behavior-timing-sample/1\""
+            ) != std::string::npos);
+        check(
+            json.find("\"detector_ms\":1.25") !=
+            std::string::npos);
+        check(
+            json.find("\"relation_ms\":2.5") !=
+            std::string::npos);
+        check(
+            json.find("\"detection_count\":7") !=
+            std::string::npos);
+        check(
+            json.find("\"pair_state_count\":4") !=
+            std::string::npos);
+    }
+
+    it("rejects non-finite or negative timing")
+    {
+        scene_interaction::SceneBehaviorTiming timing;
+        timing.total_ms = -1.0;
+        check_throws_as(
+            scene_interaction::scene_behavior_timing_json(
+                timing),
+            std::invalid_argument);
     }
 }
 

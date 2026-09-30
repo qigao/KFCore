@@ -94,6 +94,7 @@ jobs:
             tools/relation_training/tensorrt_dynamic_vocab_profile.py \
             tools/relation_training/build_dynamic_vocab_tensorrt.py \
             tools/relation_training/make_relation_qualification_report.py \
+            tools/relation_training/summarize_scene_behavior_latency.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
@@ -111,6 +112,7 @@ jobs:
             tools/relation_training/test_tensorrt_dynamic_vocab_profile.py \
             tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
             tools/relation_training/test_relation_qualification_report.py \
+            tools/relation_training/test_scene_behavior_latency_summary.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_detector_ceiling.py \
             tools/relation_training/test_training.py \
