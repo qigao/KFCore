@@ -12,6 +12,13 @@ from apache_vocab_head import SPATIAL_FLAGS_SCHEMA
 
 
 DERIVATION_SCHEMA = "kfcore.apache-spatial-flags-derivation/1"
+DERIVATION_ALGORITHM = (
+    "per-source predicate spatial majority "
+    "then union-any-source"
+)
+SPATIAL_BIT = 1
+MAJORITY_THRESHOLD = 0.5
+MAJORITY_COMPARATOR = ">="
 
 
 def sha256_file(path: Path) -> str:
@@ -296,13 +303,10 @@ def derive_spatial_flags(
     )
     evidence = {
         "schema": DERIVATION_SCHEMA,
-        "algorithm": (
-            "per-source predicate spatial majority "
-            "then union-any-source"
-        ),
-        "spatial_bit": 1,
-        "majority_threshold": 0.5,
-        "majority_comparator": ">=",
+        "algorithm": DERIVATION_ALGORITHM,
+        "spatial_bit": SPATIAL_BIT,
+        "majority_threshold": MAJORITY_THRESHOLD,
+        "majority_comparator": MAJORITY_COMPARATOR,
         "sources": source_reports,
         "union_predicate_count": len(
             union
