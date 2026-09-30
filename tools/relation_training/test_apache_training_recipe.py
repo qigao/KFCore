@@ -9,11 +9,18 @@ import unittest
 import torch
 from torch import nn
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
     LEGACY_DEFAULT_AUGMENT,
+    LEGACY_DEFAULT_IMAGE_SIZE,
+    LEGACY_DEFAULT_PAIR_BUDGET,
     RELEASED_EMA_DECAY,
+    RELEASED_IMAGE_SIZE,
     RELEASED_PHOTOMETRIC_AUGMENT,
     RELEASED_TEXT_DIM,
     build_reference_optimizer,
@@ -29,7 +36,9 @@ from apache_training_recipe import (
     resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
+    resolve_training_image_size,
     resolve_training_max_boxes,
+    resolve_training_pair_budget,
     select_artifact_model,
     state_dict_sha256,
     validate_training_text_dim,
@@ -99,6 +108,50 @@ def build_model() -> KFRelationModel:
 
 
 class ApacheTrainingRecipeTest(unittest.TestCase):
+    def test_image_size_defaults_and_reference_fail_fast(self):
+        self.assertEqual(
+            resolve_training_image_size(None, recipe="legacy"),
+            LEGACY_DEFAULT_IMAGE_SIZE,
+        )
+        self.assertEqual(
+            resolve_training_image_size(None, recipe="apache-reference"),
+            RELEASED_IMAGE_SIZE,
+        )
+        self.assertEqual(
+            resolve_training_image_size(224, recipe="legacy"),
+            224,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "img_size=448",
+        ):
+            resolve_training_image_size(
+                224,
+                recipe="apache-reference",
+            )
+
+    def test_pair_budget_defaults_and_reference_fail_fast(self):
+        self.assertEqual(
+            resolve_training_pair_budget(None, recipe="legacy"),
+            LEGACY_DEFAULT_PAIR_BUDGET,
+        )
+        self.assertEqual(
+            resolve_training_pair_budget(None, recipe="apache-reference"),
+            RELEASED_FINAL_BUDGET,
+        )
+        self.assertEqual(
+            resolve_training_pair_budget(24, recipe="legacy"),
+            24,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "final_budget=128",
+        ):
+            resolve_training_pair_budget(
+                64,
+                recipe="apache-reference",
+            )
+
     def test_hidden_dim_defaults_and_reference_fail_fast(self):
         self.assertEqual(
             resolve_training_hidden_dim(None, recipe="legacy"),
@@ -432,6 +485,18 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         self.assertEqual(
             config.text_dim,
             RELEASED_TEXT_DIM,
+        )
+        self.assertEqual(
+            config.image_size,
+            RELEASED_IMAGE_SIZE,
+        )
+        self.assertEqual(
+            config.geo_budget,
+            RELEASED_GEO_BUDGET,
+        )
+        self.assertEqual(
+            config.final_budget,
+            RELEASED_FINAL_BUDGET,
         )
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):

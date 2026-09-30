@@ -16,7 +16,10 @@ from apache_context import (
     ApacheRelationInteractionBlock,
     ApacheRelationTransformer,
 )
-from apache_pair_sampler import ApacheRelatednessPairSampler
+from apache_pair_sampler import (
+    ApacheRelatednessPairSampler,
+    RELEASED_GEO_BUDGET,
+)
 from apache_pair_evidence import (
     BoxPromptEncoder as ApacheBoxPromptEncoder,
     RelGeomEncoder as ApacheRelGeomEncoder,
@@ -1018,7 +1021,7 @@ class KFRelationModel(nn.Module):
         if config.pair_sampler_contract == "apache":
             self.apache_pair_sampler = ApacheRelatednessPairSampler(
                 feature_dim=backbone.hidden_size,
-                geo_budget=400,
+                geo_budget=RELEASED_GEO_BUDGET,
                 final_budget=config.pair_budget,
                 rel_dim=256,
                 negative_weight=config.apache_pair_negative_floor,

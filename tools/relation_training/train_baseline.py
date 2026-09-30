@@ -24,7 +24,11 @@ from apache_mixture import (
     validate_mixture_disjoint_validation,
 )
 from apache_multiscale import scale_ladder
-from apache_pair_sampler import PairOpportunityTable
+from apache_pair_sampler import (
+    PairOpportunityTable,
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
@@ -37,7 +41,9 @@ from apache_training_recipe import (
     resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
+    resolve_training_image_size,
     resolve_training_max_boxes,
+    resolve_training_pair_budget,
     select_artifact_model,
     validate_training_text_dim,
 )
@@ -144,7 +150,15 @@ def main() -> None:
     parser.add_argument("--predicate-embeddings", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
-    parser.add_argument("--image-size", type=int, default=448)
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=None,
+        help=(
+            "Square model input size. Defaults to 448. apache-reference "
+            "rejects any value other than released img_size=448."
+        ),
+    )
     parser.add_argument(
         "--augment",
         type=float,
@@ -164,7 +178,15 @@ def main() -> None:
             "and 32 for legacy. apache-reference rejects any value other than 40."
         ),
     )
-    parser.add_argument("--pair-budget", type=int, default=128)
+    parser.add_argument(
+        "--pair-budget",
+        type=int,
+        default=None,
+        help=(
+            "Final relation-pair budget. Defaults to 128. apache-reference "
+            "rejects any value other than released final_budget=128."
+        ),
+    )
     parser.add_argument(
         "--hidden-dim",
         type=int,
@@ -530,6 +552,14 @@ def main() -> None:
         args.augment,
         recipe=args.training_recipe,
     )
+    resolved_image_size = resolve_training_image_size(
+        args.image_size,
+        recipe=args.training_recipe,
+    )
+    resolved_pair_budget = resolve_training_pair_budget(
+        args.pair_budget,
+        recipe=args.training_recipe,
+    )
     resolved_batch_size = (
         int(args.batch_size)
         if args.batch_size is not None
@@ -638,9 +668,9 @@ def main() -> None:
         seed=resolved_seed,
     )
     model_config = RelationModelConfig(
-        image_size=args.image_size,
+        image_size=resolved_image_size,
         max_boxes=resolved_max_boxes,
-        pair_budget=args.pair_budget,
+        pair_budget=resolved_pair_budget,
         hidden_dim=resolved_hidden_dim,
         geometry_dim=args.geometry_dim,
         num_heads=args.num_heads,
@@ -1024,6 +1054,31 @@ def main() -> None:
             apache_pair_opportunity.num_cats,
         )
 
+    reference_sampler_report = None
+    if reference_training:
+        if model.apache_pair_sampler is None:
+            raise RuntimeError(
+                "apache-reference requires the Apache pair sampler"
+            )
+        reference_sampler_report = {
+            "geo_budget": int(
+                model.apache_pair_sampler.geo_budget
+            ),
+            "final_budget": int(
+                model.apache_pair_sampler.final_budget
+            ),
+        }
+        reference_sampler_report["matches_released"] = (
+            reference_sampler_report["geo_budget"]
+            == RELEASED_GEO_BUDGET
+            and reference_sampler_report["final_budget"]
+            == RELEASED_FINAL_BUDGET
+        )
+        if not reference_sampler_report["matches_released"]:
+            raise RuntimeError(
+                "Apache pair sampler budget differs from released 400->128 contract"
+            )
+
     routing_warm_start = None
     if args.predicate_head_contract == "apache":
         spatial_flags = load_predicate_spatial_flags(
@@ -1250,6 +1305,9 @@ def main() -> None:
             cfa_alpha=args.apache_cfa_alpha,
             augment=resolved_augment,
             text_dim=int(predicate_embeddings.shape[1]),
+            image_size=resolved_image_size,
+            geo_budget=RELEASED_GEO_BUDGET,
+            final_budget=resolved_pair_budget,
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
@@ -1474,6 +1532,7 @@ def main() -> None:
                 "weight_source": artifact_weight_source,
                 "ema": ema_report,
                 "augmentation": augmentation_report,
+                "sampler_budget": reference_sampler_report,
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
@@ -1579,6 +1638,7 @@ def main() -> None:
             "weight_source": artifact_weight_source,
             "ema": ema_report,
             "augmentation": augmentation_report,
+            "sampler_budget": reference_sampler_report,
             "source_mixture": mixture_report,
         },
         "device": str(device),

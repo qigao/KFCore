@@ -1594,7 +1594,9 @@ python tools/relation_training/apache_release_qualification.py \
 
 The command fails unless the run has all of the following:
 
+- the released `img_size=448` square model input;
 - the released `max_objects=40` / `max_boxes=40` model shape;
+- the released `geo_budget=400 -> final_budget=128` pair sampler;
 - the released `d_model=512` relation-head width;
 - the released `text_dim=512` predicate/query space;
 - the last Apache-2.0 source reference
@@ -1614,6 +1616,26 @@ The command fails unless the run has all of the following:
 The resulting qualification artifact binds the corpus manifest, training report
 and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
 qualification remain separate model-evidence gates.
+
+### Released external shape and pair budget
+
+The Apache released graph uses a 448 × 448 square input, 40 padded object slots,
+a stage-1 geometric budget of 400 ordered pairs, and a final relation budget of
+128. For `apache-reference`, KFCore requires exactly:
+
+```text
+image        [1,3,448,448]
+boxes        [1,40,4]
+geo_budget   400
+final_budget 128
+pred_logits  [1,128,V]
+```
+
+The 400/128 evidence is read from the constructed
+`ApacheRelatednessPairSampler`, not inferred from CLI defaults. A focused
+synthetic ONNX/ORT gate uses a tiny large-patch backbone to exercise the exact
+external shape without making a real DINOv3 448 export part of every CI run.
+Legacy and diagnostic runs may still choose smaller shapes.
 
 ### Released text-space width
 

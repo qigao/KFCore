@@ -12,6 +12,10 @@ import torch.nn.functional as F
 from apache_pair_evidence import RelGeomEncoder
 
 
+RELEASED_GEO_BUDGET = 400
+RELEASED_FINAL_BUDGET = 128
+
+
 @dataclass(frozen=True)
 class PairOpportunityTable:
     rate: Tensor
@@ -179,8 +183,8 @@ class ApacheRelatednessPairSampler(nn.Module):
         self,
         *,
         feature_dim: int,
-        geo_budget: int = 400,
-        final_budget: int = 128,
+        geo_budget: int = RELEASED_GEO_BUDGET,
+        final_budget: int = RELEASED_FINAL_BUDGET,
         rel_dim: int = 256,
         negative_weight: float = 0.3,
         swap_include: bool = True,
