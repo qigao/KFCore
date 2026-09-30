@@ -218,6 +218,9 @@ def derive_source_column_allow(
                         meta_path
                     )
                 ),
+                "local_predicates": list(
+                    local_names
+                ),
                 "local_predicate_count": (
                     len(local_names)
                 ),
@@ -233,8 +236,16 @@ def derive_source_column_allow(
                     source_name
                     in restricted
                 ),
+                "allowed_predicates": list(
+                    allowed
+                ),
                 "allowed_predicate_count": (
                     len(allowed)
+                ),
+                "allowed_predicate_order_sha256": (
+                    ordered_strings_sha256(
+                        allowed
+                    )
                 ),
             }
         )
@@ -264,6 +275,9 @@ def derive_source_column_allow(
         ),
         "restricted_sources": list(
             RELEASED_RESTRICTED_SOURCES
+        ),
+        "union_predicate_order": list(
+            union
         ),
         "union_predicate_count": (
             len(union)
