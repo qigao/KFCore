@@ -2,12 +2,16 @@
 
 #include "kfcore/image_processor/types.hpp"
 #include "kfcore/relation/open_vocabulary_relation.hpp"
+#include "kfcore/relation/predicate_routing_gate.hpp"
+#include "kfcore/relation/predicate_text_encoder.hpp"
 #include "kfcore/relation/relate_anything.hpp"
 #include "kfcore/yolo/detector.hpp"
 #include "kfcore/yolo/tracking.hpp"
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace kfcore::pipelines
 {
@@ -41,6 +45,13 @@ public:
            std::unique_ptr<relation::OpenVocabularyRelation> relation_model,
            const SceneGraphPipelineOptions& options = {});
 
+    [[nodiscard]] static std::unique_ptr<SceneGraphPipeline>
+    create(std::unique_ptr<yolo::YoloDetector> detector,
+           std::unique_ptr<relation::OpenVocabularyRelation> relation_model,
+           std::unique_ptr<relation::PredicateTextEncoder> text_encoder,
+           std::unique_ptr<relation::PredicateRoutingGate> routing_gate,
+           const SceneGraphPipelineOptions& options = {});
+
     [[nodiscard]] SceneGraphFrame process(const image::ImageView& image);
 
     // Dynamic-vocabulary control is available only when this pipeline was
@@ -48,8 +59,13 @@ public:
     // ByteTrack identity; RelationFrame::vocabulary_version tells temporal
     // consumers when predicate-index semantics changed.
     [[nodiscard]] bool supports_dynamic_vocabulary() const noexcept;
+    [[nodiscard]] bool supports_live_predicates() const noexcept;
+
     void set_vocabulary(relation::PredicateVocabulary vocabulary);
+    void set_predicates(const std::vector<std::string>& predicates);
+
     [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
+    [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
 
     void reset_tracking() noexcept;
 
