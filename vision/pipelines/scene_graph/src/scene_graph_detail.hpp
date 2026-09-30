@@ -71,6 +71,9 @@ public:
     [[nodiscard]] SceneGraphFrame
     process(const image::ImageView& image);
 
+    [[nodiscard]] TimedSceneGraphFrame
+    process_timed(const image::ImageView& image);
+
     [[nodiscard]] bool
     supports_dynamic_vocabulary() const noexcept;
 
