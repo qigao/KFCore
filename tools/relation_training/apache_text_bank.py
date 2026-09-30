@@ -768,17 +768,22 @@ def rebuild_text_banks(
         ),
     )
 
+    output_dim = int(
+        model.config.output_dim
+    )
     predicate_runtime, (
         predicate_report
     ) = load_predicate_text_bank(
         predicate_path,
         predicate_names,
+        text_dim=output_dim,
     )
     object_runtime, (
         object_report
     ) = load_object_text_bank(
         object_path,
         object_names,
+        text_dim=output_dim,
     )
 
     if transformers_version is None:
