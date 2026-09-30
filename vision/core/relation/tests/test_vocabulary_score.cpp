@@ -14,6 +14,16 @@ using namespace kfcore::relation;
 
 spec("open vocabulary relation scoring")
 {
+    it("keeps generic default and exposes explicit Apache 40-box options")
+    {
+        const OpenVocabularyRelationOptions legacy;
+        const auto apache =
+            apache_released_open_vocabulary_relation_options();
+
+        check(legacy.max_boxes == kLegacyRelationMaxBoxes);
+        check(apache.max_boxes == kApacheReleasedMaxBoxes);
+    }
+
     it("scores multiple vocabulary sizes without changing query shape")
     {
         const float semantic[] = {1.0F, 0.0F};
