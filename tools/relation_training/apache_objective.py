@@ -11,6 +11,20 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_release_scalars import (
+    RELEASED_BG_TOPK,
+    RELEASED_HARD_FRAC,
+    RELEASED_INFONCE_TEMP,
+    RELEASED_LAMBDA_BG,
+    RELEASED_LAMBDA_GEO,
+    RELEASED_LAMBDA_OBJ,
+    RELEASED_LAMBDA_REL,
+    RELEASED_LAMBDA_SIGMOID,
+    RELEASED_LAMBDA_SWAP,
+    RELEASED_N_NEG,
+    RELEASED_PAIR_NEGATIVE_FLOOR,
+    RELEASED_SWAP_MARGIN,
+)
 from model import RelationTrainingOutputs
 
 
@@ -228,18 +242,18 @@ def load_source_column_allow(
 
 @dataclass(frozen=True)
 class ApacheObjectiveConfig:
-    infonce_temp: float = 0.07
-    n_neg: int = 512
-    hard_frac: float = 0.5
-    lambda_obj: float = 0.10
-    lambda_swap: float = 0.50
-    lambda_sigmoid: float = 0.25
-    lambda_bg: float = 0.05
-    lambda_geo: float = 1.0
-    lambda_rel: float = 1.0
-    bg_topk: int = 5
-    swap_margin: float = 0.05
-    pair_negative_floor: float = 0.30
+    infonce_temp: float = RELEASED_INFONCE_TEMP
+    n_neg: int = RELEASED_N_NEG
+    hard_frac: float = RELEASED_HARD_FRAC
+    lambda_obj: float = RELEASED_LAMBDA_OBJ
+    lambda_swap: float = RELEASED_LAMBDA_SWAP
+    lambda_sigmoid: float = RELEASED_LAMBDA_SIGMOID
+    lambda_bg: float = RELEASED_LAMBDA_BG
+    lambda_geo: float = RELEASED_LAMBDA_GEO
+    lambda_rel: float = RELEASED_LAMBDA_REL
+    bg_topk: int = RELEASED_BG_TOPK
+    swap_margin: float = RELEASED_SWAP_MARGIN
+    pair_negative_floor: float = RELEASED_PAIR_NEGATIVE_FLOOR
 
     def __post_init__(self) -> None:
         finite_nonnegative = (
