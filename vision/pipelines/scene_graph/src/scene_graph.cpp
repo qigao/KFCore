@@ -3,6 +3,7 @@
 #include "scene_graph_detail.hpp"
 
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,9 @@ public:
     virtual ~RelationRunner() = default;
 
     [[nodiscard]] virtual std::size_t max_boxes() const noexcept = 0;
+    [[nodiscard]] virtual bool supports_dynamic_vocabulary() const noexcept = 0;
+    virtual void set_vocabulary(relation::PredicateVocabulary vocabulary) = 0;
+    [[nodiscard]] virtual std::uint64_t vocabulary_version() const noexcept = 0;
     [[nodiscard]] virtual relation::RelationFrame
     infer(const image::ImageView& image,
           const std::vector<relation::Region>& regions) = 0;
@@ -39,6 +43,43 @@ public:
     std::size_t max_boxes() const noexcept override
     {
         return model_->max_boxes();
+    }
+
+    bool supports_dynamic_vocabulary() const noexcept override
+    {
+        return std::is_same_v<
+            Model,
+            relation::OpenVocabularyRelation>;
+    }
+
+    void set_vocabulary(
+        relation::PredicateVocabulary vocabulary) override
+    {
+        if constexpr (
+            std::is_same_v<
+                Model,
+                relation::OpenVocabularyRelation>)
+        {
+            model_->set_vocabulary(
+                std::move(vocabulary));
+        }
+        else
+        {
+            throw std::logic_error(
+                "SceneGraphPipeline relation model has a fixed vocabulary");
+        }
+    }
+
+    std::uint64_t vocabulary_version() const noexcept override
+    {
+        if constexpr (
+            std::is_same_v<
+                Model,
+                relation::OpenVocabularyRelation>)
+        {
+            return model_->vocabulary_version();
+        }
+        return 0U;
     }
 
     relation::RelationFrame
@@ -147,6 +188,35 @@ SceneGraphFrame SceneGraphPipeline::process(const image::ImageView& image)
 
     return detail::assemble_scene_graph(
         std::move(tracks), std::move(relations));
+}
+
+bool SceneGraphPipeline::supports_dynamic_vocabulary() const noexcept
+{
+    return impl_ &&
+        impl_->relation_model &&
+        impl_->relation_model->supports_dynamic_vocabulary();
+}
+
+void SceneGraphPipeline::set_vocabulary(
+    relation::PredicateVocabulary vocabulary)
+{
+    if (!impl_ || !impl_->relation_model)
+    {
+        throw std::logic_error(
+            "SceneGraphPipeline state is unavailable");
+    }
+    impl_->relation_model->set_vocabulary(
+        std::move(vocabulary));
+}
+
+std::uint64_t
+SceneGraphPipeline::vocabulary_version() const noexcept
+{
+    if (!impl_ || !impl_->relation_model)
+    {
+        return 0U;
+    }
+    return impl_->relation_model->vocabulary_version();
 }
 
 void SceneGraphPipeline::reset_tracking() noexcept
