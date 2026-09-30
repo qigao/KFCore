@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 using namespace kfcore;
 
@@ -56,9 +58,23 @@ spec("scene graph pipeline dynamic vocabulary API")
                 std::uint64_t>);
         static_assert(
             std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .supports_live_predicates()),
+                bool>);
+        static_assert(
+            std::is_same_v<
                 decltype(std::declval<Pipeline&>().set_vocabulary(
                     std::declval<relation::PredicateVocabulary>())),
                 void>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>().set_predicates(
+                    std::declval<const std::vector<std::string>&>())),
+                void>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>().predicates()),
+                const std::vector<std::string>&>);
         check(true);
     }
 }
