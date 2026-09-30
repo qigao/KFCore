@@ -35,6 +35,10 @@ struct PairKey
 struct SceneBehaviorModel
 {
     std::size_t predicate_count = 0U;
+
+    // Zero keeps legacy/wildcard behavior. A positive version binds the
+    // predicate-index semantics to RelationFrame::vocabulary_version.
+    std::uint64_t vocabulary_version = 0U;
     int reservoir_size = 0;
     float leak_rate = 0.5F;
     std::size_t neutral_index = 0U;
@@ -73,6 +77,7 @@ enum class SceneBehaviorEventReason
     FrameGap,
     Reset,
     ModelChanged,
+    VocabularyChanged,
 };
 
 struct SceneBehaviorEvent
