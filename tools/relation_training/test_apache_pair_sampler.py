@@ -4,9 +4,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import numpy as np
 import torch
 
-from apache_pair_sampler import ApacheRelatednessPairSampler
+from apache_pair_sampler import (
+    ApacheRelatednessPairSampler,
+    PairOpportunityTable,
+)
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import check_onnx_parity, export_graph
 from losses import RelationLossConfig, supervised_relation_loss
@@ -116,6 +120,111 @@ class ApacheRelatednessSamplerTest(unittest.TestCase):
         ).sum() / 2.0
         self.assertFalse(
             torch.allclose(score_01, score_10)
+        )
+
+    def test_pair_opportunity_table_loads_reference_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pair_opportunity.npz"
+            np.savez_compressed(
+                path,
+                rate=np.asarray(
+                    [0.0, 0.1, 0.9, 0.2],
+                    dtype=np.float32,
+                ),
+                opportunities=np.asarray(
+                    [100, 50, 75, 10],
+                    dtype=np.int64,
+                ),
+                relations=np.asarray(
+                    [0, 5, 68, 2],
+                    dtype=np.int64,
+                ),
+                num_cats=np.int32(2),
+                min_support=np.int32(50),
+                meta=np.asarray(["{}"]),
+            )
+            table = PairOpportunityTable.load(path)
+
+        self.assertEqual(table.num_cats, 2)
+        self.assertEqual(table.min_support, 50)
+        self.assertTrue(
+            torch.equal(
+                table.trusted,
+                torch.tensor([True, True, True, False]),
+            )
+        )
+        stats = table.stats(negative_floor=0.3)
+        self.assertEqual(stats["trusted_category_pairs"], 3)
+        self.assertGreaterEqual(
+            float(stats["median_trusted_negative_weight"]),
+            0.3,
+        )
+
+    def test_statistical_pu_negative_weights_match_reference_formula(self):
+        sampler = ApacheRelatednessPairSampler(
+            feature_dim=8,
+            geo_budget=4,
+            final_budget=2,
+            rel_dim=4,
+            negative_weight=0.3,
+        )
+        sampler.set_negative_rates(
+            torch.tensor([0.0, 0.1, 0.9, 0.2]),
+            torch.tensor([True, True, True, False]),
+            2,
+        )
+        weights = sampler._pu_neg_weight(
+            torch.tensor([0, 0, 1, -1]),
+            torch.tensor([0, 1, 0, 0]),
+            torch.zeros(4),
+        )
+        self.assertTrue(
+            torch.allclose(
+                weights,
+                torch.tensor([1.0, 0.9, 0.3, 0.3]),
+                atol=1.0e-6,
+            )
+        )
+
+    def test_statistical_weights_drive_selected_background_pair_weights(self):
+        torch.manual_seed(341)
+        sampler = ApacheRelatednessPairSampler(
+            feature_dim=8,
+            geo_budget=8,
+            final_budget=6,
+            rel_dim=4,
+            negative_weight=0.3,
+        )
+        # Every trusted category pair has zero interaction rate, so all
+        # unlabelled selected pairs must receive weight 1 rather than 0.3.
+        sampler.set_negative_rates(
+            torch.zeros(4),
+            torch.ones(4, dtype=torch.bool),
+            2,
+        )
+        box_tensor, _ = boxes()
+        pair_targets = torch.zeros(1, 4, 4)
+        pair_targets[0, 0, 1] = 1.0
+        entity_labels = torch.tensor(
+            [[0, 1, 0, 1]],
+            dtype=torch.int64,
+        )
+        output = sampler(
+            box_tensor[:1],
+            torch.randn(1, 4, 8),
+            torch.tensor([4], dtype=torch.int64),
+            pair_targets=pair_targets,
+            entity_labels=entity_labels,
+        )
+        assert output.pair_negative_weights is not None
+        valid_weights = output.pair_negative_weights[
+            output.valid_mask
+        ]
+        self.assertTrue(
+            torch.allclose(
+                valid_weights,
+                torch.ones_like(valid_weights),
+            )
         )
 
     def test_pu_negative_floor_adds_only_unlabelled_relatedness_mass(self):
