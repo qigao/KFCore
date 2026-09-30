@@ -10,6 +10,38 @@ from torch import nn
 from model import KFRelationModel
 
 
+LEGACY_DEFAULT_MAX_BOXES = 32
+RELEASED_MAX_BOXES = 40
+
+
+def resolve_training_max_boxes(
+    requested: int | None,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        int(requested)
+        if requested is not None
+        else (
+            RELEASED_MAX_BOXES
+            if recipe == "apache-reference"
+            else LEGACY_DEFAULT_MAX_BOXES
+        )
+    )
+    if value < 2:
+        raise ValueError("max boxes must be at least 2")
+    if (
+        recipe == "apache-reference"
+        and value != RELEASED_MAX_BOXES
+    ):
+        raise ValueError(
+            "apache-reference requires released max_objects=40"
+        )
+    return value
+
+
 def module_state_sha256(module: nn.Module) -> str:
     """Deterministic SHA-256 over names/shapes/dtypes/tensor bytes."""
     digest = hashlib.sha256()
