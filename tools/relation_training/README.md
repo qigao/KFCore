@@ -437,6 +437,69 @@ The train manifest alone determines the weights. `training.json` records:
 K=48 and whitened CLIP prototypes. The final compare job rejects any
 dataset/prototype/parameter-count drift before reporting metric deltas.
 
+## Detector-box recoverability ceiling
+
+GT-box relation metrics do not reveal whether a failure came from the detector,
+the pair sampler, or predicate scoring.  KFCore therefore evaluates detector
+boxes with a separate recoverability layer before relation metrics.
+
+Detector input is class-agnostic:
+
+```json
+{
+  "schema": "kfcore.detector-boxes/1",
+  "image": "relative/path.jpg",
+  "width": 1280,
+  "height": 720,
+  "boxes_xyxy": [[10, 20, 110, 220]],
+  "scores": [0.93]
+}
+```
+
+Object class labels are intentionally absent and are never fed to the relation
+model.
+
+For each GT object, the evaluator builds the set of detector boxes whose IoU is
+at least the configured threshold.  A directed GT pair is recoverable when
+there exists at least one subject candidate and one object candidate using two
+distinct detector boxes.
+
+This is an **existence ceiling**, not a greedy or Hungarian one-to-one matching
+policy.  In particular, one detector box that overlaps both GT endpoints cannot
+make a subject/object relation recoverable by itself.
+
+The report separates:
+
+```text
+GT object recoverability
+directed GT pair recoverability ceiling
+sampler recall | recoverable pairs
+sampler pair recall | all GT pairs
+predicate R@K / mR@K | recoverable triplets
+end-to-end R@K / mR@K | all GT triplets
+```
+
+At the largest requested K, every GT triplet is assigned to exactly one failure
+bucket:
+
+```text
+detector miss
+sampler miss
+predicate miss
+recovered
+```
+
+and those buckets must sum back to the total GT triplet count.
+
+Detector predictions are score-capped to the model's `max_boxes` using stable
+descending score order.  Reports record both the pre-cap and used box counts,
+the detector prediction-file SHA-256, detector/model/config provenance strings,
+and the IoU threshold.
+
+Use `evaluate_detector_boxes()` to run the actual relation model on detector
+boxes.  The evaluator loads the image from the GT manifest, but the relation
+box tensor comes only from the detector manifest.
+
 ## Open-world predicate objective v2
 
 The historical relation baseline uses exhaustive multi-label BCE. That remains

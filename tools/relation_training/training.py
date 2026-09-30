@@ -17,6 +17,12 @@ from benchmark import (
     RelationBenchmark,
     RelationExample,
 )
+from detector_ceiling import (
+    DetectorPredictionExample,
+    DetectorPredictionManifest,
+    DetectorRecoverabilityBenchmark,
+    DetectorRecoverabilityConfig,
+)
 from losses import RelationLossConfig, supervised_relation_loss
 from model import KFRelationModel
 
@@ -96,6 +102,38 @@ def _load_square_rgb(
         array = np.asarray(resized, dtype=np.float32).copy()
     array /= 255.0
     return torch.from_numpy(array).permute(2, 0, 1).contiguous()
+
+
+def prepare_detector_boxes(
+    example: DetectorPredictionExample,
+    *,
+    max_boxes: int,
+) -> tuple[Tensor, Tensor]:
+    if max_boxes <= 0:
+        raise ValueError("max_boxes must be positive")
+    limited = example.limit(max_boxes)
+    boxes = torch.zeros(
+        (max_boxes, 4),
+        dtype=torch.float32,
+    )
+    for index, (left, top, right, bottom) in enumerate(
+        limited.boxes_xyxy
+    ):
+        cx = ((left + right) * 0.5) / example.width
+        cy = ((top + bottom) * 0.5) / example.height
+        width = (right - left) / example.width
+        height = (bottom - top) / example.height
+        boxes[index] = torch.tensor(
+            (cx, cy, width, height),
+            dtype=torch.float32,
+        )
+    return (
+        boxes,
+        torch.tensor(
+            len(limited.boxes_xyxy),
+            dtype=torch.int64,
+        ),
+    )
 
 
 def prepare_example(
@@ -599,6 +637,94 @@ def train_epoch(
             max(learning_rates)
         )
     return report
+
+
+def evaluate_detector_boxes(
+    model: KFRelationModel,
+    manifest: DatasetManifest,
+    detector_manifest: DetectorPredictionManifest,
+    *,
+    image_root: str | Path,
+    device: torch.device,
+    benchmark_config: DetectorRecoverabilityConfig = (
+        DetectorRecoverabilityConfig()
+    ),
+    detector_id: str = "",
+    detector_model_sha256: str = "",
+    detector_config_sha256: str = "",
+) -> dict[str, object]:
+    benchmark = DetectorRecoverabilityBenchmark(
+        predicate_count=int(model.predicate_bank.shape[0]),
+        config=benchmark_config,
+    )
+    detector_by_image = detector_manifest.by_image()
+    expected_images = {
+        example.image
+        for example in manifest.examples
+    }
+    actual_images = set(detector_by_image)
+    missing = sorted(expected_images - actual_images)
+    extra = sorted(actual_images - expected_images)
+    if missing:
+        raise ValueError(
+            f"missing detector prediction for image: {missing[0]}"
+        )
+    if extra:
+        raise ValueError(
+            f"detector prediction has unknown image: {extra[0]}"
+        )
+
+    model.eval()
+    with torch.inference_mode():
+        for example in manifest.examples:
+            raw_detector = detector_by_image[example.image]
+            detector = raw_detector.limit(
+                model.config.max_boxes
+            )
+            if (
+                detector.width != example.width
+                or detector.height != example.height
+            ):
+                raise ValueError(
+                    f"detector dimensions for {example.image} "
+                    "do not match GT manifest"
+                )
+
+            image = _load_square_rgb(
+                example,
+                Path(image_root),
+                model.config.image_size,
+            ).unsqueeze(0).to(device)
+            boxes, box_count = prepare_detector_boxes(
+                detector,
+                max_boxes=model.config.max_boxes,
+            )
+            runtime = model(
+                image,
+                boxes.unsqueeze(0).to(device),
+                box_count.unsqueeze(0).to(device),
+            )
+            benchmark.add(
+                tuple(
+                    value.detach().cpu()
+                    for value in runtime
+                ),
+                example,
+                detector,
+                detector_boxes_before_cap=len(
+                    raw_detector.boxes_xyxy
+                ),
+            )
+
+    return benchmark.report(
+        annotations_sha256=manifest.annotations_sha256,
+        detector_predictions_sha256=(
+            detector_manifest.predictions_sha256
+        ),
+        detector_id=detector_id,
+        detector_model_sha256=detector_model_sha256,
+        detector_config_sha256=detector_config_sha256,
+    )
 
 
 def evaluate_gt_boxes(
