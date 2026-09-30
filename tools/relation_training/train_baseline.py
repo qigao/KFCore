@@ -16,6 +16,7 @@ from benchmark import (
 from apache_pair_sampler import PairOpportunityTable
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
+    backbone_provenance,
     build_reference_optimizer,
     build_reference_scheduler,
 )
@@ -207,7 +208,15 @@ def main() -> None:
             "gradient clipping."
         ),
     )
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help=(
+            "Training epochs. Defaults to 5 for legacy recipe and 12 for "
+            "apache-reference."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
     parser.add_argument("--weight-decay", type=float, default=1.0e-4)
@@ -372,6 +381,13 @@ def main() -> None:
     reference_training = (
         args.training_recipe == "apache-reference"
     )
+    resolved_epochs = (
+        int(args.epochs)
+        if args.epochs is not None
+        else (12 if reference_training else 5)
+    )
+    if resolved_epochs <= 0:
+        raise ValueError("--epochs must be positive")
     if reference_training and not apache_mode:
         raise ValueError(
             "--training-recipe apache-reference requires "
@@ -432,7 +448,7 @@ def main() -> None:
             )
 
     baseline_config = FrozenBaselineConfig(
-        epochs=args.epochs,
+        epochs=resolved_epochs,
         batch_size=args.batch_size,
         learning_rate=(
             args.apache_head_lr
@@ -786,6 +802,12 @@ def main() -> None:
     device = resolve_device(args.device)
     model.to(device)
 
+    backbone_provenance_initial = backbone_provenance(
+        model,
+        model_name=args.backbone,
+        mode=("full" if reference_training else "frozen"),
+    )
+
     if apache_mode:
         if (
             model.apache_pair_sampler is None
@@ -898,7 +920,7 @@ def main() -> None:
             head_lr=args.apache_head_lr,
             backbone_lr=args.apache_backbone_lr,
             weight_decay=args.weight_decay,
-            epochs=args.epochs,
+            epochs=resolved_epochs,
             warmup_steps=args.apache_warmup_steps,
             min_lr_factor=args.apache_min_lr_factor,
             clip_grad=args.apache_clip_grad,
@@ -961,6 +983,12 @@ def main() -> None:
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
 
+    backbone_provenance_final = backbone_provenance(
+        model,
+        model_name=args.backbone,
+        mode=("full" if reference_training else "frozen"),
+    )
+
     benchmark_report = evaluate_gt_boxes(
         model,
         validation_manifest,
@@ -1014,7 +1042,7 @@ def main() -> None:
             "training_recipe": {
                 "name": args.training_recipe,
                 "released_epoch_target": 12,
-                "matches_released_epoch_count": args.epochs == 12,
+                "matches_released_epoch_count": resolved_epochs == 12,
                 "config": (
                     reference_recipe_config.__dict__
                     if reference_recipe_config is not None
@@ -1025,6 +1053,8 @@ def main() -> None:
                 "backbone_trainable_parameter_count": (
                     backbone_trainable_parameter_count
                 ),
+                "backbone_initial": backbone_provenance_initial,
+                "backbone_final": backbone_provenance_final,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
             "validation_annotations_sha256": (
@@ -1102,7 +1132,7 @@ def main() -> None:
         "training_recipe": {
             "name": args.training_recipe,
             "released_epoch_target": 12,
-            "matches_released_epoch_count": args.epochs == 12,
+            "matches_released_epoch_count": resolved_epochs == 12,
             "config": (
                 reference_recipe_config.__dict__
                 if reference_recipe_config is not None
