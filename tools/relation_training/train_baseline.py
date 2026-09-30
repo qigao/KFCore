@@ -13,6 +13,12 @@ from benchmark import (
     RelationVocabulary,
     stable_report_json,
 )
+from apache_objective import (
+    ApacheObjectiveConfig,
+    ApacheReferenceObjective,
+    PredicateOntology,
+    load_source_column_allow,
+)
 from apache_vocab_head import (
     balanced_spatial_probe_targets,
     load_predicate_spatial_flags,
@@ -193,12 +199,13 @@ def main() -> None:
     parser.add_argument("--predicate-loss-weight", type=float, default=1.0)
     parser.add_argument(
         "--predicate-objective",
-        choices=("bce", "batch-local-infonce"),
+        choices=("bce", "batch-local-infonce", "apache-reference"),
         default="bce",
         help=(
             "Predicate training objective. bce preserves the historical "
-            "exhaustive baseline; batch-local-infonce contrasts only "
-            "supervised predicate directions observed in the current batch."
+            "exhaustive baseline; batch-local-infonce preserves the earlier "
+            "KFCore diagnostic; apache-reference enables the exact Apache "
+            "ontology/source-aware objective."
         ),
     )
     parser.add_argument(
@@ -275,6 +282,37 @@ def main() -> None:
             "equivalent to masking those negative-only dimensions."
         ),
     )
+    parser.add_argument(
+        "--apache-ontology-meta",
+        default="",
+        help="Apache soft-supervision metadata JSON; required for apache-reference.",
+    )
+    parser.add_argument(
+        "--apache-ontology-npz",
+        default="",
+        help="Apache soft_supervision.npz tables; required for apache-reference.",
+    )
+    parser.add_argument(
+        "--apache-source-column-allow",
+        default="",
+        help="Source-aware predicate column allow JSON; required for apache-reference.",
+    )
+    parser.add_argument(
+        "--apache-object-embeddings",
+        default="",
+        help="Object-category text embedding tensor [O,D]; required for lambda_obj > 0.",
+    )
+    parser.add_argument("--apache-n-neg", type=int, default=512)
+    parser.add_argument("--apache-hard-frac", type=float, default=0.5)
+    parser.add_argument("--apache-lambda-obj", type=float, default=0.10)
+    parser.add_argument("--apache-lambda-swap", type=float, default=0.50)
+    parser.add_argument("--apache-lambda-sigmoid", type=float, default=0.25)
+    parser.add_argument("--apache-lambda-bg", type=float, default=0.05)
+    parser.add_argument("--apache-lambda-geo", type=float, default=1.0)
+    parser.add_argument("--apache-lambda-rel", type=float, default=1.0)
+    parser.add_argument("--apache-bg-topk", type=int, default=5)
+    parser.add_argument("--apache-swap-margin", type=float, default=0.05)
+    parser.add_argument("--apache-pair-negative-floor", type=float, default=0.30)
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260929)
