@@ -89,6 +89,55 @@ static void test_kalman_udu_predict(float* x, float* U, float* d, const float* P
                                workspace, TEST_KALMAN_WORKSPACE_FLOATS);
 }
 
+static int test_kalman_ekf_takasu_predict(
+    float* x, float* P, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, int n, int r, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_takasu_predict)(
+        x, P, transition, G, Q, (size_t)n, (size_t)r, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_takasu_update(
+    float* x, float* P, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, int n, int m,
+    float chi2_threshold, float* chi2, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_takasu_update)(
+        x, P, z, R, measurement, (size_t)n, (size_t)m,
+        chi2_threshold, chi2, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_udu_predict(
+    float* x, float* U, float* d, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, int n, int r, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_udu_predict)(
+        x, U, d, transition, G, Q, (size_t)n, (size_t)r, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_udu_update(
+    float* x, float* U, float* d, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, int n, int m,
+    float chi2_threshold, int downweight_outlier, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_udu_update)(
+        x, U, d, z, R, measurement, (size_t)n, (size_t)m,
+        chi2_threshold, downweight_outlier, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+#define kalman_ekf_takasu_predict(...) test_kalman_ekf_takasu_predict(__VA_ARGS__)
+#define kalman_ekf_takasu_update(...) test_kalman_ekf_takasu_update(__VA_ARGS__)
+#define kalman_ekf_udu_predict(...) test_kalman_ekf_udu_predict(__VA_ARGS__)
+#define kalman_ekf_udu_update(...) test_kalman_ekf_udu_update(__VA_ARGS__)
+
 #define kalman_takasu(...) test_kalman_takasu(__VA_ARGS__)
 #define kalman_predict(...) test_kalman_predict(__VA_ARGS__)
 #define kalman_udu(...) test_kalman_udu(__VA_ARGS__)
