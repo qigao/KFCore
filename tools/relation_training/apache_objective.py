@@ -17,6 +17,115 @@ from model import RelationTrainingOutputs
 SOURCE_ALLOW_SCHEMA = "kfcore.predicate-source-allow/1"
 
 
+@dataclass(frozen=True)
+class PairOpportunityTable:
+    rate: Tensor
+    trusted: Tensor
+    opportunities: Tensor
+    num_categories: int
+    min_support: int
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        expected_num_categories: int,
+    ) -> "PairOpportunityTable":
+        if expected_num_categories <= 0:
+            raise ValueError(
+                "pair-opportunity table requires a positive object vocabulary"
+            )
+        with np.load(path, allow_pickle=False) as data:
+            required = {
+                "rate",
+                "opportunities",
+                "num_cats",
+                "min_support",
+            }
+            missing = sorted(required - set(data.files))
+            if missing:
+                raise ValueError(
+                    "pair-opportunity table is missing "
+                    + ", ".join(missing)
+                )
+            num_categories = int(data["num_cats"])
+            min_support = int(data["min_support"])
+            rate_np = np.asarray(
+                data["rate"],
+                dtype=np.float32,
+            ).reshape(-1)
+            opportunities_np = np.asarray(
+                data["opportunities"],
+                dtype=np.int64,
+            ).reshape(-1)
+
+        if num_categories != expected_num_categories:
+            raise ValueError(
+                "pair-opportunity category count does not match "
+                "vocabulary.object_labels"
+            )
+        expected = num_categories * num_categories
+        if (
+            rate_np.size != expected
+            or opportunities_np.size != expected
+        ):
+            raise ValueError(
+                "pair-opportunity arrays must contain C*C entries"
+            )
+        if min_support <= 0:
+            raise ValueError(
+                "pair-opportunity min_support must be positive"
+            )
+        if (
+            not np.isfinite(rate_np).all()
+            or np.any(rate_np < 0.0)
+            or np.any(rate_np > 1.0)
+        ):
+            raise ValueError(
+                "pair-opportunity rates must be finite within [0,1]"
+            )
+        if np.any(opportunities_np < 0):
+            raise ValueError(
+                "pair-opportunity counts must be non-negative"
+            )
+
+        opportunities = torch.from_numpy(
+            opportunities_np.copy()
+        )
+        trusted = opportunities >= min_support
+        return cls(
+            rate=torch.from_numpy(rate_np.copy()),
+            trusted=trusted,
+            opportunities=opportunities,
+            num_categories=num_categories,
+            min_support=min_support,
+        )
+
+    def stats(
+        self,
+        *,
+        floor: float,
+    ) -> dict[str, float | int]:
+        trusted_count = int(self.trusted.sum().item())
+        if trusted_count:
+            trusted_rate = self.rate[self.trusted].float()
+            median_weight = float(
+                (
+                    1.0 - trusted_rate.median()
+                ).clamp(min=floor, max=1.0)
+            )
+        else:
+            median_weight = float(floor)
+        return {
+            "num_categories": self.num_categories,
+            "min_support": self.min_support,
+            "trusted_category_pairs": trusted_count,
+            "total_category_pairs": int(self.rate.numel()),
+            "median_trusted_negative_weight": median_weight,
+        }
+
+
 @dataclass
 class PredicateOntology:
     predicates: tuple[str, ...]
