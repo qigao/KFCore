@@ -16,6 +16,10 @@ from apache_released_contract import (
     RELEASED_STRUCTURE,
     validate_released_scalar_contract,
 )
+from apache_source_allow import (
+    DERIVATION_ALGORITHM as SOURCE_ALLOW_DERIVATION_ALGORITHM,
+    DERIVATION_SCHEMA as SOURCE_ALLOW_DERIVATION_SCHEMA,
+)
 from apache_spatial_flags import (
     DERIVATION_ALGORITHM,
     DERIVATION_SCHEMA,
@@ -87,6 +91,42 @@ def corpus() -> dict:
         "sources": sources,
         "exclude_ids_sha256": h("4"),
         "source_column_allow_sha256": h("5"),
+        "source_column_allow_derivation": {
+            "schema": SOURCE_ALLOW_DERIVATION_SCHEMA,
+            "algorithm": SOURCE_ALLOW_DERIVATION_ALGORITHM,
+            "restricted_sources": ["hicodet"],
+            "union_predicate_count": 3,
+            "sources": [
+                {
+                    "source_name": "megasg_clean",
+                    "pack_split": "megasg_clean/train",
+                    "meta_sha256": h("1"),
+                    "local_predicate_count": 3,
+                    "restricted": False,
+                    "allowed_predicate_count": 3,
+                    "ignored_predicates": [],
+                },
+                {
+                    "source_name": "vg_raw",
+                    "pack_split": "vg_raw/train",
+                    "meta_sha256": h("2"),
+                    "local_predicate_count": 3,
+                    "restricted": False,
+                    "allowed_predicate_count": 3,
+                    "ignored_predicates": [],
+                },
+                {
+                    "source_name": "hicodet",
+                    "pack_split": "hicodet/train",
+                    "meta_sha256": h("3"),
+                    "local_predicate_count": 2,
+                    "restricted": True,
+                    "allowed_predicate_count": 2,
+                    "ignored_predicates": ["hico-local-only"],
+                },
+            ],
+            "sidecar_sha256": h("5"),
+        },
         "ontology_meta_sha256": h("6"),
         "ontology_npz_sha256": h("7"),
         "neg_rate_table_sha256": h("8"),
@@ -273,6 +313,9 @@ def training() -> dict:
         "apache_reference_objective": {
             "config": objective_scalars,
             "assets": {
+                "source_names": list(
+                    RELEASED_SOURCE_NAMES
+                ),
                 "source_column_allow_sha256": c[
                     "source_column_allow_sha256"
                 ],
@@ -378,6 +421,16 @@ class ApacheReleaseQualificationTest(
         self.assertEqual(
             result["predicate_spatial_flags_sha256"],
             h("0"),
+        )
+        self.assertEqual(
+            result["source_column_allow_sha256"],
+            h("5"),
+        )
+        self.assertEqual(
+            result["source_column_allow_derivation"][
+                "restricted_sources"
+            ],
+            ["hicodet"],
         )
         self.assertEqual(
             result["predicate_spatial_flags_derivation"][
@@ -710,6 +763,53 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "epoch sequence",
+        ):
+            validate_training_run(run)
+
+    def test_source_column_derivation_is_bound(self):
+        value = corpus()
+        value[
+            "source_column_allow_derivation"
+        ]["restricted_sources"] = ["vg_raw"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "restrict only hicodet",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "source_column_allow_derivation"
+        ]["sources"][0][
+            "allowed_predicate_count"
+        ] = 2
+        with self.assertRaisesRegex(
+            ValueError,
+            "must allow every union predicate",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "source_column_allow_derivation"
+        ]["sidecar_sha256"] = h("4")
+        with self.assertRaisesRegex(
+            ValueError,
+            "sidecar hash",
+        ):
+            validate_corpus(value)
+
+        run = training()
+        run["apache_reference_objective"][
+            "assets"
+        ]["source_names"] = [
+            "vg_raw",
+            "megasg_clean",
+            "hicodet",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "source order",
         ):
             validate_training_run(run)
 
