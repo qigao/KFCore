@@ -31,6 +31,7 @@ from apache_training_recipe import (
     build_reference_optimizer,
     build_reference_scheduler,
     resolve_training_epochs,
+    resolve_training_hidden_dim,
     resolve_training_max_boxes,
 )
 from apache_objective import (
@@ -147,7 +148,15 @@ def main() -> None:
         ),
     )
     parser.add_argument("--pair-budget", type=int, default=128)
-    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=None,
+        help=(
+            "Relation head width. Defaults to 512 for apache-reference "
+            "and 256 for legacy. apache-reference rejects any value other than 512."
+        ),
+    )
     parser.add_argument("--geometry-dim", type=int, default=64)
     parser.add_argument("--num-heads", type=int, default=4)
     parser.add_argument("--num-layers", type=int, default=2)
@@ -509,6 +518,10 @@ def main() -> None:
         args.max_boxes,
         recipe=args.training_recipe,
     )
+    resolved_hidden_dim = resolve_training_hidden_dim(
+        args.hidden_dim,
+        recipe=args.training_recipe,
+    )
     if resolved_batch_size <= 0:
         raise ValueError("batch size must be positive")
     if (
@@ -607,7 +620,7 @@ def main() -> None:
         image_size=args.image_size,
         max_boxes=resolved_max_boxes,
         pair_budget=args.pair_budget,
-        hidden_dim=args.hidden_dim,
+        hidden_dim=resolved_hidden_dim,
         geometry_dim=args.geometry_dim,
         num_heads=args.num_heads,
         num_layers=args.num_layers,
