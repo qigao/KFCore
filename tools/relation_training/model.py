@@ -10,6 +10,13 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from apache_release_scalars import (
+    RELEASED_BOX_TOKEN_DROPOUT,
+    RELEASED_CFA_ALPHA,
+    RELEASED_CFA_PROB,
+    RELEASED_CONTEXT_DROPOUT,
+    RELEASED_PAIR_NEGATIVE_FLOOR,
+)
 from apache_vocab_head import ApacheVocabHead
 from apache_context import (
     ApacheDeformableRelRead,
@@ -48,11 +55,11 @@ class RelationModelConfig:
     pair_evidence_contract: str = "legacy"
     pair_sampler_contract: str = "legacy"
     relation_context_contract: str = "legacy"
-    apache_context_dropout: float = 0.2
-    apache_box_token_dropout: float = 0.3
-    apache_pair_negative_floor: float = 0.3
+    apache_context_dropout: float = RELEASED_CONTEXT_DROPOUT
+    apache_box_token_dropout: float = RELEASED_BOX_TOKEN_DROPOUT
+    apache_pair_negative_floor: float = RELEASED_PAIR_NEGATIVE_FLOOR
     apache_cfa_prob: float = 0.0
-    apache_cfa_alpha: float = 1.0
+    apache_cfa_alpha: float = RELEASED_CFA_ALPHA
     allow_training_multiscale: bool = False
     predicate_head_contract: str = "legacy"
 
