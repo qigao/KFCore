@@ -502,6 +502,124 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
             module_state_sha256(model),
         )
 
+    def test_bf16_autocast_wraps_model_and_objective(self):
+        torch.manual_seed(124)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(2, 6),
+            model_config(),
+        )
+        freeze_backbone(model)
+        dataset = RelationTrainingDataset(
+            self.train_manifest,
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+        )
+        loader = make_training_loader(
+            dataset,
+            FrozenBaselineConfig(
+                epochs=1,
+                batch_size=1,
+                learning_rate=1.0e-2,
+                weight_decay=0.0,
+                seed=20,
+            ),
+        )
+        optimizer = torch.optim.AdamW(
+            trainable_parameters(model),
+            lr=1.0e-2,
+            weight_decay=0.0,
+        )
+
+        def cpu_autocast_enabled() -> bool:
+            try:
+                return bool(
+                    torch.is_autocast_enabled(
+                        "cpu"
+                    )
+                )
+            except TypeError:
+                return bool(
+                    torch.is_autocast_cpu_enabled()
+                )
+
+        model_seen: list[bool] = []
+        original_forward_training = (
+            model.forward_training
+        )
+
+        def probed_forward_training(
+            *args,
+            **kwargs,
+        ):
+            model_seen.append(
+                cpu_autocast_enabled()
+            )
+            return original_forward_training(
+                *args,
+                **kwargs,
+            )
+
+        model.forward_training = (  # type: ignore[method-assign]
+            probed_forward_training
+        )
+
+        class ProbeObjective(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seen: list[bool] = []
+
+            def forward(
+                self,
+                outputs,
+                predicate_targets,
+                **kwargs,
+            ):
+                del predicate_targets, kwargs
+                self.seen.append(
+                    cpu_autocast_enabled()
+                )
+                return {
+                    "loss": outputs[0]
+                    .float()
+                    .square()
+                    .mean()
+                }
+
+        objective = ProbeObjective()
+        report = train_epoch(
+            model,
+            loader,
+            optimizer,
+            device=torch.device("cpu"),
+            apache_objective=objective,
+            amp_enabled=True,
+            amp_dtype=torch.bfloat16,
+        )
+
+        self.assertEqual(model_seen, [True])
+        self.assertEqual(objective.seen, [True])
+        self.assertEqual(
+            int(report["optimizer_steps"]),
+            1,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "BF16 only",
+        ):
+            train_epoch(
+                model,
+                loader,
+                optimizer,
+                device=torch.device("cpu"),
+                apache_objective=objective,
+                amp_enabled=True,
+                amp_dtype=torch.float16,
+            )
+
     def test_split_leakage_box_overflow_and_image_size_mismatch_fail(self):
         leaking = DatasetManifest(
             examples=self.train_manifest.examples,
