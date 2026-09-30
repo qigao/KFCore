@@ -56,6 +56,17 @@ class ApacheRelatednessPairSampler(nn.Module):
         self.rel_dim = int(rel_dim)
         self.negative_weight = float(negative_weight)
         self.swap_include = bool(swap_include)
+        self.num_categories = 0
+        self.register_buffer(
+            "negative_rate",
+            None,
+            persistent=False,
+        )
+        self.register_buffer(
+            "negative_trusted",
+            None,
+            persistent=False,
+        )
 
         self.geo_scorer = nn.Sequential(
             nn.Linear(RelGeomEncoder.NUM_GEO, 64),
@@ -73,6 +84,92 @@ class ApacheRelatednessPairSampler(nn.Module):
             nn.Linear(feature_dim, rel_dim),
             nn.GELU(),
             nn.Linear(rel_dim, rel_dim),
+        )
+
+    def set_negative_rates(
+        self,
+        rate: Tensor,
+        trusted: Tensor,
+        *,
+        num_categories: int,
+    ) -> None:
+        if (
+            isinstance(num_categories, bool)
+            or not isinstance(num_categories, int)
+            or num_categories <= 0
+        ):
+            raise ValueError(
+                "num_categories must be a positive integer"
+            )
+        expected = num_categories * num_categories
+        if rate.ndim != 1 or rate.numel() != expected:
+            raise ValueError(
+                "negative-rate table must be flat [C*C]"
+            )
+        if trusted.shape != rate.shape or trusted.dtype != torch.bool:
+            raise ValueError(
+                "negative-rate trust mask must be bool [C*C]"
+            )
+        if (
+            not torch.isfinite(rate).all()
+            or (rate < 0).any()
+            or (rate > 1).any()
+        ):
+            raise ValueError(
+                "negative interaction rates must be finite within [0,1]"
+            )
+        self.negative_rate = rate.detach().clone()
+        self.negative_trusted = trusted.detach().clone()
+        self.num_categories = int(num_categories)
+
+    def _pu_negative_weight(
+        self,
+        subject_category: Tensor | None,
+        object_category: Tensor | None,
+        like: Tensor,
+    ) -> Tensor:
+        negative = torch.full_like(
+            like,
+            self.negative_weight,
+        )
+        if (
+            self.negative_rate is None
+            or self.negative_trusted is None
+            or subject_category is None
+            or object_category is None
+        ):
+            return negative
+
+        subject_category = subject_category.to(torch.int64)
+        object_category = object_category.to(torch.int64)
+        known = (
+            (subject_category >= 0)
+            & (object_category >= 0)
+            & (subject_category < self.num_categories)
+            & (object_category < self.num_categories)
+        )
+        flat = (
+            subject_category.clamp_min(0)
+            * self.num_categories
+            + object_category.clamp_min(0)
+        ).clamp(
+            max=self.negative_rate.numel() - 1
+        )
+        rate = self.negative_rate.to(like.device)[flat].to(
+            like.dtype
+        )
+        trusted = (
+            self.negative_trusted.to(like.device)[flat]
+            & known
+        )
+        statistical = (1.0 - rate).clamp(
+            min=self.negative_weight,
+            max=1.0,
+        )
+        return torch.where(
+            trusted,
+            statistical,
+            negative,
         )
 
     @staticmethod
@@ -142,6 +239,7 @@ class ApacheRelatednessPairSampler(nn.Module):
         box_counts: Tensor,
         *,
         pair_targets: Tensor | None = None,
+        entity_labels: Tensor | None = None,
     ) -> ApachePairSamplerOutput:
         if boxes.ndim != 3 or boxes.shape[-1] != 4:
             raise ValueError("boxes must be [B,N,4]")
@@ -164,6 +262,15 @@ class ApacheRelatednessPairSampler(nn.Module):
             device=boxes.device,
         )
         training_contract = gt_grid is not None
+        if entity_labels is not None:
+            if entity_labels.shape != (batch, count):
+                raise ValueError(
+                    "entity_labels must be [B,N] matching boxes"
+                )
+            entity_labels = entity_labels.to(
+                device=boxes.device,
+                dtype=torch.int64,
+            )
 
         subject = boxes.unsqueeze(2).expand(
             batch, count, count, 4
@@ -273,13 +380,30 @@ class ApacheRelatednessPairSampler(nn.Module):
                 1,
                 stage1,
             )
+            subject_categories = object_categories = None
+            if (
+                self.negative_rate is not None
+                and entity_labels is not None
+            ):
+                subject_categories = torch.gather(
+                    entity_labels,
+                    1,
+                    subject_index_1,
+                )
+                object_categories = torch.gather(
+                    entity_labels,
+                    1,
+                    object_index_1,
+                )
+            negative_weights = self._pu_negative_weight(
+                subject_categories,
+                object_categories,
+                stage1_relatedness,
+            )
             weights = torch.where(
                 gt_stage1 > 0.5,
                 torch.ones_like(stage1_relatedness),
-                torch.full_like(
-                    stage1_relatedness,
-                    self.negative_weight,
-                ),
+                negative_weights,
             )
             probability = torch.sigmoid(
                 stage1_relatedness
@@ -350,13 +474,31 @@ class ApacheRelatednessPairSampler(nn.Module):
                 1,
                 flat_pair,
             )
+            selected_subject_categories = None
+            selected_object_categories = None
+            if (
+                self.negative_rate is not None
+                and entity_labels is not None
+            ):
+                selected_subject_categories = torch.gather(
+                    entity_labels,
+                    1,
+                    flat_pair // count,
+                )
+                selected_object_categories = torch.gather(
+                    entity_labels,
+                    1,
+                    flat_pair % count,
+                )
+            selected_negative_weights = self._pu_negative_weight(
+                selected_subject_categories,
+                selected_object_categories,
+                pair_logits,
+            )
             pair_negative_weights = torch.where(
                 selected_gt,
                 torch.ones_like(pair_logits),
-                torch.full_like(
-                    pair_logits,
-                    self.negative_weight,
-                ),
+                selected_negative_weights,
             )
         sub_idx = flat_pair // count
         obj_idx = flat_pair % count
