@@ -1,0 +1,50 @@
+name: Runtime docs contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'README.md'
+      - 'docs/runtime/**'
+      - '.github/workflows/runtime-docs-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'README.md'
+      - 'docs/runtime/**'
+      - '.github/workflows/runtime-docs-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate runtime documentation links
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          for path in             docs/runtime/model-package-v1.md             docs/runtime/manual-build.md             docs/runtime/backend-plugin-abi.md; do
+            test -s "$path"
+            grep -Fq "`$path`" README.md
+          done
+          ! grep -Fq 'docs/superpowers/specs/2026-09-14-backend-neutral-runtime-plugin-abi-design.md' README.md
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
