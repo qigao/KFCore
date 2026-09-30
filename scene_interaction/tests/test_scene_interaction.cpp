@@ -1,12 +1,16 @@
 #include "scene_features.hpp"
 
 #include "kfcore/scene_interaction/interaction.hpp"
+#include "kfcore/scene_interaction/pipeline.hpp"
 #include "tinytest.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace kfcore;
@@ -73,6 +77,47 @@ scene_interaction::SceneInteractionOptions make_options()
 }
 
 } // namespace
+
+spec("typed scene behavior pipeline API")
+{
+    it("composes scene graph, temporal behavior, and vocabulary controls")
+    {
+        using Pipeline = scene_interaction::SceneBehaviorPipeline;
+
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .supports_dynamic_vocabulary()),
+                bool>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .supports_live_predicates()),
+                bool>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>().set_predicates(
+                    std::declval<const std::vector<std::string>&>())),
+                void>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .vocabulary_version()),
+                std::uint64_t>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>().process(
+                    std::declval<const image::ImageView&>(),
+                    0.0)),
+                scene_interaction::SceneBehaviorFrame>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .pair_state_count()),
+                std::size_t>);
+        check(true);
+    }
+}
 
 spec("scene graph temporal feature encoding")
 {
