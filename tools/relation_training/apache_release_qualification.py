@@ -12,6 +12,7 @@ from apache_training_recipe import (
     RELEASED_EMA_DECAY,
     RELEASED_MAX_BOXES,
     RELEASED_PHOTOMETRIC_AUGMENT,
+    RELEASED_TEXT_DIM,
 )
 from apache_mixture import (
     RELEASED_MICRO_BATCH_SIZE,
@@ -323,6 +324,11 @@ def validate_training_run(
         raise ValueError(
             "logical rank/gradient accumulation differs from release"
         )
+    if config.get("text_dim") != RELEASED_TEXT_DIM:
+        raise ValueError(
+            "Apache recipe config requires text_dim=512"
+        )
+
     config_augment = config.get("augment")
     if (
         isinstance(config_augment, bool)
@@ -530,6 +536,17 @@ def validate_training_run(
         payload.get("checkpoint_sha256"),
         "checkpoint_sha256",
     )
+    predicate_shape = payload.get(
+        "predicate_embedding_shape"
+    )
+    if (
+        not isinstance(predicate_shape, list)
+        or len(predicate_shape) != 2
+        or predicate_shape[1] != RELEASED_TEXT_DIM
+    ):
+        raise ValueError(
+            "released qualification requires predicate text_dim=512"
+        )
     require_sha256(
         payload.get("predicate_embeddings_sha256"),
         "predicate_embeddings_sha256",
@@ -730,6 +747,7 @@ def qualify_training_run(
         "augmentation": training[
             "training_recipe"
         ]["augmentation"],
+        "text_dim": RELEASED_TEXT_DIM,
     }
 
 
