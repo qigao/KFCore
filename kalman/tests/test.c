@@ -435,6 +435,24 @@ static void testlinalg(void)
             TEST_FLOAT_WITHIN(threshold, d[i], dexp[i], "UDU: d test failed");
         }
     }
+    {
+        const float negative[1] = { -1.0f };
+        const float zero[1]     = { 0.0f };
+        const float nan_value[1] = { NAN };
+        const float final_zero_pivot[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        float U[4];
+        float d[2];
+
+        check_equal(udu(negative, U, d, 1), -1);
+        check_equal(udu(zero, U, d, 1), -1);
+        check_equal(udu(nan_value, U, d, 1), -1);
+        check_equal(udu(final_zero_pivot, U, d, 2), -1);
+        check_equal(udu(NULL, U, d, 1), -1);
+        check_equal(udu(negative, NULL, d, 1), -1);
+        check_equal(udu(negative, U, NULL, 1), -1);
+        check_equal(udu(negative, U, d, 0), -1);
+        printf("[x] UDU rejects invalid/final non-positive pivots\n");
+    }
     // Test magnetometer yaw
     {
         const float roll_rad         = DEG2RAD(45.0f);
@@ -448,6 +466,48 @@ static void testlinalg(void)
                           "Magnetometer heading test failed (nav_mag_heading)");
         printf("[x] Yaw from magnetometer (nav_mag_heading)\n");
     }
+}
+
+static void testkalmanbounds(void)
+{
+    float x[1]   = { 7.0f };
+    float P[1]   = { 9.0f };
+    float U[1]   = { 1.0f };
+    float d[1]   = { 2.0f };
+    float z[1]   = { 0.0f };
+    float R[1]   = { 1.0f };
+    float Ht[1]  = { 1.0f };
+    float Phi[1] = { 1.0f };
+
+    check_equal(kalman_takasu(x, P, z, R, Ht, 0, 1, 0.0f, NULL), -1);
+    check_equal(kalman_takasu(x, P, z, R, Ht, 33, 1, 0.0f, NULL), -1);
+    check_equal(kalman_takasu(x, P, z, R, Ht, 1, 5, 0.0f, NULL), -1);
+    check_equal(kalman_takasu(NULL, P, z, R, Ht, 1, 1, 0.0f, NULL), -1);
+
+    check_equal(kalman_udu_scalar(x, U, d, 0.0f, R[0], Ht, 33), -1);
+    check_equal(kalman_udu_scalar(x, U, d, 0.0f, NAN, Ht, 1), -1);
+    check_equal(kalman_udu(x, U, d, z, R, Ht, 33, 1, 0.0f, 0), -1);
+    check_equal(kalman_udu(x, U, d, z, R, Ht, 1, 0, 0.0f, 0), -1);
+    check_equal(decorrelate(z, Ht, R, 0, 1), -1);
+
+    check_equal(kalman_ekf_takasu_predict(x, P, NULL, NULL, NULL, 33, 0, NULL), -1);
+    check_equal(kalman_ekf_takasu_update(x, P, z, R, NULL, 1, 4, 0.0f, NULL, NULL), -1);
+    check_equal(kalman_ekf_udu_predict(x, U, d, NULL, NULL, NULL, 33, 0, NULL), -1);
+    check_equal(kalman_ekf_udu_update(x, U, d, z, R, NULL, 1, 4, 0.0f, 0, NULL), -1);
+
+    check_equal(kalman_ukf_predict(x, P, NULL, NULL, 33, NULL, NULL), -1);
+    check_equal(kalman_ukf_update(x, P, z, R, NULL, 1, 4, NULL, 0.0f, NULL, NULL), -1);
+
+    kalman_predict(x, P, Phi, NULL, NULL, 33, 0);
+    TEST_FLOAT_WITHIN(0.0f, 7.0f, x[0], "invalid kalman_predict changed state");
+    TEST_FLOAT_WITHIN(0.0f, 9.0f, P[0], "invalid kalman_predict changed covariance");
+
+    kalman_udu_predict(x, U, d, Phi, NULL, NULL, 33, 0);
+    TEST_FLOAT_WITHIN(0.0f, 7.0f, x[0], "invalid kalman_udu_predict changed state");
+    TEST_FLOAT_WITHIN(0.0f, 1.0f, U[0], "invalid kalman_udu_predict changed U");
+    TEST_FLOAT_WITHIN(0.0f, 2.0f, d[0], "invalid kalman_udu_predict changed d");
+
+    printf("[x] Kalman public dimension guards\n");
 }
 
 static void testnavtoolbox(void)
@@ -2145,6 +2205,7 @@ spec("kfcore")
     it("passes navigation and Kalman filter tests")
     {
         testframetransform();
+        testkalmanbounds();
         testnavtoolbox();
     }
 

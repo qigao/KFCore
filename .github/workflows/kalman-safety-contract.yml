@@ -1,0 +1,88 @@
+name: Kalman safety contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'kalman/**'
+      - 'vendor/miniblas/**'
+      - '.github/workflows/kalman-safety-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'kalman/**'
+      - 'vendor/miniblas/**'
+      - '.github/workflows/kalman-safety-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kalman-safety-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-release-sanitized:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused build dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
+      - name: Build release-safety contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/kalman-safety"
+          cc \
+            -std=c11 \
+            -DNDEBUG \
+            -O1 -g \
+            -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Ivendor/miniblas \
+            -Ikalman \
+            vendor/miniblas/miniblas.c \
+            vendor/miniblas/linalg.c \
+            kalman/kalman_takasu.c \
+            kalman/kalman_udu.c \
+            kalman/kalman_ekf.c \
+            kalman/kalman_ukf.c \
+            kalman/tests/test_safety.c \
+            -lm \
+            -o "$RUNNER_TEMP/kalman-safety/kfcore_kalman_safety"
+
+      - name: Run release-safety contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 \
+          UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+          "$RUNNER_TEMP/kalman-safety/kfcore_kalman_safety"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
