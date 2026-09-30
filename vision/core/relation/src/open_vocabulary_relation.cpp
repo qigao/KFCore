@@ -524,6 +524,7 @@ struct OpenVocabularyRelation::Impl final
     ScoringMode mode = ScoringMode::HostQueries;
     std::unique_ptr<runtime::ExecutionContext> context;
     PredicateVocabulary vocabulary;
+    std::uint64_t vocabulary_version = 0U;
     std::int32_t input_size_value = 0;
     std::size_t fixed_output_bytes = 0U;
 
@@ -610,47 +611,75 @@ void OpenVocabularyRelation::set_vocabulary(
             "backend-scoring vocabulary requires one alpha value per predicate");
     }
 
-    impl_->vocabulary = normalize_predicate_vocabulary(
-        std::move(vocabulary),
-        impl_->options.query_dim,
-        impl_->options.max_vocabulary_bytes);
-
-    if (impl_->mode == ScoringMode::BackendLogits)
+    try
     {
-        std::size_t input_bytes = checked_multiply(
-            impl_->vocabulary.embeddings.size(),
-            sizeof(float),
-            "predicate embedding input");
-        input_bytes = checked_add(
-            input_bytes,
-            checked_multiply(
-                impl_->vocabulary.spatial_weights.size(),
+        PredicateVocabulary candidate =
+            normalize_predicate_vocabulary(
+                std::move(vocabulary),
+                impl_->options.query_dim,
+                impl_->options.max_vocabulary_bytes);
+
+        if (impl_->mode == ScoringMode::BackendLogits)
+        {
+            std::size_t input_bytes = checked_multiply(
+                candidate.embeddings.size(),
                 sizeof(float),
-                "predicate alpha input"),
-            "dynamic vocabulary inputs");
-        if (input_bytes > impl_->options.max_tensor_bytes)
+                "predicate embedding input");
+            input_bytes = checked_add(
+                input_bytes,
+                checked_multiply(
+                    candidate.spatial_weights.size(),
+                    sizeof(float),
+                    "predicate alpha input"),
+                "dynamic vocabulary inputs");
+            if (input_bytes > impl_->options.max_tensor_bytes)
+            {
+                throw_resource(
+                    "dynamic vocabulary inputs exceed configured tensor byte limit");
+            }
+        }
+
+        const std::size_t pred_values = checked_multiply(
+            impl_->options.max_pairs,
+            candidate.predicates.size(),
+            "predicate logits");
+        const std::size_t pred_bytes = checked_multiply(
+            pred_values,
+            sizeof(float),
+            "predicate logits");
+        const std::size_t total_output_bytes = checked_add(
+            impl_->fixed_output_bytes,
+            pred_bytes,
+            "relation outputs");
+        if (total_output_bytes > impl_->options.max_output_bytes)
         {
             throw_resource(
-                "dynamic vocabulary inputs exceed configured tensor byte limit");
+                "dynamic predicate logits exceed configured output byte limit");
         }
-    }
+        if (impl_->vocabulary_version ==
+            (std::numeric_limits<std::uint64_t>::max)())
+        {
+            throw_resource(
+                "predicate vocabulary version exhausted");
+        }
 
-    const std::size_t pred_values = checked_multiply(
-        impl_->options.max_pairs,
-        impl_->vocabulary.predicates.size(),
-        "predicate logits");
-    const std::size_t pred_bytes = checked_multiply(
-        pred_values, sizeof(float), "predicate logits");
-    const std::size_t total_output_bytes = checked_add(
-        impl_->fixed_output_bytes,
-        pred_bytes,
-        "relation outputs");
-    if (total_output_bytes > impl_->options.max_output_bytes)
+        std::vector<float> candidate_logits(
+            pred_values,
+            0.0F);
+
+        impl_->vocabulary = std::move(candidate);
+        impl_->pred_logits.swap(candidate_logits);
+        ++impl_->vocabulary_version;
+    }
+    catch (const RelationError&)
+    {
+        throw;
+    }
+    catch (const std::bad_alloc&)
     {
         throw_resource(
-            "dynamic predicate logits exceed configured output byte limit");
+            "dynamic predicate vocabulary allocation failed");
     }
-    impl_->pred_logits.resize(pred_values);
 }
 
 RelationFrame OpenVocabularyRelation::infer(
@@ -868,6 +897,7 @@ RelationFrame OpenVocabularyRelation::infer(
         RelationFrame result;
         result.image_width = source.width;
         result.image_height = source.height;
+        result.vocabulary_version = impl_->vocabulary_version;
         result.edges = detail::decode_relation_outputs(
             raw, regions,
             decode_options(impl_->options, impl_->vocabulary));
@@ -919,6 +949,11 @@ std::size_t OpenVocabularyRelation::query_dim() const noexcept
 std::size_t OpenVocabularyRelation::predicate_count() const noexcept
 {
     return impl_ ? impl_->vocabulary.predicates.size() : 0U;
+}
+
+std::uint64_t OpenVocabularyRelation::vocabulary_version() const noexcept
+{
+    return impl_ ? impl_->vocabulary_version : 0U;
 }
 
 bool OpenVocabularyRelation::backend_scoring() const noexcept
