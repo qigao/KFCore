@@ -322,6 +322,20 @@ def validate_training_run(
         raise ValueError(
             "logical rank/gradient accumulation differs from release"
         )
+    config_ema_decay = config.get("ema_decay")
+    if (
+        isinstance(config_ema_decay, bool)
+        or not isinstance(config_ema_decay, (int, float))
+        or not math.isclose(
+            float(config_ema_decay),
+            RELEASED_EMA_DECAY,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "Apache recipe config requires ema_decay=0.9998"
+        )
     if (
         recipe.get("effective_batch_size")
         != RELEASED_EFFECTIVE_BATCH_SIZE
