@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--image-size", type=int, default=224)
+    parser.add_argument("--max-boxes", type=int, default=4)
     parser.add_argument("--opset", type=int, default=18)
     parser.add_argument(
         "--pair-evidence-contract",
@@ -80,6 +81,8 @@ def main() -> None:
 
     if args.image_size <= 0:
         raise ValueError("image-size must be positive")
+    if args.max_boxes < 4:
+        raise ValueError("max-boxes must be at least 4 for the smoke fixture")
 
     torch.manual_seed(20260929)
     torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
@@ -124,7 +127,7 @@ def main() -> None:
 
     config = RelationModelConfig(
         image_size=args.image_size,
-        max_boxes=4,
+        max_boxes=args.max_boxes,
         pair_budget=6,
         hidden_dim=64,
         geometry_dim=16,
@@ -149,14 +152,16 @@ def main() -> None:
     model.eval()
 
     image = torch.rand(1, 3, args.image_size, args.image_size)
-    boxes = torch.tensor(
+    boxes = torch.zeros(
+        (1, args.max_boxes, 4),
+        dtype=torch.float32,
+    )
+    boxes[0, :4] = torch.tensor(
         [
-            [
-                [0.20, 0.20, 0.20, 0.20],
-                [0.50, 0.20, 0.20, 0.20],
-                [0.25, 0.60, 0.25, 0.25],
-                [0.70, 0.65, 0.20, 0.30],
-            ]
+            [0.20, 0.20, 0.20, 0.20],
+            [0.50, 0.20, 0.20, 0.20],
+            [0.25, 0.60, 0.25, 0.25],
+            [0.70, 0.65, 0.20, 0.30],
         ],
         dtype=torch.float32,
     )

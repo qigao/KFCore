@@ -1594,6 +1594,7 @@ python tools/relation_training/apache_release_qualification.py \
 
 The command fails unless the run has all of the following:
 
+- the released `max_objects=40` / `max_boxes=40` model shape;
 - the last Apache-2.0 source reference
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;

@@ -31,6 +31,7 @@ from apache_training_recipe import (
     build_reference_optimizer,
     build_reference_scheduler,
     resolve_training_epochs,
+    resolve_training_max_boxes,
 )
 from apache_objective import (
     ApacheObjectiveConfig,
@@ -136,7 +137,15 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     parser.add_argument("--image-size", type=int, default=448)
-    parser.add_argument("--max-boxes", type=int, default=32)
+    parser.add_argument(
+        "--max-boxes",
+        type=int,
+        default=None,
+        help=(
+            "Maximum relation boxes. Defaults to 40 for apache-reference "
+            "and 32 for legacy. apache-reference rejects any value other than 40."
+        ),
+    )
     parser.add_argument("--pair-budget", type=int, default=128)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--geometry-dim", type=int, default=64)
@@ -496,6 +505,10 @@ def main() -> None:
         if args.batch_size is not None
         else (32 if reference_training else 4)
     )
+    resolved_max_boxes = resolve_training_max_boxes(
+        args.max_boxes,
+        recipe=args.training_recipe,
+    )
     if resolved_batch_size <= 0:
         raise ValueError("batch size must be positive")
     if (
@@ -592,7 +605,7 @@ def main() -> None:
     )
     model_config = RelationModelConfig(
         image_size=args.image_size,
-        max_boxes=args.max_boxes,
+        max_boxes=resolved_max_boxes,
         pair_budget=args.pair_budget,
         hidden_dim=args.hidden_dim,
         geometry_dim=args.geometry_dim,

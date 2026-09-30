@@ -34,6 +34,17 @@ std::vector<Region> regions()
 
 spec("scene relation decoding")
 {
+    it("keeps legacy default and exposes explicit Apache 40-box options")
+    {
+        const RelateAnythingOptions legacy;
+        const auto apache = apache_released_relate_anything_options();
+
+        check(legacy.max_boxes == kLegacyRelationMaxBoxes);
+        check(apache.max_boxes == kApacheReleasedMaxBoxes);
+        check(kLegacyRelationMaxBoxes == std::size_t{32U});
+        check(kApacheReleasedMaxBoxes == std::size_t{40U});
+    }
+
     it("fuses predicate and pair logits and keeps the best predicate per pair")
     {
         const float pred[] = {

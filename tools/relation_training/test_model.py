@@ -664,6 +664,60 @@ class RelationModelTest(unittest.TestCase):
                 adapter_config(),
             )
 
+    def test_reference_40_box_tensor_contract(self):
+        cfg = RelationModelConfig(
+            image_size=8,
+            max_boxes=40,
+            pair_budget=6,
+            hidden_dim=16,
+            geometry_dim=8,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+        )
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            cfg,
+        )
+        image = torch.randn(1, 3, 8, 8)
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        box_tensor[0, :4] = torch.tensor(
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            dtype=torch.float32,
+        )
+        output = model(
+            image,
+            box_tensor,
+            torch.tensor([4], dtype=torch.int64),
+        )
+        self.assertEqual(
+            tuple(output[0].shape),
+            (1, 6, 3),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "max_boxes",
+        ):
+            model(
+                image,
+                torch.zeros(
+                    (1, 41, 4),
+                    dtype=torch.float32,
+                ),
+                torch.tensor([4], dtype=torch.int64),
+            )
+
     def test_runtime_shapes_and_valid_pair_indices(self):
         torch.manual_seed(3)
         model = KFRelationModel(

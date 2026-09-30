@@ -13,8 +13,11 @@ from apache_training_recipe import (
     backbone_provenance,
     configure_backbone_trainability,
     gradient_health,
+    LEGACY_DEFAULT_MAX_BOXES,
+    RELEASED_MAX_BOXES,
     module_state_sha256,
     resolve_training_epochs,
+    resolve_training_max_boxes,
     tap_fusion_weights,
 )
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
@@ -80,6 +83,33 @@ def build_model() -> KFRelationModel:
 
 
 class ApacheTrainingRecipeTest(unittest.TestCase):
+    def test_max_boxes_defaults_and_reference_fail_fast(self):
+        self.assertEqual(
+            resolve_training_max_boxes(None, recipe="legacy"),
+            LEGACY_DEFAULT_MAX_BOXES,
+        )
+        self.assertEqual(
+            resolve_training_max_boxes(None, recipe="apache-reference"),
+            RELEASED_MAX_BOXES,
+        )
+        self.assertEqual(
+            resolve_training_max_boxes(24, recipe="legacy"),
+            24,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "max_objects=40",
+        ):
+            resolve_training_max_boxes(
+                32,
+                recipe="apache-reference",
+            )
+        with self.assertRaises(ValueError):
+            resolve_training_max_boxes(
+                1,
+                recipe="legacy",
+            )
+
     def test_recipe_epoch_defaults_preserve_legacy_and_reference(self):
         self.assertEqual(
             resolve_training_epochs(None, recipe="legacy"),

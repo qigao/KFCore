@@ -127,6 +127,7 @@ def training() -> dict:
             for epoch in range(1, 13)
         ],
         "model_config": {
+            "max_boxes": 40,
             "pair_evidence_contract": "apache",
             "pair_sampler_contract": "apache",
             "relation_context_contract": "apache",
@@ -238,6 +239,15 @@ class ApacheReleaseQualificationTest(
                 corpus(),
                 run,
             )
+
+    def test_released_max_boxes_must_be_40(self):
+        run = training()
+        run["model_config"]["max_boxes"] = 32
+        with self.assertRaisesRegex(
+            ValueError,
+            "max_boxes=40",
+        ):
+            validate_training_run(run)
 
     def test_sampling_stream_must_be_qualified(self):
         run = training()
