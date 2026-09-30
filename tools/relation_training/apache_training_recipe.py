@@ -12,6 +12,36 @@ from model import KFRelationModel
 
 LEGACY_DEFAULT_MAX_BOXES = 32
 RELEASED_MAX_BOXES = 40
+LEGACY_DEFAULT_HIDDEN_DIM = 256
+RELEASED_D_MODEL = 512
+
+
+def resolve_training_hidden_dim(
+    requested: int | None,
+    *,
+    recipe: str,
+) -> int:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        int(requested)
+        if requested is not None
+        else (
+            RELEASED_D_MODEL
+            if recipe == "apache-reference"
+            else LEGACY_DEFAULT_HIDDEN_DIM
+        )
+    )
+    if value <= 0:
+        raise ValueError("hidden dimension must be positive")
+    if (
+        recipe == "apache-reference"
+        and value != RELEASED_D_MODEL
+    ):
+        raise ValueError(
+            "apache-reference requires released d_model=512"
+        )
+    return value
 
 
 def resolve_training_max_boxes(
