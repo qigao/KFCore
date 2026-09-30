@@ -12,6 +12,7 @@ from apache_pair_evidence import (
     RelGeomEncoder,
     ScenePosEnc,
     SoftSpatialPool,
+    box_coverage_raster,
     contact_box,
     coverage_pair_metrics,
     union_box,
@@ -221,6 +222,140 @@ class ApachePairEvidenceTest(unittest.TestCase):
             n(0.5),
             delta=1.0e-5,
         )
+
+    def test_box_coverage_raster_matches_reference_analytic_contract(self):
+        box = torch.tensor(
+            [[[0.50, 0.50, 0.50, 0.50]]],
+            dtype=torch.float32,
+        )
+        raster = box_coverage_raster(
+            box,
+            resolution=4,
+        )
+        self.assertEqual(tuple(raster.shape), (1, 1, 4, 4))
+        expected = torch.zeros(1, 1, 4, 4)
+        expected[:, :, 1:3, 1:3] = 1.0
+        self.assertTrue(
+            torch.allclose(
+                raster,
+                expected,
+                atol=1.0e-6,
+            )
+        )
+
+    def test_box_raster_fill_one_reproduces_box_only_runtime(self):
+        torch.manual_seed(11)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            apache_config(),
+        ).eval()
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+        coverage = box_coverage_raster(
+            box_tensor[:1],
+            resolution=32,
+        )
+        fill = torch.ones(1, 4)
+
+        with torch.inference_mode():
+            plain = model(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+            )
+            boxed = model(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                coverage=coverage,
+                fill=fill,
+            )
+
+        for left, right in zip(plain, boxed):
+            if left.dtype == torch.bool or not left.dtype.is_floating_point:
+                self.assertTrue(torch.equal(left, right))
+            else:
+                self.assertTrue(
+                    torch.allclose(
+                        left,
+                        right,
+                        atol=2.0e-4,
+                        rtol=0.0,
+                    )
+                )
+
+    def test_mask_coverage_changes_reference_geometry_columns(self):
+        subject = torch.tensor(
+            [[[0.50, 0.50, 0.50, 0.50]]],
+            dtype=torch.float32,
+        )
+        object_ = torch.tensor(
+            [[[0.625, 0.50, 0.50, 0.50]]],
+            dtype=torch.float32,
+        )
+        box_features = RelGeomEncoder.features(
+            subject,
+            object_,
+        )
+
+        region_features = RelGeomEncoder.features(
+            subject,
+            object_,
+            (
+                torch.tensor([[0.50]]),
+                torch.tensor([[0.25]]),
+                torch.tensor([[0.10]]),
+                torch.tensor([[0.20]]),
+            ),
+        )
+        self.assertTrue(
+            torch.equal(
+                box_features[..., :15],
+                region_features[..., :15],
+            )
+        )
+        self.assertFalse(
+            torch.equal(
+                box_features[..., 15:],
+                region_features[..., 15:],
+            )
+        )
+
+    def test_model_rejects_invalid_region_coverage_contract(self):
+        torch.manual_seed(12)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            apache_config(),
+        ).eval()
+        image = torch.rand(1, 3, 8, 8)
+        box_tensor, box_counts = boxes()
+
+        with self.assertRaises(ValueError):
+            model(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                coverage=torch.ones(1, 3, 32, 32),
+            )
+        with self.assertRaises(ValueError):
+            model(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                coverage=torch.full(
+                    (1, 4, 32, 32),
+                    1.5,
+                ),
+            )
+        with self.assertRaises(ValueError):
+            model(
+                image,
+                box_tensor[:1],
+                box_counts[:1],
+                fill=torch.ones(1, 4),
+            )
 
     def test_region_coverage_metrics_are_pairwise(self):
         coverage = torch.tensor(
