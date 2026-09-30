@@ -23,6 +23,8 @@ LEGACY_DEFAULT_PAIR_BUDGET = 128
 LEGACY_DEFAULT_HIDDEN_DIM = 256
 RELEASED_D_MODEL = 512
 RELEASED_TEXT_DIM = 512
+RELEASED_AMP = True
+RELEASED_AMP_DTYPE = "bf16"
 RELEASED_EMA_DECAY = 0.9998
 LEGACY_DEFAULT_AUGMENT = 0.0
 RELEASED_PHOTOMETRIC_AUGMENT = 0.3
@@ -393,6 +395,8 @@ class ApacheTrainingRecipeConfig:
     image_size: int = RELEASED_IMAGE_SIZE
     geo_budget: int = RELEASED_GEO_BUDGET
     final_budget: int = RELEASED_FINAL_BUDGET
+    amp: bool = RELEASED_AMP
+    amp_dtype: str = RELEASED_AMP_DTYPE
 
     def __post_init__(self) -> None:
         for name in (
@@ -492,6 +496,14 @@ class ApacheTrainingRecipeConfig:
         if self.final_budget != RELEASED_FINAL_BUDGET:
             raise ValueError(
                 "Apache released recipe requires final_budget=128"
+            )
+        if self.amp is not RELEASED_AMP:
+            raise ValueError(
+                "Apache released recipe requires amp=true"
+            )
+        if self.amp_dtype != RELEASED_AMP_DTYPE:
+            raise ValueError(
+                "Apache released recipe requires amp_dtype=bf16"
             )
         if (
             not math.isfinite(self.augment)
