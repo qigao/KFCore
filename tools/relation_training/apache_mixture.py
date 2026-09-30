@@ -25,6 +25,10 @@ RELEASED_MIX_FRACTIONS = (
     0.0630,
     0.2096,
 )
+RELEASED_SAMPLES_PER_EPOCH = 503_754
+RELEASED_WORLD_SIZE = 4
+RELEASED_MICRO_BATCH_SIZE = 32
+RELEASED_SEED = 42
 
 
 @dataclass(frozen=True)
@@ -49,8 +53,10 @@ class RelationMixtureSource:
 class RelationMixtureConfig:
     sources: tuple[RelationMixtureSource, ...]
     samples_per_epoch: int = 0
-    seed: int = 42
+    seed: int = RELEASED_SEED
     config_sha256: str = ""
+    exclude_ids: Path | None = None
+    exclude_ids_sha256: str = ""
 
     def __post_init__(self) -> None:
         if not self.sources:
@@ -94,7 +100,7 @@ class RelationMixtureConfig:
             for source in self.sources
         )
 
-    def matches_released_mixture(self) -> bool:
+    def matches_released_source_spec(self) -> bool:
         if self.source_names != RELEASED_SOURCE_NAMES:
             return False
         return all(
@@ -108,6 +114,20 @@ class RelationMixtureConfig:
                 self.fractions,
                 RELEASED_MIX_FRACTIONS,
             )
+        )
+
+    def matches_released_mixture(self) -> bool:
+        """Config-level gate for the released source-mixture recipe.
+
+        Dataset identity is checked after loading, because the released epoch
+        size is a property of the post-exclusion source universe.
+        """
+        return (
+            self.matches_released_source_spec()
+            and self.samples_per_epoch == 0
+            and self.seed == RELEASED_SEED
+            and self.exclude_ids is not None
+            and bool(self.exclude_ids_sha256)
         )
 
     @classmethod
@@ -184,12 +204,35 @@ class RelationMixtureConfig:
             "samples_per_epoch",
             0,
         )
-        seed = payload.get("seed", 42)
+        seed = payload.get("seed", RELEASED_SEED)
+
+        raw_exclude_ids = payload.get("exclude_ids")
+        exclude_ids = None
+        exclude_ids_sha256 = ""
+        if raw_exclude_ids is not None:
+            if (
+                not isinstance(raw_exclude_ids, str)
+                or not raw_exclude_ids
+            ):
+                raise ValueError(
+                    "exclude_ids must be a non-empty path string"
+                )
+            exclude_ids = Path(raw_exclude_ids)
+            if not exclude_ids.is_absolute():
+                exclude_ids = base / exclude_ids
+            exclude_ids = exclude_ids.resolve()
+            exclude_raw = exclude_ids.read_bytes()
+            exclude_ids_sha256 = hashlib.sha256(
+                exclude_raw
+            ).hexdigest()
+
         return cls(
             sources=tuple(sources),
             samples_per_epoch=samples_per_epoch,
             seed=seed,
             config_sha256=hashlib.sha256(raw).hexdigest(),
+            exclude_ids=exclude_ids,
+            exclude_ids_sha256=exclude_ids_sha256,
         )
 
 
@@ -200,6 +243,7 @@ class LoadedRelationMixture:
     combined_manifest: DatasetManifest
     source_of_index: np.ndarray
     source_annotation_sha256: tuple[str, ...]
+    source_excluded_counts: tuple[int, ...]
 
     @property
     def draws_per_epoch(self) -> int:
@@ -207,6 +251,20 @@ class LoadedRelationMixture:
             self.config.samples_per_epoch
             if self.config.samples_per_epoch > 0
             else len(self.combined_manifest.examples)
+        )
+
+    def matches_released_sampling_contract(self) -> bool:
+        counts = np.bincount(
+            self.source_of_index,
+            minlength=len(self.config.sources),
+        )
+        return (
+            self.config.matches_released_mixture()
+            and self.draws_per_epoch == RELEASED_SAMPLES_PER_EPOCH
+            and self.source_of_index.shape == (
+                len(self.combined_manifest.examples),
+            )
+            and bool((counts > 0).all())
         )
 
     def report(self) -> dict[str, object]:
@@ -239,6 +297,10 @@ class LoadedRelationMixture:
             "source_annotation_sha256": list(
                 self.source_annotation_sha256
             ),
+            "source_excluded_counts": list(
+                self.source_excluded_counts
+            ),
+            "exclude_ids_sha256": self.config.exclude_ids_sha256,
             "target_fractions": list(
                 self.config.fractions
             ),
@@ -246,11 +308,40 @@ class LoadedRelationMixture:
                 realized
             ),
             "draws_per_epoch": self.draws_per_epoch,
+            "released_draws_per_epoch": RELEASED_SAMPLES_PER_EPOCH,
             "seed": self.config.seed,
+            "matches_released_source_spec": (
+                self.config.matches_released_source_spec()
+            ),
             "matches_released_mixture": (
-                self.config.matches_released_mixture()
+                self.matches_released_sampling_contract()
             ),
         }
+
+
+def _load_excluded_stems(
+    path: Path | None,
+) -> set[str]:
+    if path is None:
+        return set()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    values = (
+        payload.get("stems")
+        if isinstance(payload, dict)
+        else payload
+    )
+    if not isinstance(values, list):
+        raise ValueError(
+            "exclude_ids must be a list or an object with a stems list"
+        )
+    stems: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                "exclude_ids stems must be non-empty strings"
+            )
+        stems.add(value)
+    return stems
 
 
 def load_relation_mixture(
@@ -258,23 +349,40 @@ def load_relation_mixture(
     vocabulary: RelationVocabulary,
 ) -> LoadedRelationMixture:
     config = RelationMixtureConfig.load(path)
+    excluded_stems = _load_excluded_stems(
+        config.exclude_ids
+    )
     manifests: list[DatasetManifest] = []
     source_index_parts: list[np.ndarray] = []
     combined_examples = []
     annotation_hashes: list[str] = []
+    excluded_counts: list[int] = []
 
     for source_id, source in enumerate(config.sources):
         raw_manifest = DatasetManifest.load(
             source.annotations,
             vocabulary,
         )
+        filtered_examples = tuple(
+            example
+            for example in raw_manifest.examples
+            if Path(example.image).stem not in excluded_stems
+        )
+        excluded_counts.append(
+            len(raw_manifest.examples)
+            - len(filtered_examples)
+        )
+        if not filtered_examples:
+            raise ValueError(
+                f"mixture source {source.name} has no samples after exclusion"
+            )
         manifest = DatasetManifest(
             examples=tuple(
                 replace(
                     example,
                     source_id=source_id,
                 )
-                for example in raw_manifest.examples
+                for example in filtered_examples
             ),
             annotations_sha256=raw_manifest.annotations_sha256,
             vocabulary_sha256=raw_manifest.vocabulary_sha256,
@@ -302,6 +410,10 @@ def load_relation_mixture(
         config.config_sha256.encode("ascii")
     )
     digest.update(b"\0")
+    digest.update(
+        config.exclude_ids_sha256.encode("ascii")
+    )
+    digest.update(b"\0")
     for source, manifest in zip(
         config.sources,
         manifests,
@@ -327,6 +439,9 @@ def load_relation_mixture(
         source_of_index=source_of_index,
         source_annotation_sha256=tuple(
             annotation_hashes
+        ),
+        source_excluded_counts=tuple(
+            excluded_counts
         ),
     )
 
@@ -460,6 +575,7 @@ class DistributedWeightedSampler(Sampler[int]):
             )
 
         self.weights = tensor
+        self.requested_num_samples = int(requested)
         self.num_replicas = int(num_replicas)
         self.rank = int(rank)
         self.total_size = int(
@@ -487,7 +603,7 @@ class DistributedWeightedSampler(Sampler[int]):
             )
         self.epoch = epoch
 
-    def __iter__(self) -> Iterator[int]:
+    def draw_global(self) -> torch.Tensor:
         generator = torch.Generator()
         generator.manual_seed(
             self.seed + self.epoch
@@ -499,6 +615,10 @@ class DistributedWeightedSampler(Sampler[int]):
             generator=generator,
         )
         self.last_global_indices = indices.clone()
+        return indices
+
+    def __iter__(self) -> Iterator[int]:
+        indices = self.draw_global()
         yield from indices[
             self.rank :
             self.total_size :
@@ -507,6 +627,139 @@ class DistributedWeightedSampler(Sampler[int]):
 
     def __len__(self) -> int:
         return self.num_samples
+
+
+class ApacheReleasedBatchSampler(
+    Sampler[list[int | tuple[int, int]]]
+):
+    """Single-process emulation of the released four-rank Apache stream.
+
+    The upstream release draws one padded global multinomial, shards it by
+    rank, batches each rank independently, and uses the same multi-scale
+    resolution sequence on every rank. Yielding the four logical-rank
+    micro-batches consecutively lets grad_accum=4 reproduce that grouping.
+    """
+
+    def __init__(
+        self,
+        weights: np.ndarray,
+        *,
+        resolutions: Sequence[int] = (),
+        num_samples: int = RELEASED_SAMPLES_PER_EPOCH,
+        batch_size: int = RELEASED_MICRO_BATCH_SIZE,
+        world_size: int = RELEASED_WORLD_SIZE,
+        seed: int = RELEASED_SEED,
+    ) -> None:
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise ValueError(
+                "batch_size must be a positive integer"
+            )
+        if (
+            isinstance(world_size, bool)
+            or not isinstance(world_size, int)
+            or world_size <= 0
+        ):
+            raise ValueError(
+                "world_size must be a positive integer"
+            )
+        self.batch_size = int(batch_size)
+        self.world_size = int(world_size)
+        self.resolutions = tuple(
+            int(value)
+            for value in resolutions
+        )
+        if any(value <= 0 for value in self.resolutions):
+            raise ValueError(
+                "resolutions must be positive"
+            )
+        self.seed = int(seed)
+        self.epoch = 0
+        self.global_sampler = DistributedWeightedSampler(
+            weights,
+            num_replicas=self.world_size,
+            rank=0,
+            num_samples=num_samples,
+            seed=self.seed,
+        )
+
+    @property
+    def last_global_indices(self) -> torch.Tensor | None:
+        return self.global_sampler.last_global_indices
+
+    @property
+    def optimizer_steps_per_epoch(self) -> int:
+        return (
+            self.global_sampler.num_samples
+            // self.batch_size
+        )
+
+    def matches_released_topology(self) -> bool:
+        return (
+            self.global_sampler.requested_num_samples
+            == RELEASED_SAMPLES_PER_EPOCH
+            and self.batch_size == RELEASED_MICRO_BATCH_SIZE
+            and self.world_size == RELEASED_WORLD_SIZE
+            and self.seed == RELEASED_SEED
+        )
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+        self.global_sampler.set_epoch(epoch)
+
+    def __iter__(
+        self,
+    ) -> Iterator[list[int | tuple[int, int]]]:
+        global_indices = self.global_sampler.draw_global()
+        shards = tuple(
+            global_indices[
+                rank :
+                self.global_sampler.total_size :
+                self.world_size
+            ]
+            for rank in range(self.world_size)
+        )
+        steps = self.optimizer_steps_per_epoch
+        resolution_generator = torch.Generator()
+        resolution_generator.manual_seed(
+            self.seed + self.epoch
+        )
+
+        for step in range(steps):
+            resolution = None
+            if self.resolutions:
+                resolution = self.resolutions[
+                    int(
+                        torch.randint(
+                            len(self.resolutions),
+                            (1,),
+                            generator=resolution_generator,
+                        ).item()
+                    )
+                ]
+            start = step * self.batch_size
+            stop = start + self.batch_size
+            for rank in range(self.world_size):
+                values = shards[rank][start:stop].tolist()
+                if resolution is None:
+                    yield [
+                        int(value)
+                        for value in values
+                    ]
+                else:
+                    yield [
+                        (int(value), resolution)
+                        for value in values
+                    ]
+
+    def __len__(self) -> int:
+        return (
+            self.optimizer_steps_per_epoch
+            * self.world_size
+        )
 
 
 

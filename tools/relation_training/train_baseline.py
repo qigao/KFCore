@@ -14,6 +14,9 @@ from benchmark import (
     stable_report_json,
 )
 from apache_mixture import (
+    ApacheReleasedBatchSampler,
+    RELEASED_SEED,
+    RELEASED_WORLD_SIZE,
     DistributedWeightedSampler,
     load_relation_mixture,
     realized_source_draws,
@@ -420,7 +423,15 @@ def main() -> None:
     parser.add_argument("--apache-pair-negative-floor", type=float, default=0.30)
     parser.add_argument("--negative-pair-weight", type=float, default=0.25)
     parser.add_argument("--pair-weight", type=float, default=1.0)
-    parser.add_argument("--seed", type=int, default=20260929)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Global training seed. Defaults to 42 for apache-reference and "
+            "20260929 for the legacy recipe."
+        ),
+    )
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
@@ -470,6 +481,11 @@ def main() -> None:
     )
     reference_training = (
         args.training_recipe == "apache-reference"
+    )
+    resolved_seed = (
+        int(args.seed)
+        if args.seed is not None
+        else (RELEASED_SEED if reference_training else 20260929)
     )
     resolved_epochs = resolve_training_epochs(
         args.epochs,
@@ -572,7 +588,7 @@ def main() -> None:
             else args.learning_rate
         ),
         weight_decay=args.weight_decay,
-        seed=args.seed,
+        seed=resolved_seed,
     )
     model_config = RelationModelConfig(
         image_size=args.image_size,
@@ -1076,27 +1092,75 @@ def main() -> None:
         )
 
     mixture_sampler = None
+    mixture_batch_sampler = None
+    mixture_draw_sampler = None
     mixture_report = None
     if training_mixture is not None:
         mixture_weights = sample_weights_from_fractions(
             training_mixture.source_of_index,
             training_mixture.config.fractions,
         )
-        mixture_sampler = DistributedWeightedSampler(
-            mixture_weights,
-            num_replicas=1,
-            rank=0,
-            num_samples=training_mixture.draws_per_epoch,
-            seed=training_mixture.config.seed,
-        )
+        if reference_training:
+            mixture_batch_sampler = ApacheReleasedBatchSampler(
+                mixture_weights,
+                resolutions=(
+                    multi_scale_resolutions
+                    if multi_scale_resolutions is not None
+                    else ()
+                ),
+                num_samples=training_mixture.draws_per_epoch,
+                batch_size=resolved_batch_size,
+                world_size=RELEASED_WORLD_SIZE,
+                seed=training_mixture.config.seed,
+            )
+            mixture_draw_sampler = (
+                mixture_batch_sampler.global_sampler
+            )
+        else:
+            mixture_sampler = DistributedWeightedSampler(
+                mixture_weights,
+                num_replicas=1,
+                rank=0,
+                num_samples=training_mixture.draws_per_epoch,
+                seed=training_mixture.config.seed,
+            )
+            mixture_draw_sampler = mixture_sampler
+
         mixture_report = training_mixture.report()
+        if mixture_batch_sampler is not None:
+            runtime_matches = (
+                mixture_batch_sampler.matches_released_topology()
+                and args.apache_grad_accum == RELEASED_WORLD_SIZE
+                and resolved_seed == RELEASED_SEED
+            )
+            mixture_report["runtime_topology"] = {
+                "mode": "single-process-logical-ddp",
+                "world_size": RELEASED_WORLD_SIZE,
+                "micro_batch_size": resolved_batch_size,
+                "grad_accum": args.apache_grad_accum,
+                "global_training_seed": resolved_seed,
+                "sampler_seed": training_mixture.config.seed,
+                "optimizer_steps_per_epoch": (
+                    mixture_batch_sampler.optimizer_steps_per_epoch
+                ),
+                "matches_released_topology": runtime_matches,
+            }
+            mixture_report["matches_released_sampling_stream"] = (
+                bool(mixture_report["matches_released_mixture"])
+                and runtime_matches
+            )
 
     loader = make_training_loader(
         train_dataset,
         baseline_config,
-        resolutions=multi_scale_resolutions,
+        resolutions=(
+            None
+            if mixture_batch_sampler is not None
+            else multi_scale_resolutions
+        ),
         drop_last=reference_training,
         sampler=mixture_sampler,
+        batch_sampler=mixture_batch_sampler,
     )
     reference_recipe_config = None
     optimizer_report = None
@@ -1206,12 +1270,12 @@ def main() -> None:
             **losses,
         }
         if (
-            mixture_sampler is not None
+            mixture_draw_sampler is not None
             and training_mixture is not None
         ):
             epoch_report["source_mixture_draw"] = (
                 realized_source_draws(
-                    mixture_sampler,
+                    mixture_draw_sampler,
                     training_mixture.source_of_index,
                     len(training_mixture.config.sources),
                 )
