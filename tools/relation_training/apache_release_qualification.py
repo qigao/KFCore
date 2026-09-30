@@ -12,6 +12,8 @@ from apache_pair_sampler import (
     RELEASED_GEO_BUDGET,
 )
 from apache_training_recipe import (
+    RELEASED_AMP,
+    RELEASED_AMP_DTYPE,
     RELEASED_D_MODEL,
     RELEASED_EMA_DECAY,
     RELEASED_IMAGE_SIZE,
@@ -346,6 +348,14 @@ def validate_training_run(
         raise ValueError(
             "Apache recipe config requires final_budget=128"
         )
+    if config.get("amp") is not RELEASED_AMP:
+        raise ValueError(
+            "Apache recipe config requires amp=true"
+        )
+    if config.get("amp_dtype") != RELEASED_AMP_DTYPE:
+        raise ValueError(
+            "Apache recipe config requires amp_dtype=bf16"
+        )
 
     config_augment = config.get("augment")
     if (
@@ -469,6 +479,44 @@ def validate_training_run(
     if augmentation.get("rng_equivalence") != "stochastic-distribution":
         raise ValueError(
             "released augmentation must claim stochastic-distribution equivalence"
+        )
+
+    precision = recipe.get("precision")
+    if not isinstance(precision, dict):
+        raise ValueError(
+            "released qualification requires precision evidence"
+        )
+    if precision.get("amp_requested") is not True:
+        raise ValueError(
+            "released qualification requires AMP enabled"
+        )
+    if precision.get("amp_dtype") != RELEASED_AMP_DTYPE:
+        raise ValueError(
+            "released qualification requires BF16 AMP"
+        )
+    if precision.get("autocast_device_type") != "cuda":
+        raise ValueError(
+            "released qualification requires CUDA autocast"
+        )
+    if precision.get("autocast_executed") is not True:
+        raise ValueError(
+            "released qualification requires executed autocast"
+        )
+    if precision.get("grad_scaler") is not False:
+        raise ValueError(
+            "released BF16 contract must not use GradScaler"
+        )
+    if precision.get("released_cuda_execution") is not True:
+        raise ValueError(
+            "released qualification requires CUDA BF16 execution"
+        )
+    device = payload.get("device")
+    if (
+        not isinstance(device, str)
+        or not device.startswith("cuda")
+    ):
+        raise ValueError(
+            "released qualification requires a CUDA training device"
         )
 
     sampler_budget = recipe.get("sampler_budget")
@@ -791,6 +839,9 @@ def qualify_training_run(
         "image_size": RELEASED_IMAGE_SIZE,
         "geo_budget": RELEASED_GEO_BUDGET,
         "final_budget": RELEASED_FINAL_BUDGET,
+        "precision": training[
+            "training_recipe"
+        ]["precision"],
     }
 
 
