@@ -12,7 +12,9 @@ from torch import nn
 from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
+    LEGACY_DEFAULT_AUGMENT,
     RELEASED_EMA_DECAY,
+    RELEASED_PHOTOMETRIC_AUGMENT,
     build_reference_optimizer,
     build_reference_scheduler,
     backbone_provenance,
@@ -23,6 +25,7 @@ from apache_training_recipe import (
     RELEASED_D_MODEL,
     RELEASED_MAX_BOXES,
     module_state_sha256,
+    resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
@@ -118,6 +121,42 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_training_hidden_dim(
                 0,
+                recipe="legacy",
+            )
+
+    def test_augment_defaults_and_reference_fail_fast(self):
+        self.assertEqual(
+            resolve_training_augment(
+                None,
+                recipe="legacy",
+            ),
+            LEGACY_DEFAULT_AUGMENT,
+        )
+        self.assertEqual(
+            resolve_training_augment(
+                None,
+                recipe="apache-reference",
+            ),
+            RELEASED_PHOTOMETRIC_AUGMENT,
+        )
+        self.assertEqual(
+            resolve_training_augment(
+                0.2,
+                recipe="legacy",
+            ),
+            0.2,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "augment=0.3",
+        ):
+            resolve_training_augment(
+                0.0,
+                recipe="apache-reference",
+            )
+        with self.assertRaises(ValueError):
+            resolve_training_augment(
+                -0.1,
                 recipe="legacy",
             )
 
@@ -360,6 +399,10 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         self.assertEqual(config.clip_grad, 1.0)
         self.assertEqual(config.backbone_mode, "full")
         self.assertEqual(config.ema_decay, RELEASED_EMA_DECAY)
+        self.assertEqual(
+            config.augment,
+            RELEASED_PHOTOMETRIC_AUGMENT,
+        )
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
         model = build_model()

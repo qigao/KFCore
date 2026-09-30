@@ -16,6 +16,8 @@ RELEASED_MAX_BOXES = 40
 LEGACY_DEFAULT_HIDDEN_DIM = 256
 RELEASED_D_MODEL = 512
 RELEASED_EMA_DECAY = 0.9998
+LEGACY_DEFAULT_AUGMENT = 0.0
+RELEASED_PHOTOMETRIC_AUGMENT = 0.3
 
 
 def resolve_training_hidden_dim(
@@ -70,6 +72,42 @@ def resolve_training_max_boxes(
     ):
         raise ValueError(
             "apache-reference requires released max_objects=40"
+        )
+    return value
+
+
+
+def resolve_training_augment(
+    requested: float | None,
+    *,
+    recipe: str,
+) -> float:
+    if recipe not in {"legacy", "apache-reference"}:
+        raise ValueError("training recipe must be legacy/apache-reference")
+    value = (
+        float(requested)
+        if requested is not None
+        else (
+            RELEASED_PHOTOMETRIC_AUGMENT
+            if recipe == "apache-reference"
+            else LEGACY_DEFAULT_AUGMENT
+        )
+    )
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(
+            "photometric augmentation strength must be finite and non-negative"
+        )
+    if (
+        recipe == "apache-reference"
+        and not math.isclose(
+            value,
+            RELEASED_PHOTOMETRIC_AUGMENT,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(
+            "apache-reference requires released augment=0.3"
         )
     return value
 
@@ -261,6 +299,7 @@ class ApacheTrainingRecipeConfig:
     cfa_prob: float = 0.5
     cfa_alpha: float = 1.0
     ema_decay: float = RELEASED_EMA_DECAY
+    augment: float = RELEASED_PHOTOMETRIC_AUGMENT
 
     def __post_init__(self) -> None:
         for name in (
@@ -333,6 +372,13 @@ class ApacheTrainingRecipeConfig:
         ):
             raise ValueError(
                 "ema_decay must be finite within [0,1)"
+            )
+        if (
+            not math.isfinite(self.augment)
+            or self.augment < 0.0
+        ):
+            raise ValueError(
+                "augment must be finite and non-negative"
             )
         if self.multi_scale:
             parts = self.multi_scale.split(",")
