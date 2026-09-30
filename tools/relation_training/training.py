@@ -642,6 +642,8 @@ def train_epoch(
     record_gradient_health: bool = False,
     grad_accum: int = 1,
     ema: object | None = None,
+    amp_enabled: bool = False,
+    amp_dtype: torch.dtype = torch.bfloat16,
 ) -> dict[str, float]:
     model.train()
     if backbone_training:
@@ -660,6 +662,15 @@ def train_epoch(
         raise ValueError(
             "grad_accum must be a positive integer"
         )
+    if amp_enabled:
+        if device.type not in {"cuda", "cpu"}:
+            raise ValueError(
+                "BF16 autocast requires cuda or cpu device"
+            )
+        if amp_dtype is not torch.bfloat16:
+            raise ValueError(
+                "released AMP training supports BF16 only"
+            )
 
     sums = {
         "loss": 0.0,
@@ -739,43 +750,48 @@ def train_epoch(
                 + batch_size
             )
 
-        outputs = model.forward_training(
-            image,
-            boxes,
-            box_counts,
-            pair_targets=pair_targets,
-            cfa_predicate_labels=cfa_predicate_labels,
-            entity_labels=(
-                object_label_indices
-                if apache_objective is not None
-                else None
-            ),
-            coverage=coverage,
-            fill=fill,
-        )
-        if apache_objective is not None:
-            source_ids = batch["source_id"].to(device)
-            losses = apache_objective(
-                outputs,
-                predicate_targets,
-                source_ids=source_ids,
-                object_label_indices=object_label_indices,
-            )
-        else:
-            losses = supervised_relation_loss(
-                outputs,
-                pair_targets,
-                predicate_targets,
-                loss_config,
-                predicate_positive_weights=predicate_positive_weights,
-                predicate_supervision_mask=predicate_supervision_mask,
-                predicate_negative_weights=predicate_negative_weights,
-                explicit_holdout_mask=explicit_holdout_mask,
-                explicit_holdout_row_policy=explicit_holdout_row_policy,
-                predicate_contrastive_negative_mask=(
-                    predicate_contrastive_negative_mask
+        with torch.amp.autocast(
+            device_type=device.type,
+            enabled=amp_enabled,
+            dtype=amp_dtype,
+        ):
+            outputs = model.forward_training(
+                image,
+                boxes,
+                box_counts,
+                pair_targets=pair_targets,
+                cfa_predicate_labels=cfa_predicate_labels,
+                entity_labels=(
+                    object_label_indices
+                    if apache_objective is not None
+                    else None
                 ),
+                coverage=coverage,
+                fill=fill,
             )
+            if apache_objective is not None:
+                source_ids = batch["source_id"].to(device)
+                losses = apache_objective(
+                    outputs,
+                    predicate_targets,
+                    source_ids=source_ids,
+                    object_label_indices=object_label_indices,
+                )
+            else:
+                losses = supervised_relation_loss(
+                    outputs,
+                    pair_targets,
+                    predicate_targets,
+                    loss_config,
+                    predicate_positive_weights=predicate_positive_weights,
+                    predicate_supervision_mask=predicate_supervision_mask,
+                    predicate_negative_weights=predicate_negative_weights,
+                    explicit_holdout_mask=explicit_holdout_mask,
+                    explicit_holdout_row_policy=explicit_holdout_row_policy,
+                    predicate_contrastive_negative_mask=(
+                        predicate_contrastive_negative_mask
+                    ),
+                )
         if not torch.isfinite(losses["loss"]):
             raise RuntimeError("training loss became non-finite")
         backward_loss = (
