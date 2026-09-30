@@ -47,6 +47,13 @@ jobs:
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
+      - name: Install focused build dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
       - name: Checkout pinned TinyTest source
         uses: actions/checkout@v4
         with:
