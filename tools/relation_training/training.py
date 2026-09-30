@@ -505,7 +505,19 @@ def make_training_loader(
     resolutions: list[int] | None = None,
     drop_last: bool = False,
     sampler: Sampler[int] | None = None,
+    batch_sampler: Sampler[list[int | tuple[int, int]]] | None = None,
 ) -> DataLoader:
+    if batch_sampler is not None:
+        if sampler is not None or resolutions:
+            raise ValueError(
+                "explicit batch_sampler cannot be combined with sampler/resolutions"
+            )
+        return DataLoader(
+            dataset,
+            batch_sampler=batch_sampler,
+            num_workers=0,
+        )
+
     active_sampler = sampler
     if resolutions:
         if active_sampler is None:
