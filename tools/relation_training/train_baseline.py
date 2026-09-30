@@ -428,6 +428,7 @@ def main() -> None:
         predicate_head_contract=args.predicate_head_contract,
         apache_context_dropout=args.apache_context_dropout,
         apache_box_token_dropout=args.apache_box_token_dropout,
+        apache_pair_negative_floor=args.apache_pair_negative_floor,
     )
     loss_config = RelationLossConfig(
         sampler_loss_weight=args.sampler_loss_weight,
@@ -729,6 +730,7 @@ def main() -> None:
                 if apache_pair_opportunity is not None
                 else None
             ),
+            "object_label_order": list(vocabulary.object_labels),
             "object_embeddings_sha256": (
                 sha256(Path(args.apache_object_embeddings))
                 if args.apache_object_embeddings
@@ -758,9 +760,6 @@ def main() -> None:
             raise RuntimeError(
                 "Apache reference sampler/table is unavailable"
             )
-        model.apache_pair_sampler.negative_weight = float(
-            args.apache_pair_negative_floor
-        )
         model.apache_pair_sampler.set_negative_rates(
             apache_pair_opportunity.rate.to(device),
             apache_pair_opportunity.trusted.to(device),
@@ -1043,6 +1042,9 @@ def main() -> None:
             "apache_context_dropout": model.config.apache_context_dropout,
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
+            ),
+            "apache_pair_negative_floor": (
+                model.config.apache_pair_negative_floor
             ),
         },
         "baseline_config": config_payload(baseline_config),
