@@ -11,6 +11,9 @@ from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
 )
+from apache_release_scalars import (
+    validate_released_scalar_contract,
+)
 from apache_training_recipe import (
     RELEASED_D_MODEL,
     RELEASED_EMA_DECAY,
@@ -603,6 +606,21 @@ def validate_training_run(
         raise ValueError(
             "Apache reference objective evidence is missing"
         )
+    objective_config = objective.get("config")
+    if not isinstance(objective_config, dict):
+        raise ValueError(
+            "Apache reference objective config evidence is missing"
+        )
+    scalar_contract = validate_released_scalar_contract(
+        config,
+        model_config,
+        objective_config,
+    )
+    if recipe.get("scalar_contract") != scalar_contract:
+        raise ValueError(
+            "reported released scalar contract does not match raw training evidence"
+        )
+
     assets = objective.get("assets")
     if not isinstance(assets, dict):
         raise ValueError(
@@ -791,6 +809,9 @@ def qualify_training_run(
         "image_size": RELEASED_IMAGE_SIZE,
         "geo_budget": RELEASED_GEO_BUDGET,
         "final_budget": RELEASED_FINAL_BUDGET,
+        "scalar_contract": training[
+            "training_recipe"
+        ]["scalar_contract"],
     }
 
 
