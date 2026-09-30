@@ -25,6 +25,9 @@ from apache_training_recipe import (
     RELEASED_PHOTOMETRIC_AUGMENT,
     RELEASED_TEXT_DIM,
 )
+from make_apache_object_embeddings import (
+    validate_object_bank_evidence,
+)
 from apache_mixture import (
     RELEASED_MICRO_BATCH_SIZE,
     RELEASED_MIX_FRACTIONS,
@@ -35,7 +38,7 @@ from apache_mixture import (
 )
 
 
-CORPUS_SCHEMA = "kfcore.apache-released-corpus/1"
+CORPUS_SCHEMA = "kfcore.apache-released-corpus/2"
 QUALIFICATION_SCHEMA = "kfcore.apache-release-training-qualification/1"
 TRAINING_SCHEMA = "kfcore.relation-training-run/1"
 REFERENCE_SOURCE_COMMIT = (
@@ -244,6 +247,22 @@ def validate_corpus(
         "predicate_embeddings_sha256": require_sha256(
             payload.get("predicate_embeddings_sha256"),
             "predicate_embeddings_sha256",
+        ),
+        "text_student_sha256": require_sha256(
+            payload.get("text_student_sha256"),
+            "text_student_sha256",
+        ),
+        "tokenizer_contract_sha256": require_sha256(
+            payload.get("tokenizer_contract_sha256"),
+            "tokenizer_contract_sha256",
+        ),
+        "object_embeddings_tensor_sha256": require_sha256(
+            payload.get("object_embeddings_tensor_sha256"),
+            "object_embeddings_tensor_sha256",
+        ),
+        "object_labels_sha256": require_sha256(
+            payload.get("object_labels_sha256"),
+            "object_labels_sha256",
         ),
         "vocabulary_sha256": require_sha256(
             payload.get("vocabulary_sha256"),
@@ -697,6 +716,17 @@ def validate_training_run(
             assets.get(key),
             key,
         )
+    object_embeddings = assets.get(
+        "object_embeddings"
+    )
+    if not isinstance(object_embeddings, dict):
+        raise ValueError(
+            "Apache released objective requires object-bank provenance"
+        )
+    validate_object_bank_evidence(
+        object_embeddings,
+        required_dim=RELEASED_TEXT_DIM,
+    )
 
     source_hashes = mixture.get(
         "source_annotation_sha256"
@@ -785,6 +815,32 @@ def qualify_training_run(
     objective_assets = training[
         "apache_reference_objective"
     ]["assets"]
+    object_bank = objective_assets[
+        "object_embeddings"
+    ]
+    for training_key, corpus_key in (
+        (
+            "text_student_sha256",
+            "text_student_sha256",
+        ),
+        (
+            "tokenizer_contract_sha256",
+            "tokenizer_contract_sha256",
+        ),
+        (
+            "tensor_sha256",
+            "object_embeddings_tensor_sha256",
+        ),
+        (
+            "object_labels_sha256",
+            "object_labels_sha256",
+        ),
+    ):
+        if object_bank[training_key] != corpus[corpus_key]:
+            raise ValueError(
+                f"object-bank {training_key} does not match corpus manifest"
+            )
+
     asset_pairs = (
         (
             "source_column_allow_sha256",
@@ -847,6 +903,18 @@ def qualify_training_run(
         ),
         "exclude_ids_sha256": corpus[
             "exclude_ids_sha256"
+        ],
+        "text_student_sha256": corpus[
+            "text_student_sha256"
+        ],
+        "tokenizer_contract_sha256": corpus[
+            "tokenizer_contract_sha256"
+        ],
+        "object_embeddings_tensor_sha256": corpus[
+            "object_embeddings_tensor_sha256"
+        ],
+        "object_labels_sha256": corpus[
+            "object_labels_sha256"
         ],
         "epochs": RELEASED_EPOCHS,
         "draws_per_epoch": (
