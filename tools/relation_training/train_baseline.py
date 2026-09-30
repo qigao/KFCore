@@ -19,6 +19,7 @@ from apache_training_recipe import (
     backbone_provenance,
     build_reference_optimizer,
     build_reference_scheduler,
+    resolve_training_epochs,
 )
 from apache_objective import (
     ApacheObjectiveConfig,
@@ -381,13 +382,10 @@ def main() -> None:
     reference_training = (
         args.training_recipe == "apache-reference"
     )
-    resolved_epochs = (
-        int(args.epochs)
-        if args.epochs is not None
-        else (12 if reference_training else 5)
+    resolved_epochs = resolve_training_epochs(
+        args.epochs,
+        recipe=args.training_recipe,
     )
-    if resolved_epochs <= 0:
-        raise ValueError("--epochs must be positive")
     if reference_training and not apache_mode:
         raise ValueError(
             "--training-recipe apache-reference requires "
