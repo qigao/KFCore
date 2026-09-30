@@ -710,15 +710,15 @@ class RelationModelTest(unittest.TestCase):
         self.assertEqual(model.config.max_boxes, 40)
         self.assertEqual(model.apache_pair_projection.out_features, 512)
         self.assertEqual(
-            model.apache_relation_transformer.d_model,
+            model.apache_relation_transformer.scene_proj.out_features,
             512,
         )
         self.assertEqual(
-            model.apache_deformable_read.d_model,
-            512,
+            tuple(model.apache_deformable_read.norm.normalized_shape),
+            (512,),
         )
         self.assertEqual(
-            model.apache_relation_interaction.d_model,
+            model.apache_relation_interaction.scene_proj.out_features,
             512,
         )
         self.assertEqual(
