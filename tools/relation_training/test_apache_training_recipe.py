@@ -13,10 +13,13 @@ from apache_training_recipe import (
     backbone_provenance,
     configure_backbone_trainability,
     gradient_health,
+    LEGACY_DEFAULT_HIDDEN_DIM,
     LEGACY_DEFAULT_MAX_BOXES,
+    RELEASED_D_MODEL,
     RELEASED_MAX_BOXES,
     module_state_sha256,
     resolve_training_epochs,
+    resolve_training_hidden_dim,
     resolve_training_max_boxes,
     tap_fusion_weights,
 )
@@ -83,6 +86,33 @@ def build_model() -> KFRelationModel:
 
 
 class ApacheTrainingRecipeTest(unittest.TestCase):
+    def test_hidden_dim_defaults_and_reference_fail_fast(self):
+        self.assertEqual(
+            resolve_training_hidden_dim(None, recipe="legacy"),
+            LEGACY_DEFAULT_HIDDEN_DIM,
+        )
+        self.assertEqual(
+            resolve_training_hidden_dim(None, recipe="apache-reference"),
+            RELEASED_D_MODEL,
+        )
+        self.assertEqual(
+            resolve_training_hidden_dim(384, recipe="legacy"),
+            384,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "d_model=512",
+        ):
+            resolve_training_hidden_dim(
+                256,
+                recipe="apache-reference",
+            )
+        with self.assertRaises(ValueError):
+            resolve_training_hidden_dim(
+                0,
+                recipe="legacy",
+            )
+
     def test_max_boxes_defaults_and_reference_fail_fast(self):
         self.assertEqual(
             resolve_training_max_boxes(None, recipe="legacy"),
