@@ -437,6 +437,81 @@ The train manifest alone determines the weights. `training.json` records:
 K=48 and whitened CLIP prototypes. The final compare job rejects any
 dataset/prototype/parameter-count drift before reporting metric deltas.
 
+## Consolidated relation qualification report
+
+Release evidence for #102 must bind quality and latency to the same immutable
+runtime context. KFCore uses a separate context sidecar rather than changing the
+existing detector-ceiling schema.
+
+Context schema:
+
+```json
+{
+  "schema": "kfcore.relation-qualification-context/1",
+  "relation_model_sha256": "...",
+  "vocabulary_sha256": "...",
+  "relation_config_sha256": "...",
+  "detector_model_sha256": "...",
+  "detector_config_sha256": "...",
+  "backend": "onnxruntime-cpu",
+  "device": "cpu",
+  "relation_model_type": "relation.open-vocabulary",
+  "detector_id": "...",
+  "max_boxes": 32,
+  "vocabulary_size": 19103
+}
+```
+
+The stable, sorted JSON form is SHA-256 hashed. The latency artifact must carry
+that exact `context_sha256`.
+
+Latency schema:
+
+```text
+kfcore.scene-behavior-latency/1
+
+samples
+context_sha256
+stages_ms:
+  detector
+  tracker
+  region_prepare
+  relation
+  assembly
+  temporal
+  total
+
+each stage:
+  p50 / p90 / p95 / p99 / mean
+
+cardinality:
+  detections_mean
+  tracked_objects_mean
+  relation_edges_mean
+  events_mean
+  pair_states_mean
+```
+
+Create the final JSON + Markdown report with:
+
+```bash
+python tools/relation_training/make_relation_qualification_report.py \
+  --context qualification-context.json \
+  --quality detector-relation-ceiling.json \
+  --latency scene-behavior-latency.json \
+  --out-json qualification.json \
+  --out-md qualification.md
+```
+
+The combiner rejects:
+- latency collected under a different context hash;
+- detector id/model/config drift between quality evidence and context;
+- invalid/non-monotonic latency percentiles;
+- malformed detector failure decomposition.
+
+This prevents a fast latency run from one backend/model/vocabulary from being
+published beside quality numbers from another configuration.
+
 ## Detector-box recoverability ceiling
 
 GT-box relation metrics do not reveal whether a failure came from the detector,
