@@ -49,6 +49,9 @@ def save_checkpoint(
             "apache_box_token_dropout": (
                 model.config.apache_box_token_dropout
             ),
+            "apache_pair_negative_floor": (
+                model.config.apache_pair_negative_floor
+            ),
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),
