@@ -149,6 +149,16 @@ static int ekf_identity_transition(float* x_pred, float* Phi, const float* x, in
     return 0;
 }
 
+static int ekf_counting_transition(float* x_pred, float* Phi, const float* x,
+                                   int n, void* user)
+{
+    int* calls = (int*)user;
+    ++(*calls);
+    memcpy(x_pred, x, sizeof(float) * (size_t)n);
+    fill_identity(Phi, (size_t)n);
+    return 0;
+}
+
 static int ekf_identity_measurement(float* z_pred, float* Ht, const float* x,
                                     int n, int m, void* user)
 {
@@ -234,6 +244,17 @@ static void test_ekf_workspace_contract(void)
                    0.0f, 0, NULL, workspace,
                    sizeof(workspace) / sizeof(workspace[0])),
                KFCORE_KALMAN_OK);
+
+    {
+        int callback_calls = 0;
+        expect_int("EKF invalid process-noise arguments",
+                   kalman_ekf_takasu_predict(
+                       x, P, ekf_counting_transition, NULL, NULL, N, 1,
+                       &callback_calls, workspace,
+                       sizeof(workspace) / sizeof(workspace[0])),
+                   KFCORE_KALMAN_INVALID_ARGUMENT);
+        expect_int("EKF invalid arguments skip callback", callback_calls, 0);
+    }
 
     {
         int callback_failure = 1;
