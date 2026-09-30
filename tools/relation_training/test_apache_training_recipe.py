@@ -19,6 +19,8 @@ from apache_training_recipe import (
     LEGACY_DEFAULT_AUGMENT,
     LEGACY_DEFAULT_IMAGE_SIZE,
     LEGACY_DEFAULT_PAIR_BUDGET,
+    RELEASED_AMP,
+    RELEASED_AMP_DTYPE,
     RELEASED_EMA_DECAY,
     RELEASED_IMAGE_SIZE,
     RELEASED_PHOTOMETRIC_AUGMENT,
@@ -498,6 +500,30 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             config.final_budget,
             RELEASED_FINAL_BUDGET,
         )
+        self.assertIs(
+            config.amp,
+            RELEASED_AMP,
+        )
+        self.assertEqual(
+            config.amp_dtype,
+            RELEASED_AMP_DTYPE,
+        )
+
+    def test_reference_precision_config_rejects_drift(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "amp=true",
+        ):
+            ApacheTrainingRecipeConfig(
+                amp=False,
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            "amp_dtype=bf16",
+        ):
+            ApacheTrainingRecipeConfig(
+                amp_dtype="fp16",
+            )
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
         model = build_model()
