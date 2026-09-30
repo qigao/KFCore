@@ -1606,6 +1606,7 @@ The command fails unless the run has all of the following:
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
+- deterministic source-column derivation from the same released pack metadata;
 - deterministic pair-opportunity rebuild evidence from the same MegaSG pack;
 - matching vocabulary, named predicate/object banks and derived spatial-routing hashes;
 - deterministic predicate/object bank derivation from the released text student + tokenizer bundle;
@@ -1740,6 +1741,42 @@ Full-reference qualification binds the training warm-start's
 `spatial_flags_sha256` to this derivation and cross-checks the derived
 spatial/semantic counts against the predicate-bank row count. An arbitrary
 hand-authored sidecar cannot qualify as the released routing input.
+
+### Released source-column negative mask
+
+The released recipe restricts negative predicate columns for **HICO only**:
+
+```text
+source order:
+  megasg_clean
+  vg_raw
+  hicodet
+
+restrict_neg_sources:
+  hicodet
+```
+
+The runtime table starts with every source allowed to contrast against every
+union predicate. The HICO row is then replaced by the exact intersection of
+`hicodet/train/meta.json::predicates` with the union predicate vocabulary.
+Unknown HICO-local predicates are ignored, matching upstream; local predicate
+order does not affect union-column positions.
+
+`apache_source_columns.py` materializes the existing
+`kfcore.predicate-source-allow/1` sidecar deterministically and records:
+- source order and exact restricted-source set;
+- union predicate order/count/hash;
+- every source `meta.json` SHA-256;
+- each local predicate order/count/hash;
+- ignored local predicates;
+- allowed predicate order/count/hash;
+- emitted sidecar SHA-256.
+
+Released qualification reconstructs the sidecar from this evidence and requires
+its SHA-256 to equal the exact asset consumed by training. It also requires each
+source `meta.json` hash to match the same pack metadata used by the spatial
+routing derivation, and the union predicate-order hash to match the named
+predicate bank from the text-bank derivation.
 
 ### Released text-bank derivation
 
