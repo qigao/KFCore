@@ -245,6 +245,10 @@ def validate_corpus(
             payload.get("predicate_embeddings_sha256"),
             "predicate_embeddings_sha256",
         ),
+        "object_embeddings_sha256": require_sha256(
+            payload.get("object_embeddings_sha256"),
+            "object_embeddings_sha256",
+        ),
         "vocabulary_sha256": require_sha256(
             payload.get("vocabulary_sha256"),
             "vocabulary_sha256",
@@ -692,10 +696,58 @@ def validate_training_run(
         "ontology_meta_sha256",
         "ontology_npz_sha256",
         "neg_rate_table_sha256",
+        "object_embeddings_sha256",
     ):
         require_sha256(
             assets.get(key),
             key,
+        )
+
+    object_shape = assets.get(
+        "object_embeddings_shape"
+    )
+    object_order = assets.get(
+        "object_label_order"
+    )
+    if (
+        not isinstance(object_shape, list)
+        or len(object_shape) != 2
+        or object_shape[1] != RELEASED_TEXT_DIM
+        or not isinstance(object_shape[0], int)
+        or isinstance(object_shape[0], bool)
+        or object_shape[0] <= 0
+    ):
+        raise ValueError(
+            "released qualification requires object embeddings [O,512]"
+        )
+    if (
+        not isinstance(object_order, list)
+        or len(object_order) != object_shape[0]
+        or any(
+            not isinstance(name, str) or not name
+            for name in object_order
+        )
+        or len(set(object_order)) != len(object_order)
+    ):
+        raise ValueError(
+            "released qualification requires exact object-label order evidence"
+        )
+    object_bank = assets.get("object_bank")
+    if (
+        not isinstance(object_bank, dict)
+        or object_bank.get("schema")
+        != "kfcore.apache-object-text-bank/1"
+        or object_bank.get("artifact_sha256")
+        != assets["object_embeddings_sha256"]
+        or object_bank.get("shape")
+        != object_shape
+        or object_bank.get("object_label_order")
+        != object_order
+        or object_bank.get("text_dim")
+        != RELEASED_TEXT_DIM
+    ):
+        raise ValueError(
+            "released qualification requires named object-bank provenance"
         )
 
     source_hashes = mixture.get(
@@ -802,6 +854,10 @@ def qualify_training_run(
             "neg_rate_table_sha256",
             "neg_rate_table_sha256",
         ),
+        (
+            "object_embeddings_sha256",
+            "object_embeddings_sha256",
+        ),
     )
     for training_key, corpus_key in asset_pairs:
         if (
@@ -870,6 +926,12 @@ def qualify_training_run(
         "image_size": RELEASED_IMAGE_SIZE,
         "geo_budget": RELEASED_GEO_BUDGET,
         "final_budget": RELEASED_FINAL_BUDGET,
+        "object_embeddings_sha256": corpus[
+            "object_embeddings_sha256"
+        ],
+        "object_embeddings_shape": training[
+            "apache_reference_objective"
+        ]["assets"]["object_embeddings_shape"],
         "precision": training[
             "training_recipe"
         ]["precision"],

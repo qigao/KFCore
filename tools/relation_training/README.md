@@ -1606,7 +1606,7 @@ The command fails unless the run has all of the following:
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
-- matching vocabulary and predicate-embedding hashes;
+- matching vocabulary, predicate-embedding and named object-bank hashes;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
 - 12 complete epochs;
@@ -1677,6 +1677,24 @@ CPU tests may exercise the BF16 autocast software path, but a released-run
 qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
+
+### Released object text bank
+
+The released objective uses `lambda_obj=0.10`, so object-category text
+embeddings are part of the training input identity. For `apache-reference`,
+KFCore accepts the Apache-style `obj_embeds.npz` contract:
+
+```text
+names       [O]      exact object-label order
+embeddings  [O,512]  object text directions
+```
+
+The `names` array must exactly equal the object order in the relation
+vocabulary. A bare tensor is not sufficient for released qualification because
+its row semantics cannot be proven. Training evidence records the NPZ
+SHA-256, shape, source dtype and object-label order; the released corpus
+manifest carries the same object-bank SHA-256, and qualification requires the
+two artifacts to match exactly.
 
 ### Released text-space width
 
