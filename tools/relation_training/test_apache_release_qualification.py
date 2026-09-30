@@ -9,6 +9,13 @@ from apache_mixture import (
     RELEASED_SEED,
     RELEASED_SOURCE_NAMES,
 )
+from apache_released_contract import (
+    RELEASED_MODEL_SCALARS,
+    RELEASED_OBJECTIVE_SCALARS,
+    RELEASED_RECIPE_SCALARS,
+    RELEASED_STRUCTURE,
+    validate_released_scalar_contract,
+)
 from apache_release_qualification import (
     CORPUS_SCHEMA,
     QUALIFICATION_SCHEMA,
@@ -83,6 +90,29 @@ def corpus() -> dict:
 
 def training() -> dict:
     c = corpus()
+    recipe_scalars = dict(
+        RELEASED_RECIPE_SCALARS
+    )
+    model_scalars = dict(
+        RELEASED_MODEL_SCALARS
+    )
+    objective_scalars = dict(
+        RELEASED_OBJECTIVE_SCALARS
+    )
+    scalar_contract = (
+        validate_released_scalar_contract(
+            recipe=recipe_scalars,
+            model=model_scalars,
+            objective=objective_scalars,
+        )
+    )
+    structure_contract = {
+        "schema": "kfcore.apache-released-structure/1",
+        "matches_released": True,
+        **RELEASED_STRUCTURE,
+        "box_pe_num_freqs": 16,
+        "box_pe_max_octave": 7.0,
+    }
     return {
         "schema": "kfcore.relation-training-run/1",
         "backbone": "hf_hub:timm/vit_small_patch16_dinov3.lvd1689m",
@@ -104,6 +134,7 @@ def training() -> dict:
                 "final_budget": 128,
                 "amp": True,
                 "amp_dtype": "bf16",
+                **recipe_scalars,
             },
             "effective_batch_size": 128,
             "weight_source": "ema",
@@ -133,6 +164,8 @@ def training() -> dict:
                 "grad_scaler": False,
                 "released_cuda_execution": True,
             },
+            "scalar_contract": scalar_contract,
+            "structure_contract": structure_contract,
             "sampler_budget": {
                 "geo_budget": 400,
                 "final_budget": 128,
@@ -176,6 +209,7 @@ def training() -> dict:
             "pair_sampler_contract": "apache",
             "relation_context_contract": "apache",
             "predicate_head_contract": "apache",
+            **model_scalars,
         },
         "checkpoint_sha256": h("b"),
         "predicate_embedding_shape": [3, 512],
@@ -186,6 +220,7 @@ def training() -> dict:
             "vocabulary_sha256"
         ],
         "apache_reference_objective": {
+            "config": objective_scalars,
             "assets": {
                 "source_column_allow_sha256": c[
                     "source_column_allow_sha256"
