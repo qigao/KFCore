@@ -13,6 +13,13 @@ from benchmark import (
     RelationVocabulary,
     stable_report_json,
 )
+from apache_mixture import (
+    DistributedWeightedSampler,
+    load_relation_mixture,
+    realized_source_draws,
+    sample_weights_from_fractions,
+    validate_mixture_disjoint_validation,
+)
 from apache_multiscale import scale_ladder
 from apache_pair_sampler import PairOpportunityTable
 from apache_training_recipe import (
@@ -38,6 +45,7 @@ from make_predicate_embeddings import gram_diagnostics, tensor_sha256
 from model import KFRelationModel, RelationModelConfig, TimmDinoV3Backbone
 from training import (
     FrozenBaselineConfig,
+    RelationMixtureTrainingDataset,
     RelationTrainingDataset,
     build_predicate_weighting,
     build_zero_support_negative_weights,
@@ -101,7 +109,23 @@ def main() -> None:
             "on canonical GT-box annotations."
         )
     )
-    parser.add_argument("--train-annotations", required=True)
+    parser.add_argument(
+        "--train-annotations",
+        default="",
+        help=(
+            "Single-source training JSONL. Mutually exclusive with "
+            "--train-mixture."
+        ),
+    )
+    parser.add_argument(
+        "--train-mixture",
+        default="",
+        help=(
+            "JSON mixture contract for multi-source training. Sources carry "
+            "name/annotations/image_root/fraction and are assigned source_id "
+            "by mixture order."
+        ),
+    )
     parser.add_argument("--validation-annotations", required=True)
     parser.add_argument("--vocabulary", required=True)
     parser.add_argument("--image-root", required=True)
@@ -407,15 +431,39 @@ def main() -> None:
         )
 
     vocabulary = RelationVocabulary.load(args.vocabulary)
-    train_manifest = DatasetManifest.load(
-        args.train_annotations, vocabulary
-    )
+    if bool(args.train_annotations) == bool(args.train_mixture):
+        raise ValueError(
+            "exactly one of --train-annotations or --train-mixture is required"
+        )
+
+    training_mixture = None
+    if args.train_mixture:
+        training_mixture = load_relation_mixture(
+            args.train_mixture,
+            vocabulary,
+        )
+        train_manifest = training_mixture.combined_manifest
+    else:
+        train_manifest = DatasetManifest.load(
+            args.train_annotations,
+            vocabulary,
+        )
+
     validation_manifest = DatasetManifest.load(
-        args.validation_annotations, vocabulary
+        args.validation_annotations,
+        vocabulary,
     )
-    validate_disjoint_splits(
-        train_manifest, validation_manifest
-    )
+    if training_mixture is not None:
+        validate_mixture_disjoint_validation(
+            training_mixture,
+            validation_manifest,
+            validation_image_root=args.image_root,
+        )
+    else:
+        validate_disjoint_splits(
+            train_manifest,
+            validation_manifest,
+        )
 
     apache_mode = (
         args.predicate_objective == "apache-reference"
@@ -804,6 +852,15 @@ def main() -> None:
             args.apache_source_column_allow,
             vocabulary.predicates,
         )
+        if (
+            training_mixture is not None
+            and tuple(apache_source_names)
+            != training_mixture.config.source_names
+        ):
+            raise ValueError(
+                "Apache source-column table order must exactly match "
+                "training mixture source order"
+            )
         max_source_id = max(
             example.source_id
             for example in train_manifest.examples
@@ -974,18 +1031,31 @@ def main() -> None:
             object_text_bank=apache_object_embeddings,
         )
 
-    train_dataset = RelationTrainingDataset(
-        train_manifest,
-        image_root=args.image_root,
-        image_size=model.config.image_size,
-        max_boxes=model.config.max_boxes,
-        predicate_count=len(vocabulary.predicates),
-        object_labels=(
-            vocabulary.object_labels
-            if apache_mode
-            else ()
-        ),
-    )
+    if training_mixture is not None:
+        train_dataset = RelationMixtureTrainingDataset(
+            training_mixture,
+            image_size=model.config.image_size,
+            max_boxes=model.config.max_boxes,
+            predicate_count=len(vocabulary.predicates),
+            object_labels=(
+                vocabulary.object_labels
+                if apache_mode
+                else ()
+            ),
+        )
+    else:
+        train_dataset = RelationTrainingDataset(
+            train_manifest,
+            image_root=args.image_root,
+            image_size=model.config.image_size,
+            max_boxes=model.config.max_boxes,
+            predicate_count=len(vocabulary.predicates),
+            object_labels=(
+                vocabulary.object_labels
+                if apache_mode
+                else ()
+            ),
+        )
     multi_scale_resolutions = None
     if reference_training and args.apache_multi_scale:
         parts = [
@@ -1005,11 +1075,28 @@ def main() -> None:
             patch=int(model.backbone.patch_size),
         )
 
+    mixture_sampler = None
+    mixture_report = None
+    if training_mixture is not None:
+        mixture_weights = sample_weights_from_fractions(
+            training_mixture.source_of_index,
+            training_mixture.config.fractions,
+        )
+        mixture_sampler = DistributedWeightedSampler(
+            mixture_weights,
+            num_replicas=1,
+            rank=0,
+            num_samples=training_mixture.draws_per_epoch,
+            seed=training_mixture.config.seed,
+        )
+        mixture_report = training_mixture.report()
+
     loader = make_training_loader(
         train_dataset,
         baseline_config,
         resolutions=multi_scale_resolutions,
         drop_last=reference_training,
+        sampler=mixture_sampler,
     )
     reference_recipe_config = None
     optimizer_report = None
@@ -1075,8 +1162,15 @@ def main() -> None:
             "batch_sampler",
             None,
         )
+        loader_sampler = getattr(
+            loader,
+            "sampler",
+            None,
+        )
         if hasattr(batch_sampler, "set_epoch"):
             batch_sampler.set_epoch(epoch - 1)
+        elif hasattr(loader_sampler, "set_epoch"):
+            loader_sampler.set_epoch(epoch - 1)
 
         losses = train_epoch(
             model,
@@ -1107,7 +1201,22 @@ def main() -> None:
                 else 1
             ),
         )
-        history.append({"epoch": epoch, **losses})
+        epoch_report: dict[str, object] = {
+            "epoch": epoch,
+            **losses,
+        }
+        if (
+            mixture_sampler is not None
+            and training_mixture is not None
+        ):
+            epoch_report["source_mixture_draw"] = (
+                realized_source_draws(
+                    mixture_sampler,
+                    training_mixture.source_of_index,
+                    len(training_mixture.config.sources),
+                )
+            )
+        history.append(epoch_report)
         print(json.dumps(history[-1], sort_keys=True))
 
     backbone_provenance_final = backbone_provenance(
@@ -1192,8 +1301,11 @@ def main() -> None:
                 ),
                 "backbone_initial": backbone_provenance_initial,
                 "backbone_final": backbone_provenance_final,
+                "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
+        "train_mixture": mixture_report,
+            "train_mixture": mixture_report,
             "validation_annotations_sha256": (
                 validation_manifest.annotations_sha256
             ),
@@ -1290,6 +1402,7 @@ def main() -> None:
             "backbone_trainable_parameter_count": (
                 backbone_trainable_parameter_count
             ),
+            "source_mixture": mixture_report,
         },
         "device": str(device),
         "train_examples": len(train_manifest.examples),
