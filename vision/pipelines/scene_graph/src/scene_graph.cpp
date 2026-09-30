@@ -21,6 +21,8 @@ public:
     [[nodiscard]] virtual bool supports_dynamic_vocabulary() const noexcept = 0;
     virtual void set_vocabulary(relation::PredicateVocabulary vocabulary) = 0;
     [[nodiscard]] virtual std::uint64_t vocabulary_version() const noexcept = 0;
+    [[nodiscard]] virtual const std::vector<std::string>&
+    predicates() const noexcept = 0;
     [[nodiscard]] virtual relation::RelationFrame
     infer(const image::ImageView& image,
           const std::vector<relation::Region>& regions) = 0;
@@ -82,6 +84,20 @@ public:
         return 0U;
     }
 
+    const std::vector<std::string>&
+    predicates() const noexcept override
+    {
+        if constexpr (
+            std::is_same_v<
+                Model,
+                relation::OpenVocabularyRelation>)
+        {
+            return model_->predicates();
+        }
+        static const std::vector<std::string> empty;
+        return empty;
+    }
+
     relation::RelationFrame
     infer(const image::ImageView& image,
           const std::vector<relation::Region>& regions) override
@@ -104,17 +120,24 @@ make_relation_runner(std::unique_ptr<Model> model)
 } // namespace
 struct SceneGraphPipeline::Impl final
 {
-    Impl(std::unique_ptr<yolo::YoloDetector> detector_value,
-         std::unique_ptr<RelationRunner> relation_value,
-         const SceneGraphPipelineOptions& options)
+    Impl(
+        std::unique_ptr<yolo::YoloDetector> detector_value,
+        std::unique_ptr<RelationRunner> relation_value,
+        std::unique_ptr<relation::PredicateTextEncoder> text_encoder_value,
+        std::unique_ptr<relation::PredicateRoutingGate> routing_gate_value,
+        const SceneGraphPipelineOptions& options)
         : detector(std::move(detector_value))
         , relation_model(std::move(relation_value))
+        , text_encoder(std::move(text_encoder_value))
+        , routing_gate(std::move(routing_gate_value))
         , tracking(options.tracking)
     {
     }
 
     std::unique_ptr<yolo::YoloDetector> detector;
     std::unique_ptr<RelationRunner> relation_model;
+    std::unique_ptr<relation::PredicateTextEncoder> text_encoder;
+    std::unique_ptr<relation::PredicateRoutingGate> routing_gate;
     yolo::ByteTrackSession tracking;
 };
 
@@ -140,6 +163,8 @@ SceneGraphPipeline::create(
     auto impl = std::make_unique<Impl>(
         std::move(detector),
         make_relation_runner(std::move(relation_model)),
+        nullptr,
+        nullptr,
         options);
     return std::unique_ptr<SceneGraphPipeline>(
         new SceneGraphPipeline(std::move(impl)));
@@ -160,6 +185,41 @@ SceneGraphPipeline::create(
     auto impl = std::make_unique<Impl>(
         std::move(detector),
         make_relation_runner(std::move(relation_model)),
+        nullptr,
+        nullptr,
+        options);
+    return std::unique_ptr<SceneGraphPipeline>(
+        new SceneGraphPipeline(std::move(impl)));
+}
+
+std::unique_ptr<SceneGraphPipeline>
+SceneGraphPipeline::create(
+    std::unique_ptr<yolo::YoloDetector> detector,
+    std::unique_ptr<relation::OpenVocabularyRelation> relation_model,
+    std::unique_ptr<relation::PredicateTextEncoder> text_encoder,
+    std::unique_ptr<relation::PredicateRoutingGate> routing_gate,
+    const SceneGraphPipelineOptions& options)
+{
+    if (!detector || !relation_model ||
+        !text_encoder || !routing_gate)
+    {
+        throw std::invalid_argument(
+            "SceneGraphPipeline live vocabulary requires detector, relation, text encoder, and routing gate");
+    }
+    if (text_encoder->embedding_dim() !=
+            relation_model->query_dim() ||
+        routing_gate->embedding_dim() !=
+            relation_model->query_dim())
+    {
+        throw std::invalid_argument(
+            "SceneGraphPipeline live vocabulary model dimensions do not match");
+    }
+
+    auto impl = std::make_unique<Impl>(
+        std::move(detector),
+        make_relation_runner(std::move(relation_model)),
+        std::move(text_encoder),
+        std::move(routing_gate),
         options);
     return std::unique_ptr<SceneGraphPipeline>(
         new SceneGraphPipeline(std::move(impl)));
@@ -197,6 +257,14 @@ bool SceneGraphPipeline::supports_dynamic_vocabulary() const noexcept
         impl_->relation_model->supports_dynamic_vocabulary();
 }
 
+bool SceneGraphPipeline::supports_live_predicates() const noexcept
+{
+    return supports_dynamic_vocabulary() &&
+        impl_ &&
+        static_cast<bool>(impl_->text_encoder) &&
+        static_cast<bool>(impl_->routing_gate);
+}
+
 void SceneGraphPipeline::set_vocabulary(
     relation::PredicateVocabulary vocabulary)
 {
@@ -209,6 +277,28 @@ void SceneGraphPipeline::set_vocabulary(
         std::move(vocabulary));
 }
 
+void SceneGraphPipeline::set_predicates(
+    const std::vector<std::string>& predicates)
+{
+    if (!impl_ || !impl_->relation_model)
+    {
+        throw std::logic_error(
+            "SceneGraphPipeline state is unavailable");
+    }
+    if (!impl_->text_encoder || !impl_->routing_gate)
+    {
+        throw std::logic_error(
+            "SceneGraphPipeline was not created with live predicate support");
+    }
+
+    relation::PredicateVocabulary candidate =
+        impl_->text_encoder->encode(predicates);
+    candidate = impl_->routing_gate->apply(
+        std::move(candidate));
+    impl_->relation_model->set_vocabulary(
+        std::move(candidate));
+}
+
 std::uint64_t
 SceneGraphPipeline::vocabulary_version() const noexcept
 {
@@ -217,6 +307,17 @@ SceneGraphPipeline::vocabulary_version() const noexcept
         return 0U;
     }
     return impl_->relation_model->vocabulary_version();
+}
+
+const std::vector<std::string>&
+SceneGraphPipeline::predicates() const noexcept
+{
+    static const std::vector<std::string> empty;
+    if (!impl_ || !impl_->relation_model)
+    {
+        return empty;
+    }
+    return impl_->relation_model->predicates();
 }
 
 void SceneGraphPipeline::reset_tracking() noexcept
