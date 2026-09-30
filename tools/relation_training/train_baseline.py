@@ -336,6 +336,61 @@ def main() -> None:
         train_manifest, validation_manifest
     )
 
+    apache_mode = (
+        args.predicate_objective == "apache-reference"
+    )
+    if apache_mode:
+        if (
+            args.pair_evidence_contract != "apache"
+            or args.pair_sampler_contract != "apache"
+            or args.relation_context_contract != "apache"
+            or args.predicate_head_contract != "apache"
+        ):
+            raise ValueError(
+                "apache-reference objective requires the full Apache "
+                "pair-evidence/sampler/context/predicate-head stack"
+            )
+        required_assets = {
+            "--apache-ontology-meta": args.apache_ontology_meta,
+            "--apache-ontology-npz": args.apache_ontology_npz,
+            "--apache-source-column-allow": (
+                args.apache_source_column_allow
+            ),
+        }
+        for flag, value in required_assets.items():
+            if not value:
+                raise ValueError(
+                    f"{flag} is required for apache-reference"
+                )
+        if args.apache_lambda_obj > 0.0:
+            if not args.apache_object_embeddings:
+                raise ValueError(
+                    "--apache-object-embeddings is required when "
+                    "--apache-lambda-obj > 0"
+                )
+            if not vocabulary.object_labels:
+                raise ValueError(
+                    "Apache object-text loss requires vocabulary objects"
+                )
+        if (
+            args.holdout_predicate
+            or args.mask_zero_support_predicates
+            or args.zero_support_negative_weight != 1.0
+        ):
+            raise ValueError(
+                "legacy holdout/zero-support knobs are not part of the "
+                "Apache reference objective"
+            )
+        if (
+            args.predicate_positive_weight_mode != "none"
+            or args.predicate_contrastive_hard_negative_count != 0
+            or args.predicate_calibration_loss_weight != 0.0
+        ):
+            raise ValueError(
+                "legacy predicate weighting/contrast/calibration knobs "
+                "cannot be combined with apache-reference"
+            )
+
     baseline_config = FrozenBaselineConfig(
         epochs=args.epochs,
         batch_size=args.batch_size,
@@ -368,16 +423,42 @@ def main() -> None:
         pair_loss_weight=args.pair_loss_weight,
         predicate_loss_weight=args.predicate_loss_weight,
         negative_pair_weight=args.negative_pair_weight,
-        predicate_objective=args.predicate_objective,
+        predicate_objective=(
+            "bce"
+            if apache_mode
+            else args.predicate_objective
+        ),
         predicate_contrastive_temperature=(
             args.predicate_contrastive_temperature
         ),
         predicate_contrastive_hard_negative_count=(
-            args.predicate_contrastive_hard_negative_count
+            0
+            if apache_mode
+            else args.predicate_contrastive_hard_negative_count
         ),
         predicate_calibration_loss_weight=(
-            args.predicate_calibration_loss_weight
+            0.0
+            if apache_mode
+            else args.predicate_calibration_loss_weight
         ),
+    )
+    apache_objective_config = (
+        ApacheObjectiveConfig(
+            infonce_temp=args.predicate_contrastive_temperature,
+            n_neg=args.apache_n_neg,
+            hard_frac=args.apache_hard_frac,
+            lambda_obj=args.apache_lambda_obj,
+            lambda_swap=args.apache_lambda_swap,
+            lambda_sigmoid=args.apache_lambda_sigmoid,
+            lambda_bg=args.apache_lambda_bg,
+            lambda_geo=args.apache_lambda_geo,
+            lambda_rel=args.apache_lambda_rel,
+            bg_topk=args.apache_bg_topk,
+            swap_margin=args.apache_swap_margin,
+            pair_negative_floor=args.apache_pair_negative_floor,
+        )
+        if apache_mode
+        else None
     )
     benchmark_config = BenchmarkConfig(
         top_ks=(20, 50, 100),
@@ -561,6 +642,67 @@ def main() -> None:
         args.predicate_embeddings,
         len(vocabulary.predicates),
     )
+
+    apache_ontology = None
+    apache_source_names: tuple[str, ...] = ()
+    apache_source_allow = None
+    apache_object_embeddings = None
+    apache_asset_report = None
+    if apache_mode:
+        apache_ontology = PredicateOntology.from_soft_supervision(
+            args.apache_ontology_meta,
+            args.apache_ontology_npz,
+        )
+        if apache_ontology.predicates != vocabulary.predicates:
+            raise ValueError(
+                "Apache ontology predicate order must match vocabulary"
+            )
+        (
+            apache_source_names,
+            apache_source_allow,
+        ) = load_source_column_allow(
+            args.apache_source_column_allow,
+            vocabulary.predicates,
+        )
+        max_source_id = max(
+            example.source_id
+            for example in train_manifest.examples
+        )
+        if max_source_id >= len(apache_source_names):
+            raise ValueError(
+                "training source_id exceeds Apache source-column table"
+            )
+        if args.apache_lambda_obj > 0.0:
+            apache_object_embeddings = load_predicate_embeddings(
+                args.apache_object_embeddings,
+                len(vocabulary.object_labels),
+            )
+            if (
+                apache_object_embeddings.shape[1]
+                != predicate_embeddings.shape[1]
+            ):
+                raise ValueError(
+                    "object/predicate embeddings must share text dimension"
+                )
+        apache_asset_report = {
+            "ontology_meta_sha256": sha256(
+                Path(args.apache_ontology_meta)
+            ),
+            "ontology_npz_sha256": sha256(
+                Path(args.apache_ontology_npz)
+            ),
+            "source_column_allow_sha256": sha256(
+                Path(args.apache_source_column_allow)
+            ),
+            "source_names": list(apache_source_names),
+            "ontology": apache_ontology.stats(),
+            "object_embeddings_sha256": (
+                sha256(Path(args.apache_object_embeddings))
+                if args.apache_object_embeddings
+                else None
+            ),
+        }
+
     backbone = TimmDinoV3Backbone.from_pretrained(
         args.backbone,
         train_backbone=False,
@@ -637,12 +779,29 @@ def main() -> None:
                 "Apache predicate routing warm start did not improve MSE"
             )
 
+    apache_objective = None
+    if apache_mode:
+        assert apache_ontology is not None
+        assert apache_source_allow is not None
+        assert apache_objective_config is not None
+        apache_objective = ApacheReferenceObjective(
+            apache_ontology,
+            config=apache_objective_config,
+            source_column_allow=apache_source_allow,
+            object_text_bank=apache_object_embeddings,
+        )
+
     train_dataset = RelationTrainingDataset(
         train_manifest,
         image_root=args.image_root,
         image_size=model.config.image_size,
         max_boxes=model.config.max_boxes,
         predicate_count=len(vocabulary.predicates),
+        object_labels=(
+            vocabulary.object_labels
+            if apache_mode
+            else ()
+        ),
     )
     loader = make_training_loader(
         train_dataset, baseline_config
@@ -673,6 +832,7 @@ def main() -> None:
             predicate_contrastive_negative_mask=(
                 predicate_contrastive_negative_mask
             ),
+            apache_objective=apache_objective,
         )
         history.append({"epoch": epoch, **losses})
         print(json.dumps(history[-1], sort_keys=True))
@@ -776,6 +936,18 @@ def main() -> None:
             },
             "predicate_adapter": predicate_adapter_report,
             "routing_warm_start": routing_warm_start,
+            "apache_reference_objective": (
+                {
+                    "config": (
+                        apache_objective_config.__dict__
+                        if apache_objective_config is not None
+                        else None
+                    ),
+                    "assets": apache_asset_report,
+                }
+                if apache_mode
+                else None
+            ),
             "history": history,
         },
     )
@@ -892,6 +1064,18 @@ def main() -> None:
         },
         "predicate_adapter": predicate_adapter_report,
         "routing_warm_start": routing_warm_start,
+        "apache_reference_objective": (
+            {
+                "config": (
+                    apache_objective_config.__dict__
+                    if apache_objective_config is not None
+                    else None
+                ),
+                "assets": apache_asset_report,
+            }
+            if apache_mode
+            else None
+        ),
         "history": history,
     }
 
