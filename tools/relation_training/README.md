@@ -1558,6 +1558,58 @@ benchmark.json
 training configuration, epoch losses and checkpoint SHA-256.
 `benchmark.json` is the canonical GT-box validation report.
 
+## Apache released-corpus qualification
+
+The Apache sampling implementation is not enough to claim that a checkpoint
+used the released training corpus. A full-reference run must first bind its
+three training sources to an explicit corpus manifest:
+
+```text
+kfcore.apache-released-corpus/1
+
+megasg_clean
+vg_raw
+hicodet
+```
+
+Every resolved source records an immutable origin/revision, the canonical
+training-annotation SHA-256 and its post-exclusion image count. A source may be
+recorded as `unresolved`, but unresolved provenance deliberately blocks
+full-reference qualification.
+
+This distinction matters for the public artifacts: the released model metadata
+names `megasg_clean + vg_raw + hicodet`, while the current public RA-4M
+dataset tree exposes the MegaSG pack but does not by itself establish the exact
+released `vg_raw` and `hicodet` pack identities. Do not substitute a source
+name for an artifact identity.
+
+After a real training run finishes:
+
+```bash
+python tools/relation_training/apache_release_qualification.py \
+  --corpus released-corpus.json \
+  --training build/full-reference/training.json \
+  --out build/full-reference/released-qualification.json
+```
+
+The command fails unless the run has all of the following:
+
+- the last Apache-2.0 source reference
+  `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
+- all three source identities resolved;
+- exact source annotation hashes and post-exclusion counts;
+- matching exclusion, source-column, ontology and pair-opportunity hashes;
+- matching vocabulary and predicate-embedding hashes;
+- the released 503,754-draw sampling stream;
+- full Apache pair-evidence/sampler/context/vocab-head contracts;
+- 12 complete epochs;
+- effective batch 128;
+- a concrete checkpoint SHA-256.
+
+The resulting qualification artifact binds the corpus manifest, training report
+and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
+qualification remain separate model-evidence gates.
+
 ## Checkpoint
 
 ```python
