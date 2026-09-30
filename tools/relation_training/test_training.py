@@ -21,6 +21,7 @@ from training import (
     evaluate_gt_boxes,
     freeze_backbone,
     make_training_loader,
+    photometric_jitter,
     prepare_example,
     seed_everything,
     train_epoch,
@@ -116,6 +117,124 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.directory.cleanup()
+
+    def test_photometric_jitter_matches_apache_formula(self):
+        image = torch.tensor(
+            [
+                [[0.1, 0.2], [0.3, 0.4]],
+                [[0.5, 0.6], [0.7, 0.8]],
+                [[0.2, 0.4], [0.6, 0.9]],
+            ],
+            dtype=torch.float32,
+        )
+        strength = 0.3
+        torch.manual_seed(777)
+        factors = [
+            float(
+                1.0
+                + (
+                    torch.rand(()) * 2.0
+                    - 1.0
+                )
+                * strength
+            )
+            for _ in range(3)
+        ]
+        expected = image * factors[0]
+        mean = expected.mean(
+            dim=(1, 2),
+            keepdim=True,
+        )
+        expected = (
+            expected - mean
+        ) * factors[1] + mean
+        luma = torch.tensor(
+            [0.299, 0.587, 0.114],
+            dtype=torch.float32,
+        ).view(3, 1, 1)
+        grey = (
+            expected * luma
+        ).sum(
+            dim=0,
+            keepdim=True,
+        )
+        expected = (
+            expected - grey
+        ) * factors[2] + grey
+        expected = expected.clamp(
+            0.0,
+            1.0,
+        )
+
+        torch.manual_seed(777)
+        actual = photometric_jitter(
+            image.clone(),
+            strength,
+        )
+        self.assertTrue(
+            torch.equal(
+                actual,
+                expected,
+            )
+        )
+        self.assertGreaterEqual(
+            float(actual.min()),
+            0.0,
+        )
+        self.assertLessEqual(
+            float(actual.max()),
+            1.0,
+        )
+        identity = image.clone()
+        self.assertIs(
+            photometric_jitter(
+                identity,
+                0.0,
+            ),
+            identity,
+        )
+
+    def test_photometric_augmentation_changes_only_image_tensor(self):
+        torch.manual_seed(778)
+        plain = prepare_example(
+            self.train_manifest.examples[0],
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+            augment=0.0,
+        )
+        torch.manual_seed(778)
+        augmented = prepare_example(
+            self.train_manifest.examples[0],
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+            augment=0.3,
+        )
+        self.assertFalse(
+            torch.equal(
+                plain["image"],
+                augmented["image"],
+            )
+        )
+        for key in (
+            "boxes",
+            "box_count",
+            "pair_targets",
+            "predicate_targets",
+            "cfa_predicate_labels",
+            "object_label_indices",
+            "source_id",
+        ):
+            self.assertTrue(
+                torch.equal(
+                    plain[key],
+                    augmented[key],
+                ),
+                key,
+            )
 
     def test_prepare_example_builds_runtime_and_multilabel_targets(self):
         prepared = prepare_example(
