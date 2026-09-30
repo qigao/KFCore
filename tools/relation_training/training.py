@@ -199,11 +199,19 @@ def prepare_example(
         (max_boxes, max_boxes, predicate_count),
         dtype=torch.float32,
     )
+    cfa_predicate_labels = torch.full(
+        (max_boxes, max_boxes),
+        -1,
+        dtype=torch.int64,
+    )
     for subject, predicate, object_ in example.relations:
         if predicate >= predicate_count:
             raise ValueError("relation predicate exceeds model vocabulary")
         pair_targets[subject, object_] = 1.0
         predicate_targets[subject, object_, predicate] = 1.0
+        # Apache sampler/CFA contract: last predicate annotation wins for
+        # the per-pair feature-mixing label while the loss remains multi-hot.
+        cfa_predicate_labels[subject, object_] = int(predicate)
 
     return {
         "image": image,
@@ -213,6 +221,7 @@ def prepare_example(
         ),
         "pair_targets": pair_targets,
         "predicate_targets": predicate_targets,
+        "cfa_predicate_labels": cfa_predicate_labels,
         "object_label_indices": object_label_indices,
         "source_id": torch.tensor(
             example.source_id,
@@ -533,6 +542,11 @@ def train_epoch(
         box_counts = batch["box_count"].to(device)
         pair_targets = batch["pair_targets"].to(device)
         predicate_targets = batch["predicate_targets"].to(device)
+        cfa_predicate_labels = batch.get(
+            "cfa_predicate_labels"
+        )
+        if cfa_predicate_labels is not None:
+            cfa_predicate_labels = cfa_predicate_labels.to(device)
         object_label_indices = batch.get(
             "object_label_indices"
         )
@@ -560,6 +574,7 @@ def train_epoch(
             boxes,
             box_counts,
             pair_targets=pair_targets,
+            cfa_predicate_labels=cfa_predicate_labels,
             entity_labels=(
                 object_label_indices
                 if apache_objective is not None
