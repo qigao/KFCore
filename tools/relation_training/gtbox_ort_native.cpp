@@ -4,7 +4,9 @@
 #include "kfcore/runtime/resolver.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
