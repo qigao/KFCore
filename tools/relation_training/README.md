@@ -1565,7 +1565,7 @@ used the released training corpus. A full-reference run must first bind its
 three training sources to an explicit corpus manifest:
 
 ```text
-kfcore.apache-released-corpus/1
+kfcore.apache-released-corpus/2
 
 megasg_clean
 vg_raw
@@ -1607,6 +1607,7 @@ The command fails unless the run has all of the following:
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
 - matching vocabulary and predicate-embedding hashes;
+- matching text-student, tokenizer-contract, and derived object-bank provenance;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
 - 12 complete epochs;
@@ -1638,6 +1639,31 @@ The 400/128 evidence is read from the constructed
 synthetic ONNX/ORT gate uses a tiny large-patch backbone to exercise the exact
 external shape without making a real DINOv3 448 export part of every CI run.
 Legacy and diagnostic runs may still choose smaller shapes.
+
+### Released object-text bank provenance
+
+The released `lambda_obj=0.1` objective uses an object-category text bank
+derived from the **same Apache text student** used by the release. It is not an
+arbitrary compatible `[O,512]` matrix.
+
+Upstream encodes the exact ordered object labels with:
+
+```text
+"{p}"
+"a photo of a {p}"
+```
+
+Each template is encoded independently, the two normalized embeddings are
+summed, and the sum is L2-normalized. KFCore's
+`make_apache_object_embeddings.py` reproduces that rule and writes both the
+tensor and `kfcore.apache-object-embeddings/1` provenance.
+
+For `apache-reference`, training requires the tensor, provenance JSON, exact
+text-student checkpoint, and local tokenizer contract. Their hashes are
+cross-checked before training. Released-corpus schema
+`kfcore.apache-released-corpus/2` additionally binds the semantic object-bank
+tensor hash, text-student hash, tokenizer-contract hash, and ordered
+object-label hash into final qualification.
 
 ### Released scalar hyperparameter contract
 
