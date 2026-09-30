@@ -13,7 +13,10 @@ from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
     LEGACY_DEFAULT_AUGMENT,
+    LEGACY_DEFAULT_IMAGE_SIZE,
+    LEGACY_DEFAULT_PAIR_BUDGET,
     RELEASED_EMA_DECAY,
+    RELEASED_IMAGE_SIZE,
     RELEASED_PHOTOMETRIC_AUGMENT,
     RELEASED_TEXT_DIM,
     build_reference_optimizer,
@@ -29,7 +32,9 @@ from apache_training_recipe import (
     resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
+    resolve_training_image_size,
     resolve_training_max_boxes,
+    resolve_training_pair_budget,
     select_artifact_model,
     state_dict_sha256,
     validate_training_text_dim,
@@ -124,6 +129,52 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             resolve_training_hidden_dim(
                 0,
                 recipe="legacy",
+            )
+
+    def test_image_and_pair_budget_reference_gates(self):
+        self.assertEqual(
+            resolve_training_image_size(
+                None,
+                recipe="legacy",
+            ),
+            LEGACY_DEFAULT_IMAGE_SIZE,
+        )
+        self.assertEqual(
+            resolve_training_image_size(
+                None,
+                recipe="apache-reference",
+            ),
+            RELEASED_IMAGE_SIZE,
+        )
+        self.assertEqual(
+            resolve_training_pair_budget(
+                None,
+                recipe="legacy",
+            ),
+            LEGACY_DEFAULT_PAIR_BUDGET,
+        )
+        self.assertEqual(
+            resolve_training_pair_budget(
+                None,
+                recipe="apache-reference",
+            ),
+            128,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "img_size=448",
+        ):
+            resolve_training_image_size(
+                224,
+                recipe="apache-reference",
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            "final_budget=128",
+        ):
+            resolve_training_pair_budget(
+                64,
+                recipe="apache-reference",
             )
 
     def test_text_dim_reference_gate(self):
@@ -433,6 +484,12 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             config.text_dim,
             RELEASED_TEXT_DIM,
         )
+        self.assertEqual(
+            config.image_size,
+            RELEASED_IMAGE_SIZE,
+        )
+        self.assertEqual(config.geo_budget, 400)
+        self.assertEqual(config.final_budget, 128)
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
         model = build_model()
