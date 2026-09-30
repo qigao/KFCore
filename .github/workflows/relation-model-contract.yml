@@ -80,6 +80,7 @@ jobs:
             tools/relation_training/real_dinov3_smoke.py \
             tools/relation_training/benchmark.py \
             tools/relation_training/detector_ceiling.py \
+            tools/relation_training/evaluate_detector_qualification.py \
             tools/relation_training/training.py \
             tools/relation_training/train_baseline.py \
             tools/relation_training/compare_zero_support_sweep.py \
@@ -107,6 +108,7 @@ jobs:
             tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_detector_ceiling.py \
+            tools/relation_training/test_detector_qualification.py \
             tools/relation_training/test_training.py \
             tools/relation_training/test_openimages.py
 
@@ -115,7 +117,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_detector_ceiling.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_apache_objective.py test_apache_training_recipe.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_detector_ceiling.py test_detector_qualification.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_context.py test_apache_vocab_head.py test_apache_text_student.py test_apache_objective.py test_apache_training_recipe.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
