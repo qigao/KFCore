@@ -15,6 +15,7 @@ from apache_training_recipe import (
     LEGACY_DEFAULT_AUGMENT,
     RELEASED_EMA_DECAY,
     RELEASED_PHOTOMETRIC_AUGMENT,
+    RELEASED_TEXT_DIM,
     build_reference_optimizer,
     build_reference_scheduler,
     backbone_provenance,
@@ -31,6 +32,7 @@ from apache_training_recipe import (
     resolve_training_max_boxes,
     select_artifact_model,
     state_dict_sha256,
+    validate_training_text_dim,
     tap_fusion_weights,
 )
 from checkpoint import load_payload, save_checkpoint
@@ -122,6 +124,30 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
             resolve_training_hidden_dim(
                 0,
                 recipe="legacy",
+            )
+
+    def test_text_dim_reference_gate(self):
+        self.assertEqual(
+            validate_training_text_dim(
+                32,
+                recipe="legacy",
+            ),
+            32,
+        )
+        self.assertEqual(
+            validate_training_text_dim(
+                512,
+                recipe="apache-reference",
+            ),
+            RELEASED_TEXT_DIM,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "text_dim=512",
+        ):
+            validate_training_text_dim(
+                32,
+                recipe="apache-reference",
             )
 
     def test_augment_defaults_and_reference_fail_fast(self):
@@ -402,6 +428,10 @@ class ApacheTrainingRecipeTest(unittest.TestCase):
         self.assertEqual(
             config.augment,
             RELEASED_PHOTOMETRIC_AUGMENT,
+        )
+        self.assertEqual(
+            config.text_dim,
+            RELEASED_TEXT_DIM,
         )
 
     def test_full_mode_freezes_only_unused_final_backbone_outputs(self):
