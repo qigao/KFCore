@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import unittest
 
+from apache_pair_opportunity import (
+    NPZ_FORMAT as PAIR_OPPORTUNITY_NPZ_FORMAT,
+    REBUILD_SCHEMA as PAIR_OPPORTUNITY_REBUILD_SCHEMA,
+    RELEASED_MIN_SUPPORT as PAIR_OPPORTUNITY_MIN_SUPPORT,
+    RELEASED_SCAN_BOX_CAP as PAIR_OPPORTUNITY_SCAN_BOX_CAP,
+    RELEASED_SOURCE_NAME as PAIR_OPPORTUNITY_SOURCE_NAME,
+)
 from apache_mixture import (
     RELEASED_MIX_FRACTIONS,
     RELEASED_SAMPLES_PER_EPOCH,
@@ -36,6 +44,14 @@ from apache_release_qualification import (
 
 def h(char: str) -> str:
     return char * 64
+
+
+def names_h(names: tuple[str, ...]) -> str:
+    digest = hashlib.sha256()
+    for name in names:
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def corpus() -> dict:
@@ -120,6 +136,52 @@ def corpus() -> dict:
             "spatial_union_predicate_count": 1,
             "unsupported_predicates": [],
             "sidecar_sha256": h("0"),
+        },
+        "pair_opportunity_rebuild": {
+            "schema": PAIR_OPPORTUNITY_REBUILD_SCHEMA,
+            "source_name": PAIR_OPPORTUNITY_SOURCE_NAME,
+            "pack_split": "/packs/megasg_clean/train",
+            "component_sha256": {
+                "meta.json": h("4"),
+                "img_meta.npy": h("b"),
+                "box_cats.npy": h("c"),
+                "rels.npy": h("7"),
+            },
+            "object_label_order": [
+                "person",
+                "horse",
+            ],
+            "object_label_order_sha256": names_h(
+                (
+                    "person",
+                    "horse",
+                )
+            ),
+            "num_cats": 2,
+            "scan_box_cap": PAIR_OPPORTUNITY_SCAN_BOX_CAP,
+            "min_support": PAIR_OPPORTUNITY_MIN_SUPPORT,
+            "full_scan": True,
+            "extrapolated": False,
+            "opportunity_semantics": (
+                "ordered-instance-pairs-minus-self-on-diagonal"
+            ),
+            "numerator_semantics": (
+                "same-pack-relations-after-400-box-cap"
+            ),
+            "rate_semantics": (
+                "min(1,relations/opportunities)"
+            ),
+            "images_total": 100,
+            "images_scanned": 100,
+            "boxes_scanned": 200,
+            "relations_scanned": 50,
+            "relations_dropped_by_box_cap": 0,
+            "category_pairs_with_opportunity": 4,
+            "trusted_category_pairs": 2,
+            "opportunity_sum": 1000,
+            "relation_sum": 50,
+            "npz_format": PAIR_OPPORTUNITY_NPZ_FORMAT,
+            "output_sha256": h("8"),
         },
         "vocabulary_sha256": h("a"),
     }
@@ -374,6 +436,18 @@ class ApacheReleaseQualificationTest(
         self.assertEqual(
             result["object_embeddings_shape"],
             [2, 512],
+        )
+        self.assertEqual(
+            result["pair_opportunity_rebuild"][
+                "output_sha256"
+            ],
+            h("8"),
+        )
+        self.assertEqual(
+            result["pair_opportunity_rebuild"][
+                "min_support"
+            ],
+            50,
         )
         self.assertEqual(
             result["predicate_spatial_flags_sha256"],
@@ -712,6 +786,91 @@ class ApacheReleaseQualificationTest(
             "epoch sequence",
         ):
             validate_training_run(run)
+
+    def test_pair_opportunity_rebuild_is_bound(self):
+        value = corpus()
+        del value["pair_opportunity_rebuild"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "pair-opportunity rebuild",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["output_sha256"] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "output hash",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["min_support"] = 49
+        with self.assertRaisesRegex(
+            ValueError,
+            "min_support=50",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["component_sha256"][
+            "rels.npy"
+        ] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "same MegaSG pack",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["full_scan"] = False
+        with self.assertRaisesRegex(
+            ValueError,
+            "full scan",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["object_label_order"] = [
+            "horse",
+            "person",
+        ]
+        value[
+            "pair_opportunity_rebuild"
+        ]["object_label_order_sha256"] = names_h(
+            (
+                "horse",
+                "person",
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "category order",
+        ):
+            qualify_training_run(
+                value,
+                training(),
+            )
+
+        value = corpus()
+        value[
+            "pair_opportunity_rebuild"
+        ]["relation_sum"] = 49
+        with self.assertRaisesRegex(
+            ValueError,
+            "relation summary",
+        ):
+            validate_corpus(value)
 
     def test_spatial_flag_derivation_and_routing_are_bound(self):
         value = corpus()

@@ -1606,6 +1606,7 @@ The command fails unless the run has all of the following:
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
+- deterministic pair-opportunity rebuild evidence from the same MegaSG pack;
 - matching vocabulary, predicate-embedding, named object-bank and derived spatial-routing hashes;
 - the released 503,754-draw sampling stream;
 - full Apache pair-evidence/sampler/context/vocab-head contracts;
@@ -1677,6 +1678,42 @@ CPU tests may exercise the BF16 autocast software path, but a released-run
 qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
+
+### Released pair-opportunity rebuild
+
+The released relatedness/background PU weighting consumes
+`pair_opportunity.npz`. Artifact SHA-256 alone proves which table was used,
+but not that a rebuilt table followed the Apache denominator/numerator
+contract. KFCore can deterministically rebuild and audit the table from
+`megasg_clean/train`:
+
+```text
+scan_box_cap = 400
+min_support  = 50
+
+opportunities(cs,co)
+  = sum over images of ordered instance pairs
+  = n_cs * n_co
+  - self pairs on the diagonal
+
+relations(cs,co)
+  = relation rows from the SAME pack
+  - rows whose endpoint falls outside the 400-box scan window
+
+rate = min(1, relations / opportunities)
+```
+
+The pack's `meta.categories` order must exactly equal the relation
+vocabulary's object-label order. The rebuild writes the runtime-compatible NPZ
+with deterministic ZIP metadata and records SHA-256 for `meta.json`,
+`img_meta.npy`, `box_cats.npy`, `rels.npy`, the object-order hash,
+algorithm constants, summary counts and the output NPZ hash.
+
+Released qualification requires the rebuild output hash to equal the
+`neg_rate_table_sha256` actually consumed by training. It also cross-checks
+the MegaSG `meta.json` and `rels.npy` hashes against the spatial-routing
+derivation, proving both derived assets came from the same released/rebuilt
+MegaSG pack. Sampled/extrapolated rebuilds cannot qualify.
 
 ### Released spatial routing derivation
 
