@@ -11,6 +11,10 @@ from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
 )
+from apache_released_contract import (
+    validate_released_scalar_contract,
+    validate_released_structure_report,
+)
 from apache_training_recipe import (
     RELEASED_AMP,
     RELEASED_AMP_DTYPE,
@@ -651,6 +655,33 @@ def validate_training_run(
         raise ValueError(
             "Apache reference objective evidence is missing"
         )
+    objective_config = objective.get("config")
+    if not isinstance(objective_config, dict):
+        raise ValueError(
+            "Apache reference objective config is missing"
+        )
+    scalar_contract = (
+        validate_released_scalar_contract(
+            recipe=config,
+            model=model_config,
+            objective=objective_config,
+        )
+    )
+    if recipe.get("scalar_contract") != scalar_contract:
+        raise ValueError(
+            "released scalar-contract evidence does not match resolved config"
+        )
+    structure_contract = recipe.get(
+        "structure_contract"
+    )
+    if not isinstance(structure_contract, dict):
+        raise ValueError(
+            "released structure-contract evidence is missing"
+        )
+    validate_released_structure_report(
+        structure_contract
+    )
+
     assets = objective.get("assets")
     if not isinstance(assets, dict):
         raise ValueError(
@@ -842,6 +873,12 @@ def qualify_training_run(
         "precision": training[
             "training_recipe"
         ]["precision"],
+        "scalar_contract": training[
+            "training_recipe"
+        ]["scalar_contract"],
+        "structure_contract": training[
+            "training_recipe"
+        ]["structure_contract"],
     }
 
 
