@@ -475,6 +475,10 @@ class ApachePairOpportunityRebuildTest(
             two_bytes = (
                 two.read_bytes()
             )
+            box_cats_sha = sha256_file(
+                pack
+                / "box_cats.npy"
+            )
 
         self.assertEqual(
             one_bytes,
@@ -517,10 +521,7 @@ class ApachePairOpportunityRebuildTest(
             [0, 1, 0, 0],
         )
         self.assertEqual(
-            sha256_file(
-                pack
-                / "box_cats.npy"
-            ),
+            box_cats_sha,
             report_one[
                 "component_sha256"
             ]["box_cats.npy"],
