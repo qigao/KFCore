@@ -19,8 +19,8 @@ if(_kfcore_install_plugindir_normalized MATCHES "(^|/)\\.\\.(/|$)")
 endif()
 unset(_kfcore_install_plugindir_normalized)
 
-option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" ON)
-option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" ON)
+option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" OFF)
+option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" OFF)
 option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
 option(KFCORE_ENABLE_TEMPORAL_GESTURE_GRU
        "Build the experimental temporal gesture GRU library and smoke tool"

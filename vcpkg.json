@@ -1,5 +1,5 @@
 {
-  "name": "kalman-filter",
+  "name": "kfcore",
   "version-semver": "0.1.0",
   "dependencies": [
     {
