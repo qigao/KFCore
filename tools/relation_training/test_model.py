@@ -664,6 +664,72 @@ class RelationModelTest(unittest.TestCase):
                 adapter_config(),
             )
 
+    def test_released_apache_graph_uses_512_width_and_40_boxes(self):
+        cfg = RelationModelConfig(
+            image_size=8,
+            max_boxes=40,
+            pair_budget=6,
+            hidden_dim=512,
+            geometry_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+            pair_evidence_contract="apache",
+            pair_sampler_contract="apache",
+            relation_context_contract="apache",
+            predicate_head_contract="apache",
+        )
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            cfg,
+        )
+        image = torch.randn(1, 3, 8, 8)
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        box_tensor[0, :4] = torch.tensor(
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            dtype=torch.float32,
+        )
+        with torch.no_grad():
+            output = model(
+                image,
+                box_tensor,
+                torch.tensor([4], dtype=torch.int64),
+            )
+
+        self.assertEqual(model.config.hidden_dim, 512)
+        self.assertEqual(model.config.max_boxes, 40)
+        self.assertEqual(model.apache_pair_projection.out_features, 512)
+        self.assertEqual(
+            model.apache_relation_transformer.d_model,
+            512,
+        )
+        self.assertEqual(
+            model.apache_deformable_read.d_model,
+            512,
+        )
+        self.assertEqual(
+            model.apache_relation_interaction.d_model,
+            512,
+        )
+        self.assertEqual(
+            model.apache_vocab_head.d_model,
+            512,
+        )
+        self.assertEqual(
+            tuple(output[0].shape),
+            (1, 6, 3),
+        )
+
     def test_reference_40_box_tensor_contract(self):
         cfg = RelationModelConfig(
             image_size=8,
