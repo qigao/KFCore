@@ -43,7 +43,7 @@ struct PredicateVocabulary
 struct OpenVocabularyRelationOptions
 {
     std::int32_t input_size = 0;
-    std::size_t max_boxes = 32U;
+    std::size_t max_boxes = kLegacyRelationMaxBoxes;
     std::size_t max_pairs = 128U;
     std::size_t query_dim = 512U;
 
@@ -62,6 +62,14 @@ struct OpenVocabularyRelationOptions
     std::size_t max_output_bytes = 64U * 1024U * 1024U;
     std::size_t max_vocabulary_bytes = 64U * 1024U * 1024U;
 };
+
+[[nodiscard]] inline OpenVocabularyRelationOptions
+apache_released_open_vocabulary_relation_options()
+{
+    OpenVocabularyRelationOptions options;
+    options.max_boxes = kApacheReleasedMaxBoxes;
+    return options;
+}
 
 class OpenVocabularyRelation final
 {
