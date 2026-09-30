@@ -33,6 +33,50 @@ from losses import RelationLossConfig, supervised_relation_loss
 from model import KFRelationModel
 
 
+_LUMA = torch.tensor(
+    [0.299, 0.587, 0.114]
+).view(3, 1, 1)
+
+
+def photometric_jitter(
+    image: Tensor,
+    strength: float,
+) -> Tensor:
+    """Apache released brightness/contrast/saturation jitter."""
+    if strength <= 0.0:
+        return image
+
+    def factor() -> float:
+        return float(
+            1.0
+            + (
+                torch.rand(()) * 2.0
+                - 1.0
+            )
+            * strength
+        )
+
+    image = image * factor()
+    mean = image.mean(
+        dim=(1, 2),
+        keepdim=True,
+    )
+    image = (
+        image - mean
+    ) * factor() + mean
+    grey = (
+        image
+        * _LUMA.to(image.dtype)
+    ).sum(
+        dim=0,
+        keepdim=True,
+    )
+    image = (
+        image - grey
+    ) * factor() + grey
+    return image.clamp_(0.0, 1.0)
+
+
 @dataclass(frozen=True)
 class FrozenBaselineConfig:
     epochs: int = 5
@@ -150,6 +194,7 @@ def prepare_example(
     max_boxes: int,
     predicate_count: int,
     object_label_to_index: dict[str, int] | None = None,
+    augment: float = 0.0,
 ) -> dict[str, Tensor]:
     if max_boxes < 2:
         raise ValueError("max_boxes must be at least 2")
@@ -166,6 +211,11 @@ def prepare_example(
         Path(image_root),
         image_size,
     )
+    if augment > 0.0:
+        image = photometric_jitter(
+            image,
+            augment,
+        )
     boxes = torch.zeros((max_boxes, 4), dtype=torch.float32)
     for index, (left, top, right, bottom) in enumerate(
         example.boxes_xyxy
@@ -242,12 +292,21 @@ class RelationTrainingDataset(Dataset):
         max_boxes: int,
         predicate_count: int,
         object_labels: tuple[str, ...] = (),
+        augment: float = 0.0,
     ) -> None:
         self.manifest = manifest
         self.image_root = Path(image_root)
         self.image_size = image_size
         self.max_boxes = max_boxes
         self.predicate_count = predicate_count
+        if (
+            not np.isfinite(augment)
+            or augment < 0.0
+        ):
+            raise ValueError(
+                "augmentation strength must be finite and non-negative"
+            )
+        self.augment = float(augment)
         self.object_label_to_index = (
             {
                 name: index
@@ -281,6 +340,7 @@ class RelationTrainingDataset(Dataset):
             max_boxes=self.max_boxes,
             predicate_count=self.predicate_count,
             object_label_to_index=self.object_label_to_index,
+            augment=self.augment,
         )
         result["training_resolution"] = torch.tensor(
             image_size,
@@ -303,6 +363,7 @@ class RelationMixtureTrainingDataset(Dataset):
         max_boxes: int,
         predicate_count: int,
         object_labels: tuple[str, ...] = (),
+        augment: float = 0.0,
     ) -> None:
         self.mixture = mixture
         self.datasets = tuple(
@@ -313,6 +374,7 @@ class RelationMixtureTrainingDataset(Dataset):
                 max_boxes=max_boxes,
                 predicate_count=predicate_count,
                 object_labels=object_labels,
+                augment=augment,
             )
             for source, manifest in zip(
                 mixture.config.sources,
