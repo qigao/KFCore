@@ -268,6 +268,11 @@ void symmetricrankupdate(float* P, const float* E, int n, int m)
 
 int udu(const float* A, float* U, float* d, const int m)
 {
+    if (!A || !U || !d || m <= 0)
+    {
+        return -1;
+    }
+
     /*    A = U*diag(d)*U' decomposition
      *    Source:
      *      1. Golub, Gene H., and Charles F. Van Loan. "Matrix Computations." 4rd ed.,
@@ -312,16 +317,15 @@ int udu(const float* A, float* U, float* d, const int m)
             }
             if (i == j)
             {
+                if (!(sigma > 0.0f) || !isfinite(sigma))
+                {
+                    return -1;
+                }
                 d[j]                    = sigma;
                 MAT_ELEM(U, j, j, m, m) = 1.0f;
             }
             else
             {
-                if ((d[j] <= 0.0f) || !isfinite(d[j]))
-                {
-                    /* matrix is not positive definite if d < 0 */
-                    return -1;
-                }
                 MAT_ELEM(U, i, j, m, m) = sigma / d[j];
             }
         }

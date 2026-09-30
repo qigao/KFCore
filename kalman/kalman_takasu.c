@@ -52,6 +52,14 @@ int kalman_takasu(float* x, float* P, const float* dz, const float* R, const flo
 {
     float D[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
     float L[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
+
+    if (!x || !P || !dz || !R || !Ht ||
+        n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
+    {
+        return -1;
+    }
+
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(m > 0 && m <= KALMAN_MAX_MEASUREMENTS);
 
@@ -138,6 +146,16 @@ int kalman_takasu(float* x, float* P, const float* dz, const float* R, const flo
 void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
                     int r)
 {
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        r < 0 || r > KALMAN_MAX_STATE_SIZE)
+    {
+        return;
+    }
+    if (x && !Phi)
+    {
+        return;
+    }
+
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(r >= 0 && r <= KALMAN_MAX_STATE_SIZE);
     float alpha, beta;

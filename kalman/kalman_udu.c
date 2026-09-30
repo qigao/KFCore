@@ -48,15 +48,18 @@
 int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float R,
                       const float* H_line, int n)
 {
+    if (!x || !U || !d || !H_line ||
+        n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        !(R > 0.0f) || !isfinite(R))
+    {
+        return -1;
+    }
+
     assert(n <= KALMAN_MAX_STATE_SIZE);
 
     float a[KALMAN_MAX_STATE_SIZE];
     float b[KALMAN_MAX_STATE_SIZE];
     float alpha = R;
-    if (alpha <= 0.0f)
-    {
-        return -1;
-    }
     float gamma = 1.0f / alpha;
 
     {
@@ -104,6 +107,12 @@ int kalman_udu_scalar(float* x, float* U, float* d, const float dz, const float 
 int kalman_udu(float* x, float* U, float* d, const float* z, const float* R, const float* Ht, int n,
                int m, float chi2_threshold, int downweight_outlier)
 {
+    if (!x || !U || !d || !z || !R || !Ht ||
+        n <= 0 || n > KALMAN_MAX_STATE_SIZE || m <= 0)
+    {
+        return -1;
+    }
+
     assert(n <= KALMAN_MAX_STATE_SIZE);
 
     int retcode = 0;
@@ -157,6 +166,11 @@ int kalman_udu(float* x, float* U, float* d, const float* z, const float* R, con
 
 int decorrelate(float* z, float* Ht, float* R, int n, int m)
 {
+    if (!z || !Ht || !R || n <= 0 || m <= 0)
+    {
+        return -1;
+    }
+
     /* Basic decorrelation in MATLAB
     [G] = chol(R); % G'*G = R
     zdecorr = (G')\z;
@@ -181,6 +195,14 @@ int decorrelate(float* z, float* Ht, float* R, int n, int m)
 void kalman_udu_predict(float* x, float* U, float* d, const float* Phi, const float* G,
                         const float* Q, int n, int r)
 {
+    if (!U || !d || !Phi ||
+        n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        r < 0 || r > KALMAN_MAX_STATE_SIZE ||
+        (r > 0 && (!G || !Q)))
+    {
+        return;
+    }
+
     assert(n <= KALMAN_MAX_STATE_SIZE);
     assert(r <= KALMAN_MAX_STATE_SIZE);
 
@@ -193,7 +215,10 @@ void kalman_udu_predict(float* x, float* U, float* d, const float* Phi, const fl
 
     // G_tmp = G; // move to internal array for destructive updates
     float G_tmp[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-    memcpy(G_tmp, G, sizeof(G_tmp[0]) * n * r);
+    if (r > 0)
+    {
+        memcpy(G_tmp, G, sizeof(G_tmp[0]) * n * r);
+    }
 
     // PhiU  = Phi*U; // rows of [PhiU,G] are to be orthogonalized
     float PhiU[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];

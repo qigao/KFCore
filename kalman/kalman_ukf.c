@@ -119,7 +119,12 @@ int kalman_ukf_predict(float* x, float* P, const float* Q, kalman_ukf_transition
     float     wc0;
     float     wi;
     float     gamma;
-    const int sigma_count = 2 * n + 1;
+    int       sigma_count;
+
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE)
+    {
+        return -1;
+    }
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
 
@@ -127,6 +132,7 @@ int kalman_ukf_predict(float* x, float* P, const float* Q, kalman_ukf_transition
     {
         return -1;
     }
+    sigma_count = 2 * n + 1;
     if (ukf_weights(n, params, &wm0, &wc0, &wi, &gamma) != 0)
     {
         return -1;
@@ -217,7 +223,13 @@ int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
     float     wc0;
     float     wi;
     float     gamma;
-    const int sigma_count = 2 * n + 1;
+    int       sigma_count;
+
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
+    {
+        return -1;
+    }
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(m > 0 && m <= KALMAN_MAX_MEASUREMENTS);
@@ -226,6 +238,7 @@ int kalman_ukf_update(float* x, float* P, const float* z, const float* R,
     {
         return -1;
     }
+    sigma_count = 2 * n + 1;
     if (ukf_weights(n, params, &wm0, &wc0, &wi, &gamma) != 0)
     {
         return -1;

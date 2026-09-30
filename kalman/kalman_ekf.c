@@ -43,6 +43,12 @@ int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn trans
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
 
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        r < 0 || r > KALMAN_MAX_STATE_SIZE)
+    {
+        return -1;
+    }
+
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(r >= 0 && r <= KALMAN_MAX_STATE_SIZE);
 
@@ -70,6 +76,12 @@ int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
     float dz[KALMAN_MAX_MEASUREMENTS];
     float Ht[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
 
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
+    {
+        return -1;
+    }
+
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(m > 0 && m <= KALMAN_MAX_MEASUREMENTS);
 
@@ -96,6 +108,12 @@ int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_f
 {
     float x_pred[KALMAN_MAX_STATE_SIZE];
     float Phi[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
+
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        r < 0 || r > KALMAN_MAX_STATE_SIZE)
+    {
+        return -1;
+    }
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(r >= 0 && r <= KALMAN_MAX_STATE_SIZE);
@@ -126,6 +144,12 @@ int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const fl
     float Ht[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
     float R_work[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
     float Reye[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
+
+    if (n <= 0 || n > KALMAN_MAX_STATE_SIZE ||
+        m <= 0 || m > KALMAN_MAX_MEASUREMENTS)
+    {
+        return -1;
+    }
 
     assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
     assert(m > 0 && m <= KALMAN_MAX_MEASUREMENTS);
