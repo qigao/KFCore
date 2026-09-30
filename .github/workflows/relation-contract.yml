@@ -90,6 +90,23 @@ jobs:
             "$RUNNER_TEMP/relation-contract/test_predicate_text_api.o" \
             -o "$RUNNER_TEMP/relation-contract/test_relation_predicate_text_api"
 
+      - name: Build predicate routing gate API tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/relation/include \
+            -Iruntime/core/include \
+            -Ivision/core/image_processor/include \
+            -Isalts/tinytest/include \
+            -c vision/core/relation/tests/test_predicate_routing_gate_api.cpp \
+            -o "$RUNNER_TEMP/relation-contract/test_predicate_routing_gate_api.o"
+          c++ -fsanitize=address,undefined \
+            "$RUNNER_TEMP/relation-contract/tinytest.o" \
+            "$RUNNER_TEMP/relation-contract/test_predicate_routing_gate_api.o" \
+            -o "$RUNNER_TEMP/relation-contract/test_relation_predicate_routing_gate_api"
+
       - name: Run relation tests
         shell: bash
         env:
@@ -100,6 +117,7 @@ jobs:
           "$RUNNER_TEMP/relation-contract/test_relation_decode"
           "$RUNNER_TEMP/relation-contract/test_relation_vocabulary_score"
           "$RUNNER_TEMP/relation-contract/test_relation_predicate_text_api"
+          "$RUNNER_TEMP/relation-contract/test_relation_predicate_routing_gate_api"
 
       - name: Verify unchanged tracked sources
         if: always()
