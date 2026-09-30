@@ -375,11 +375,30 @@ class ApacheObjectiveTest(unittest.TestCase):
         predicate_targets[0, 0, 1, 0] = 1.0
         predicate_targets[0, 2, 3, 2] = 1.0
 
+        assert model.apache_pair_sampler is not None
+        model.apache_pair_sampler.set_negative_rates(
+            torch.zeros(9),
+            torch.ones(9, dtype=torch.bool),
+            3,
+        )
+        entity_labels = torch.tensor(
+            [[0, 1, 2, -1]],
+            dtype=torch.int64,
+        )
         outputs = model.forward_training(
             image,
             box_tensor[:1],
             box_counts[:1],
             pair_targets=pair_targets,
+            entity_labels=entity_labels,
+        )
+        assert outputs.sampler_pair_negative_weights is not None
+        valid = outputs.runtime[4]
+        self.assertTrue(
+            torch.all(
+                outputs.sampler_pair_negative_weights[valid]
+                >= 0.3
+            )
         )
 
         pos_w = torch.eye(3)
@@ -412,9 +431,7 @@ class ApacheObjectiveTest(unittest.TestCase):
             outputs,
             predicate_targets,
             source_ids=torch.tensor([0]),
-            object_label_indices=torch.tensor(
-                [[0, 1, 2, -1]]
-            ),
+            object_label_indices=entity_labels,
         )
         self.assertTrue(torch.isfinite(losses["loss"]))
         losses["loss"].backward()
