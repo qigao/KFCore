@@ -16,6 +16,13 @@ from apache_released_contract import (
     RELEASED_STRUCTURE,
     validate_released_scalar_contract,
 )
+from apache_spatial_flags import (
+    DERIVATION_ALGORITHM,
+    DERIVATION_SCHEMA,
+    MAJORITY_COMPARATOR,
+    MAJORITY_THRESHOLD,
+    SPATIAL_BIT,
+)
 from apache_release_qualification import (
     CORPUS_SCHEMA,
     QUALIFICATION_SCHEMA,
@@ -85,6 +92,35 @@ def corpus() -> dict:
         "neg_rate_table_sha256": h("8"),
         "predicate_embeddings_sha256": h("9"),
         "object_embeddings_sha256": h("e"),
+        "predicate_spatial_flags_sha256": h("0"),
+        "predicate_spatial_flags_derivation": {
+            "schema": DERIVATION_SCHEMA,
+            "algorithm": DERIVATION_ALGORITHM,
+            "spatial_bit": SPATIAL_BIT,
+            "majority_threshold": MAJORITY_THRESHOLD,
+            "majority_comparator": MAJORITY_COMPARATOR,
+            "sources": [
+                {
+                    "source_name": name,
+                    "pack_split": f"/packs/{name}/train",
+                    "meta_sha256": h(str(index + 4)),
+                    "rels_sha256": h(str(index + 7)),
+                    "relations": 100 + index,
+                    "local_predicate_count": 3,
+                    "supported_predicate_count": 3,
+                    "local_spatial_majority_count": 1,
+                    "ignored_predicates": [],
+                }
+                for index, name in enumerate(
+                    RELEASED_SOURCE_NAMES
+                )
+            ],
+            "union_predicate_count": 3,
+            "supported_union_predicate_count": 3,
+            "spatial_union_predicate_count": 1,
+            "unsupported_predicates": [],
+            "sidecar_sha256": h("0"),
+        },
         "vocabulary_sha256": h("a"),
     }
 
@@ -201,6 +237,20 @@ def training() -> dict:
             {"epoch": epoch, "loss": 1.0}
             for epoch in range(1, 13)
         ],
+        "routing_warm_start": {
+            "schema": "kfcore.apache-routing-warm-start/1",
+            "spatial_flags_sha256": c[
+                "predicate_spatial_flags_sha256"
+            ],
+            "spatial_count": 1,
+            "semantic_count": 2,
+            "target_alpha_mean": 0.4,
+            "target_alpha_spatial_mean": 0.8,
+            "target_alpha_semantic_mean": 0.2,
+            "mse_before": 0.20,
+            "mse_after": 0.05,
+            "reported_final_mse": 0.06,
+        },
         "model_config": {
             "image_size": 448,
             "max_boxes": 40,
@@ -324,6 +374,16 @@ class ApacheReleaseQualificationTest(
         self.assertEqual(
             result["object_embeddings_shape"],
             [2, 512],
+        )
+        self.assertEqual(
+            result["predicate_spatial_flags_sha256"],
+            h("0"),
+        )
+        self.assertEqual(
+            result["predicate_spatial_flags_derivation"][
+                "majority_comparator"
+            ],
+            ">=",
         )
         self.assertEqual(
             result["precision"]["amp_dtype"],
@@ -650,6 +710,70 @@ class ApacheReleaseQualificationTest(
         with self.assertRaisesRegex(
             ValueError,
             "epoch sequence",
+        ):
+            validate_training_run(run)
+
+    def test_spatial_flag_derivation_and_routing_are_bound(self):
+        value = corpus()
+        value[
+            "predicate_spatial_flags_derivation"
+        ]["majority_comparator"] = ">"
+        with self.assertRaisesRegex(
+            ValueError,
+            "comparator",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "predicate_spatial_flags_derivation"
+        ]["sources"][0]["source_name"] = "vg_raw"
+        with self.assertRaisesRegex(
+            ValueError,
+            "source order",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "predicate_spatial_flags_derivation"
+        ]["sidecar_sha256"] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "sidecar hash",
+        ):
+            validate_corpus(value)
+
+        run = training()
+        run["routing_warm_start"][
+            "spatial_flags_sha256"
+        ] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "spatial-flags hash",
+        ):
+            qualify_training_run(
+                corpus(),
+                run,
+            )
+
+        run = training()
+        run["routing_warm_start"][
+            "mse_after"
+        ] = 0.25
+        with self.assertRaisesRegex(
+            ValueError,
+            "improve MSE",
+        ):
+            validate_training_run(run)
+
+        run = training()
+        run["routing_warm_start"][
+            "semantic_count"
+        ] = 1
+        with self.assertRaisesRegex(
+            ValueError,
+            "do not match predicate vocabulary",
         ):
             validate_training_run(run)
 
