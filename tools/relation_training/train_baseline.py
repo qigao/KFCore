@@ -29,10 +29,12 @@ from apache_training_recipe import (
     ApacheTrainingRecipeConfig,
     ModelEMA,
     RELEASED_EMA_DECAY,
+    RELEASED_PHOTOMETRIC_AUGMENT,
     backbone_provenance,
     build_reference_optimizer,
     build_reference_scheduler,
     module_state_sha256,
+    resolve_training_augment,
     resolve_training_epochs,
     resolve_training_hidden_dim,
     resolve_training_max_boxes,
@@ -142,6 +144,16 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     parser.add_argument("--image-size", type=int, default=448)
+    parser.add_argument(
+        "--augment",
+        type=float,
+        default=None,
+        help=(
+            "Training-only photometric jitter strength. Defaults to 0.3 for "
+            "apache-reference and 0 for legacy. apache-reference rejects "
+            "any value other than 0.3."
+        ),
+    )
     parser.add_argument(
         "--max-boxes",
         type=int,
@@ -511,6 +523,10 @@ def main() -> None:
     )
     resolved_epochs = resolve_training_epochs(
         args.epochs,
+        recipe=args.training_recipe,
+    )
+    resolved_augment = resolve_training_augment(
+        args.augment,
         recipe=args.training_recipe,
     )
     resolved_batch_size = (
@@ -1097,6 +1113,7 @@ def main() -> None:
                 if apache_mode
                 else ()
             ),
+            augment=resolved_augment,
         )
     else:
         train_dataset = RelationTrainingDataset(
@@ -1110,6 +1127,7 @@ def main() -> None:
                 if apache_mode
                 else ()
             ),
+            augment=resolved_augment,
         )
     multi_scale_resolutions = None
     if reference_training and args.apache_multi_scale:
@@ -1225,6 +1243,7 @@ def main() -> None:
             multi_scale_n=args.apache_multi_scale_n,
             cfa_prob=args.apache_cfa_prob,
             cfa_alpha=args.apache_cfa_alpha,
+            augment=resolved_augment,
         )
         optimizer, optimizer_report = build_reference_optimizer(
             model,
@@ -1257,6 +1276,20 @@ def main() -> None:
         for parameter in model.backbone.parameters()
         if parameter.requires_grad
     )
+
+    augmentation_report = {
+        "kind": "brightness-contrast-saturation",
+        "strength": resolved_augment,
+        "horizontal_flip": False,
+        "geometry_transform": False,
+        "rng_source": "ambient-torch-rng",
+        "rng_equivalence": (
+            "stochastic-distribution"
+            if reference_training
+            else "disabled"
+        ),
+        "worker_trajectory_equivalence": False,
+    }
 
     history: list[dict[str, object]] = []
     for epoch in range(1, baseline_config.epochs + 1):
@@ -1434,6 +1467,7 @@ def main() -> None:
                 "backbone_final": backbone_provenance_final,
                 "weight_source": artifact_weight_source,
                 "ema": ema_report,
+                "augmentation": augmentation_report,
                 "source_mixture": mixture_report,
             },
             "train_annotations_sha256": train_manifest.annotations_sha256,
@@ -1538,6 +1572,7 @@ def main() -> None:
             "backbone_final": backbone_provenance_final,
             "weight_source": artifact_weight_source,
             "ema": ema_report,
+            "augmentation": augmentation_report,
             "source_mixture": mixture_report,
         },
         "device": str(device),
