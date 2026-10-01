@@ -1711,6 +1711,44 @@ output directories.
 This shared pack builder is the final common primitive used by deterministic
 `vg_raw` and HICO-train source rebuild qualification.
 
+### Released VG raw deterministic rebuild
+
+The released `vg_raw` source is rebuilt from the raw Visual Genome relation
+metadata rather than accepted by source name alone:
+
+```bash
+python tools/relation_training/apache_vg_raw_rebuild.py \
+  --relationships /data/VG_metadata/relationships.json \
+  --image-data /data/VG_metadata/image_data.json \
+  --image-root /data/VG150_coco_format/train \
+  --registry /runs/datamix/registry.json \
+  --vg2coco /runs/datamix/vg2coco.json \
+  --psg2coco /runs/datamix/psg2coco.json \
+  --expected-input-hashes vg_raw_expected_inputs.json \
+  --coco-out build/vg_raw_train_coco.json \
+  --pack-out build/vg_raw/train \
+  --evidence build/vg_raw-rebuild.json
+```
+
+The converter reproduces the Apache boundary at
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`:
+case-sensitive `.jpg` disk membership, registry-based VG/COCO leakage
+filtering, `image_data.json` dimensions, whitespace/lowercase normalization,
+the five-word filter, first-seen `object_id` box order, subject `name` /
+object `names[0]`, one-pixel minimum box extents, writer relation
+deduplication and insertion-order category/predicate vocabularies.
+
+A development rebuild may omit `--expected-input-hashes`, but its evidence
+then records `input_hashes_pinned=false` and cannot establish released source
+identity. Qualification requires all five semantic input hashes
+(`relationships.json`, `image_data.json`, `registry.json`,
+`vg2coco.json`, and the `psg2coco.json` parsed by the upstream registry
+loader) to be supplied and matched exactly. Any drift fails closed.
+
+The emitted COCO-SGG file is immediately passed through the shared released
+pack builder with logical provenance labels, so the evidence binds both the
+raw-source conversion and every memmap component SHA-256.
+
 ### Released IndoorVG exclusion derivation
 
 IndoorVG evaluation images originate from Visual Genome and can leak into
