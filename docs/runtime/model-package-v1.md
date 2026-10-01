@@ -50,6 +50,7 @@ For `model_type="yolo-detection"`, every artifact must explicitly declare one
 of:
 
 - `raw-yolo`;
+- `raw-yolox`;
 - `compact-nms`;
 - `efficient-nms`.
 
