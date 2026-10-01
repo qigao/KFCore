@@ -2046,6 +2046,49 @@ Buffers are copied exactly. The final benchmark and saved relation checkpoint
 use EMA weights. Training evidence retains both raw and EMA state SHA-256 values
 so qualification fails if a raw checkpoint is accidentally substituted.
 
+### TensorRT dynamic-vocabulary hardware qualification
+
+The `relation.open-vocabulary` ONNX graph and dynamic-V TensorRT builder are
+already repository contracts. Final TensorRT acceptance requires a real NVIDIA
+run against a **prebuilt** engine:
+
+```bash
+python tools/relation_training/tensorrt_dynamic_vocab_qualification.py \
+  --onnx relation-open-vocabulary.onnx \
+  --engine relation-open-vocabulary.engine \
+  --engine-metadata relation-open-vocabulary.json \
+  --out tensorrt-dynamic-vocab-qualification.json
+```
+
+The qualification command never builds or rewrites the engine. It deserializes
+the supplied engine once, creates one execution context once, and runs the same
+context at:
+
+```text
+V=1
+V=3
+profile opt V
+profile max V
+```
+
+The ORT reference and TensorRT outputs are compared by valid directed pair key
+`(subject_idx, object_idx)`, so backend TopK tie ordering may differ while
+the valid pair set and logits must remain equivalent. The report records pair
+set equality, pair-logit and predicate-logit max absolute/relative error,
+explicit tolerances, per-V ORT/TensorRT latency, source ONNX/engine/sidecar
+hashes, TensorRT/ORT/CUDA/GPU provenance and the exact optimization profile.
+
+The engine SHA-256 is checked before and after all vocabulary swaps. A passing
+report also requires `engine_load_count=1` and `context_create_count=1`.
+This is the evidence that dynamic vocabulary changes do not rebuild the
+TensorRT engine.
+
+Repository CPU CI validates case selection, deterministic W/alpha inputs,
+pair-key comparison, tolerance logic and the fail-closed report schema. It
+does **not** set `hardware_executed=true` and cannot complete the TensorRT
+qualification issue. #228 remains open until a real NVIDIA run publishes a
+passing hardware report.
+
 ## Checkpoint
 
 ```python
