@@ -39,6 +39,31 @@ cmake_install_headers(
   PATTERNS "*.hpp")
 
 if(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    set(_kfcore_tokenizer_android_abis
+      arm64-v8a
+      armeabi-v7a
+      x86_64
+      x86)
+    if(NOT ANDROID_ABI IN_LIST _kfcore_tokenizer_android_abis)
+      message(FATAL_ERROR
+        "KFCore HF tokenizer provider supports Android ABI "
+        "arm64-v8a/armeabi-v7a/x86_64/x86; got '${ANDROID_ABI}'")
+    endif()
+    unset(_kfcore_tokenizer_android_abis)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    string(TOUPPER "${CMAKE_SYSTEM_PROCESSOR}" _kfcore_tokenizer_processor)
+    if(NOT _kfcore_tokenizer_processor STREQUAL "AMD64" AND
+       NOT _kfcore_tokenizer_processor STREQUAL "X86_64" AND
+       NOT _kfcore_tokenizer_processor STREQUAL "ARM64" AND
+       NOT _kfcore_tokenizer_processor STREQUAL "AARCH64")
+      message(FATAL_ERROR
+        "KFCore HF tokenizer provider supports Windows x86_64/ARM64 only; "
+        "got '${CMAKE_SYSTEM_PROCESSOR}'")
+    endif()
+    unset(_kfcore_tokenizer_processor)
+  endif()
+
   if(KFCORE_TOKENIZERS_CPP_SOURCE_DIR STREQUAL "")
     message(FATAL_ERROR
       "KFCORE_ENABLE_HF_TOKENIZER_PROVIDER requires KFCORE_TOKENIZERS_CPP_SOURCE_DIR")
