@@ -1,0 +1,69 @@
+name: Kalman C++ linkage contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'kalman/**'
+      - 'cmake/tests/kalman_cpp_linkage/**'
+      - '.github/workflows/kalman-cpp-linkage-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'kalman/**'
+      - 'cmake/tests/kalman_cpp_linkage/**'
+      - '.github/workflows/kalman-cpp-linkage-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kalman-cpp-linkage-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cpp-link:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
+      - name: Configure C++ linkage consumer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake             -S cmake/tests/kalman_cpp_linkage             -B "$RUNNER_TEMP/kalman-cpp-linkage"             -DKFCORE_SOURCE_DIR="$GITHUB_WORKSPACE"
+
+      - name: Build and run C++ linkage consumer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build "$RUNNER_TEMP/kalman-cpp-linkage"
+          "$RUNNER_TEMP/kalman-cpp-linkage/kalman_cpp_link"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
