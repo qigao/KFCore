@@ -1725,6 +1725,8 @@ python tools/relation_training/apache_vg_raw_rebuild.py \
   --vg2coco /runs/datamix/vg2coco.json \
   --psg2coco /runs/datamix/psg2coco.json \
   --expected-input-hashes vg_raw_expected_inputs.json \
+  --vocabulary released-vocabulary.json \
+  --canonical-out build/vg_raw-canonical.jsonl \
   --coco-out build/vg_raw_train_coco.json \
   --pack-out build/vg_raw/train \
   --evidence build/vg_raw-rebuild.json
@@ -1747,7 +1749,10 @@ loader) to be supplied and matched exactly. Any drift fails closed.
 
 The emitted COCO-SGG file is immediately passed through the shared released
 pack builder with logical provenance labels, so the evidence binds both the
-raw-source conversion and every memmap component SHA-256.
+raw-source conversion and every memmap component SHA-256. When the released
+union vocabulary is supplied, the same command materializes the pack through
+KFCore's canonical JSONL boundary and records the canonical annotation
+SHA-256/image/relation counts used by the released-corpus manifest.
 
 ### Released IndoorVG exclusion derivation
 
