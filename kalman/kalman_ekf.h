@@ -12,6 +12,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /******************************************************************************
  * TYPEDEFS
  ******************************************************************************/
@@ -98,6 +102,10 @@ kfcore_kalman_status kalman_ekf_udu_update(
     kalman_ekf_measurement_fn measurement, size_t n, size_t m,
     float chi2_threshold, int downweight_outlier, void* user,
     float* workspace, size_t workspace_floats);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* KALMAN_EKF_H */
 
