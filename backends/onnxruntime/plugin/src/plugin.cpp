@@ -183,7 +183,10 @@ kf_data_type_v1 abi_type(ONNXTensorElementDataType type)
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: return KF_DATA_TYPE_V1_UINT8;
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL: return KF_DATA_TYPE_V1_BOOL;
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16: return KF_DATA_TYPE_V1_BFLOAT16;
-    default: throw std::invalid_argument("unsupported ONNX tensor element type");
+    default:
+        throw std::invalid_argument(
+            "unsupported ONNX tensor element type: " +
+            std::to_string(static_cast<int>(type)));
     }
 }
 
