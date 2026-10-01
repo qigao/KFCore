@@ -9,7 +9,6 @@
  * SYSTEM INCLUDE FILES
  ******************************************************************************/
 
-#include <assert.h>
 #include <math.h>
 #include <string.h> /* memset */
 
@@ -40,40 +39,36 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-void matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
-            const float* B, float beta, float* C)
+int matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
+           const float* B, float beta, float* C)
 {
-    int lda    = lsame_(ta, "T") ? m : n;
-    int ldb    = lsame_(tb, "T") ? k : m;
-    int result = sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha, (float*)A, &lda, (float*)B, &ldb,
-                       &beta, C, &n);
-    assert(result == 0);
+    int lda = lsame_(ta, "T") ? m : n;
+    int ldb = lsame_(tb, "T") ? k : m;
+    return sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha,
+                  (float*)A, &lda, (float*)B, &ldb, &beta, C, &n);
 }
 
-void matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
+int matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
 {
-    float alpha  = 1.0f;
-    float beta   = 0.0f;
-    int   result = ssymm_("L" /* calculate C = A*B not C = B*A */,
-                         "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
-                         &m,                                                 /* cols of B / C */
-                         &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n);
-    assert(result == 0);
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    return ssymm_("L" /* calculate C = A*B not C = B*A */,
+                  "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
+                  &m,                                                 /* cols of B / C */
+                  &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n);
 }
 
-void matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
-            float beta, float* y)
+int matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
+           float beta, float* y)
 {
-    int       inc    = 1;
-    const int result = sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc);
-    assert(result == 0);
+    int inc = 1;
+    return sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc);
 }
 
-void rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
+int rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
 {
-    int       inc    = 1;
-    const int result = sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows);
-    assert(result == 0);
+    int inc = 1;
+    return sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows);
 }
 
 void mateye(float* A, int n)
@@ -237,33 +232,25 @@ int mat3inv(const float* A, float* Ainv, float eps)
     return smat3_inv_(A, Ainv, &eps);
 }
 
-void trisolve(const float* A, float* B, int n, int m, const char* tp)
+int trisolve(const float* A, float* B, int n, int m, const char* tp)
 {
-    float     alpha = 1.0f;
-    const int result =
-        strsm_("L" /* left hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-              "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n);
-    assert(result == 0);
-    /* strsm basically just checks for proper matrix dimensions, handle via assert */
+    float alpha = 1.0f;
+    return strsm_("L" /* left hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
+                  "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n);
 }
 
-void trisolveright(const float* L, float* A, int n, int m, const char* tp)
+int trisolveright(const float* L, float* A, int n, int m, const char* tp)
 {
-    float     alpha = 1.0f;
-    const int result =
-        strsm_("R" /* right hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-              "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m);
-    assert(result == 0);
-    /* strsm basically just checks for proper matrix dimensions, handle via assert */
+    float alpha = 1.0f;
+    return strsm_("R" /* right hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
+                  "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m);
 }
 
-void symmetricrankupdate(float* P, const float* E, int n, int m)
+int symmetricrankupdate(float* P, const float* E, int n, int m)
 {
     float alpha = -1.0f;
-    float beta  = 1.0f;
-
-    const int result = ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n);
-    assert(result == 0);
+    float beta = 1.0f;
+    return ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n);
 }
 
 int udu(const float* A, float* U, float* d, const int m)
