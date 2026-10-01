@@ -93,6 +93,14 @@ ocsort_config_t ocsort_default_config(void);
 sort_t* sort_create(const sort_config_t* config);
 void sort_destroy(sort_t* tracker);
 void sort_reset(sort_t* tracker);
+tracker_status_t sort_update_ex(
+    sort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t sort_update(
     sort_t* tracker,
     const detection_t* detections,
@@ -124,6 +132,14 @@ size_t bytetrack_update(
 cbiou_t* cbiou_create(const cbiou_config_t* config);
 void cbiou_destroy(cbiou_t* tracker);
 void cbiou_reset(cbiou_t* tracker);
+tracker_status_t cbiou_update_ex(
+    cbiou_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t cbiou_update(
     cbiou_t* tracker,
     const detection_t* detections,
