@@ -316,6 +316,8 @@ def validate_qualification_report(payload: Mapping[str, object]) -> dict[str, ob
         raise ValueError("qualification did not prove one-engine reuse")
     if payload.get("same_context_reused") is not True:
         raise ValueError("qualification did not prove one-context reuse")
+    if payload.get("passed") is not True:
+        raise ValueError("qualification report is not globally passing")
     if payload.get("engine_sha256_before") != payload.get("engine_sha256_after"):
         raise ValueError("engine bytes changed during vocabulary qualification")
 
