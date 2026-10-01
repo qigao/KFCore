@@ -217,6 +217,32 @@ void compare_edges(
     }
 }
 
+void compare_relation_edges(
+    const std::vector<RelationEdge>& actual,
+    const std::vector<RelationEdge>& expected)
+{
+    require(
+        actual.size() == expected.size(),
+        "backend/host edge count differs");
+    for (std::size_t index = 0U;
+         index < actual.size(); ++index)
+    {
+        require(
+            actual[index].subject_index ==
+                    expected[index].subject_index &&
+                actual[index].object_index ==
+                    expected[index].object_index &&
+                actual[index].predicate_index ==
+                    expected[index].predicate_index,
+            "backend/host relation key differs");
+        require(
+            std::fabs(
+                actual[index].score -
+                expected[index].score) <= 1.0e-6F,
+            "backend/host relation score differs");
+    }
+}
+
 std::string json_escape(const std::string& value)
 {
     std::ostringstream stream;
