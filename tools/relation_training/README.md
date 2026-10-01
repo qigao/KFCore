@@ -1682,6 +1682,35 @@ qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
 
+### Deterministic released COCO-SGG pack rebuild
+
+The released training sources are consumed as Apache memmap packs. KFCore now
+has both directions of that boundary:
+
+```text
+COCO-SGG JSON
+  -> apache_pack_builder.py
+  -> meta.json / file_names.json / img_meta.npy / boxes.npy / box_cats.npy / rels.npy
+  -> apache_pack_materializer.py
+  -> canonical relation JSONL
+```
+
+The builder pins the released train semantics: file-order predicate/category
+vocabularies, `max_objects=40`, `min_rels=1`, relation-window/self-loop
+drops, spatial/geometric/round flag bits, insertion-order raw predicate
+vocabulary, and the exact normalized-cxcywh clamp rules. Output component
+SHA-256 values are recorded in rebuild evidence.
+
+Upstream pack metadata embeds machine-local `ann_source` and `img_dir`
+paths, while the dataset release rewrites those paths. A deterministic rebuild
+therefore requires explicit **logical provenance labels** for those fields
+rather than hashing local absolute paths. With the same logical input JSON,
+labels and exclusion set, every emitted component is byte-identical across
+output directories.
+
+This shared pack builder is the final common primitive used by deterministic
+`vg_raw` and HICO-train source rebuild qualification.
+
 ### Released IndoorVG exclusion derivation
 
 IndoorVG evaluation images originate from Visual Genome and can leak into
