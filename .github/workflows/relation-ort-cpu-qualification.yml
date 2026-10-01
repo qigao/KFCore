@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S . -B build/relation-ort-cpu -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DKFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION=ON             -DKFCORE_ENABLE_ONNXRUNTIME=ON             -DKFCORE_ENABLE_CUDA=OFF             -DKFCORE_ENABLE_TENSORRT=OFF             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+          cmake -S cmake/tests/relation_ort_cpu_qualification -B build/relation-ort-cpu -G Ninja             -DCMAKE_BUILD_TYPE=Release             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
 
       - name: Build ORT plugin and C++ qualification executable
         shell: bash
