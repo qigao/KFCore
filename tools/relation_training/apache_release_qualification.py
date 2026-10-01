@@ -23,6 +23,13 @@ from apache_released_contract import (
     validate_released_scalar_contract,
     validate_released_structure_report,
 )
+from apache_objective import (
+    SOURCE_ALLOW_SCHEMA,
+)
+from apache_source_columns import (
+    DERIVATION_SCHEMA as SOURCE_COLUMN_DERIVATION_SCHEMA,
+    RELEASED_RESTRICTED_SOURCES,
+)
 from apache_spatial_flags import (
     DERIVATION_ALGORITHM,
     DERIVATION_SCHEMA,
@@ -411,6 +418,365 @@ def _validate_text_bank_derivation(
         ),
         "predicate_bank": predicate_bank,
         "object_bank": object_bank,
+    }
+
+
+def _validate_source_column_derivation(
+    payload: object,
+    *,
+    sidecar_sha256: str,
+    spatial_derivation: dict[str, Any],
+    predicate_order_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "source-column derivation evidence must be an object"
+        )
+    if (
+        payload.get("schema")
+        != SOURCE_COLUMN_DERIVATION_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported source-column derivation schema"
+        )
+    if (
+        payload.get("source_order")
+        != list(RELEASED_SOURCE_NAMES)
+    ):
+        raise ValueError(
+            "source-column derivation source order differs from release"
+        )
+    if (
+        payload.get("restricted_sources")
+        != list(
+            RELEASED_RESTRICTED_SOURCES
+        )
+    ):
+        raise ValueError(
+            "source-column derivation must restrict hicodet only"
+        )
+
+    union = payload.get(
+        "union_predicate_order"
+    )
+    if (
+        not isinstance(union, list)
+        or not union
+        or any(
+            not isinstance(name, str)
+            or not name
+            for name in union
+        )
+        or len(set(union)) != len(union)
+    ):
+        raise ValueError(
+            "source-column union predicate order must be unique non-empty strings"
+        )
+    union_count = _require_positive_int(
+        payload.get(
+            "union_predicate_count"
+        ),
+        "source-column union_predicate_count",
+    )
+    if union_count != len(union):
+        raise ValueError(
+            "source-column union predicate count does not match order"
+        )
+    union_sha = require_sha256(
+        payload.get(
+            "union_predicate_order_sha256"
+        ),
+        "source-column union_predicate_order_sha256",
+    )
+    if union_sha != _ordered_names_sha256(
+        union
+    ):
+        raise ValueError(
+            "source-column union predicate-order hash does not match order"
+        )
+    if union_sha != predicate_order_sha256:
+        raise ValueError(
+            "source-column union predicate order does not match named predicate bank"
+        )
+
+    spatial_sources = spatial_derivation.get(
+        "sources"
+    )
+    if (
+        not isinstance(spatial_sources, list)
+        or len(spatial_sources)
+        != len(RELEASED_SOURCE_NAMES)
+    ):
+        raise ValueError(
+            "spatial derivation sources unavailable for source-column binding"
+        )
+    spatial_by_name = {
+        source.get("source_name"): source
+        for source in spatial_sources
+        if isinstance(source, dict)
+    }
+
+    sources = payload.get(
+        "sources"
+    )
+    if (
+        not isinstance(sources, list)
+        or len(sources)
+        != len(RELEASED_SOURCE_NAMES)
+    ):
+        raise ValueError(
+            "source-column derivation must describe all released sources"
+        )
+
+    union_set = set(union)
+    normalized_sources: list[
+        dict[str, Any]
+    ] = []
+    sidecar_sources: list[
+        dict[str, object]
+    ] = []
+    names: list[str] = []
+
+    for index, source in enumerate(
+        sources
+    ):
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"source-column source {index} must be an object"
+            )
+        name = require_non_empty_string(
+            source.get("source_name"),
+            f"source-column source {index} name",
+        )
+        names.append(name)
+
+        local = source.get(
+            "local_predicates"
+        )
+        if (
+            not isinstance(local, list)
+            or not local
+            or any(
+                not isinstance(value, str)
+                or not value
+                for value in local
+            )
+            or len(set(local)) != len(local)
+        ):
+            raise ValueError(
+                f"{name} local predicates must be unique non-empty strings"
+            )
+        local_count = _require_positive_int(
+            source.get(
+                "local_predicate_count"
+            ),
+            f"{name} local_predicate_count",
+        )
+        if local_count != len(local):
+            raise ValueError(
+                f"{name} local predicate count does not match order"
+            )
+        local_sha = require_sha256(
+            source.get(
+                "local_predicate_order_sha256"
+            ),
+            f"{name} local_predicate_order_sha256",
+        )
+        if local_sha != _ordered_names_sha256(
+            local
+        ):
+            raise ValueError(
+                f"{name} local predicate-order hash does not match order"
+            )
+
+        unknown = source.get(
+            "unknown_local_predicates"
+        )
+        expected_unknown = [
+            value
+            for value in local
+            if value not in union_set
+        ]
+        if unknown != expected_unknown:
+            raise ValueError(
+                f"{name} unknown local predicate evidence is inconsistent"
+            )
+
+        expected_restricted = (
+            name
+            in RELEASED_RESTRICTED_SOURCES
+        )
+        if (
+            source.get("restricted")
+            is not expected_restricted
+        ):
+            raise ValueError(
+                f"{name} restricted flag differs from released rule"
+            )
+
+        local_set = set(local)
+        expected_allowed = (
+            [
+                value
+                for value in union
+                if value in local_set
+            ]
+            if expected_restricted
+            else list(union)
+        )
+        if not expected_allowed:
+            raise ValueError(
+                f"restricted source {name} has no union predicates"
+            )
+        allowed = source.get(
+            "allowed_predicates"
+        )
+        if allowed != expected_allowed:
+            raise ValueError(
+                f"{name} allowed predicates differ from released rule"
+            )
+        allowed_count = _require_positive_int(
+            source.get(
+                "allowed_predicate_count"
+            ),
+            f"{name} allowed_predicate_count",
+        )
+        if allowed_count != len(
+            expected_allowed
+        ):
+            raise ValueError(
+                f"{name} allowed predicate count is inconsistent"
+            )
+        allowed_sha = require_sha256(
+            source.get(
+                "allowed_predicate_order_sha256"
+            ),
+            f"{name} allowed_predicate_order_sha256",
+        )
+        if allowed_sha != _ordered_names_sha256(
+            expected_allowed
+        ):
+            raise ValueError(
+                f"{name} allowed predicate-order hash is inconsistent"
+            )
+
+        meta_sha = require_sha256(
+            source.get("meta_sha256"),
+            f"{name} source-column meta_sha256",
+        )
+        spatial_source = (
+            spatial_by_name.get(name)
+        )
+        if (
+            not isinstance(
+                spatial_source,
+                dict,
+            )
+            or spatial_source.get(
+                "meta_sha256"
+            )
+            != meta_sha
+        ):
+            raise ValueError(
+                f"{name} source-column derivation does not use the same pack meta as spatial derivation"
+            )
+
+        pack_split = require_non_empty_string(
+            source.get("pack_split"),
+            f"{name} source-column pack_split",
+        )
+        normalized_sources.append(
+            {
+                "source_name": name,
+                "pack_split": pack_split,
+                "meta_sha256": meta_sha,
+                "local_predicates": list(
+                    local
+                ),
+                "local_predicate_count": (
+                    local_count
+                ),
+                "local_predicate_order_sha256": (
+                    local_sha
+                ),
+                "unknown_local_predicates": list(
+                    expected_unknown
+                ),
+                "restricted": (
+                    expected_restricted
+                ),
+                "allowed_predicates": list(
+                    expected_allowed
+                ),
+                "allowed_predicate_count": (
+                    allowed_count
+                ),
+                "allowed_predicate_order_sha256": (
+                    allowed_sha
+                ),
+            }
+        )
+        sidecar_sources.append(
+            {
+                "name": name,
+                "predicates": list(
+                    expected_allowed
+                ),
+            }
+        )
+
+    if tuple(names) != (
+        RELEASED_SOURCE_NAMES
+    ):
+        raise ValueError(
+            "source-column derivation source order differs from release"
+        )
+
+    sidecar_payload = {
+        "schema": SOURCE_ALLOW_SCHEMA,
+        "sources": sidecar_sources,
+    }
+    derived_sha = hashlib.sha256(
+        stable_json_bytes(
+            sidecar_payload
+        )
+    ).hexdigest()
+    recorded_sha = require_sha256(
+        payload.get(
+            "sidecar_sha256"
+        ),
+        "source-column sidecar_sha256",
+    )
+    if recorded_sha != derived_sha:
+        raise ValueError(
+            "source-column derivation sidecar hash does not match reconstructed table"
+        )
+    if recorded_sha != sidecar_sha256:
+        raise ValueError(
+            "source-column derivation sidecar hash does not match corpus"
+        )
+
+    return {
+        "schema": (
+            SOURCE_COLUMN_DERIVATION_SCHEMA
+        ),
+        "source_order": list(
+            RELEASED_SOURCE_NAMES
+        ),
+        "restricted_sources": list(
+            RELEASED_RESTRICTED_SOURCES
+        ),
+        "union_predicate_order": list(
+            union
+        ),
+        "union_predicate_count": (
+            union_count
+        ),
+        "union_predicate_order_sha256": (
+            union_sha
+        ),
+        "sources": normalized_sources,
+        "sidecar_sha256": recorded_sha,
     }
 
 
@@ -1092,6 +1458,24 @@ def validate_corpus(
         ],
         object_artifact_sha256=normalized_payload[
             "object_embeddings_sha256"
+        ],
+    )
+    normalized_payload[
+        "source_column_derivation"
+    ] = _validate_source_column_derivation(
+        payload.get(
+            "source_column_derivation"
+        ),
+        sidecar_sha256=normalized_payload[
+            "source_column_allow_sha256"
+        ],
+        spatial_derivation=normalized_payload[
+            "predicate_spatial_flags_derivation"
+        ],
+        predicate_order_sha256=normalized_payload[
+            "text_bank_derivation"
+        ]["predicate_bank"][
+            "label_order_sha256"
         ],
     )
     return normalized_payload
@@ -2055,6 +2439,9 @@ def qualify_training_run(
         ],
         "text_bank_derivation": corpus[
             "text_bank_derivation"
+        ],
+        "source_column_derivation": corpus[
+            "source_column_derivation"
         ],
         "precision": training[
             "training_recipe"

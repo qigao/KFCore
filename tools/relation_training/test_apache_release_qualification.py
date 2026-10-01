@@ -5,6 +5,14 @@ from dataclasses import asdict
 import hashlib
 import unittest
 
+from apache_objective import (
+    SOURCE_ALLOW_SCHEMA,
+)
+from apache_source_columns import (
+    DERIVATION_SCHEMA as SOURCE_COLUMN_DERIVATION_SCHEMA,
+    RELEASED_RESTRICTED_SOURCES,
+    stable_json_bytes as source_column_json_bytes,
+)
 from apache_pair_opportunity import (
     NPZ_FORMAT as PAIR_OPPORTUNITY_NPZ_FORMAT,
     REBUILD_SCHEMA as PAIR_OPPORTUNITY_REBUILD_SCHEMA,
@@ -128,6 +136,136 @@ def corpus() -> dict:
         if sources[-1]["recipe"] is None:
             del sources[-1]["recipe"]
 
+    union_predicates = (
+        "above",
+        "over",
+        "below",
+    )
+    source_column_sources = [
+        {
+            "name": "megasg_clean",
+            "predicates": list(
+                union_predicates
+            ),
+        },
+        {
+            "name": "vg_raw",
+            "predicates": list(
+                union_predicates
+            ),
+        },
+        {
+            "name": "hicodet",
+            "predicates": [
+                "above",
+            ],
+        },
+    ]
+    source_column_payload = {
+        "schema": SOURCE_ALLOW_SCHEMA,
+        "sources": source_column_sources,
+    }
+    source_column_sha = hashlib.sha256(
+        source_column_json_bytes(
+            source_column_payload
+        )
+    ).hexdigest()
+    local_predicates = {
+        "megasg_clean": [
+            "above",
+            "over",
+            "below",
+        ],
+        "vg_raw": [
+            "below",
+            "above",
+            "over",
+        ],
+        "hicodet": [
+            "above",
+            "unknown-local",
+        ],
+    }
+    source_column_derivation = {
+        "schema": SOURCE_COLUMN_DERIVATION_SCHEMA,
+        "source_order": list(
+            RELEASED_SOURCE_NAMES
+        ),
+        "restricted_sources": list(
+            RELEASED_RESTRICTED_SOURCES
+        ),
+        "union_predicate_order": list(
+            union_predicates
+        ),
+        "union_predicate_count": len(
+            union_predicates
+        ),
+        "union_predicate_order_sha256": names_h(
+            union_predicates
+        ),
+        "sources": [
+            {
+                "source_name": name,
+                "pack_split": f"/packs/{name}/train",
+                "meta_sha256": h(
+                    str(index + 4)
+                ),
+                "local_predicates": (
+                    local_predicates[name]
+                ),
+                "local_predicate_count": len(
+                    local_predicates[
+                        name
+                    ]
+                ),
+                "local_predicate_order_sha256": names_h(
+                    tuple(
+                        local_predicates[
+                            name
+                        ]
+                    )
+                ),
+                "unknown_local_predicates": (
+                    [
+                        value
+                        for value in local_predicates[
+                            name
+                        ]
+                        if value
+                        not in union_predicates
+                    ]
+                ),
+                "restricted": (
+                    name
+                    in RELEASED_RESTRICTED_SOURCES
+                ),
+                "allowed_predicates": (
+                    source_column_sources[
+                        index
+                    ]["predicates"]
+                ),
+                "allowed_predicate_count": len(
+                    source_column_sources[
+                        index
+                    ]["predicates"]
+                ),
+                "allowed_predicate_order_sha256": names_h(
+                    tuple(
+                        source_column_sources[
+                            index
+                        ]["predicates"]
+                    )
+                ),
+            }
+            for index, name in enumerate(
+                RELEASED_SOURCE_NAMES
+            )
+        ],
+        "sidecar_sha256": (
+            source_column_sha
+        ),
+    }
+
     return {
         "schema": CORPUS_SCHEMA,
         "reference_source_commit": (
@@ -135,7 +273,12 @@ def corpus() -> dict:
         ),
         "sources": sources,
         "exclude_ids_sha256": h("4"),
-        "source_column_allow_sha256": h("5"),
+        "source_column_allow_sha256": (
+            source_column_sha
+        ),
+        "source_column_derivation": (
+            source_column_derivation
+        ),
         "ontology_meta_sha256": h("6"),
         "ontology_npz_sha256": h("7"),
         "neg_rate_table_sha256": h("8"),
@@ -595,6 +738,18 @@ class ApacheReleaseQualificationTest(
             ),
         )
         self.assertEqual(
+            result["source_column_derivation"][
+                "restricted_sources"
+            ],
+            ["hicodet"],
+        )
+        self.assertEqual(
+            result["source_column_derivation"][
+                "sources"
+            ][2]["allowed_predicates"],
+            ["above"],
+        )
+        self.assertEqual(
             result["predicate_spatial_flags_sha256"],
             h("0"),
         )
@@ -931,6 +1086,72 @@ class ApacheReleaseQualificationTest(
             "epoch sequence",
         ):
             validate_training_run(run)
+
+    def test_source_column_derivation_is_bound(self):
+        value = corpus()
+        value["source_column_derivation"][
+            "restricted_sources"
+        ] = ["vg_raw"]
+        with self.assertRaisesRegex(
+            ValueError,
+            "restrict hicodet only",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["source_column_derivation"][
+            "sources"
+        ][2]["allowed_predicates"] = [
+            "below",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "allowed predicates",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["source_column_derivation"][
+            "sources"
+        ][2]["meta_sha256"] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "same pack meta",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["source_column_derivation"][
+            "sidecar_sha256"
+        ] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "sidecar hash",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value["source_column_derivation"][
+            "union_predicate_order"
+        ] = [
+            "over",
+            "above",
+            "below",
+        ]
+        value["source_column_derivation"][
+            "union_predicate_order_sha256"
+        ] = names_h(
+            (
+                "over",
+                "above",
+                "below",
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "named predicate bank",
+        ):
+            validate_corpus(value)
 
     def test_text_bank_derivation_is_bound(self):
         value = corpus()
