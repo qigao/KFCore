@@ -505,12 +505,18 @@ int main(int argc, char** argv)
         std::vector<
             kfcore::relation::TimedRelationFrame>
             runs;
+        std::vector<
+            kfcore::relation::TimedRelationFrame>
+            host_runs;
         runs.reserve(vocabularies.size());
+        host_runs.reserve(vocabularies.size());
 
         for (std::size_t index = 0U;
              index < vocabularies.size(); ++index)
         {
             relation->set_vocabulary(
+                vocabularies[index].vocabulary);
+            host_relation->set_vocabulary(
                 vocabularies[index].vocabulary);
             require(
                 relation->predicate_count() ==
@@ -521,9 +527,15 @@ int main(int argc, char** argv)
                 relation->vocabulary_version() ==
                     index + 1U,
                 "vocabulary version is not positive/monotonic");
+            require(
+                host_relation->vocabulary_version() ==
+                    index + 1U,
+                "host vocabulary version is not positive/monotonic");
 
             auto timed =
                 relation->infer_timed(image, regions);
+            auto host_timed =
+                host_relation->infer_timed(image, regions);
             require(
                 timed.frame.vocabulary_version ==
                     relation->vocabulary_version(),
@@ -538,10 +550,32 @@ int main(int argc, char** argv)
                 "timing predicate count drifted");
             require(
                 timed.timing.preprocess_ms >= 0.0 &&
+                    timed.timing.backend_ms >= 0.0 &&
+                    timed.timing.predicate_score_ms >= 0.0 &&
                     timed.timing.runtime_ms >= 0.0 &&
                     timed.timing.decode_ms >= 0.0 &&
                     timed.timing.total_ms >= 0.0,
-                "negative timing value");
+                "negative backend-scoring timing value");
+            require(
+                host_timed.timing.preprocess_ms >= 0.0 &&
+                    host_timed.timing.backend_ms >= 0.0 &&
+                    host_timed.timing.predicate_score_ms >= 0.0 &&
+                    host_timed.timing.runtime_ms >= 0.0 &&
+                    host_timed.timing.decode_ms >= 0.0 &&
+                    host_timed.timing.total_ms >= 0.0,
+                "negative host-scoring timing value");
+            require(
+                std::fabs(
+                    timed.timing.runtime_ms -
+                    (timed.timing.backend_ms +
+                     timed.timing.predicate_score_ms)) <= 1.0e-3,
+                "backend timing split does not sum to runtime");
+            require(
+                std::fabs(
+                    host_timed.timing.runtime_ms -
+                    (host_timed.timing.backend_ms +
+                     host_timed.timing.predicate_score_ms)) <= 1.0e-3,
+                "host timing split does not sum to runtime");
             require(
                 timed.timing.edge_count ==
                     timed.frame.edges.size(),
@@ -556,6 +590,12 @@ int main(int argc, char** argv)
             compare_edges(
                 timed.frame.edges,
                 reference->second);
+            compare_edges(
+                host_timed.frame.edges,
+                reference->second);
+            compare_relation_edges(
+                timed.frame.edges,
+                host_timed.frame.edges);
 
             kfcore::pipelines::SceneGraphFrame scene;
             scene.objects.image_width = 8;
@@ -586,6 +626,7 @@ int main(int argc, char** argv)
             }
 
             runs.push_back(std::move(timed));
+            host_runs.push_back(std::move(host_timed));
         }
 
         require(
