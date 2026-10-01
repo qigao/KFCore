@@ -100,9 +100,9 @@ def _validate_onnx(path: Path) -> dict[str, object]:
     }
 
     expected_inputs = {
-        "image": (TensorProto.FLOAT, [1, 3, 448, 448]),
-        "boxes": (TensorProto.FLOAT, [1, 32, 4]),
-        "box_counts": (TensorProto.INT64, [1]),
+        "image": (TensorProto.FLOAT, [-1, 3, 448, 448]),
+        "boxes": (TensorProto.FLOAT, [-1, -1, 4]),
+        "box_counts": (TensorProto.INT64, [-1]),
         "W": (TensorProto.FLOAT, [-1, 512]),
         "alpha": (TensorProto.FLOAT, [-1]),
     }
