@@ -325,8 +325,7 @@ std::uint64_t ByteTrackSession::tracking_epoch() const noexcept {
 
 std::uint64_t ByteTrackSession::reset() {
     if (!impl_) {
-        throw YoloError(YoloErrorCode::InvalidArgument,
-                        "cannot reset a moved-from ByteTrackSession");
+        return 0U;
     }
     if (impl_->tracking_epoch == (std::numeric_limits<std::uint64_t>::max)()) {
         throw YoloError(YoloErrorCode::ResourceLimitExceeded,
