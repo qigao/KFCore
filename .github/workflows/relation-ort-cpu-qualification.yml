@@ -175,6 +175,53 @@ jobs:
           "$executable"             "$plugin"             "$fixture"             "$fixture/vocabularies.tsv"             "$fixture/reference.tsv"             "$report"
           test -f "$report"
 
+      - name: Record ORT CPU hardware and software provenance
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import platform
+          from pathlib import Path
+          import subprocess
+          import sys
+          import onnxruntime as ort
+
+          cpu_model = ""
+          cpuinfo = Path("/proc/cpuinfo")
+          if cpuinfo.is_file():
+              for line in cpuinfo.read_text(encoding="utf-8").splitlines():
+                  if line.lower().startswith("model name"):
+                      cpu_model = line.split(":", 1)[1].strip()
+                      break
+          compiler = subprocess.check_output(
+              ["c++", "--version"],
+              text=True,
+          ).splitlines()[0]
+          payload = {
+              "schema": "kfcore.relation-backend-provenance/1",
+              "backend": "onnxruntime-cpu",
+              "hardware": {
+                  "machine": platform.machine(),
+                  "cpu_model": cpu_model or platform.processor() or "unknown",
+                  "logical_cpu_count": os.cpu_count(),
+              },
+              "software": {
+                  "os": platform.platform(),
+                  "python": sys.version.split()[0],
+                  "onnxruntime": ort.__version__,
+                  "compiler": compiler,
+              },
+          }
+          path = Path(os.environ["RUNNER_TEMP"]) / "relation-ort-cpu-provenance.json"
+          path.write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
       - name: Validate qualification evidence
         shell: bash
         run: |
@@ -263,6 +310,7 @@ jobs:
           name: relation-ort-cpu-cpp-qualification
           path: |
             ${{ runner.temp }}/relation-ort-cpu-report.json
+            ${{ runner.temp }}/relation-ort-cpu-provenance.json
             ${{ runner.temp }}/relation-ort-cpu-fixture/fixture-evidence.json
           if-no-files-found: error
           retention-days: 7
