@@ -280,8 +280,11 @@ spec("scene graph production engine")
         check(engine.vocabulary_version() == std::uint64_t{9U});
         check(engine.predicates()[0] == "riding");
 
-        engine.reset_tracking();
+        check(engine.tracking_epoch() == std::uint64_t{1U});
+        check(engine.reset_tracking() == std::uint64_t{2U});
+        check(engine.tracking_epoch() == std::uint64_t{2U});
         const auto scene = engine.process(image::ImageView{});
+        check(scene.objects.tracking_epoch == std::uint64_t{2U});
         check(scene.objects.detections.size() == std::size_t{2U});
     }
 

@@ -24,11 +24,13 @@ pipelines::SceneGraphFrame make_frame(
     float relation_score = 1.0F,
     std::optional<std::uint64_t> subject_track = std::uint64_t{101},
     std::optional<std::uint64_t> object_track = std::uint64_t{202},
-    std::uint64_t vocabulary_version = 0U)
+    std::uint64_t vocabulary_version = 0U,
+    std::uint64_t tracking_epoch = 1U)
 {
     pipelines::SceneGraphFrame frame;
     frame.objects.image_width = 100;
     frame.objects.image_height = 100;
+    frame.objects.tracking_epoch = tracking_epoch;
     frame.objects.detections = {
         {{{0.0F, 0.0F, 20.0F, 20.0F}, 0.95F, 0}, subject_track},
         {{{20.0F, 0.0F, 40.0F, 20.0F}, 0.90F, 1}, object_track},
@@ -117,6 +119,17 @@ spec("typed scene behavior pipeline API")
                 decltype(std::declval<const Pipeline&>()
                              .vocabulary_version()),
                 std::uint64_t>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<const Pipeline&>()
+                             .tracking_epoch()),
+                std::uint64_t>);
+        static_assert(
+            std::is_same_v<
+                decltype(std::declval<Pipeline&>()
+                             .reset_tracking(0.0)),
+                std::vector<
+                    scene_interaction::SceneBehaviorEvent>>);
         static_assert(
             std::is_same_v<
                 decltype(std::declval<Pipeline&>().process(
@@ -299,6 +312,7 @@ spec("scene graph temporal feature encoding")
         const auto& observation = observations.front();
         check(observation.pair.subject_track_id == std::uint64_t{101});
         check(observation.pair.object_track_id == std::uint64_t{202});
+        check(observation.pair.tracking_epoch == std::uint64_t{1U});
         check(observation.subject_class_id == std::int32_t{0});
         check(observation.object_class_id == std::int32_t{1});
         check(observation.values.size() == std::size_t{7U});
@@ -471,6 +485,71 @@ spec("pair-centric scene ESN behavior lifecycle")
             0.50);
         check(resumed.empty());
         check(interaction.pair_state_count() == std::size_t{1U});
+    }
+
+    it("cancels old pair state when a tracking epoch reuses the same IDs")
+    {
+        scene_interaction::SceneInteraction interaction(make_options());
+        (void)interaction.configure_model(make_model(), 0.0);
+        (void)interaction.process(
+            make_frame(1.0F, std::uint64_t{101}, std::uint64_t{202}, 0U, 1U),
+            0.0);
+        const auto started = interaction.process(
+            make_frame(1.0F, std::uint64_t{101}, std::uint64_t{202}, 0U, 1U),
+            0.20);
+        check(started.size() == std::size_t{1U});
+        check(interaction.pair_state_count() == std::size_t{1U});
+
+        const auto reset = interaction.process(
+            make_frame(1.0F, std::uint64_t{101}, std::uint64_t{202}, 0U, 2U),
+            0.30);
+        check(reset.size() == std::size_t{1U});
+        check(reset[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorCancelled);
+        check(reset[0].reason ==
+              scene_interaction::SceneBehaviorEventReason::TrackingReset);
+        check(reset[0].pair.subject_track_id == std::uint64_t{101});
+        check(reset[0].pair.object_track_id == std::uint64_t{202});
+        check(reset[0].pair.tracking_epoch == std::uint64_t{1U});
+        check(interaction.pair_state_count() == std::size_t{1U});
+
+        const auto restarted = interaction.process(
+            make_frame(1.0F, std::uint64_t{101}, std::uint64_t{202}, 0U, 2U),
+            0.45);
+        check(restarted.size() == std::size_t{1U});
+        check(restarted[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorStarted);
+        check(restarted[0].pair.tracking_epoch == std::uint64_t{2U});
+    }
+
+    it("resets tracker and temporal identity atomically through the pipeline")
+    {
+        auto pipeline = make_behavior_pipeline();
+        (void)pipeline->configure_model(make_model(7U), 0.0);
+        check(pipeline->tracking_epoch() == std::uint64_t{1U});
+
+        (void)pipeline->process(image::ImageView{}, 0.0);
+        const auto started =
+            pipeline->process(image::ImageView{}, 0.20);
+        check(started.events.size() == std::size_t{1U});
+        check(pipeline->pair_state_count() == std::size_t{1U});
+
+        const auto cancelled =
+            pipeline->reset_tracking(0.25);
+        check(cancelled.size() == std::size_t{1U});
+        check(cancelled[0].kind ==
+              scene_interaction::SceneBehaviorEventKind::BehaviorCancelled);
+        check(cancelled[0].reason ==
+              scene_interaction::SceneBehaviorEventReason::TrackingReset);
+        check(cancelled[0].pair.tracking_epoch == std::uint64_t{1U});
+        check(pipeline->tracking_epoch() == std::uint64_t{2U});
+        check(pipeline->pair_state_count() == std::size_t{0U});
+
+        const auto after =
+            pipeline->process(image::ImageView{}, 0.30);
+        check(after.events.empty());
+        check(after.scene.objects.tracking_epoch == std::uint64_t{2U});
+        check(pipeline->pair_state_count() == std::size_t{1U});
     }
 
     it("cancels active behavior when the model is replaced")

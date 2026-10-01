@@ -175,9 +175,15 @@ SceneGraphEngine::predicates() const noexcept
         empty;
 }
 
-void SceneGraphEngine::reset_tracking() noexcept
+std::uint64_t
+SceneGraphEngine::tracking_epoch() const noexcept
 {
-    tracking_.reset();
+    return tracking_.tracking_epoch();
+}
+
+std::uint64_t SceneGraphEngine::reset_tracking()
+{
+    return tracking_.reset();
 }
 
 std::vector<relation::Region>

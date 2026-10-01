@@ -382,12 +382,20 @@ SceneGraphPipeline::predicates() const noexcept
         empty;
 }
 
-void SceneGraphPipeline::reset_tracking() noexcept
+std::uint64_t
+SceneGraphPipeline::tracking_epoch() const noexcept
 {
-    if (impl_)
+    return impl_ ? impl_->engine.tracking_epoch() : 0U;
+}
+
+std::uint64_t SceneGraphPipeline::reset_tracking()
+{
+    if (!impl_)
     {
-        impl_->engine.reset_tracking();
+        throw std::logic_error(
+            "SceneGraphPipeline state is unavailable");
     }
+    return impl_->engine.reset_tracking();
 }
 
 } // namespace kfcore::pipelines

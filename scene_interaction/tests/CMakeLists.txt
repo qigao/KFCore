@@ -7,3 +7,12 @@ cmake_add_test(
   INCLUDES ../src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_scene_interaction_test_folder}")
+
+
+cmake_add_test(
+  NAME tracking_continuity_qualification
+  SOURCES tracking_continuity_qualification.cpp
+  LIBS KFCore::scene_interaction
+  INCLUDES ../../vision/pipelines/scene_graph/src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_scene_interaction_test_folder}")

@@ -61,7 +61,8 @@ public:
     [[nodiscard]] std::vector<SceneBehaviorEvent>
     reset_temporal(double seconds);
 
-    void reset_tracking() noexcept;
+    [[nodiscard]] std::vector<SceneBehaviorEvent>
+    reset_tracking(double seconds);
 
     [[nodiscard]] bool supports_dynamic_vocabulary() const noexcept;
     [[nodiscard]] bool supports_live_predicates() const noexcept;
@@ -69,6 +70,7 @@ public:
     void set_vocabulary(relation::PredicateVocabulary vocabulary);
     void set_predicates(const std::vector<std::string>& predicates);
 
+    [[nodiscard]] std::uint64_t tracking_epoch() const noexcept;
     [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
     [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
 

@@ -193,6 +193,7 @@ public:
 
     ByteTrackOptions options;
     std::map<std::int32_t, TrackerOwner> trackers;
+    std::uint64_t tracking_epoch = 1U;
 };
 
 ByteTrackSession::ByteTrackSession(ByteTrackOptions options) {
@@ -247,6 +248,7 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
         }
 
         TrackFrame result{frame.image_width, frame.image_height, {}};
+        result.tracking_epoch = impl_->tracking_epoch;
         result.detections.resize(detection_count);
         for (std::size_t index = 0; index < detection_count; ++index) {
             result.detections[index].detection = frame.detections[index];
@@ -317,11 +319,21 @@ TrackFrame ByteTrackSession::update(const DetectionFrame& frame) {
     }
 }
 
-void ByteTrackSession::reset() noexcept {
+std::uint64_t ByteTrackSession::tracking_epoch() const noexcept {
+    return impl_ ? impl_->tracking_epoch : 0U;
+}
+
+std::uint64_t ByteTrackSession::reset() {
     if (!impl_) {
-        return;
+        return 0U;
+    }
+    if (impl_->tracking_epoch == (std::numeric_limits<std::uint64_t>::max)()) {
+        throw YoloError(YoloErrorCode::ResourceLimitExceeded,
+                        "ByteTrack tracking epoch exhausted");
     }
     impl_->trackers.clear();
+    ++impl_->tracking_epoch;
+    return impl_->tracking_epoch;
 }
 
 }  // namespace kfcore::yolo

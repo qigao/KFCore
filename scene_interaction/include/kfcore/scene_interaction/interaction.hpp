@@ -17,18 +17,22 @@ struct PairKey
 {
     std::uint64_t subject_track_id = 0U;
     std::uint64_t object_track_id = 0U;
+    std::uint64_t tracking_epoch = 1U;
 
     friend bool operator==(const PairKey& left, const PairKey& right) noexcept
     {
         return left.subject_track_id == right.subject_track_id &&
-               left.object_track_id == right.object_track_id;
+               left.object_track_id == right.object_track_id &&
+               left.tracking_epoch == right.tracking_epoch;
     }
 
     friend bool operator<(const PairKey& left, const PairKey& right) noexcept
     {
-        return left.subject_track_id < right.subject_track_id ||
-               (left.subject_track_id == right.subject_track_id &&
-                left.object_track_id < right.object_track_id);
+        return left.tracking_epoch < right.tracking_epoch ||
+               (left.tracking_epoch == right.tracking_epoch &&
+                (left.subject_track_id < right.subject_track_id ||
+                 (left.subject_track_id == right.subject_track_id &&
+                  left.object_track_id < right.object_track_id)));
     }
 };
 
@@ -76,6 +80,7 @@ enum class SceneBehaviorEventReason
     PairLost,
     FrameGap,
     Reset,
+    TrackingReset,
     ModelChanged,
     VocabularyChanged,
 };
@@ -109,6 +114,9 @@ public:
 
     [[nodiscard]] std::vector<SceneBehaviorEvent> advance(double seconds);
     [[nodiscard]] std::vector<SceneBehaviorEvent> reset(double seconds);
+
+    [[nodiscard]] std::vector<SceneBehaviorEvent>
+    reset_tracking_epoch(std::uint64_t tracking_epoch, double seconds);
 
     [[nodiscard]] bool configured() const noexcept;
     [[nodiscard]] std::size_t pair_state_count() const noexcept;
