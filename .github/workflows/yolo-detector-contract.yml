@@ -99,6 +99,7 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -Ivision/core/yolo/include \
             -Ivision/core/yolo/src \
+            -Ivision/core/image_processor/include \
             -c vision/core/yolo/src/raw_yolo.cpp \
             -o "$out/raw_yolo.o"
 
@@ -106,6 +107,7 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -Ivision/core/yolo/include \
             -Ivision/core/yolo/src \
+            -Ivision/core/image_processor/include \
             -Isalts/tinytest/include \
             -c vision/core/yolo/tests/test_raw_yolo.cpp \
             -o "$out/test_raw_yolo.o"
