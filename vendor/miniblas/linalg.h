@@ -57,6 +57,7 @@ extern "C"
      * @param[in] B Input matrix B (m x k)
      * @param[in] beta Factor beta
      * @param[in/out] C Output matrix (n x k)
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
                 const float* B, float beta, float* C);
@@ -68,6 +69,7 @@ extern "C"
      *  @param[in] n Rows/columns of A, rows of B
      *  @param[in] m columns of B and C
      *  @param[out] C (n x m) matrix output of the product A*B
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int matmulsym(const float* A_sym, const float* B, int n, int m, float* C);
 
@@ -80,6 +82,7 @@ extern "C"
      * @param[in] x Input vector, length cols for "N" or rows for "T".
      * @param[in] beta Factor beta.
      * @param[in,out] y Output vector, length rows for "N" or cols for "T".
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int matvec(const char* trans, int rows, int cols, float alpha, const float* A,
                 const float* x, float beta, float* y);
@@ -91,6 +94,7 @@ extern "C"
      * @param[in] rows Rows of A.
      * @param[in] cols Columns of A.
      * @param[in] alpha Factor alpha.
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha);
 
@@ -127,6 +131,7 @@ extern "C"
      * @param[in]     n Matrix dimension (rows / columns of A)
      * @param[in]     m Matrix dimension (cols of B)
      * @param[in]     tp Transpose L?
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int trisolve(const float* A, float* B, int n, int m, const char* tp);
 
@@ -140,6 +145,7 @@ extern "C"
      * @param[in]     n Matrix dimension (rows / columns of L)
      * @param[in]     m Matrix dimension (rows of A)
      * @param[in]     tp Transpose L?
+      * @return 0 on success; non-zero miniblas status on invalid operation/input.
      */
     int trisolveright(const float* L, float* A, int n, int m, const char* tp);
 
@@ -147,7 +153,8 @@ extern "C"
      * @param[in,out] P Matrix (n x n) to be updated (only upper part is referenced and updated)
      * @param[in] E Matrix (n x m) including the update
      * @param[in] n Number of rows and cols in P, rows in E
-     * @param[in] m Number of cols in E */
+     * @param[in] m Number of cols in E  * @return 0 on success; non-zero miniblas status on invalid operation/input.
+     */
     int symmetricrankupdate(float* P, const float* E, int n, int m);
 
     /**
