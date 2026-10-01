@@ -698,19 +698,22 @@ DetectionFrame YoloDetector::detect(const ImageView& image)
         const kfcore::image::ImageView source = to_image_view(image);
         kfcore::image::PreprocessOptions preprocess;
         preprocess.output_format =
-            impl_->layout == Impl::OutputLayout::RawYoloX
-                ? kfcore::image::PixelFormat::Bgr8
-                : kfcore::image::PixelFormat::Rgb8;
+            kfcore::image::PixelFormat::Rgb8;
         preprocess.border_value = impl_->options.border_value;
         preprocess.mirror_horizontal =
             impl_->options.mirror_horizontal;
         if (impl_->layout == Impl::OutputLayout::RawYoloX)
         {
             preprocess.center_letterbox = false;
+            preprocess.mean = {
+                0.485F,
+                0.456F,
+                0.406F,
+            };
             preprocess.stddev = {
-                1.0F / 255.0F,
-                1.0F / 255.0F,
-                1.0F / 255.0F,
+                0.229F,
+                0.224F,
+                0.225F,
             };
         }
         kfcore::image::LetterboxTransform transform;
