@@ -1,3 +1,4 @@
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -289,16 +290,131 @@ static void test_ekf_workspace_contract(void)
                KFCORE_KALMAN_INVALID_ARGUMENT);
 }
 
-static void test_remaining_fixed_wrappers(void)
+static int ukf_identity_transition(float* x_pred, const float* x, int n, void* user)
 {
-    float x[1] = { 7.0f };
-    float P[1] = { 9.0f };
-    float z[1] = { 0.0f };
-    float R[1] = { 1.0f };
+    if (user && *(const int*)user != 0)
+    {
+        return -1;
+    }
+    memcpy(x_pred, x, sizeof(float) * (size_t)n);
+    return 0;
+}
 
-    expect_int("ukf state overflow", kalman_ukf_predict(x, P, NULL, NULL, 33, NULL, NULL), -1);
-    expect_int("ukf measurement overflow",
-               kalman_ukf_update(x, P, z, R, NULL, 1, 4, NULL, 0.0f, NULL, NULL), -1);
+static int ukf_identity_measurement(float* z_pred, const float* x,
+                                    int n, int m, void* user)
+{
+    (void)n;
+    if (user && *(const int*)user != 0)
+    {
+        return -1;
+    }
+    for (int i = 0; i < m; ++i)
+    {
+        z_pred[i] = x[i];
+    }
+    return 0;
+}
+
+static void test_ukf_workspace_contract(void)
+{
+    enum { N = 40, M = 5 };
+    float x[N];
+    float P[N * N];
+    float z[M];
+    float R[M * M];
+    float workspace[8192];
+    float tiny[1] = { 0.0f };
+    size_t required = 0U;
+    const kalman_ukf_params params = { 1.0f, 2.0f, 0.0f };
+
+    fill_identity(P, N);
+    fill_identity(R, M);
+    for (size_t i = 0U; i < N; ++i)
+    {
+        x[i] = (float)i;
+    }
+    for (size_t i = 0U; i < M; ++i)
+    {
+        z[i] = x[i];
+    }
+
+    expect_int("UKF predict query",
+               kalman_ukf_predict_workspace_floats(N, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("UKF predict size", (int)required, 3 * N * N + 2 * N);
+    expect_int("UKF predict n>32",
+               kalman_ukf_predict(
+                   x, P, NULL, ukf_identity_transition, N, &params, NULL,
+                   workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    expect_int("UKF update query",
+               kalman_ukf_update_workspace_floats(N, M, &required),
+               KFCORE_KALMAN_OK);
+    expect_int("UKF update size", (int)required,
+               N * N + N + 3 * N * M + M * M + 4 * M);
+    expect_int("UKF update n>32 m>3",
+               kalman_ukf_update(
+                   x, P, z, R, ukf_identity_measurement, N, M,
+                   &params, 0.0f, NULL, NULL,
+                   workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_OK);
+
+    {
+        int callback_failure = 1;
+        float before_x = x[0];
+        float before_p = P[0];
+
+        expect_int("UKF callback failure status",
+                   kalman_ukf_predict(
+                       x, P, NULL, ukf_identity_transition, N, &params,
+                       &callback_failure, workspace,
+                       sizeof(workspace) / sizeof(workspace[0])),
+                   KFCORE_KALMAN_CALLBACK_FAILURE);
+        expect_float("UKF callback failure preserves state", x[0], before_x);
+        expect_float("UKF callback failure preserves covariance", P[0], before_p);
+    }
+
+    {
+        const kalman_ukf_params invalid_params = { 0.0f, 2.0f, 0.0f };
+        expect_int("UKF invalid params before workspace",
+                   kalman_ukf_predict(
+                       x, P, NULL, ukf_identity_transition, N, &invalid_params,
+                       NULL, tiny, 1),
+                   KFCORE_KALMAN_INVALID_ARGUMENT);
+    }
+
+    {
+        const kalman_ukf_params invalid_params = { 1.0f, NAN, 0.0f };
+        expect_int("UKF rejects non-finite beta",
+                   kalman_ukf_predict(
+                       x, P, NULL, ukf_identity_transition, N, &invalid_params,
+                       NULL, workspace,
+                       sizeof(workspace) / sizeof(workspace[0])),
+                   KFCORE_KALMAN_INVALID_ARGUMENT);
+    }
+
+    {
+        float before_x = x[0];
+        float before_p = P[0];
+
+        expect_int("UKF undersized workspace",
+                   kalman_ukf_update(
+                       x, P, z, R, ukf_identity_measurement, N, M,
+                       &params, 0.0f, NULL, NULL, tiny, 1),
+                   KFCORE_KALMAN_WORKSPACE_TOO_SMALL);
+        expect_float("UKF workspace failure preserves state", x[0], before_x);
+        expect_float("UKF workspace failure preserves covariance", P[0], before_p);
+    }
+
+    expect_int("UKF invalid zero state query",
+               kalman_ukf_predict_workspace_floats(0, &required),
+               KFCORE_KALMAN_INVALID_ARGUMENT);
+
+    expect_int("UKF workspace size overflow",
+               kalman_ukf_update_workspace_floats(
+                   (size_t)INT_MAX, (size_t)INT_MAX, &required),
+               KFCORE_KALMAN_SIZE_OVERFLOW);
 }
 
 int main(void)
@@ -306,7 +422,7 @@ int main(void)
     test_udu_pivots();
     test_linear_workspace_contract();
     test_ekf_workspace_contract();
-    test_remaining_fixed_wrappers();
+    test_ukf_workspace_contract();
 
     if (failures != 0)
     {
