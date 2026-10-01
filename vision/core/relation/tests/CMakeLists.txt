@@ -39,8 +39,8 @@ if(KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION)
 add_executable(kfcore_relation_ort_cpu_qualification
   ort_cpu_qualification.cpp)
 target_include_directories(kfcore_relation_ort_cpu_qualification PRIVATE
-  ${PROJECT_SOURCE_DIR}/vision/pipelines/scene_graph/include
-  ${PROJECT_SOURCE_DIR}/vision/core/yolo/include)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../pipelines/scene_graph/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../yolo/include)
 target_compile_features(kfcore_relation_ort_cpu_qualification PRIVATE cxx_std_17)
 target_link_libraries(kfcore_relation_ort_cpu_qualification PRIVATE
   KFCore::relation_core)
