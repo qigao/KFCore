@@ -9,7 +9,6 @@
  * SYSTEM INCLUDE FILES
  ******************************************************************************/
 
-#include <assert.h>
 #include <math.h>
 #include <string.h> /* memset */
 
@@ -165,37 +164,22 @@ float vecnorm(const float* x, int n)
     return snrm2_(&n, x, &inc);
 }
 
-float vecmean(const float* x, int n)
+int vecmean(const float* x, int n, float* mean)
 {
-    int   inc = 1;
-    float mean;
-    int   result = svec_mean_(&n, x, &inc, &mean);
-
-    assert(result == 0);
-
-    return mean;
+    int inc = 1;
+    return svec_mean_(&n, x, &inc, mean);
 }
 
-float vecvariance(const float* x, int n, int ddof)
+int vecvariance(const float* x, int n, int ddof, float* variance)
 {
-    int   inc = 1;
-    float variance;
-    int   result = svec_variance_(&n, x, &inc, &ddof, &variance);
-
-    assert(result == 0);
-
-    return variance;
+    int inc = 1;
+    return svec_variance_(&n, x, &inc, &ddof, variance);
 }
 
-float vecrms(const float* x, int n)
+int vecrms(const float* x, int n, float* rms)
 {
-    int   inc = 1;
-    float rms;
-    int   result = svec_rms_(&n, x, &inc, &rms);
-
-    assert(result == 0);
-
-    return rms;
+    int inc = 1;
+    return svec_rms_(&n, x, &inc, rms);
 }
 
 int vecnormalize(float* x, int n, float eps, float* norm)
@@ -212,26 +196,16 @@ int vecnormalize(float* x, int n, float eps, float* norm)
     return result;
 }
 
-float vecdist_l1(const float* x, const float* y, int n)
+int vecdist_l1(const float* x, const float* y, int n, float* distance)
 {
-    int   inc = 1;
-    float distance;
-    int   result = svec_l1_distance_(&n, x, &inc, y, &inc, &distance);
-
-    assert(result == 0);
-
-    return distance;
+    int inc = 1;
+    return svec_l1_distance_(&n, x, &inc, y, &inc, distance);
 }
 
-float vecdist_linf(const float* x, const float* y, int n)
+int vecdist_linf(const float* x, const float* y, int n, float* distance)
 {
-    int   inc = 1;
-    float distance;
-    int   result = svec_linf_distance_(&n, x, &inc, y, &inc, &distance);
-
-    assert(result == 0);
-
-    return distance;
+    int inc = 1;
+    return svec_linf_distance_(&n, x, &inc, y, &inc, distance);
 }
 
 int veccosine(const float* x, const float* y, int n, float* cosine)

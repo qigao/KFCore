@@ -400,8 +400,12 @@ static void testlinalg(void)
         TEST_FLOAT_WITHIN(threshold, 22.0f, G[2], "rank1update wrapper G[2] failed");
         TEST_FLOAT_WITHIN(threshold, 28.0f, G[3], "rank1update wrapper G[3] failed");
 
-        TEST_FLOAT_WITHIN(threshold, 2.5f, vecmean(v, 4), "vecmean wrapper failed");
-        TEST_FLOAT_WITHIN(threshold, 1.25f, vecvariance(v, 4, 0), "vecvariance wrapper failed");
+        float       mean = 0.0f;
+        float       variance = 0.0f;
+        check_equal(vecmean(v, 4, &mean), 0);
+        check_equal(vecvariance(v, 4, 0, &variance), 0);
+        TEST_FLOAT_WITHIN(threshold, 2.5f, mean, "vecmean wrapper failed");
+        TEST_FLOAT_WITHIN(threshold, 1.25f, variance, "vecvariance wrapper failed");
         TEST_FLOAT_WITHIN(threshold, 3.7416575f, vecnorm(x, 3), "vecnorm wrapper failed");
         check_equal(vecnormalize(vn, 2, 1.0e-06f, &norm), 0);
         TEST_FLOAT_WITHIN(threshold, 5.0f, norm, "vecnormalize wrapper norm failed");

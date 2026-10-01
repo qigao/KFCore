@@ -57,6 +57,55 @@ int main(void)
     expect_failure("symmetricrankupdate negative rows",
                    symmetricrankupdate(a, b, -1, 1));
 
+    {
+        const float values[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+        const float other[4] = { 4.0f, 3.0f, 2.0f, 1.0f };
+        float result = 0.0f;
+
+        expect_zero("vecmean valid", vecmean(values, 4, &result));
+        if (result != 2.5f)
+        {
+            fprintf(stderr, "vecmean valid: expected 2.5, got %.9g\n", (double)result);
+            ++failures;
+        }
+        expect_failure("vecmean zero length", vecmean(values, 0, &result));
+        expect_failure("vecmean null input", vecmean(NULL, 4, &result));
+        expect_failure("vecmean null output", vecmean(values, 4, NULL));
+
+        expect_zero("vecvariance valid", vecvariance(values, 4, 0, &result));
+        if (result != 1.25f)
+        {
+            fprintf(stderr, "vecvariance valid: expected 1.25, got %.9g\n", (double)result);
+            ++failures;
+        }
+        expect_failure("vecvariance invalid ddof", vecvariance(values, 4, 4, &result));
+        expect_failure("vecvariance null output", vecvariance(values, 4, 0, NULL));
+
+        expect_zero("vecrms valid", vecrms(values, 4, &result));
+        expect_failure("vecrms zero length", vecrms(values, 0, &result));
+        expect_failure("vecrms null output", vecrms(values, 4, NULL));
+
+        expect_zero("vecdist_l1 valid", vecdist_l1(values, other, 4, &result));
+        if (result != 8.0f)
+        {
+            fprintf(stderr, "vecdist_l1 valid: expected 8, got %.9g\n", (double)result);
+            ++failures;
+        }
+        expect_failure("vecdist_l1 zero length", vecdist_l1(values, other, 0, &result));
+        expect_failure("vecdist_l1 null input", vecdist_l1(NULL, other, 4, &result));
+        expect_failure("vecdist_l1 null output", vecdist_l1(values, other, 4, NULL));
+
+        expect_zero("vecdist_linf valid", vecdist_linf(values, other, 4, &result));
+        if (result != 3.0f)
+        {
+            fprintf(stderr, "vecdist_linf valid: expected 3, got %.9g\n", (double)result);
+            ++failures;
+        }
+        expect_failure("vecdist_linf zero length", vecdist_linf(values, other, 0, &result));
+        expect_failure("vecdist_linf null input", vecdist_linf(values, NULL, 4, &result));
+        expect_failure("vecdist_linf null output", vecdist_linf(values, other, 4, NULL));
+    }
+
     if (failures != 0)
     {
         fprintf(stderr, "linalg status contract: %d failure(s)\n", failures);
