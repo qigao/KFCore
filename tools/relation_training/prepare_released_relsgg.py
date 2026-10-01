@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +166,9 @@ def prepare(
     if root.exists():
         raise FileExistsError(root)
     root.mkdir(parents=True, exist_ok=False)
+    shutil.copyfile(onnx_file, root / "relateanything.onnx")
+    shutil.copyfile(bank_file, root / "predicate_bank.npz")
+    shutil.copyfile(metadata_file, root / "relateanything.json")
 
     package = {
         "schema": PACKAGE_SCHEMA,
