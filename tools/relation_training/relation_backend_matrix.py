@@ -85,21 +85,56 @@ def _positive_int(value: object, name: str) -> int:
 def validate_policy(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("score_decode_policy must be an object")
-    result: dict[str, object] = {}
     for key in _POLICY_KEYS:
         if key not in payload:
             raise ValueError(f"score_decode_policy is missing {key}")
-        value = payload[key]
-        if key == "weight_ranking_by_detector_score":
-            if not isinstance(value, bool):
-                raise ValueError(
-                    "weight_ranking_by_detector_score must be boolean"
-                )
-            result[key] = value
-        elif key == "top_k":
-            result[key] = _positive_int(value, f"policy {key}")
-        else:
-            result[key] = _number(value, f"policy {key}")
+
+    result: dict[str, object] = {
+        "logit_scale": _number(
+            payload["logit_scale"],
+            "policy logit_scale",
+        ),
+        "logit_bias": _number(
+            payload["logit_bias"],
+            "policy logit_bias",
+            minimum=-float("inf"),
+        ),
+        "pair_weight": _number(
+            payload["pair_weight"],
+            "policy pair_weight",
+            minimum=-float("inf"),
+        ),
+        "calibration_a": _number(
+            payload["calibration_a"],
+            "policy calibration_a",
+        ),
+        "calibration_b": _number(
+            payload["calibration_b"],
+            "policy calibration_b",
+            minimum=-float("inf"),
+        ),
+        "threshold": _number(
+            payload["threshold"],
+            "policy threshold",
+        ),
+        "top_k": _positive_int(
+            payload["top_k"],
+            "policy top_k",
+        ),
+    }
+    if float(result["logit_scale"]) <= 0.0:
+        raise ValueError("policy logit_scale must be positive")
+    if float(result["calibration_a"]) <= 0.0:
+        raise ValueError("policy calibration_a must be positive")
+    if float(result["threshold"]) > 1.0:
+        raise ValueError("policy threshold must be <= 1")
+
+    detector_weight = payload["weight_ranking_by_detector_score"]
+    if not isinstance(detector_weight, bool):
+        raise ValueError(
+            "weight_ranking_by_detector_score must be boolean"
+        )
+    result["weight_ranking_by_detector_score"] = detector_weight
     return result
 
 
