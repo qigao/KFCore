@@ -2,6 +2,7 @@
 
 #include "tinytest.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
