@@ -425,6 +425,16 @@ void write_report(
     stream << "  \"same_model_reused_across_vocabularies\": true,\n";
     stream << "  \"same_host_model_reused_across_vocabularies\": true,\n";
     stream << "  \"object_labels_enter_relation_inference\": false,\n";
+    stream << "  \"score_decode_policy\": {\n";
+    stream << "    \"logit_scale\": 1.0,\n";
+    stream << "    \"logit_bias\": 0.0,\n";
+    stream << "    \"pair_weight\": 1.0,\n";
+    stream << "    \"calibration_a\": 1.0,\n";
+    stream << "    \"calibration_b\": 0.0,\n";
+    stream << "    \"threshold\": 0.0,\n";
+    stream << "    \"top_k\": 4,\n";
+    stream << "    \"weight_ranking_by_detector_score\": false\n";
+    stream << "  },\n";
 
     write_case_array(
         stream, "cases", vocabularies, runs, true);
