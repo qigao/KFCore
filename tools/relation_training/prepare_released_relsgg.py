@@ -107,11 +107,11 @@ def _validate_onnx(path: Path) -> dict[str, object]:
         "alpha": (TensorProto.FLOAT, [-1]),
     }
     expected_outputs = {
-        "pred_logits": (TensorProto.FLOAT, [1, 128, -1]),
-        "pair_logits": (TensorProto.FLOAT, [1, 128]),
-        "sub_idx": (TensorProto.INT64, [1, 128]),
-        "obj_idx": (TensorProto.INT64, [1, 128]),
-        "valid_mask": (TensorProto.BOOL, [1, 128]),
+        "pred_logits": (TensorProto.FLOAT, [-1, -1, -1]),
+        "pair_logits": (TensorProto.FLOAT, [-1, -1]),
+        "sub_idx": (TensorProto.INT64, [-1, -1]),
+        "obj_idx": (TensorProto.INT64, [-1, -1]),
+        "valid_mask": (TensorProto.BOOL, [-1, -1]),
     }
     if inputs != expected_inputs:
         raise ValueError(
