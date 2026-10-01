@@ -113,13 +113,13 @@ load_vocabularies(const std::filesystem::path& path)
             std::stof(fields[6]));
     }
 
-    if (result.size() != 4U)
+    if (result.size() != 5U)
     {
         throw std::runtime_error(
-            "qualification requires four vocabulary cases");
+            "qualification requires five vocabulary cases");
     }
-    const std::array<std::string, 4U> expected {
-        "v1", "v3", "default", "v1-repeat"
+    const std::array<std::string, 5U> expected {
+        "v1", "v3", "default", "large", "v1-repeat"
     };
     for (std::size_t index = 0U;
          index < result.size(); ++index)
