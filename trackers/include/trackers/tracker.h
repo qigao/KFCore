@@ -31,7 +31,8 @@ typedef enum tracker_status {
     TRACKER_STATUS_INVALID_ARGUMENT = 1,
     TRACKER_STATUS_CAPACITY = 2,
     TRACKER_STATUS_OVERFLOW = 3,
-    TRACKER_STATUS_ALLOCATION_FAILED = 4
+    TRACKER_STATUS_ALLOCATION_FAILED = 4,
+    TRACKER_STATUS_NUMERICAL_FAILURE = 5
 } tracker_status_t;
 
 typedef struct tracked_detection_ex {
