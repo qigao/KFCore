@@ -28,6 +28,9 @@ option(KFCORE_ENABLE_TEMPORAL_GESTURE_GRU
 option(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER
        "Build the optional HuggingFace tokenizer.json provider for relation predicates"
        OFF)
+option(KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION
+       "Build the focused C++ ORT CPU open-vocabulary qualification executable"
+       OFF)
 set(KFCORE_TOKENIZERS_CPP_SOURCE_DIR "" CACHE PATH
     "Path to a pinned mlc-ai/tokenizers-cpp source checkout when KFCORE_ENABLE_HF_TOKENIZER_PROVIDER=ON")
 option(KFCORE_ONNXRUNTIME_ENABLE_CUDA
