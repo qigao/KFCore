@@ -92,6 +92,76 @@ suite("tracker update status") {
         cbiou_destroy(tracker);
     }
 
+    it("rolls back OC-SORT after a late Kalman failure") {
+        ocsort_config_t config = ocsort_default_config();
+        config.minimum_consecutive_frames = 1;
+        ocsort_t* tracker = ocsort_create(&config);
+        detection_t detections[2] = {
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f),
+            make_detection(100.0f, 0.0f, 110.0f, 10.0f, 0.95f),
+        };
+        tracked_detection_ex_t output[2];
+        size_t written = 0;
+
+        check_not_null(tracker);
+        trackers_test_alloc_reset();
+
+        check_equal(ocsort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].tracked.tracker_id, -1);
+        check_equal(output[1].tracked.tracker_id, -1);
+
+        trackers_test_kalman_fail_after(3);
+        check_equal(ocsort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_NUMERICAL_FAILURE);
+        check_equal(written, (size_t)0);
+
+        check_equal(ocsort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].detection_index, (size_t)0);
+        check_equal(output[1].detection_index, (size_t)1);
+        check_equal(output[0].tracked.tracker_id, 0);
+        check_equal(output[1].tracked.tracker_id, 1);
+
+        ocsort_destroy(tracker);
+    }
+
+    it("rolls back OC-SORT when unfreeze replay fails") {
+        ocsort_config_t config = ocsort_default_config();
+        config.minimum_consecutive_frames = 1;
+        ocsort_t* tracker = ocsort_create(&config);
+        detection_t detection =
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f);
+        tracked_detection_ex_t output[1];
+        size_t written = 0;
+
+        check_not_null(tracker);
+        trackers_test_alloc_reset();
+
+        check_equal(ocsort_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)1);
+
+        check_equal(ocsort_update_ex(tracker, NULL, 0, NULL, 0, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)0);
+
+        trackers_test_kalman_fail_after(1);
+        check_equal(ocsort_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_NUMERICAL_FAILURE);
+        check_equal(written, (size_t)0);
+
+        check_equal(ocsort_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)1);
+        check_equal(output[0].detection_index, (size_t)0);
+        check_equal(output[0].tracked.tracker_id, 0);
+
+        ocsort_destroy(tracker);
+    }
+
     it("does not advance state when preparation allocation fails") {
         bytetrack_config_t config = bytetrack_default_config();
         config.minimum_consecutive_frames = 1;
