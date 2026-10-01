@@ -58,7 +58,7 @@ extern "C"
      * @param[in] beta Factor beta
      * @param[in/out] C Output matrix (n x k)
      */
-    void matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
+    int matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
                 const float* B, float beta, float* C);
 
     /** @brief Multiplication of symmetric matrix A with B:
@@ -69,7 +69,7 @@ extern "C"
      *  @param[in] m columns of B and C
      *  @param[out] C (n x m) matrix output of the product A*B
      */
-    void matmulsym(const float* A_sym, const float* B, int n, int m, float* C);
+    int matmulsym(const float* A_sym, const float* B, int n, int m, float* C);
 
     /** @brief Matrix-vector multiply y = alpha*op(A)*x + beta*y.
      * @param[in] trans Supply "T" for transpose(A) or "N" for A.
@@ -81,7 +81,7 @@ extern "C"
      * @param[in] beta Factor beta.
      * @param[in,out] y Output vector, length rows for "N" or cols for "T".
      */
-    void matvec(const char* trans, int rows, int cols, float alpha, const float* A,
+    int matvec(const char* trans, int rows, int cols, float alpha, const float* A,
                 const float* x, float beta, float* y);
 
     /** @brief Rank-1 matrix update A = A + alpha*x*y'.
@@ -92,7 +92,7 @@ extern "C"
      * @param[in] cols Columns of A.
      * @param[in] alpha Factor alpha.
      */
-    void rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha);
+    int rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha);
 
     /** @brief Fill array with an identity matrix.
      * @param[out] A To be filled (n x n).
@@ -128,7 +128,7 @@ extern "C"
      * @param[in]     m Matrix dimension (cols of B)
      * @param[in]     tp Transpose L?
      */
-    void trisolve(const float* A, float* B, int n, int m, const char* tp);
+    int trisolve(const float* A, float* B, int n, int m, const char* tp);
 
     /**
      * @brief Triangular solve (right hand side).
@@ -141,14 +141,14 @@ extern "C"
      * @param[in]     m Matrix dimension (rows of A)
      * @param[in]     tp Transpose L?
      */
-    void trisolveright(const float* L, float* A, int n, int m, const char* tp);
+    int trisolveright(const float* L, float* A, int n, int m, const char* tp);
 
     /** @brief Symmetric rank update. P = P - E*E'
      * @param[in,out] P Matrix (n x n) to be updated (only upper part is referenced and updated)
      * @param[in] E Matrix (n x m) including the update
      * @param[in] n Number of rows and cols in P, rows in E
      * @param[in] m Number of cols in E */
-    void symmetricrankupdate(float* P, const float* E, int n, int m);
+    int symmetricrankupdate(float* P, const float* E, int n, int m);
 
     /**
      *  @brief UDU decomposition of a symmetrical n x n matrix so that A = U*D*U'.
