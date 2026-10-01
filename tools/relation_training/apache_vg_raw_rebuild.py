@@ -235,6 +235,7 @@ def convert_vg_raw(
     vg2coco_path: str | Path,
     psg2coco_path: str | Path,
     max_words: int = RELEASED_MAX_WORDS,
+    expected_input_sha256: dict[str, str] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     if max_words != RELEASED_MAX_WORDS:
         raise ValueError("released VG raw rebuild requires max_words=5")
@@ -295,6 +296,29 @@ def convert_vg_raw(
     relationships_payload = json.loads(relationships_file.read_text(encoding="utf-8"))
     if not isinstance(relationships_payload, list):
         raise ValueError("relationships.json must be an array")
+
+    input_sha256 = {
+        "relationships_json": sha256_file(relationships_file),
+        "image_data_json": sha256_file(image_data_file),
+        "registry_json": sha256_file(registry_file),
+        "vg2coco_json": sha256_file(vg2coco_file),
+        "psg2coco_json": sha256_file(psg2coco_file),
+    }
+    if expected_input_sha256 is not None:
+        if set(expected_input_sha256) != set(input_sha256):
+            raise ValueError("expected input SHA-256 keys do not match the VG raw contract")
+        for name, actual in input_sha256.items():
+            expected = expected_input_sha256[name]
+            if (
+                not isinstance(expected, str)
+                or len(expected) != 64
+                or any(char not in "0123456789abcdef" for char in expected)
+            ):
+                raise ValueError(f"expected {name} SHA-256 must be lowercase hex")
+            if actual != expected:
+                raise ValueError(
+                    f"{name} SHA-256 drift: expected {expected}, got {actual}"
+                )
 
     writer = _CocoSGGWriter()
     drops: Counter[str] = Counter()
@@ -413,13 +437,8 @@ def convert_vg_raw(
         "schema": EVIDENCE_SCHEMA,
         "reference_source_commit": REFERENCE_SOURCE_COMMIT,
         "max_words": RELEASED_MAX_WORDS,
-        "input_sha256": {
-            "relationships_json": sha256_file(relationships_file),
-            "image_data_json": sha256_file(image_data_file),
-            "registry_json": sha256_file(registry_file),
-            "vg2coco_json": sha256_file(vg2coco_file),
-            "psg2coco_json": sha256_file(psg2coco_file),
-        },
+        "input_sha256": input_sha256,
+        "input_hashes_pinned": expected_input_sha256 is not None,
         "registry_policy": {
             "protected_coco_key": protected_coco_key,
             "protected_coco_count": len(protected_coco),
@@ -462,6 +481,7 @@ def rebuild_vg_raw(
     coco_output: str | Path,
     pack_output: str | Path,
     evidence_output: str | Path,
+    expected_input_sha256: dict[str, str] | None = None,
 ) -> dict[str, object]:
     coco_path = Path(coco_output)
     pack_path = Path(pack_output)
@@ -480,6 +500,7 @@ def rebuild_vg_raw(
         registry_path=registry_path,
         vg2coco_path=vg2coco_path,
         psg2coco_path=psg2coco_path,
+        expected_input_sha256=expected_input_sha256,
     )
     coco_path.parent.mkdir(parents=True, exist_ok=True)
     coco_path.write_bytes(_upstream_json_bytes(payload))
@@ -530,7 +551,20 @@ def main() -> None:
     parser.add_argument("--coco-out", required=True)
     parser.add_argument("--pack-out", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument(
+        "--expected-input-hashes",
+        help="Optional JSON object pinning all five semantic input SHA-256 values.",
+    )
     args = parser.parse_args()
+
+    expected_input_sha256 = None
+    if args.expected_input_hashes:
+        raw_expected = json.loads(
+            Path(args.expected_input_hashes).read_text(encoding="utf-8")
+        )
+        if not isinstance(raw_expected, dict):
+            raise ValueError("expected input hashes must be a JSON object")
+        expected_input_sha256 = raw_expected
 
     report = rebuild_vg_raw(
         relationships_path=args.relationships,
@@ -542,6 +576,7 @@ def main() -> None:
         coco_output=args.coco_out,
         pack_output=args.pack_out,
         evidence_output=args.evidence,
+        expected_input_sha256=expected_input_sha256,
     )
     print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
 
