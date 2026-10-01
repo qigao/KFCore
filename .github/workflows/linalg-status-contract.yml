@@ -1,0 +1,71 @@
+name: Linalg status contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'vendor/miniblas/**'
+      - '.github/workflows/linalg-status-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'vendor/miniblas/**'
+      - '.github/workflows/linalg-status-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linalg-status-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-release-sanitized:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsimde-dev
+
+      - name: Build linalg status contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          out="$RUNNER_TEMP/linalg-status"
+          mkdir -p "$out"
+          cc -std=c11 -DNDEBUG -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             vendor/miniblas/miniblas.c             vendor/miniblas/linalg.c             vendor/miniblas/tests/test_linalg_status.c             -lm -o "$out/test_linalg_status"
+
+      - name: Run linalg status contract
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/linalg-status/test_linalg_status"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
