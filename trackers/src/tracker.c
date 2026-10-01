@@ -578,7 +578,11 @@ static void build_iou_matrix_into(
 
 static float* build_iou_matrix(const box_t* rows, size_t row_count,
                                const box_t* cols, size_t col_count) {
-    const size_t count = row_count * col_count;
+    size_t count = 0;
+    if (!checked_multiply_size(row_count, col_count, &count) ||
+        count > SIZE_MAX / sizeof(float)) {
+        return NULL;
+    }
     float* matrix = count ? malloc(sizeof(float) * count) : NULL;
     if (!matrix && count) {
         return NULL;
@@ -601,7 +605,11 @@ static float* build_biou_score_matrix(
     float buffer_ratio,
     int fuse_detection_score
 ) {
-    const size_t count = row_count * col_count;
+    size_t count = 0;
+    if (!checked_multiply_size(row_count, col_count, &count) ||
+        count > SIZE_MAX / sizeof(float)) {
+        return NULL;
+    }
     float* matrix = count ? malloc(sizeof(float) * count) : NULL;
     if (!matrix && count) {
         return NULL;
