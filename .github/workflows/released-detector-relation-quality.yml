@@ -63,7 +63,7 @@ jobs:
           python -m pip install --disable-pip-version-check \
             -r tools/relation_training/requirements-ci.txt
           python -m pip install --disable-pip-version-check \
-            boto3>=1.35,<2 tqdm>=4.66,<5
+            "boto3>=1.35,<2" "tqdm>=4.66,<5"
 
       - name: Compile and run focused qualification tests
         shell: bash
