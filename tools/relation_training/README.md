@@ -1605,6 +1605,7 @@ The command fails unless the run has all of the following:
   `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
 - all three source identities resolved;
 - exact source annotation hashes and post-exclusion counts;
+- deterministic IndoorVG val/test exclusion derivation and exact exclusion hash;
 - matching exclusion, source-column, ontology and pair-opportunity hashes;
 - deterministic source-column derivation from the same released pack metadata;
 - deterministic pair-opportunity rebuild evidence from the same MegaSG pack;
@@ -1680,6 +1681,41 @@ CPU tests may exercise the BF16 autocast software path, but a released-run
 qualification is accepted only when the recorded training device is CUDA and
 CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
 for development but cannot be labeled a released training reproduction.
+
+### Released IndoorVG exclusion derivation
+
+IndoorVG evaluation images originate from Visual Genome and can leak into
+VG-derived training packs under two different filename identities. The released
+training run therefore excludes both spellings:
+
+```text
+IndoorVG val + test .jpg filenames
+    -> literal VG filename stems
+vg2coco.json
+    -> mapped COCO ids formatted as exactly 12 digits
+
+exclude stems = VG stems UNION zero-padded COCO stems
+```
+
+The released rule is intentionally filename-identity only: image bytes are not
+read, the protected splits are exactly `val` then `test`, and only a
+case-sensitive `.jpg` suffix is accepted. Unmapped VG ids remain protected by
+their VG stem; multiple VG ids that map to one COCO id collapse naturally in
+the final set.
+
+`apache_indoorvg_holdout.py` rebuilds the current `exclude_ids` JSON
+deterministically and records:
+- exact split order plus every sorted split VG-id list/count/hash;
+- sorted val/test VG union;
+- `vg2coco.json` SHA-256;
+- sorted VG->12-digit-COCO mapped pairs and unmapped VG ids;
+- deduplicated COCO stems and final stem union/count/hashes;
+- emitted holdout artifact SHA-256.
+
+Released qualification reconstructs the holdout JSON bytes from this derivation
+and requires the resulting SHA-256 to equal the exact `exclude_ids_sha256`
+used by the training mixture. A hand-authored or differently split holdout
+cannot qualify as the released leakage-exclusion input.
 
 ### Released pair-opportunity rebuild
 
