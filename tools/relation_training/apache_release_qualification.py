@@ -8,6 +8,14 @@ import math
 from pathlib import Path
 from typing import Any
 
+from apache_indoorvg_holdout import (
+    DERIVATION_SCHEMA as INDOORVG_DERIVATION_SCHEMA,
+    RELEASED_NOTE as INDOORVG_RELEASED_NOTE,
+    RELEASED_SOURCE as INDOORVG_RELEASED_SOURCE,
+    RELEASED_SPLITS as INDOORVG_RELEASED_SPLITS,
+    holdout_bytes as indoorvg_holdout_bytes,
+    stable_json_sha256 as indoorvg_stable_json_sha256,
+)
 from apache_pair_sampler import (
     RELEASED_FINAL_BUDGET,
     RELEASED_GEO_BUDGET,
@@ -418,6 +426,480 @@ def _validate_text_bank_derivation(
         ),
         "predicate_bank": predicate_bank,
         "object_bank": object_bank,
+    }
+
+
+def _validate_indoorvg_holdout_derivation(
+    payload: object,
+    *,
+    output_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "IndoorVG exclusion derivation evidence must be an object"
+        )
+    if (
+        payload.get("schema")
+        != INDOORVG_DERIVATION_SCHEMA
+    ):
+        raise ValueError(
+            "unsupported IndoorVG exclusion derivation schema"
+        )
+    if (
+        payload.get("source")
+        != INDOORVG_RELEASED_SOURCE
+    ):
+        raise ValueError(
+            "IndoorVG exclusion derivation source differs from release"
+        )
+    if (
+        payload.get("splits")
+        != list(INDOORVG_RELEASED_SPLITS)
+    ):
+        raise ValueError(
+            "IndoorVG exclusion derivation requires splits=['val','test']"
+        )
+
+    split_inputs = payload.get(
+        "split_inputs"
+    )
+    if (
+        not isinstance(split_inputs, list)
+        or len(split_inputs)
+        != len(INDOORVG_RELEASED_SPLITS)
+    ):
+        raise ValueError(
+            "IndoorVG exclusion derivation must describe val/test split inputs"
+        )
+
+    union_from_splits: set[str] = set()
+    normalized_splits: list[
+        dict[str, Any]
+    ] = []
+    for index, expected_split in enumerate(
+        INDOORVG_RELEASED_SPLITS
+    ):
+        entry = split_inputs[
+            index
+        ]
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"IndoorVG split input {index} must be an object"
+            )
+        if entry.get("split") != expected_split:
+            raise ValueError(
+                "IndoorVG exclusion split order differs from release"
+            )
+        ids = entry.get("vg_ids")
+        if (
+            not isinstance(ids, list)
+            or not ids
+            or any(
+                not isinstance(value, str)
+                or not value
+                for value in ids
+            )
+            or len(set(ids)) != len(ids)
+            or ids != sorted(ids)
+        ):
+            raise ValueError(
+                f"IndoorVG {expected_split} VG ids must be sorted unique non-empty strings"
+            )
+        count = _require_positive_int(
+            entry.get(
+                "vg_id_count"
+            ),
+            f"IndoorVG {expected_split} vg_id_count",
+        )
+        if count != len(ids):
+            raise ValueError(
+                f"IndoorVG {expected_split} count does not match ids"
+            )
+        digest = require_sha256(
+            entry.get(
+                "vg_ids_sha256"
+            ),
+            f"IndoorVG {expected_split} vg_ids_sha256",
+        )
+        if digest != _ordered_names_sha256(
+            ids
+        ):
+            raise ValueError(
+                f"IndoorVG {expected_split} VG-id hash does not match ids"
+            )
+        union_from_splits.update(
+            ids
+        )
+        normalized_splits.append(
+            {
+                "split": expected_split,
+                "vg_ids": list(ids),
+                "vg_id_count": count,
+                "vg_ids_sha256": digest,
+            }
+        )
+
+    vg_ids = payload.get(
+        "vg_ids"
+    )
+    if (
+        not isinstance(vg_ids, list)
+        or not vg_ids
+        or any(
+            not isinstance(value, str)
+            or not value
+            for value in vg_ids
+        )
+        or len(set(vg_ids)) != len(vg_ids)
+        or vg_ids != sorted(vg_ids)
+    ):
+        raise ValueError(
+            "IndoorVG exclusion vg_ids must be sorted unique non-empty strings"
+        )
+    if vg_ids != sorted(
+        union_from_splits
+    ):
+        raise ValueError(
+            "IndoorVG exclusion vg_ids do not equal val/test union"
+        )
+    vg_count = _require_positive_int(
+        payload.get(
+            "vg_id_count"
+        ),
+        "IndoorVG vg_id_count",
+    )
+    if vg_count != len(vg_ids):
+        raise ValueError(
+            "IndoorVG vg_id_count does not match vg_ids"
+        )
+    vg_digest = require_sha256(
+        payload.get(
+            "vg_ids_sha256"
+        ),
+        "IndoorVG vg_ids_sha256",
+    )
+    if vg_digest != _ordered_names_sha256(
+        vg_ids
+    ):
+        raise ValueError(
+            "IndoorVG vg_ids hash does not match ids"
+        )
+
+    vg2coco_sha = require_sha256(
+        payload.get(
+            "vg2coco_sha256"
+        ),
+        "IndoorVG vg2coco_sha256",
+    )
+
+    mapped_pairs = payload.get(
+        "mapped_pairs"
+    )
+    if not isinstance(
+        mapped_pairs,
+        list,
+    ):
+        raise ValueError(
+            "IndoorVG mapped_pairs must be an array"
+        )
+    normalized_pairs: list[
+        dict[str, str]
+    ] = []
+    mapped_ids: set[str] = set()
+    for index, pair in enumerate(
+        mapped_pairs
+    ):
+        if not isinstance(pair, dict):
+            raise ValueError(
+                f"IndoorVG mapped pair {index} must be an object"
+            )
+        vg_id = pair.get(
+            "vg_id"
+        )
+        coco_stem = pair.get(
+            "coco_stem"
+        )
+        if (
+            not isinstance(vg_id, str)
+            or not vg_id
+            or vg_id not in union_from_splits
+            or vg_id in mapped_ids
+        ):
+            raise ValueError(
+                "IndoorVG mapped pairs require unique held-out VG ids"
+            )
+        if (
+            not isinstance(coco_stem, str)
+            or len(coco_stem) != 12
+            or not coco_stem.isdigit()
+        ):
+            raise ValueError(
+                "IndoorVG mapped COCO stems must be exactly 12 digits"
+            )
+        mapped_ids.add(
+            vg_id
+        )
+        normalized_pairs.append(
+            {
+                "vg_id": vg_id,
+                "coco_stem": coco_stem,
+            }
+        )
+    if normalized_pairs != sorted(
+        normalized_pairs,
+        key=lambda pair: pair[
+            "vg_id"
+        ],
+    ):
+        raise ValueError(
+            "IndoorVG mapped_pairs must be sorted by VG id"
+        )
+    mapped_count = _require_non_negative_int(
+        payload.get(
+            "mapped_vg_count"
+        ),
+        "IndoorVG mapped_vg_count",
+    )
+    if mapped_count != len(
+        normalized_pairs
+    ):
+        raise ValueError(
+            "IndoorVG mapped_vg_count does not match mapped_pairs"
+        )
+    mapped_digest = require_sha256(
+        payload.get(
+            "mapped_pairs_sha256"
+        ),
+        "IndoorVG mapped_pairs_sha256",
+    )
+    if mapped_digest != indoorvg_stable_json_sha256(
+        normalized_pairs
+    ):
+        raise ValueError(
+            "IndoorVG mapped-pair hash does not match pairs"
+        )
+
+    unmapped = payload.get(
+        "unmapped_vg_ids"
+    )
+    if (
+        not isinstance(unmapped, list)
+        or any(
+            not isinstance(value, str)
+            or not value
+            for value in unmapped
+        )
+        or len(set(unmapped)) != len(unmapped)
+        or unmapped != sorted(unmapped)
+    ):
+        raise ValueError(
+            "IndoorVG unmapped_vg_ids must be sorted unique strings"
+        )
+    unmapped_count = _require_non_negative_int(
+        payload.get(
+            "unmapped_vg_count"
+        ),
+        "IndoorVG unmapped_vg_count",
+    )
+    if unmapped_count != len(
+        unmapped
+    ):
+        raise ValueError(
+            "IndoorVG unmapped_vg_count does not match ids"
+        )
+    if set(unmapped) & mapped_ids:
+        raise ValueError(
+            "IndoorVG mapped/unmapped VG ids overlap"
+        )
+    if (
+        mapped_ids
+        | set(unmapped)
+        != set(vg_ids)
+    ):
+        raise ValueError(
+            "IndoorVG mapped/unmapped VG ids do not partition the holdout"
+        )
+
+    coco_stems = payload.get(
+        "coco_stems"
+    )
+    expected_coco_stems = sorted(
+        {
+            pair[
+                "coco_stem"
+            ]
+            for pair in normalized_pairs
+        }
+    )
+    if (
+        not isinstance(coco_stems, list)
+        or coco_stems
+        != expected_coco_stems
+    ):
+        raise ValueError(
+            "IndoorVG coco_stems do not match mapped pairs"
+        )
+    coco_count = _require_non_negative_int(
+        payload.get(
+            "coco_stem_count"
+        ),
+        "IndoorVG coco_stem_count",
+    )
+    if coco_count != len(
+        coco_stems
+    ):
+        raise ValueError(
+            "IndoorVG coco_stem_count does not match stems"
+        )
+    coco_digest = require_sha256(
+        payload.get(
+            "coco_stems_sha256"
+        ),
+        "IndoorVG coco_stems_sha256",
+    )
+    if coco_digest != _ordered_names_sha256(
+        coco_stems
+    ):
+        raise ValueError(
+            "IndoorVG coco-stem hash does not match stems"
+        )
+
+    stems = payload.get(
+        "stems"
+    )
+    expected_stems = sorted(
+        set(vg_ids)
+        | set(coco_stems)
+    )
+    if (
+        not isinstance(stems, list)
+        or stems != expected_stems
+    ):
+        raise ValueError(
+            "IndoorVG final stems do not equal VG/COCO union"
+        )
+    stem_count = _require_positive_int(
+        payload.get(
+            "stem_count"
+        ),
+        "IndoorVG stem_count",
+    )
+    if stem_count != len(stems):
+        raise ValueError(
+            "IndoorVG stem_count does not match stems"
+        )
+    stems_digest = require_sha256(
+        payload.get(
+            "stems_sha256"
+        ),
+        "IndoorVG stems_sha256",
+    )
+    if stems_digest != _ordered_names_sha256(
+        stems
+    ):
+        raise ValueError(
+            "IndoorVG final-stem hash does not match stems"
+        )
+
+    output_payload = {
+        "source": (
+            INDOORVG_RELEASED_SOURCE
+        ),
+        "splits": list(
+            INDOORVG_RELEASED_SPLITS
+        ),
+        "note": (
+            INDOORVG_RELEASED_NOTE
+        ),
+        "vg_ids": list(
+            vg_ids
+        ),
+        "coco_stems": list(
+            coco_stems
+        ),
+        "stems": list(
+            stems
+        ),
+    }
+    derived_output_sha = hashlib.sha256(
+        indoorvg_holdout_bytes(
+            output_payload
+        )
+    ).hexdigest()
+    recorded_output_sha = require_sha256(
+        payload.get(
+            "output_sha256"
+        ),
+        "IndoorVG output_sha256",
+    )
+    if (
+        recorded_output_sha
+        != derived_output_sha
+    ):
+        raise ValueError(
+            "IndoorVG exclusion output hash does not match reconstructed holdout"
+        )
+    if (
+        recorded_output_sha
+        != output_sha256
+    ):
+        raise ValueError(
+            "IndoorVG exclusion output hash does not match corpus"
+        )
+
+    return {
+        "schema": (
+            INDOORVG_DERIVATION_SCHEMA
+        ),
+        "source": (
+            INDOORVG_RELEASED_SOURCE
+        ),
+        "splits": list(
+            INDOORVG_RELEASED_SPLITS
+        ),
+        "split_inputs": (
+            normalized_splits
+        ),
+        "vg_ids": list(vg_ids),
+        "vg_id_count": vg_count,
+        "vg_ids_sha256": (
+            vg_digest
+        ),
+        "vg2coco_sha256": (
+            vg2coco_sha
+        ),
+        "mapped_pairs": (
+            normalized_pairs
+        ),
+        "mapped_vg_count": (
+            mapped_count
+        ),
+        "mapped_pairs_sha256": (
+            mapped_digest
+        ),
+        "unmapped_vg_ids": list(
+            unmapped
+        ),
+        "unmapped_vg_count": (
+            unmapped_count
+        ),
+        "coco_stems": list(
+            coco_stems
+        ),
+        "coco_stem_count": (
+            coco_count
+        ),
+        "coco_stems_sha256": (
+            coco_digest
+        ),
+        "stems": list(stems),
+        "stem_count": stem_count,
+        "stems_sha256": (
+            stems_digest
+        ),
+        "output_sha256": (
+            recorded_output_sha
+        ),
     }
 
 
@@ -1425,6 +1907,16 @@ def validate_corpus(
         ),
     }
     normalized_payload[
+        "exclude_ids_derivation"
+    ] = _validate_indoorvg_holdout_derivation(
+        payload.get(
+            "exclude_ids_derivation"
+        ),
+        output_sha256=normalized_payload[
+            "exclude_ids_sha256"
+        ],
+    )
+    normalized_payload[
         "predicate_spatial_flags_derivation"
     ] = _validate_spatial_derivation(
         payload.get(
@@ -2399,6 +2891,9 @@ def qualify_training_run(
         ),
         "exclude_ids_sha256": corpus[
             "exclude_ids_sha256"
+        ],
+        "exclude_ids_derivation": corpus[
+            "exclude_ids_derivation"
         ],
         "epochs": RELEASED_EPOCHS,
         "draws_per_epoch": (
