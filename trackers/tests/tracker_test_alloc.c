@@ -6,10 +6,12 @@
 
 static size_t trackers_test_alloc_count_value;
 static size_t trackers_test_alloc_limit = SIZE_MAX;
+static int trackers_test_kalman_fail_next_value;
 
 void trackers_test_alloc_reset(void) {
     trackers_test_alloc_count_value = 0;
     trackers_test_alloc_limit = SIZE_MAX;
+    trackers_test_kalman_fail_next_value = 0;
 }
 
 void trackers_test_alloc_fail_after(size_t successful_allocations) {
@@ -19,6 +21,16 @@ void trackers_test_alloc_fail_after(size_t successful_allocations) {
 
 size_t trackers_test_alloc_count(void) {
     return trackers_test_alloc_count_value;
+}
+
+void trackers_test_kalman_fail_next(void) {
+    trackers_test_kalman_fail_next_value = 1;
+}
+
+int trackers_test_kalman_should_fail(void) {
+    const int result = trackers_test_kalman_fail_next_value;
+    trackers_test_kalman_fail_next_value = 0;
+    return result;
 }
 
 static int trackers_test_alloc_should_fail(void) {
