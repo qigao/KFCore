@@ -1,0 +1,164 @@
+name: YOLO detector contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'vision/core/yolo/**'
+      - 'vision/core/image_processor/include/kfcore/image_processor/types.hpp'
+      - 'vision/image/cpu/src/cpu.cpp'
+      - 'vision/image/cpu/tests/test_cpu_image_processor.cpp'
+      - '.github/workflows/yolo-detector-contract.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'vision/core/yolo/**'
+      - 'vision/core/image_processor/include/kfcore/image_processor/types.hpp'
+      - 'vision/image/cpu/src/cpu.cpp'
+      - 'vision/image/cpu/tests/test_cpu_image_processor.cpp'
+      - '.github/workflows/yolo-detector-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yolo-detector-contract-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Checkout pinned TinyTest source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: salts
+          persist-credentials: false
+
+      - name: Compile production detector contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only \
+            -Ivision/core/yolo/include \
+            -Ivision/core/yolo/src \
+            -Ivision/core/image_processor/include \
+            -Ivision/image/cpu/include \
+            -Iruntime/core/include \
+            vision/core/yolo/src/runtime_detector.cpp
+
+      - name: Build focused sanitizer tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          out="$RUNNER_TEMP/yolo-detector-contract"
+          mkdir -p "$out"
+
+          cc -std=c11 -O1 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Isalts/tinytest/include \
+            -c salts/tinytest/src/tinytest.c \
+            -o "$out/tinytest.o"
+
+          cat >"$out/yolo_error.cpp" <<'CPP'
+          #include "kfcore/yolo/error.hpp"
+          #include <utility>
+          namespace kfcore::yolo {
+          YoloError::YoloError(YoloErrorCode code, std::string message)
+              : std::runtime_error(std::move(message)), code_(code) {}
+          YoloErrorCode YoloError::code() const noexcept { return code_; }
+          }
+          CPP
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/yolo/include \
+            -c "$out/yolo_error.cpp" \
+            -o "$out/yolo_error.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/yolo/include \
+            -Ivision/core/yolo/src \
+            -c vision/core/yolo/src/raw_yolo.cpp \
+            -o "$out/raw_yolo.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/yolo/include \
+            -Ivision/core/yolo/src \
+            -Isalts/tinytest/include \
+            -c vision/core/yolo/tests/test_raw_yolo.cpp \
+            -o "$out/test_raw_yolo.o"
+
+          c++ -fsanitize=address,undefined \
+            "$out/tinytest.o" \
+            "$out/yolo_error.o" \
+            "$out/raw_yolo.o" \
+            "$out/test_raw_yolo.o" \
+            -lm -o "$out/test_raw_yolo"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/image_processor/include \
+            -c vision/core/image_processor/src/error.cpp \
+            -o "$out/image_error.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/image_processor/include \
+            -Ivision/core/image_processor/src \
+            -Ivision/image/cpu/include \
+            -c vision/image/cpu/src/cpu.cpp \
+            -o "$out/image_cpu.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/image_processor/include \
+            -Ivision/image/cpu/include \
+            -Isalts/tinytest/include \
+            -c vision/image/cpu/tests/test_cpu_image_processor.cpp \
+            -o "$out/test_cpu_image_processor.o"
+
+          c++ -fsanitize=address,undefined \
+            "$out/tinytest.o" \
+            "$out/image_error.o" \
+            "$out/image_cpu.o" \
+            "$out/test_cpu_image_processor.o" \
+            -lm -o "$out/test_cpu_image_processor"
+
+      - name: Run focused sanitizer tests
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/yolo-detector-contract/test_raw_yolo"
+          "$RUNNER_TEMP/yolo-detector-contract/test_cpu_image_processor"
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
