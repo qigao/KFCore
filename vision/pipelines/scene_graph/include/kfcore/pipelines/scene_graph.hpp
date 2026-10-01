@@ -91,7 +91,8 @@ public:
     [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
     [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
 
-    void reset_tracking() noexcept;
+    [[nodiscard]] std::uint64_t tracking_epoch() const noexcept;
+    [[nodiscard]] std::uint64_t reset_tracking();
 
 private:
     struct Impl;
