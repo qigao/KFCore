@@ -312,6 +312,16 @@ class ApacheVGRawRebuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             paths = self.make_fixture(root)
+            vocabulary = root / "vocabulary.json"
+            write_json(
+                vocabulary,
+                {
+                    "schema": "kfcore.relation-vocab/1",
+                    "predicates": ["on top of"],
+                    "objects": ["person", "red ball", "pole"],
+                },
+            )
+
             reports = []
             for suffix in ("a", "b"):
                 report = rebuild_vg_raw(
@@ -324,6 +334,8 @@ class ApacheVGRawRebuildTest(unittest.TestCase):
                     coco_output=root / suffix / "vg_raw_train_coco.json",
                     pack_output=root / suffix / "vg_raw" / "train",
                     evidence_output=root / suffix / "evidence.json",
+                    vocabulary_path=vocabulary,
+                    canonical_output=root / suffix / "canonical.jsonl",
                 )
                 reports.append(report)
 
@@ -343,6 +355,13 @@ class ApacheVGRawRebuildTest(unittest.TestCase):
                 reports[0]["pack"]["img_dir_label"],
                 RELEASED_IMG_DIR_LABEL,
             )
+            self.assertIsNotNone(reports[0]["canonical_materialization"])
+            self.assertEqual(
+                reports[0]["canonical_materialization"]["canonical_annotations_sha256"],
+                reports[1]["canonical_materialization"]["canonical_annotations_sha256"],
+            )
+            self.assertEqual(reports[0]["canonical_materialization"]["images"], 1)
+            self.assertEqual(reports[0]["canonical_materialization"]["relations"], 1)
 
     def test_released_max_words_is_not_a_runtime_knob(self) -> None:
         with tempfile.TemporaryDirectory() as td:
