@@ -81,7 +81,8 @@ kfcore_kalman_status kalman_udu_scalar(float* x, float* U, float* d, float dz, f
     float onef = 1.0f;
 
     memcpy(a, H_line, sizeof(float) * n);
-    strmm_("L", "U", "T", "U", &ni, &one, &onef, U, &ni, a, &ni);
+    if (strmm_("L", "U", "T", "U", &ni, &one, &onef, U, &ni, a, &ni) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
 
     for (size_t j = 0U; j < n; ++j)
     {
@@ -149,12 +150,14 @@ kfcore_kalman_status kalman_udu(float* x, float* U, float* d, const float* z, co
         float Rv = MAT_ELEM(R, i, i, m, m);
         float dz = z[i];
 
-        matmul("N", "N", 1, 1, (int)n, -1.0f, h, x, 1.0f, &dz);
+        if (matmul("N", "N", 1, 1, (int)n, -1.0f, h, x, 1.0f, &dz) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
 
         if (chi2_threshold > 0.0f)
         {
             float HPHT = 0.0f;
-            matmul("N", "N", 1, (int)n, (int)n, 1.0f, h, U, 0.0f, workspace);
+            if (matmul("N", "N", 1, (int)n, (int)n, 1.0f, h, U, 0.0f, workspace) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
             for (size_t j = 0U; j < n; ++j)
             {
                 HPHT += workspace[j] * workspace[j] * d[j];
@@ -201,8 +204,9 @@ kfcore_kalman_status decorrelate(float* z, float* Ht, float* R, size_t n, size_t
         return KFCORE_KALMAN_NUMERICAL_FAILURE;
     }
 
-    trisolveright(R, Ht, (int)m, (int)n, "T");
-    trisolve(R, z, (int)m, 1, "N");
+    if (trisolveright(R, Ht, (int)m, (int)n, "T") != 0 ||
+        trisolve(R, z, (int)m, 1, "N") != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     return KFCORE_KALMAN_OK;
 }
 
@@ -263,7 +267,8 @@ kfcore_kalman_status kalman_udu_predict(float* x, float* U, float* d, const floa
     if (x)
     {
         memcpy(tmp, x, sizeof(float) * n);
-        matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x);
+        if (matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
     }
     if (r > 0U)
     {
@@ -273,7 +278,8 @@ kfcore_kalman_status kalman_udu_predict(float* x, float* U, float* d, const floa
 
     int ni = (int)n;
     float one = 1.0f;
-    strmm_("R", "U", "N", "U", &ni, &ni, &one, U, &ni, PhiU, &ni);
+    if (strmm_("R", "U", "N", "U", &ni, &ni, &one, U, &ni, PhiU, &ni) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
 
     mateye(U, (int)n);
     memcpy(din, d, sizeof(float) * n);

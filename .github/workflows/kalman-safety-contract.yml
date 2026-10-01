@@ -56,6 +56,7 @@ jobs:
           cc \
             -std=c11 \
             -DNDEBUG \
+            -DKFCORE_LINALG_TEST_FAILURE \
             -O1 -g \
             -Wall -Wextra -Wpedantic \
             -fsanitize=address,undefined \

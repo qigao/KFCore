@@ -72,7 +72,7 @@ jobs:
 
           cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             -c vendor/miniblas/miniblas.c -o "$out/miniblas.o"
 
-          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas             -c vendor/miniblas/linalg.c -o "$out/linalg.o"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -DKFCORE_LINALG_TEST_FAILURE             -Ivendor/miniblas             -c vendor/miniblas/linalg.c -o "$out/linalg.o"
 
           cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Ivendor/miniblas -Ikalman             -c kalman/kalman_takasu.c -o "$out/kalman_takasu.o"
 
@@ -80,7 +80,7 @@ jobs:
 
           cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Itrackers/tests             -c trackers/tests/tracker_test_alloc.c -o "$out/tracker_test_alloc.o"
 
-          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -Itrackers/include -Itrackers/tests -Isalts/tinytest/include             -c trackers/tests/test_bytetrack_status.c -o "$out/test_bytetrack_status.o"
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic             -fsanitize=address,undefined -fno-omit-frame-pointer             -DKFCORE_LINALG_TEST_FAILURE             -Itrackers/include -Itrackers/tests -Ivendor/miniblas -Isalts/tinytest/include             -c trackers/tests/test_bytetrack_status.c -o "$out/test_bytetrack_status.o"
 
           cc -fsanitize=address,undefined             "$out/tinytest.o" "$out/miniblas.o" "$out/linalg.o"             "$out/kalman_takasu.o" "$out/tracker.o"             "$out/tracker_test_alloc.o" "$out/test_bytetrack_status.o"             -lm -o "$out/test_bytetrack_status"
 

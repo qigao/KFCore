@@ -44,6 +44,10 @@ extern "C"
 {
 #endif
 
+#ifdef KFCORE_LINALG_TEST_FAILURE
+    void kfcore_linalg_test_fail_next(void);
+#endif
+
     /*** @brief matrix multiply C = alpha*A*B + beta*C
      * BLAS: ?gemm
      *

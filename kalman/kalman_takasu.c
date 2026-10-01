@@ -75,15 +75,18 @@ kfcore_kalman_status kalman_takasu(float* x, float* P, const float* dz, const fl
     float* L = D + nm;
     float* y = L + mm;
 
-    matmulsym(P, Ht, (int)n, (int)m, D);
+    if (matmulsym(P, Ht, (int)n, (int)m, D) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     memcpy(L, R, sizeof(float) * mm);
-    matmul("T", "N", (int)m, (int)m, (int)n, 1.0f, Ht, D, 1.0f, L);
+    if (matmul("T", "N", (int)m, (int)m, (int)n, 1.0f, Ht, D, 1.0f, L) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     if (cholesky(L, (int)m, 1) != 0) return KFCORE_KALMAN_NUMERICAL_FAILURE;
 
     if (chi2 || chi2_threshold > 0.0f)
     {
         memcpy(y, dz, sizeof(float) * m);
-        trisolve(L, y, (int)m, 1, "N");
+        if (trisolve(L, y, (int)m, 1, "N") != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
         float chi2sum = 0.0f;
         for (size_t i = 0; i < m; ++i) chi2sum += y[i] * y[i];
         chi2sum /= (float)m;
@@ -91,10 +94,11 @@ kfcore_kalman_status kalman_takasu(float* x, float* P, const float* dz, const fl
         if (chi2_threshold > 0.0f && chi2sum > chi2_threshold) return KFCORE_KALMAN_REJECTED;
     }
 
-    trisolveright(L, D, (int)m, (int)n, "T");
-    symmetricrankupdate(P, D, (int)n, (int)m);
-    trisolveright(L, D, (int)m, (int)n, "N");
-    matmul("N", "N", (int)n, 1, (int)m, 1.0f, D, dz, 1.0f, x);
+    if (trisolveright(L, D, (int)m, (int)n, "T") != 0 ||
+        symmetricrankupdate(P, D, (int)n, (int)m) != 0 ||
+        trisolveright(L, D, (int)m, (int)n, "N") != 0 ||
+        matmul("N", "N", (int)n, 1, (int)m, 1.0f, D, dz, 1.0f, x) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     for (size_t i = 0U; i < n; ++i)
     {
         if (!isfinite(x[i]))
@@ -138,23 +142,27 @@ kfcore_kalman_status kalman_predict(float* x, float* P, const float* Phi, const 
     if (x)
     {
         memcpy(tmp, x, sizeof(float) * n);
-        matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x);
+        if (matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
     }
     if (P)
     {
         int ni=(int)n;
         float alpha=1.0f, beta=0.0f;
-        ssymm_("R","U",&ni,&ni,&alpha,P,&ni,(float*)Phi,&ni,&beta,Phi_x_P,&ni);
+        if (ssymm_("R","U",&ni,&ni,&alpha,P,&ni,(float*)Phi,&ni,&beta,Phi_x_P,&ni) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
         if (r > 0U)
         {
             for (size_t j=0;j<r;++j)
                 for (size_t i=0;i<n;++i)
                     MAT_ELEM(GQ,i,j,n,r)=Q[j]*MAT_ELEM(G,i,j,n,r);
-            matmul("N","T",(int)n,(int)n,(int)r,1.0f,GQ,G,0.0f,P);
-            matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,1.0f,P);
+            if (matmul("N","T",(int)n,(int)n,(int)r,1.0f,GQ,G,0.0f,P) != 0 ||
+                matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,1.0f,P) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
         }
         else
-            matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,0.0f,P);
+            if (matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,0.0f,P) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
     }
     return KFCORE_KALMAN_OK;
 }

@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include "tinytest.h"
+#include "linalg.h"
 #include "tracker_test_alloc.h"
 
 static detection_t make_detection(float x1, float y1, float x2, float y2, float confidence) {
@@ -186,6 +187,33 @@ suite("tracker update status") {
         check_equal(bytetrack_update_ex(tracker, detections, 1, output, 1, &written),
                     TRACKER_STATUS_OK);
         check_equal(output[0].tracked.tracker_id, 0);
+        bytetrack_destroy(tracker);
+    }
+
+    it("maps a real linalg failure to tracker numerical failure") {
+        bytetrack_config_t config = bytetrack_default_config();
+        config.minimum_consecutive_frames = 1;
+        bytetrack_t* tracker = bytetrack_create(&config);
+        detection_t detection =
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f);
+        tracked_detection_ex_t output[1];
+        size_t written = 0;
+
+        check_not_null(tracker);
+        trackers_test_alloc_reset();
+
+        check_equal(bytetrack_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+
+        kfcore_linalg_test_fail_next();
+        check_equal(bytetrack_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_NUMERICAL_FAILURE);
+        check_equal(written, (size_t)0);
+
+        check_equal(bytetrack_update_ex(tracker, &detection, 1, output, 1, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(output[0].tracked.tracker_id, 0);
+
         bytetrack_destroy(tracker);
     }
 
