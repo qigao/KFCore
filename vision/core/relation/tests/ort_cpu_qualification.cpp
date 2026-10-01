@@ -425,6 +425,17 @@ int main(int argc, char** argv)
                     kDynamicOpenVocabularyRelationModelType,
             "fixture is not relation.open-vocabulary");
 
+        const auto host_package_path =
+            package_path / "host";
+        const auto host_package =
+            kfcore::runtime::ModelPackage::load(
+                host_package_path);
+        require(
+            host_package.model_type() ==
+                kfcore::relation::
+                    kOpenVocabularyRelationModelType,
+            "host fixture is not relation.open-vocabulary-encoder");
+
         auto options =
             kfcore::relation::
                 OpenVocabularyRelationOptions {};
@@ -432,6 +443,8 @@ int main(int argc, char** argv)
         options.max_boxes = 3U;
         options.max_pairs = 4U;
         options.query_dim = 4U;
+        options.logit_scale = 1.0F;
+        options.logit_bias = 0.0F;
         options.threshold = 0.0F;
         options.top_k = 4U;
         options.weight_ranking_by_detector_score = false;
@@ -445,15 +458,33 @@ int main(int argc, char** argv)
                     "cpu"),
                 options);
 
+        auto host_relation =
+            kfcore::relation::OpenVocabularyRelation::load(
+                runtime,
+                host_package,
+                kfcore::runtime::ExecutionPolicy::exact(
+                    "onnxruntime",
+                    "cpu"),
+                options);
+
         require(
             relation->backend_scoring(),
             "qualification did not select backend scoring");
+        require(
+            !host_relation->backend_scoring(),
+            "qualification did not select host query/scorer fallback");
         require(
             relation->execution_route().backend_id ==
                     "onnxruntime" &&
                 relation->execution_route().device_id ==
                     "cpu",
             "qualification route is not ORT CPU");
+        require(
+            host_relation->execution_route().backend_id ==
+                    "onnxruntime" &&
+                host_relation->execution_route().device_id ==
+                    "cpu",
+            "host qualification route is not ORT CPU");
 
         std::array<std::uint8_t, 8U * 8U * 3U> pixels {};
         const kfcore::image::ImageView image {
