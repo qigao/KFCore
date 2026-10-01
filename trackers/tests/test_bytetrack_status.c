@@ -19,7 +19,79 @@ static detection_t make_detection(float x1, float y1, float x2, float y2, float 
     return detection;
 }
 
-suite("bytetrack update status") {
+suite("tracker update status") {
+    it("rolls back SORT after a late Kalman failure") {
+        sort_config_t config = sort_default_config();
+        config.minimum_consecutive_frames = 2;
+        sort_t* tracker = sort_create(&config);
+        detection_t detections[2] = {
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f),
+            make_detection(100.0f, 0.0f, 110.0f, 10.0f, 0.95f),
+        };
+        tracked_detection_ex_t output[2];
+        size_t written = 0;
+
+        check_not_null(tracker);
+        trackers_test_alloc_reset();
+
+        check_equal(sort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].tracked.tracker_id, -1);
+        check_equal(output[1].tracked.tracker_id, -1);
+
+        trackers_test_kalman_fail_after(3);
+        check_equal(sort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_NUMERICAL_FAILURE);
+        check_equal(written, (size_t)0);
+
+        check_equal(sort_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].detection_index, (size_t)0);
+        check_equal(output[1].detection_index, (size_t)1);
+        check_equal(output[0].tracked.tracker_id, 0);
+        check_equal(output[1].tracked.tracker_id, 1);
+
+        sort_destroy(tracker);
+    }
+
+    it("rolls back CBIoU after a late Kalman failure") {
+        cbiou_config_t config = cbiou_default_config();
+        config.minimum_consecutive_frames = 2;
+        cbiou_t* tracker = cbiou_create(&config);
+        detection_t detections[2] = {
+            make_detection(0.0f, 0.0f, 10.0f, 10.0f, 0.95f),
+            make_detection(100.0f, 0.0f, 110.0f, 10.0f, 0.95f),
+        };
+        tracked_detection_ex_t output[2];
+        size_t written = 0;
+
+        check_not_null(tracker);
+        trackers_test_alloc_reset();
+
+        check_equal(cbiou_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].tracked.tracker_id, -1);
+        check_equal(output[1].tracked.tracker_id, -1);
+
+        trackers_test_kalman_fail_after(3);
+        check_equal(cbiou_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_NUMERICAL_FAILURE);
+        check_equal(written, (size_t)0);
+
+        check_equal(cbiou_update_ex(tracker, detections, 2, output, 2, &written),
+                    TRACKER_STATUS_OK);
+        check_equal(written, (size_t)2);
+        check_equal(output[0].detection_index, (size_t)0);
+        check_equal(output[1].detection_index, (size_t)1);
+        check_equal(output[0].tracked.tracker_id, 0);
+        check_equal(output[1].tracked.tracker_id, 1);
+
+        cbiou_destroy(tracker);
+    }
+
     it("does not advance state when preparation allocation fails") {
         bytetrack_config_t config = bytetrack_default_config();
         config.minimum_consecutive_frames = 1;
