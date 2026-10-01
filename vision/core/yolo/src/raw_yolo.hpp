@@ -8,6 +8,12 @@
 namespace kfcore::yolo::detail
 {
 
+enum class RawYoloOutputLayout
+{
+    ChannelsFirstClassScores,
+    AnchorsFirstObjectnessClassScores,
+};
+
 struct RawYoloOutputView
 {
     const void*    predictions;
@@ -18,6 +24,8 @@ struct RawYoloOutputView
     float          score_threshold;
     float          iou_threshold;
     std::size_t    max_detections;
+    RawYoloOutputLayout layout =
+        RawYoloOutputLayout::ChannelsFirstClassScores;
 };
 
 std::vector<DetectionFrame> decode_raw_yolo(

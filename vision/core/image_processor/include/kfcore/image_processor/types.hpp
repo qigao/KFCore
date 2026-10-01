@@ -132,6 +132,7 @@ struct PreprocessOptions
     std::array<float, 3> stddev { 1.0f, 1.0f, 1.0f };
     float                border_value = 114.0f;
     bool                 mirror_horizontal = false;
+    bool                 center_letterbox = true;
 };
 
 struct AffineTransform

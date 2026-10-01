@@ -105,6 +105,41 @@ spec("CPU image processor")
         check_true(approximately_equal(tensor[3], 114.0F / 255.0F));
     }
 
+    it("supports top-left letterbox placement for detector contracts")
+    {
+        const std::array<std::uint8_t, 6> source = {
+            10, 20, 30, 40, 50, 60
+        };
+        const ImageView view {
+            source.data(), source.size(), 2, 1, 6,
+            PixelFormat::Bgr8, MemoryKind::Host
+        };
+        PreprocessOptions options;
+        options.output_format = PixelFormat::Bgr8;
+        options.center_letterbox = false;
+        options.stddev = {
+            1.0F / 255.0F,
+            1.0F / 255.0F,
+            1.0F / 255.0F,
+        };
+        LetterboxTransform transform;
+
+        const std::vector<float> tensor =
+            CpuImageProcessor::letterbox_nchw(
+                view, 2, 2, options,
+                1024, 1024, &transform);
+
+        check_true(approximately_equal(transform.scale, 1.0F));
+        check_true(approximately_equal(transform.pad_x, 0.0F));
+        check_true(approximately_equal(transform.pad_y, 0.0F));
+        check_true(approximately_equal(tensor[0], 10.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[1], 40.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[2], 114.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[3], 114.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[4], 20.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[8], 30.0F, 1.0e-4F));
+    }
+
     it("converts packed NV12 and I420 red pixels to identical BGR and RGB tensors")
     {
         const std::array<std::uint8_t, 6> nv12 = {
