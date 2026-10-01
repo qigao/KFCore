@@ -1859,6 +1859,76 @@ void ocsort_reset(ocsort_t* tracker) {
     tracker->next_id = 0;
 }
 
+static tracker_status_t ocsort_clone_internal(
+    const ocsort_t* source,
+    ocsort_t** output
+) {
+    ocsort_t* clone = NULL;
+
+    if (!source || !output) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
+    }
+    *output = NULL;
+
+    if (source->track_count > source->track_capacity ||
+        (source->track_capacity && !source->tracks) ||
+        source->track_capacity > SIZE_MAX / sizeof(*source->tracks)) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
+    clone = calloc(1, sizeof(*clone));
+    if (!clone) {
+        return TRACKER_STATUS_ALLOCATION_FAILED;
+    }
+    *clone = *source;
+    clone->tracks = NULL;
+
+    if (source->track_capacity) {
+        clone->tracks = calloc(source->track_capacity, sizeof(*clone->tracks));
+        if (!clone->tracks) {
+            free(clone);
+            return TRACKER_STATUS_ALLOCATION_FAILED;
+        }
+    }
+
+    for (size_t i = 0; i < source->track_count; ++i) {
+        const ocsort_track_t* src = &source->tracks[i];
+        ocsort_track_t* dst = &clone->tracks[i];
+
+        if (src->observation_count > src->observation_capacity ||
+            (src->observation_count && !src->observations) ||
+            src->observation_capacity > SIZE_MAX / sizeof(*src->observations)) {
+            ocsort_destroy(clone);
+            return TRACKER_STATUS_OVERFLOW;
+        }
+
+        *dst = *src;
+        dst->observations = NULL;
+        if (src->observation_capacity) {
+            dst->observations =
+                malloc(sizeof(*dst->observations) * src->observation_capacity);
+            if (!dst->observations) {
+                ocsort_destroy(clone);
+                return TRACKER_STATUS_ALLOCATION_FAILED;
+            }
+            if (src->observation_count) {
+                memcpy(dst->observations, src->observations,
+                       sizeof(*dst->observations) * src->observation_count);
+            }
+        }
+    }
+
+    *output = clone;
+    return TRACKER_STATUS_OK;
+}
+
+static void ocsort_commit_clone(ocsort_t* tracker, ocsort_t* working) {
+    ocsort_t previous = *tracker;
+    *tracker = *working;
+    *working = previous;
+    ocsort_destroy(working);
+}
+
 static int ocsort_add_observation(ocsort_track_t* track, int age, box_t box) {
     if (!ensure_capacity((void**)&track->observations, &track->observation_capacity,
                          sizeof(track->observations[0]), track->observation_count + 1)) {
