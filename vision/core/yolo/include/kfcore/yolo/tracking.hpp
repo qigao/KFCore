@@ -29,8 +29,12 @@ public:
     ByteTrackSession& operator=(const ByteTrackSession&) = delete;
 
     TrackFrame update(const DetectionFrame& frame);
-    // Discards every class tracker. The next update starts a new local-ID epoch.
-    void reset() noexcept;
+
+    [[nodiscard]] std::uint64_t tracking_epoch() const noexcept;
+
+    // Discards every class tracker and advances the identity epoch. Throws if
+    // the 64-bit epoch space is exhausted rather than allowing ID aliasing.
+    [[nodiscard]] std::uint64_t reset();
 
 private:
     class Impl;
