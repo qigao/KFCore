@@ -607,6 +607,46 @@ Use `evaluate_detector_boxes()` to run the actual relation model on detector
 boxes.  The evaluator loads the image from the GT manifest, but the relation
 box tensor comes only from the detector manifest.
 
+### Executable detector-box relation qualification
+
+`run_detector_relation_qualification.py` turns the detector ceiling into one
+reproducible CPU qualification path.  It restores the checkpoint's exact timm
+DINOv3 backbone, requires all four Apache relation contracts, requires the
+checkpoint predicate order to match the supplied vocabulary exactly, and then
+runs the relation model on the class-agnostic `kfcore.detector-boxes/1`
+manifest.
+
+```bash
+python tools/relation_training/run_detector_relation_qualification.py \
+  --checkpoint out/relation-v1.pt \
+  --vocabulary data/relation-vocab.json \
+  --annotations data/validation.jsonl \
+  --image-root data/images \
+  --detector-predictions out/detector-boxes.jsonl \
+  --detector-id fixed-detector \
+  --detector-model-sha256 <64-lowercase-hex> \
+  --detector-config-sha256 <64-lowercase-hex> \
+  --iou-threshold 0.5 \
+  --top-k 20 --top-k 50 --top-k 100 \
+  --pair-weight 1.0 \
+  --out out/detector-relation-qualification.json
+```
+
+The output uses `kfcore.detector-box-relation-qualification/1` and contains,
+in one deterministic JSON document:
+
+- relation checkpoint, backbone, config and vocabulary SHA-256 provenance;
+- GT annotation plus referenced image-corpus SHA-256 provenance;
+- detector prediction/model/config provenance;
+- object and directed-pair recoverability ceilings;
+- sampler conditional and end-to-end recall;
+- predicate conditional/end-to-end R@K and mR@K;
+- the detector/sampler/predicate/recovered failure decomposition.
+
+No detector object category field is accepted by this executable path.  Backend
+and CUDA parity stay in the separate backend qualification work; this report is
+intentionally CPU-only so its scope remains detector-box quality qualification.
+
 ## Open-world predicate objective v2
 
 The historical relation baseline uses exhaustive multi-label BCE. That remains
