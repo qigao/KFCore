@@ -1135,7 +1135,28 @@ static tracker_status_t byte_allocate_frame_scratch(
     BYTE_ALLOCATE(low_unmatched_rows, track_count);
     BYTE_ALLOCATE(low_unmatched_cols, low_count);
 #undef BYTE_ALLOCATE
+
+    status = allocate_array(&scratch->track_snapshot, track_count, sizeof(byte_track_t));
+    if (status != TRACKER_STATUS_OK) {
+        return status;
+    }
     return TRACKER_STATUS_OK;
+}
+
+static void byte_restore_kalman_snapshot(
+    bytetrack_t* tracker,
+    const byte_frame_scratch_t* scratch,
+    size_t saved_track_count,
+    int saved_next_id,
+    size_t* output_count
+) {
+    if (saved_track_count) {
+        memcpy(tracker->tracks, scratch->track_snapshot,
+               sizeof(*tracker->tracks) * saved_track_count);
+    }
+    tracker->track_count = saved_track_count;
+    tracker->next_id = saved_next_id;
+    *output_count = 0;
 }
 
 tracker_status_t bytetrack_update_ex(
@@ -1152,6 +1173,8 @@ tracker_status_t bytetrack_update_ex(
     size_t high_count = 0;
     size_t low_count = 0;
     size_t required_capacity = 0;
+    size_t saved_track_count = 0;
+    int saved_next_id = 0;
     tracker_status_t status;
 
     if (output_count) {
@@ -1202,10 +1225,23 @@ tracker_status_t bytetrack_update_ex(
         return status;
     }
 
+    saved_track_count = tracker->track_count;
+    saved_next_id = tracker->next_id;
+    if (saved_track_count) {
+        memcpy(scratch.track_snapshot, tracker->tracks,
+               sizeof(*tracker->tracks) * saved_track_count);
+    }
+
     gather_boxes_into(scratch.high_boxes, detections, scratch.high_indices, high_count);
     gather_boxes_into(scratch.low_boxes, detections, scratch.low_indices, low_count);
     for (size_t i = 0; i < tracker->track_count; ++i) {
-        kf_xyxy_predict(&tracker->tracks[i].estimator);
+        status = kf_xyxy_predict(&tracker->tracks[i].estimator);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++tracker->tracks[i].time_since_update;
         scratch.track_boxes[i] = kf_xyxy_box(&tracker->tracks[i].estimator);
     }
@@ -1224,7 +1260,13 @@ tracker_status_t bytetrack_update_ex(
         const int row = high.match_rows[i];
         const int det_idx = scratch.high_indices[high.match_cols[i]];
         byte_track_t* track = &tracker->tracks[row];
-        kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        status = kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++track->number_of_successful_updates;
         track->time_since_update = 0;
         if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames &&
@@ -1254,7 +1296,13 @@ tracker_status_t bytetrack_update_ex(
         const int track_idx = high.unmatched_rows[low.match_rows[i]];
         const int det_idx = scratch.low_indices[low.match_cols[i]];
         byte_track_t* track = &tracker->tracks[track_idx];
-        kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        status = kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++track->number_of_successful_updates;
         track->time_since_update = 0;
         if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames &&
