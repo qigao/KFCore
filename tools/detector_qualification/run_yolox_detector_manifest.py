@@ -14,6 +14,12 @@ from PIL import Image
 from prepare_yolox_tiny import (
     INPUT_SIZE,
     QUALIFIED_DECODED_ONNX_SHA256,
+    QUALIFIED_PACKAGE_SHA256,
+    UPSTREAM_COMMIT,
+    UPSTREAM_LICENSE,
+    UPSTREAM_REPOSITORY,
+    UPSTREAM_SOURCE_SHA256,
+    UPSTREAM_TAG,
 )
 
 
@@ -24,6 +30,19 @@ DEFAULT_MAX_DETECTIONS = 300
 _BORDER_VALUE = 114.0
 _MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def stable_json_bytes(payload: object) -> bytes:
+    return (
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 def sha256_file(path: str | Path) -> str:
@@ -314,10 +333,32 @@ def run(
         raise FileExistsError(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    detector_config = {
+        "input_size": list(INPUT_SIZE),
+        "score_threshold": score_threshold,
+        "iou_threshold": iou_threshold,
+        "max_detections": max_detections,
+        "preprocess": (
+            "top-left-letterbox-114/rgb/imagenet-mean-std/chw-fp32"
+        ),
+        "decode": "objectness-times-best-class/class-aware-nms",
+    }
     return {
         "schema": "kfcore.yolox-detector-box-manifest-evidence/1",
         "detector_id": "yolox-tiny-coco-0.1.1rc0",
         "detector_model_sha256": QUALIFIED_DECODED_ONNX_SHA256,
+        "detector_package_sha256": QUALIFIED_PACKAGE_SHA256,
+        "detector_config": detector_config,
+        "detector_config_sha256": hashlib.sha256(
+            stable_json_bytes(detector_config)
+        ).hexdigest(),
+        "upstream": {
+            "repository": UPSTREAM_REPOSITORY,
+            "tag": UPSTREAM_TAG,
+            "commit": UPSTREAM_COMMIT,
+            "license": UPSTREAM_LICENSE,
+            "source_onnx_sha256": UPSTREAM_SOURCE_SHA256,
+        },
         "score_threshold": score_threshold,
         "iou_threshold": iou_threshold,
         "max_detections": max_detections,
