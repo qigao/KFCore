@@ -275,15 +275,99 @@ std::string json_escape(const std::string& value)
     return stream.str();
 }
 
+void write_case_array(
+    std::ofstream& stream,
+    const char* key,
+    const std::vector<VocabularyCase>& vocabularies,
+    const std::vector<kfcore::relation::TimedRelationFrame>& runs,
+    bool backend_scoring)
+{
+    stream << "  \"" << key << "\": [\n";
+    for (std::size_t index = 0U;
+         index < runs.size(); ++index)
+    {
+        const auto& value = runs[index];
+        stream << "    {\n";
+        stream << "      \"label\": \""
+               << json_escape(vocabularies[index].label)
+               << "\",\n";
+        stream << "      \"predicate_count\": "
+               << value.timing.predicate_count << ",\n";
+        stream << "      \"vocabulary_version\": "
+               << value.frame.vocabulary_version << ",\n";
+        stream << "      \"region_count\": "
+               << value.timing.region_count << ",\n";
+        stream << "      \"valid_pair_count\": "
+               << value.timing.valid_pair_count << ",\n";
+        stream << "      \"edge_count\": "
+               << value.timing.edge_count << ",\n";
+        stream << "      \"preprocess_ms\": "
+               << value.timing.preprocess_ms << ",\n";
+        stream << "      \"backend_ms\": "
+               << value.timing.backend_ms << ",\n";
+        stream << "      \"predicate_score_ms\": "
+               << value.timing.predicate_score_ms << ",\n";
+        stream << "      \"backbone_context_ms\": ";
+        if (backend_scoring)
+        {
+            stream << "null,\n";
+        }
+        else
+        {
+            stream << value.timing.backend_ms << ",\n";
+        }
+        stream << "      \"predicate_scoring_ms\": ";
+        if (backend_scoring)
+        {
+            stream << "null,\n";
+        }
+        else
+        {
+            stream << value.timing.predicate_score_ms << ",\n";
+        }
+        stream << "      \"predicate_scoring_in_backend\": "
+               << (backend_scoring ? "true" : "false")
+               << ",\n";
+        stream << "      \"runtime_ms\": "
+               << value.timing.runtime_ms << ",\n";
+        stream << "      \"decode_ms\": "
+               << value.timing.decode_ms << ",\n";
+        stream << "      \"total_ms\": "
+               << value.timing.total_ms << ",\n";
+        stream << "      \"pair_keys\": [";
+        for (std::size_t edge_index = 0U;
+             edge_index < value.frame.edges.size();
+             ++edge_index)
+        {
+            if (edge_index != 0U)
+            {
+                stream << ", ";
+            }
+            const auto& edge = value.frame.edges[edge_index];
+            stream << "[" << edge.subject_index
+                   << ", " << edge.object_index << "]";
+        }
+        stream << "]\n";
+        stream << "    }"
+               << (index + 1U == runs.size()
+                       ? "\n"
+                       : ",\n");
+    }
+    stream << "  ],\n";
+}
+
 void write_report(
     const std::filesystem::path& path,
     const std::string& model_sha,
     const std::string& package_sha,
+    const std::string& host_model_sha,
+    const std::string& host_package_sha,
     const std::string& vocabulary_sha,
     const std::string& reference_sha,
     const std::string& plugin_sha,
     const std::vector<VocabularyCase>& vocabularies,
     const std::vector<kfcore::relation::TimedRelationFrame>& runs,
+    const std::vector<kfcore::relation::TimedRelationFrame>& host_runs,
     const kfcore::runtime::ExecutionRoute& route)
 {
     if (path.empty())
@@ -310,12 +394,15 @@ void write_report(
     stream << "  \"passed\": true,\n";
     stream << "  \"runtime_language\": \"C++17\",\n";
     stream << "  \"backend_scoring\": true,\n";
+    stream << "  \"host_fallback_reference\": true,\n";
+    stream << "  \"backend_host_pair_keyed_parity\": true,\n";
     stream << "  \"provider\": \""
            << json_escape(route.backend_id)
            << "\",\n";
     stream << "  \"device\": \""
            << json_escape(route.device_id)
            << "\",\n";
+    stream << "  \"image_size\": 8,\n";
     stream << "  \"vocabulary_source\": \"precomputed\",\n";
     stream << "  \"text_encoder_sha256\": null,\n";
     stream << "  \"tokenizer_sha256\": null,\n";
@@ -323,6 +410,10 @@ void write_report(
            << model_sha << "\",\n";
     stream << "  \"package_sha256\": \""
            << package_sha << "\",\n";
+    stream << "  \"host_model_sha256\": \""
+           << host_model_sha << "\",\n";
+    stream << "  \"host_package_sha256\": \""
+           << host_package_sha << "\",\n";
     stream << "  \"vocabulary_fixture_sha256\": \""
            << vocabulary_sha << "\",\n";
     stream << "  \"python_ort_reference_sha256\": \""
@@ -330,43 +421,16 @@ void write_report(
     stream << "  \"backend_plugin_sha256\": \""
            << plugin_sha << "\",\n";
     stream << "  \"model_load_count\": 1,\n";
+    stream << "  \"host_model_load_count\": 1,\n";
     stream << "  \"same_model_reused_across_vocabularies\": true,\n";
+    stream << "  \"same_host_model_reused_across_vocabularies\": true,\n";
     stream << "  \"object_labels_enter_relation_inference\": false,\n";
-    stream << "  \"cases\": [\n";
 
-    for (std::size_t index = 0U;
-         index < runs.size(); ++index)
-    {
-        const auto& value = runs[index];
-        stream << "    {\n";
-        stream << "      \"label\": \""
-               << json_escape(vocabularies[index].label)
-               << "\",\n";
-        stream << "      \"predicate_count\": "
-               << value.timing.predicate_count << ",\n";
-        stream << "      \"vocabulary_version\": "
-               << value.frame.vocabulary_version << ",\n";
-        stream << "      \"region_count\": "
-               << value.timing.region_count << ",\n";
-        stream << "      \"valid_pair_count\": "
-               << value.timing.valid_pair_count << ",\n";
-        stream << "      \"edge_count\": "
-               << value.timing.edge_count << ",\n";
-        stream << "      \"preprocess_ms\": "
-               << value.timing.preprocess_ms << ",\n";
-        stream << "      \"runtime_ms\": "
-               << value.timing.runtime_ms << ",\n";
-        stream << "      \"decode_ms\": "
-               << value.timing.decode_ms << ",\n";
-        stream << "      \"total_ms\": "
-               << value.timing.total_ms << "\n";
-        stream << "    }"
-               << (index + 1U == runs.size()
-                       ? "\n"
-                       : ",\n");
-    }
+    write_case_array(
+        stream, "cases", vocabularies, runs, true);
+    write_case_array(
+        stream, "host_cases", vocabularies, host_runs, false);
 
-    stream << "  ],\n";
     stream << "  \"vocabulary_version_sequence\": [";
     for (std::size_t index = 0U;
          index < runs.size(); ++index)
