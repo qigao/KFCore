@@ -363,6 +363,53 @@ class ApacheVGRawRebuildTest(unittest.TestCase):
             self.assertEqual(reports[0]["canonical_materialization"]["images"], 1)
             self.assertEqual(reports[0]["canonical_materialization"]["relations"], 1)
 
+    def test_pinned_canonical_rebuild_emits_corpus_source_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            paths = self.make_fixture(root)
+            expected = {
+                "relationships_json": sha256_file(paths["relationships"]),
+                "image_data_json": sha256_file(paths["image_data"]),
+                "registry_json": sha256_file(paths["registry"]),
+                "vg2coco_json": sha256_file(paths["vg2coco"]),
+                "psg2coco_json": sha256_file(paths["psg2coco"]),
+            }
+            vocabulary = root / "vocabulary.json"
+            write_json(
+                vocabulary,
+                {
+                    "schema": "kfcore.relation-vocab/1",
+                    "predicates": ["on top of"],
+                    "objects": ["person", "red ball", "pole"],
+                },
+            )
+
+            report = rebuild_vg_raw(
+                relationships_path=paths["relationships"],
+                image_data_path=paths["image_data"],
+                image_root=paths["image_root"],
+                registry_path=paths["registry"],
+                vg2coco_path=paths["vg2coco"],
+                psg2coco_path=paths["psg2coco"],
+                coco_output=root / "out" / "vg_raw_train_coco.json",
+                pack_output=root / "out" / "vg_raw" / "train",
+                evidence_output=root / "out" / "evidence.json",
+                expected_input_sha256=expected,
+                vocabulary_path=vocabulary,
+                canonical_output=root / "out" / "canonical.jsonl",
+            )
+
+            source = report["corpus_source_candidate"]
+            self.assertIsNotNone(source)
+            self.assertEqual(source["name"], "vg_raw")
+            self.assertEqual(source["provenance_kind"], "deterministic-rebuild")
+            self.assertTrue(source["revision"].startswith("sha256:"))
+            self.assertEqual(
+                source["annotations_sha256"],
+                report["canonical_materialization"]["canonical_annotations_sha256"],
+            )
+            self.assertEqual(source["post_exclusion_count"], 1)
+
     def test_released_max_words_is_not_a_runtime_knob(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             paths = self.make_fixture(Path(td))
