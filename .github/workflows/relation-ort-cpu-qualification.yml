@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build unzip curl
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
 
       - uses: actions/setup-python@v5
         with:
