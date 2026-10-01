@@ -116,8 +116,8 @@ def validate_export_pair(
 
     if dynamic_export.get("model_type") != "relation.open-vocabulary":
         raise ValueError("dynamic export must be relation.open-vocabulary")
-    if dynamic_export.get("output_kind") != "dynamic-logits":
-        raise ValueError("dynamic export must emit dynamic-logits")
+    if dynamic_export.get("output_kind") != "dynamic-vocabulary-logits":
+        raise ValueError("dynamic export must emit dynamic-vocabulary-logits")
     if encoder_export.get("model_type") != "relation.open-vocabulary-encoder":
         raise ValueError(
             "encoder export must be relation.open-vocabulary-encoder"
