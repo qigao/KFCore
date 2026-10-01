@@ -876,68 +876,112 @@ static void sort_retain_alive(sort_t* tracker) {
     tracker->track_count = out;
 }
 
-size_t sort_update(sort_t* tracker, const detection_t* detections,
-                            size_t detection_count, tracked_detection_t* output,
-                            size_t output_capacity) {
-    if (!tracker || (!detections && detection_count)) {
-        return 0;
+tracker_status_t sort_update_ex(
+    sort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+) {
+    sort_track_t* snapshot = NULL;
+    box_t* track_boxes = NULL;
+    box_t* detection_boxes = NULL;
+    float* iou = NULL;
+    assignment_result_t assignments;
+    tracker_status_t status = TRACKER_STATUS_OK;
+    size_t saved_track_count;
+    int saved_next_id;
+    size_t required_capacity = 0;
+    size_t iou_count = 0;
+
+    memset(&assignments, 0, sizeof(assignments));
+    if (output_count) {
+        *output_count = 0;
     }
-    for (size_t i = 0; i < detection_count; ++i) {
-        if (i < output_capacity && output) {
-            output[i].detection = detections[i];
-            output[i].tracker_id = -1;
-        }
+    if (!tracker || !output_count || (!detections && detection_count)) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
     }
-    if (tracker->track_count == 0 && detection_count == 0) {
-        return 0;
+    if (detection_count > output_capacity || (detection_count && !output)) {
+        return TRACKER_STATUS_CAPACITY;
+    }
+    if (detection_count > (size_t)INT_MAX || tracker->track_count > (size_t)INT_MAX ||
+        tracker->next_id < 0 ||
+        detection_count > (size_t)(INT_MAX - tracker->next_id) ||
+        !checked_add_size(tracker->track_count, detection_count, &required_capacity) ||
+        !checked_multiply_size(tracker->track_count, detection_count, &iou_count)) {
+        return TRACKER_STATUS_OVERFLOW;
     }
 
-    box_t* track_boxes = tracker->track_count ? malloc(sizeof(*track_boxes) * tracker->track_count) : NULL;
-    box_t* detection_boxes = detection_count ? malloc(sizeof(*detection_boxes) * detection_count) : NULL;
-    if ((tracker->track_count && !track_boxes) || (detection_count && !detection_boxes)) {
-        free(track_boxes);
-        free(detection_boxes);
-        return detection_count;
+    status = reserve_capacity((void**)&tracker->tracks, &tracker->track_capacity,
+                              sizeof(*tracker->tracks), required_capacity);
+    if (status != TRACKER_STATUS_OK) {
+        return status;
+    }
+
+    saved_track_count = tracker->track_count;
+    saved_next_id = tracker->next_id;
+
+    status = allocate_array((void**)&snapshot, saved_track_count, sizeof(*snapshot));
+    if (status == TRACKER_STATUS_OK) {
+        status = allocate_array((void**)&track_boxes, saved_track_count,
+                                sizeof(*track_boxes));
+    }
+    if (status == TRACKER_STATUS_OK) {
+        status = allocate_array((void**)&detection_boxes, detection_count,
+                                sizeof(*detection_boxes));
+    }
+    if (status == TRACKER_STATUS_OK) {
+        status = allocate_array((void**)&iou, iou_count, sizeof(*iou));
+    }
+    if (status != TRACKER_STATUS_OK) {
+        goto cleanup;
+    }
+
+    if (saved_track_count) {
+        memcpy(snapshot, tracker->tracks, sizeof(*snapshot) * saved_track_count);
     }
     for (size_t i = 0; i < detection_count; ++i) {
         detection_boxes[i] = detections[i].box;
+        output[i].tracked.detection = detections[i];
+        output[i].tracked.tracker_id = -1;
+        output[i].detection_index = i;
     }
+
     for (size_t i = 0; i < tracker->track_count; ++i) {
-        kf_xyxy_predict(&tracker->tracks[i].estimator);
+        status = kf_xyxy_predict(&tracker->tracks[i].estimator);
+        if (status != TRACKER_STATUS_OK) {
+            goto rollback;
+        }
         ++tracker->tracks[i].time_since_update;
         track_boxes[i] = kf_xyxy_box(&tracker->tracks[i].estimator);
     }
 
-    float* iou = build_iou_matrix(track_boxes, tracker->track_count, detection_boxes, detection_count);
-    assignment_result_t assignments = assign_greedy(
-        iou,
-        tracker->track_count,
-        detection_count,
-        tracker->minimum_iou_threshold
-    );
-
+    build_iou_matrix_into(iou, track_boxes, tracker->track_count,
+                          detection_boxes, detection_count);
+    assignments = assign_greedy(iou, tracker->track_count, detection_count,
+                                tracker->minimum_iou_threshold);
     if (assignments.status == -1) {
-        free_assignment(&assignments);
-        free(iou);
-        free(track_boxes);
-        free(detection_boxes);
-        return 0;
+        status = TRACKER_STATUS_ALLOCATION_FAILED;
+        goto rollback;
     }
 
     for (size_t i = 0; i < assignments.match_count; ++i) {
         const int row = assignments.match_rows[i];
         const int col = assignments.match_cols[i];
         sort_track_t* track = &tracker->tracks[row];
-        kf_xyxy_update(&track->estimator, detection_boxes[col]);
+
+        status = kf_xyxy_update(&track->estimator, detection_boxes[col]);
+        if (status != TRACKER_STATUS_OK) {
+            goto rollback;
+        }
         ++track->number_of_successful_updates;
         track->time_since_update = 0;
         if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames) {
             if (track->tracker_id == -1) {
                 track->tracker_id = tracker->next_id++;
             }
-            if ((size_t)col < output_capacity && output) {
-                output[col].tracker_id = track->tracker_id;
-            }
+            output[col].tracked.tracker_id = track->tracker_id;
         }
     }
 
@@ -945,21 +989,70 @@ size_t sort_update(sort_t* tracker, const detection_t* detections,
         const int det_idx = assignments.unmatched_cols[i];
         if (confidence_passes(detections[det_idx], tracker->track_activation_threshold)) {
             sort_track_t* track = sort_add_track(tracker, detection_boxes[det_idx]);
-            if (track && track->number_of_successful_updates >= tracker->minimum_consecutive_frames) {
+            if (!track) {
+                status = TRACKER_STATUS_ALLOCATION_FAILED;
+                goto rollback;
+            }
+            if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames) {
                 track->tracker_id = tracker->next_id++;
-                if ((size_t)det_idx < output_capacity && output) {
-                    output[det_idx].tracker_id = track->tracker_id;
-                }
+                output[det_idx].tracked.tracker_id = track->tracker_id;
             }
         }
     }
 
     sort_retain_alive(tracker);
+    *output_count = detection_count;
+    status = TRACKER_STATUS_OK;
+    goto cleanup;
+
+rollback:
+    if (saved_track_count) {
+        memcpy(tracker->tracks, snapshot, sizeof(*snapshot) * saved_track_count);
+    }
+    tracker->track_count = saved_track_count;
+    tracker->next_id = saved_next_id;
+    *output_count = 0;
+
+cleanup:
     free_assignment(&assignments);
     free(iou);
     free(track_boxes);
     free(detection_boxes);
-    return detection_count;
+    free(snapshot);
+    return status;
+}
+
+size_t sort_update(
+    sort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_t* output,
+    size_t output_capacity
+) {
+    tracked_detection_ex_t* indexed_output = NULL;
+    size_t output_count = 0;
+
+    if (detection_count > SIZE_MAX / sizeof(*indexed_output)) {
+        return 0;
+    }
+    indexed_output = detection_count ? malloc(sizeof(*indexed_output) * detection_count) : NULL;
+    if (detection_count && !indexed_output) {
+        return 0;
+    }
+
+    if (sort_update_ex(tracker, detections, detection_count, indexed_output,
+                       detection_count, &output_count) != TRACKER_STATUS_OK) {
+        free(indexed_output);
+        return 0;
+    }
+
+    for (size_t i = 0; i < output_count && i < output_capacity; ++i) {
+        if (output) {
+            output[i] = indexed_output[i].tracked;
+        }
+    }
+    free(indexed_output);
+    return output_count;
 }
 
 bytetrack_t* bytetrack_create(const bytetrack_config_t* config_in) {
