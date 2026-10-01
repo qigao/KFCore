@@ -32,6 +32,7 @@ namespace kfcore::pipelines
 struct SceneGraphPipeline::Impl final
 {
     std::uint64_t vocabulary_version = 7U;
+    std::uint64_t tracking_epoch = 1U;
     std::vector<std::string> predicates {"interacting"};
 };
 
@@ -62,6 +63,7 @@ SceneGraphFrame SceneGraphPipeline::process(const image::ImageView&)
     SceneGraphFrame frame;
     frame.objects.image_width = 100;
     frame.objects.image_height = 100;
+    frame.objects.tracking_epoch = impl_->tracking_epoch;
     frame.objects.detections = {
         {{{0.0F, 0.0F, 20.0F, 20.0F}, 0.95F, 0}, std::uint64_t{101}},
         {{{20.0F, 0.0F, 40.0F, 20.0F}, 0.90F, 1}, std::uint64_t{202}},
@@ -134,8 +136,19 @@ SceneGraphPipeline::predicates() const noexcept
     return impl_ ? impl_->predicates : empty;
 }
 
-void SceneGraphPipeline::reset_tracking() noexcept
+std::uint64_t SceneGraphPipeline::tracking_epoch() const noexcept
 {
+    return impl_ ? impl_->tracking_epoch : 0U;
+}
+
+std::uint64_t SceneGraphPipeline::reset_tracking()
+{
+    if (!impl_)
+    {
+        throw std::logic_error("stub scene graph state unavailable");
+    }
+    ++impl_->tracking_epoch;
+    return impl_->tracking_epoch;
 }
 
 } // namespace kfcore::pipelines
