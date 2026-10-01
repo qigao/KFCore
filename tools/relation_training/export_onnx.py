@@ -619,7 +619,7 @@ def main() -> None:
                 .cpu()
             ),
             "score_contract": (
-                "scale*((1-alpha)*dot(q_sem,w)+alpha*dot(q_spa,w))+bias"
+                "scale*((1-alpha)*cos(q_sem,W)+alpha*cos(q_spa,W))+bias"
             ),
         })
     else:
