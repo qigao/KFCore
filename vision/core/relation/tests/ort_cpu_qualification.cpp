@@ -728,12 +728,27 @@ int main(int argc, char** argv)
             model_sha == artifact.sha256,
             "executed ONNX hash differs from package manifest");
 
+        const auto& host_artifact =
+            host_package.artifact("ort-cpu");
+        const std::string host_model_sha =
+            kfcore::runtime::
+                compute_model_artifact_sha256(
+                    host_package.artifact_path(
+                        host_artifact));
+        require(
+            host_model_sha == host_artifact.sha256,
+            "executed host ONNX hash differs from package manifest");
+
         write_report(
             report_path,
             model_sha,
             kfcore::runtime::
                 compute_model_artifact_sha256(
                     package_path / "model.json"),
+            host_model_sha,
+            kfcore::runtime::
+                compute_model_artifact_sha256(
+                    host_package_path / "model.json"),
             kfcore::runtime::
                 compute_model_artifact_sha256(
                     vocab_path),
@@ -745,6 +760,7 @@ int main(int argc, char** argv)
                     plugin_path),
             vocabularies,
             runs,
+            host_runs,
             relation->execution_route());
 
         std::cout
