@@ -544,6 +544,81 @@ The combiner rejects:
 This prevents a fast latency run from one backend/model/vocabulary from being
 published beside quality numbers from another configuration.
 
+## Relation backend parity and latency matrix
+
+`relation_backend_matrix.py` is the cross-backend qualification layer for the
+same exported Apache-reference checkpoint. It binds:
+
+```text
+#142 detector-box quality report
+        +
+dynamic-vocabulary ONNX export metadata
+        +
+encoder/query ONNX export metadata
+        +
+ORT CPU backend-scoring evidence
+        +
+host query/scorer reference evidence
+        +
+optional GPU/TensorRT evidence
+        ↓
+kfcore.relation-backend-matrix/1
+```
+
+The dynamic-logit and encoder/query ONNX exports must carry the same checkpoint,
+backbone, image size, box/pair limits, query dimension, logit scale/bias and
+score contract. The matrix rejects any lineage drift before comparing latency.
+
+The ORT CPU qualification now runs both execution modes on the same inputs and
+vocabularies:
+
+```text
+V=1 -> small(V=3) -> default(V=4) -> large(V=64) -> V=1 repeat
+```
+
+For every case it records image size, box count, selected directed-pair count,
+pair keys, preprocess time, backend time, predicate-scoring time when separately
+observable, host decode time and total relation latency. Backend-scoring and
+host-scoring decoded outputs are compared by `(subject_idx, object_idx)`; row
+ordering is not used as identity.
+
+The score/decode policy is explicit and shared:
+
+```text
+logit_scale / logit_bias
+pair_weight
+calibration_a / calibration_b
+threshold
+top_k
+detector-score ranking policy
+```
+
+Hardware and software provenance are emitted separately from the execution host
+and included in the matrix rather than inferred later.
+
+Build the matrix with:
+
+```bash
+python tools/relation_training/relation_backend_matrix.py \
+  --quality detector-relation-qualification.json \
+  --dynamic-export relation-dynamic.onnx.json \
+  --encoder-export relation-encoder.onnx.json \
+  --ort-cpu relation-ort-cpu-report.json \
+  --ort-cpu-provenance relation-ort-cpu-provenance.json \
+  --out relation-backend-matrix.json
+```
+
+A TensorRT hardware qualification can additionally be attached with
+`--tensorrt`. The current TensorRT artifact proves one-engine dynamic-V reuse,
+profile coverage and pair-keyed numeric parity, but it is intentionally marked
+`engine-only` until a full relation-stage timing run is available on GPU. The
+matrix therefore never presents engine-only timing as preprocess/backbone/
+predicate/decode end-to-end latency.
+
+ORT CUDA and full TensorRT relation rows are availability-dependent. Absence of
+GPU hardware is recorded as unavailable rather than replaced with synthetic
+numbers.
+
 ## Detector-box recoverability ceiling
 
 GT-box relation metrics do not reveal whether a failure came from the detector,
