@@ -7,6 +7,10 @@
 #ifndef SIGNAL_FILTERS_H
 #define SIGNAL_FILTERS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /******************************************************************************
  * TYPEDEFS
  ******************************************************************************/
@@ -1080,6 +1084,10 @@ int kf_signal_euclidean_distance(const float* a, const float* b, int n, float* d
  */
 int kf_signal_euclidean_filter(float* state, const float* sample, int n, float max_distance,
                                float alpha, float* distance);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SIGNAL_FILTERS_H */
 
