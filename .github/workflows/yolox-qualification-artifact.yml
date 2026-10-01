@@ -68,7 +68,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build unzip curl
           python -m pip install --disable-pip-version-check \
-            numpy==2.2.6 onnx==1.18.0 onnxruntime==1.22.0
+            numpy==2.2.6 onnx==1.18.0 onnxruntime==1.22.0 Pillow==12.3.0
 
       - name: Compile and run deterministic artifact tests
         shell: bash
@@ -77,8 +77,12 @@ jobs:
           set -euxo pipefail
           python -m py_compile \
             prepare_yolox_tiny.py \
-            test_prepare_yolox_tiny.py
-          python -m unittest -v test_prepare_yolox_tiny.py
+            run_yolox_detector_manifest.py \
+            test_prepare_yolox_tiny.py \
+            test_run_yolox_detector_manifest.py
+          python -m unittest -v \
+            test_prepare_yolox_tiny.py \
+            test_run_yolox_detector_manifest.py
 
       - name: Restore native SDK download cache
         uses: actions/cache@v4
@@ -215,6 +219,64 @@ jobs:
           print(json.dumps(evidence, indent=2, sort_keys=True))
           PY
 
+      - name: Run real YOLOX detector-box manifest smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/yolox-tiny-qualification"
+          smoke="$RUNNER_TEMP/yolox-manifest-smoke"
+          mkdir -p "$smoke/images"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from PIL import Image
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "yolox-manifest-smoke"
+          image = root / "images" / "sample.png"
+          Image.new("RGB", (416, 416), color=(127, 127, 127)).save(image)
+          (root / "annotations.jsonl").write_text(
+              json.dumps({
+                  "image": "sample.png",
+                  "width": 416,
+                  "height": 416,
+              }) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          python tools/detector_qualification/run_yolox_detector_manifest.py \
+            --model "$root/yolox_tiny_decoded.onnx" \
+            --annotations "$smoke/annotations.jsonl" \
+            --image-root "$smoke/images" \
+            --out "$smoke/detector-boxes.jsonl" \
+            --evidence-out "$smoke/evidence.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "yolox-manifest-smoke"
+          evidence = json.loads((root / "evidence.json").read_text())
+          rows = [
+              json.loads(line)
+              for line in (root / "detector-boxes.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert evidence["schema"] == "kfcore.yolox-detector-box-manifest-evidence/1"
+          assert evidence["detector_id"] == "yolox-tiny-coco-0.1.1rc0"
+          assert evidence["class_labels_emitted"] is False
+          assert evidence["image_count"] == 1
+          assert len(rows) == 1
+          assert rows[0]["schema"] == "kfcore.detector-boxes/1"
+          assert set(rows[0]) == {
+              "schema", "image", "width", "height", "boxes_xyxy", "scores"
+          }
+          assert len(rows[0]["boxes_xyxy"]) == len(rows[0]["scores"])
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: yolox-tiny-qualification-artifact
@@ -222,6 +284,8 @@ jobs:
             ${{ runner.temp }}/yolox-tiny-qualification/evidence.json
             ${{ runner.temp }}/yolox-tiny-qualification/model.json
             ${{ runner.temp }}/yolox-tiny-qualification/yolox_tiny_decoded.onnx
+            ${{ runner.temp }}/yolox-manifest-smoke/evidence.json
+            ${{ runner.temp }}/yolox-manifest-smoke/detector-boxes.jsonl
           if-no-files-found: error
           retention-days: 7
 
