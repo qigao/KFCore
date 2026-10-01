@@ -215,7 +215,8 @@ bool valid_hardware_compatibility(std::string_view value)
 
 bool valid_yolo_flavor(std::string_view value)
 {
-    return value == "raw-yolo" || value == "compact-nms" || value == "efficient-nms";
+    return value == "raw-yolo" || value == "raw-yolox" ||
+           value == "compact-nms" || value == "efficient-nms";
 }
 
 bool cuda_device_constraint(std::string_view value)
@@ -477,7 +478,7 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
         if (result.model_type_ == "yolo-detection" && !valid_yolo_flavor(artifact.flavor))
         {
             invalid_package("YOLO artifact '" + artifact.id +
-                            "' requires flavor raw-yolo, compact-nms, or efficient-nms");
+                            "' requires flavor raw-yolo, raw-yolox, compact-nms, or efficient-nms");
         }
         (void)contained_path(result.root_, artifact.path);
 
