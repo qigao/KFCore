@@ -291,21 +291,42 @@ static void compute_velocity(box_t from, box_t to, float out[2]) {
     out[1] /= norm;
 }
 
-static int ensure_capacity(void** data, size_t* capacity, size_t elem_size, size_t needed) {
-    if (*capacity >= needed) {
-        return 1;
+static tracker_status_t reserve_capacity(
+    void** data,
+    size_t* capacity,
+    size_t elem_size,
+    size_t needed
+) {
+    if (!data || !capacity || elem_size == 0) {
+        return TRACKER_STATUS_INVALID_ARGUMENT;
     }
-    size_t new_capacity = *capacity == 0 ? 4 : *capacity * 2;
+    if (*capacity >= needed) {
+        return TRACKER_STATUS_OK;
+    }
+
+    size_t new_capacity = *capacity == 0 ? 4 : *capacity;
     while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
         new_capacity *= 2;
     }
+    if (new_capacity < needed || new_capacity > SIZE_MAX / elem_size) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
     void* new_data = realloc(*data, elem_size * new_capacity);
     if (!new_data) {
-        return 0;
+        return TRACKER_STATUS_ALLOCATION_FAILED;
     }
     *data = new_data;
     *capacity = new_capacity;
-    return 1;
+    return TRACKER_STATUS_OK;
+}
+
+static int ensure_capacity(void** data, size_t* capacity, size_t elem_size, size_t needed) {
+    return reserve_capacity(data, capacity, elem_size, needed) == TRACKER_STATUS_OK;
 }
 
 static void free_assignment(assignment_result_t* result) {
