@@ -49,4 +49,15 @@ set_target_properties(kfcore_relation_ort_cpu_qualification PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   FOLDER "${_relation_test_folder}")
+
+add_executable(kfcore_released_relsgg_qualification
+  released_relsgg_qualification.cpp)
+target_compile_features(kfcore_released_relsgg_qualification PRIVATE cxx_std_17)
+target_link_libraries(kfcore_released_relsgg_qualification PRIVATE
+  KFCore::relation_core)
+set_target_properties(kfcore_released_relsgg_qualification PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  FOLDER "${_relation_test_folder}")
 endif()
