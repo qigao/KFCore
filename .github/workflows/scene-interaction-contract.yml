@@ -5,13 +5,30 @@ on:
     branches: [master]
     paths:
       - 'scene_interaction/**'
+      - 'vision/core/yolo/include/kfcore/yolo/types.hpp'
+      - 'vision/core/yolo/include/kfcore/yolo/tracking.hpp'
+      - 'vision/core/yolo/src/tracking.cpp'
       - 'vision/pipelines/scene_graph/include/kfcore/pipelines/scene_graph.hpp'
+      - 'vision/pipelines/scene_graph/src/scene_graph_detail.cpp'
+      - 'vision/pipelines/scene_graph/src/scene_graph_detail.hpp'
+      - 'trackers/**'
+      - 'kalman/kalman_takasu.c'
+      - 'kalman/kalman_takasu.h'
       - 'CMakeLists.txt'
       - '.github/workflows/scene-interaction-contract.yml'
   pull_request:
     branches: [master]
     paths:
       - 'scene_interaction/**'
+      - 'vision/core/yolo/include/kfcore/yolo/types.hpp'
+      - 'vision/core/yolo/include/kfcore/yolo/tracking.hpp'
+      - 'vision/core/yolo/src/tracking.cpp'
+      - 'vision/pipelines/scene_graph/include/kfcore/pipelines/scene_graph.hpp'
+      - 'vision/pipelines/scene_graph/src/scene_graph_detail.cpp'
+      - 'vision/pipelines/scene_graph/src/scene_graph_detail.hpp'
+      - 'trackers/**'
+      - 'kalman/kalman_takasu.c'
+      - 'kalman/kalman_takasu.h'
       - 'CMakeLists.txt'
       - '.github/workflows/scene-interaction-contract.yml'
   workflow_dispatch:
@@ -92,6 +109,112 @@ jobs:
         run: |
           set -euxo pipefail
           "$RUNNER_TEMP/scene-interaction/test_scene_interaction"
+
+      - name: Build tracked continuity qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          out="$RUNNER_TEMP/scene-interaction"
+
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ikalman -Ivendor/miniblas \
+            -c kalman/kalman_takasu.c \
+            -o "$out/kalman_takasu.o"
+
+          cc -std=c11 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Itrackers/include -Ikalman -Ivendor/miniblas \
+            -c trackers/src/tracker.c \
+            -o "$out/tracker.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/core/yolo/include -Ivision/core/yolo/src \
+            -Ivision/core/image_processor/include \
+            -Itrackers/include \
+            -c vision/core/yolo/src/tracking.cpp \
+            -o "$out/yolo_tracking.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Ivision/pipelines/scene_graph/include \
+            -Ivision/pipelines/scene_graph/src \
+            -Ivision/core/relation/include \
+            -Ivision/core/yolo/include \
+            -Ivision/core/image_processor/include \
+            -c vision/pipelines/scene_graph/src/scene_graph_detail.cpp \
+            -o "$out/scene_graph_detail.o"
+
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Iscene_interaction/include -Iscene_interaction/src \
+            -Ivision/pipelines/scene_graph/include \
+            -Ivision/pipelines/scene_graph/src \
+            -Ivision/core/relation/include \
+            -Ivision/core/yolo/include \
+            -Ivision/core/image_processor/include \
+            -Itrackers/include -Iesn \
+            -c scene_interaction/tests/tracking_continuity_qualification.cpp \
+            -o "$out/tracking_continuity_qualification.o"
+
+          c++ -fsanitize=address,undefined \
+            "$out/miniblas.o" \
+            "$out/linalg.o" \
+            "$out/kalman_takasu.o" \
+            "$out/tracker.o" \
+            "$out/esn.o" \
+            "$out/yolo_tracking.o" \
+            "$out/scene_graph_detail.o" \
+            "$out/scene_features.o" \
+            "$out/interaction.o" \
+            "$out/tracking_continuity_qualification.o" \
+            -lm -o "$out/tracking_continuity_qualification"
+
+      - name: Run tracked continuity qualification
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euxo pipefail
+          out="$RUNNER_TEMP/scene-interaction"
+          report="$out/tracking-continuity.json"
+          "$out/tracking_continuity_qualification" "$report"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) /
+               "scene-interaction" /
+               "tracking-continuity.json").read_text(encoding="utf-8")
+          )
+          assert report["schema"] == "kfcore.tracked-relation-continuity/1"
+          assert report["passed"] is True
+          assert report["tracking_backend"] == "ByteTrack"
+          assert report["tracking_epoch_before_reset"] == 1
+          assert report["tracking_epoch_after_reset"] == 2
+          assert report["numeric_track_ids_reused"] is True
+          assert report["old_pair"]["epoch"] == 1
+          assert report["new_pair"]["epoch"] == 2
+          assert report["old_pair"]["subject"] == report["new_pair"]["subject"]
+          assert report["old_pair"]["object"] == report["new_pair"]["object"]
+          assert report["tracking_reset_reason"] == "tracking reset"
+          assert report["vocabulary_change_reason"] == "vocabulary changed"
+          assert report["pair_loss_reason"] == "pair lost"
+          assert report["frame_gap_reason"] == "frame gap"
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tracked-relation-continuity
+          path: ${{ runner.temp }}/scene-interaction/tracking-continuity.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify unchanged tracked sources
         if: always()
