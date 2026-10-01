@@ -1915,16 +1915,18 @@ static void ocsort_freeze(ocsort_track_t* track) {
     track->has_frozen_state = 1;
 }
 
-static void ocsort_unfreeze(ocsort_track_t* track, box_t bbox) {
+static tracker_status_t ocsort_unfreeze(ocsort_track_t* track, box_t bbox) {
     if (!track->has_frozen_state) {
-        return;
+        return TRACKER_STATUS_OK;
     }
+
     memcpy(track->estimator.x, track->frozen_state.x, sizeof(track->estimator.x));
     memcpy(track->estimator.P, track->frozen_state.P, sizeof(track->estimator.P));
+
     const int time_gap = track->time_since_update;
     if (time_gap <= 0) {
         track->has_frozen_state = 0;
-        return;
+        return TRACKER_STATUS_OK;
     }
 
     float from[4];
@@ -1946,45 +1948,73 @@ static void ocsort_unfreeze(ocsort_track_t* track, box_t bbox) {
         const float w = w1 + (float)(i + 1) * dw;
         const float h = h1 + (float)(i + 1) * dh;
         const float measurement[4] = {x, y, w * h, w / fmaxf(h, TRACKERS_EPS)};
-        kf_xcycsr_update_measurement(&track->estimator, measurement);
+
+        tracker_status_t status =
+            kf_xcycsr_update_measurement(&track->estimator, measurement);
+        if (status != TRACKER_STATUS_OK) {
+            return status;
+        }
         if (i < time_gap - 1) {
-            kf_xcycsr_predict_raw(&track->estimator);
+            status = kf_xcycsr_predict_raw(&track->estimator);
+            if (status != TRACKER_STATUS_OK) {
+                return status;
+            }
         }
     }
+
     track->has_frozen_state = 0;
+    return TRACKER_STATUS_OK;
 }
 
-static void ocsort_update_track(ocsort_track_t* track, const box_t* bbox) {
+static tracker_status_t ocsort_update_track(ocsort_track_t* track, const box_t* bbox) {
     if (bbox) {
         box_t previous;
         if (ocsort_previous_observation(track, &previous)) {
             compute_velocity(previous, *bbox, track->velocity);
             track->has_velocity = 1;
         }
+
         if (!track->observed && track->has_frozen_state) {
-            ocsort_unfreeze(track, *bbox);
+            tracker_status_t status = ocsort_unfreeze(track, *bbox);
+            if (status != TRACKER_STATUS_OK) {
+                return status;
+            }
         }
-        kf_xcycsr_update(&track->estimator, *bbox);
+
+        tracker_status_t status = kf_xcycsr_update(&track->estimator, *bbox);
+        if (status != TRACKER_STATUS_OK) {
+            return status;
+        }
+
         track->observed = 1;
         track->time_since_update = 0;
         ++track->number_of_successful_updates;
         track->last_observation = *bbox;
-        (void)ocsort_add_observation(track, track->age, *bbox);
-        return;
+        if (!ocsort_add_observation(track, track->age, *bbox)) {
+            return TRACKER_STATUS_ALLOCATION_FAILED;
+        }
+        return TRACKER_STATUS_OK;
     }
+
     if (track->observed) {
         ocsort_freeze(track);
     }
     track->observed = 0;
+    return TRACKER_STATUS_OK;
 }
 
-static void ocsort_predict_track(ocsort_track_t* track) {
-    kf_xcycsr_predict(&track->estimator);
+static tracker_status_t ocsort_predict_track(ocsort_track_t* track) {
+    tracker_status_t status = kf_xcycsr_predict(&track->estimator);
+    if (status != TRACKER_STATUS_OK) {
+        return status;
+    }
+
     ++track->age;
     if (track->time_since_update > 0) {
         track->number_of_successful_updates = 0;
     }
     ++track->time_since_update;
+    return TRACKER_STATUS_OK;
 }
 
 static int ocsort_resolve_id(ocsort_t* tracker, ocsort_track_t* track) {
