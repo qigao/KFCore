@@ -181,16 +181,20 @@ extern "C"
     /** @brief Euclidean norm of a contiguous vector. */
     float vecnorm(const float* x, int n);
 
-    /** @brief Mean of a contiguous vector. */
-    float vecmean(const float* x, int n);
+    /** @brief Mean of a contiguous vector.
+     * @return 0 on success, non-zero on invalid input.
+     */
+    int vecmean(const float* x, int n, float* mean);
 
     /** @brief Variance of a contiguous vector.
      * @param[in] ddof Delta degrees of freedom, usually 0 for population or 1 for sample.
      */
-    float vecvariance(const float* x, int n, int ddof);
+    int vecvariance(const float* x, int n, int ddof, float* variance);
 
-    /** @brief Root mean square of a contiguous vector. */
-    float vecrms(const float* x, int n);
+    /** @brief Root mean square of a contiguous vector.
+     * @return 0 on success, non-zero on invalid input.
+     */
+    int vecrms(const float* x, int n, float* rms);
 
     /** @brief Normalize a contiguous vector in place.
      * @param[in,out] x Vector to normalize.
@@ -201,11 +205,15 @@ extern "C"
      */
     int vecnormalize(float* x, int n, float eps, float* norm);
 
-    /** @brief L1 distance between two contiguous vectors. */
-    float vecdist_l1(const float* x, const float* y, int n);
+    /** @brief L1 distance between two contiguous vectors.
+     * @return 0 on success, non-zero on invalid input.
+     */
+    int vecdist_l1(const float* x, const float* y, int n, float* distance);
 
-    /** @brief L-infinity distance between two contiguous vectors. */
-    float vecdist_linf(const float* x, const float* y, int n);
+    /** @brief L-infinity distance between two contiguous vectors.
+     * @return 0 on success, non-zero on invalid input.
+     */
+    int vecdist_linf(const float* x, const float* y, int n, float* distance);
 
     /** @brief Cosine similarity between two contiguous vectors.
      * @return 0 on success, -1 on invalid input or zero norm.
