@@ -1,0 +1,229 @@
+name: YOLOX qualification artifact
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/detector_qualification/**'
+      - 'runtime/core/src/model_package.cpp'
+      - 'runtime/core/tests/test_model_package.cpp'
+      - 'docs/runtime/model-package-v1.md'
+      - 'cmake/tests/model_package_yolox_contract/**'
+      - '.github/workflows/yolox-qualification-artifact.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/detector_qualification/**'
+      - 'runtime/core/src/model_package.cpp'
+      - 'runtime/core/tests/test_model_package.cpp'
+      - 'docs/runtime/model-package-v1.md'
+      - 'cmake/tests/model_package_yolox_contract/**'
+      - '.github/workflows/yolox-qualification-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yolox-qualification-artifact-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ort-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_VERSION: 1.8.9
+      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
+      SALTS_UTILS_VERSION: 4.1.13
+      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      YOLOX_SOURCE_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+      YOLOX_SOURCE_BYTES: '20219662'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install focused tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl
+          python -m pip install --disable-pip-version-check \
+            numpy==2.2.6 onnx==1.18.0 onnxruntime==1.22.0
+
+      - name: Compile and run deterministic artifact tests
+        shell: bash
+        working-directory: tools/detector_qualification
+        run: |
+          set -euxo pipefail
+          python -m py_compile \
+            prepare_yolox_tiny.py \
+            test_prepare_yolox_tiny.py
+          python -m unittest -v test_prepare_yolox_tiny.py
+
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-yolox-artifact
+          key: yolox-artifact-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}
+
+      - name: Restore pinned native SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cache="$HOME/.cache/kfcore-yolox-artifact"
+          mkdir -p "$cache"
+
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          if [ ! -f "$salts_pkg" ]; then
+            curl -fL --retry 3 \
+              "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg" \
+              -o "$salts_pkg"
+          fi
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          if [ ! -f "$salts_utils_pkg" ]; then
+            curl -fL --retry 3 \
+              "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg" \
+              -o "$salts_utils_pkg"
+          fi
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+
+          sdk="$RUNNER_TEMP/yolox-artifact-sdk"
+          rm -rf "$sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+
+          salts_root="$sdk/salts/sdk/linux-x64"
+          salts_utils_root="$sdk/salts-utils/sdk/linux-x64"
+          test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$salts_utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+
+          echo "SALTS_ROOT=$salts_root" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
+
+      - name: Run focused C++ ModelPackage contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          build="$RUNNER_TEMP/model-package-yolox"
+          cmake \
+            -S cmake/tests/model_package_yolox_contract \
+            -B "$build" \
+            -G Ninja \
+            -DKFCORE_SOURCE_DIR="$GITHUB_WORKSPACE" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+          cmake --build "$build" --parallel 2
+          "$build/kfcore_model_package_yolox_contract"
+
+      - name: Download official YOLOX-Tiny ONNX
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source="$RUNNER_TEMP/yolox_tiny.onnx"
+          curl -fL --retry 3 "$YOLOX_SOURCE_URL" -o "$source"
+          test "$(stat -c '%s' "$source")" = "$YOLOX_SOURCE_BYTES"
+          source_sha="$(sha256sum "$source" | awk '{print $1}')"
+          echo "official_yolox_tiny_source_sha256=$source_sha"
+          echo "YOLOX_SOURCE_SHA256=$source_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare real qualification artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+          out="$RUNNER_TEMP/yolox-tiny-qualification"
+          python tools/detector_qualification/prepare_yolox_tiny.py \
+            --source-onnx "$RUNNER_TEMP/yolox_tiny.onnx" \
+            --expected-source-sha256 "$YOLOX_SOURCE_SHA256" \
+            --out-dir "$out"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import numpy as np
+          import onnxruntime as ort
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "yolox-tiny-qualification"
+          evidence = json.loads(
+              (root / "evidence.json").read_text(encoding="utf-8")
+          )
+          package = json.loads(
+              (root / "model.json").read_text(encoding="utf-8")
+          )
+
+          assert evidence["schema"] == "kfcore.yolox-qualification-artifact/1"
+          assert evidence["upstream"]["repository"] == "Megvii-BaseDetection/YOLOX"
+          assert evidence["upstream"]["tag"] == "0.1.1rc0"
+          assert evidence["upstream"]["commit"] == "e1052df71842031413f6030723c3607b839c80ce"
+          assert evidence["upstream"]["license"] == "Apache-2.0"
+          assert evidence["upstream"]["source_sha256"] == os.environ["YOLOX_SOURCE_SHA256"]
+          assert evidence["upstream"]["source_bytes"] == int(os.environ["YOLOX_SOURCE_BYTES"])
+          assert evidence["conversion"]["input_shape"] == [1, 3, 416, 416]
+          assert evidence["conversion"]["source_output_shape"] == [1, 3549, 85]
+          assert evidence["conversion"]["decoded_output_shape"] == [1, 3549, 85]
+          assert package["model_type"] == "yolo-detection"
+          artifact = package["artifacts"][0]
+          assert artifact["flavor"] == "raw-yolox"
+          assert artifact["backend"] == "onnxruntime"
+          assert artifact["device"] == "cpu"
+
+          model_path = root / artifact["path"]
+          session = ort.InferenceSession(
+              str(model_path),
+              providers=["CPUExecutionProvider"],
+          )
+          input_meta = session.get_inputs()
+          output_meta = session.get_outputs()
+          assert len(input_meta) == 1
+          assert len(output_meta) == 1
+          assert input_meta[0].shape == [1, 3, 416, 416]
+          assert output_meta[0].shape == [1, 3549, 85]
+          values = session.run(
+              None,
+              {
+                  input_meta[0].name: np.zeros(
+                      (1, 3, 416, 416),
+                      dtype=np.float32,
+                  )
+              },
+          )[0]
+          assert values.shape == (1, 3549, 85)
+          assert np.isfinite(values).all()
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yolox-tiny-qualification-artifact
+          path: |
+            ${{ runner.temp }}/yolox-tiny-qualification/evidence.json
+            ${{ runner.temp }}/yolox-tiny-qualification/model.json
+            ${{ runner.temp }}/yolox-tiny-qualification/yolox_tiny_decoded.onnx
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
