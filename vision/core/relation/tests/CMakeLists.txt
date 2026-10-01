@@ -1,5 +1,6 @@
 set(_relation_test_folder "vision/core/relation/tests")
 
+if(BUILD_TESTS)
 cmake_add_test(
   NAME test_relation_decode
   SOURCES test_decode.cpp
@@ -32,7 +33,9 @@ cmake_add_test(
   LIBS KFCore::relation_core Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_relation_test_folder}")
+endif()
 
+if(KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION)
 add_executable(kfcore_relation_ort_cpu_qualification
   ort_cpu_qualification.cpp)
 target_include_directories(kfcore_relation_ort_cpu_qualification PRIVATE
@@ -46,3 +49,4 @@ set_target_properties(kfcore_relation_ort_cpu_qualification PROPERTIES
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   FOLDER "${_relation_test_folder}")
+endif()
