@@ -118,6 +118,23 @@ def _resize_rgb_like_kfcore(
     return np.clip(resized, 0.0, 255.0).astype(np.uint8)
 
 
+def _image_corpus_sha256(
+    manifest: DatasetManifest,
+    image_root: str | Path,
+) -> str:
+    root = Path(image_root).resolve()
+    digest = hashlib.sha256()
+    for name in sorted({example.image for example in manifest.examples}):
+        path = (root / Path(name)).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise FileNotFoundError(path)
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sha256_file(path).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _prepare_image(
     image_root: str | Path,
     image_name: str,
@@ -262,6 +279,10 @@ def run(
 
     vocabulary = RelationVocabulary.load(vocabulary_path)
     manifest = DatasetManifest.load(annotations_path, vocabulary)
+    image_corpus_sha256 = _image_corpus_sha256(
+        manifest,
+        image_root,
+    )
     detector_manifest = DetectorPredictionManifest.load(
         detector_predictions_path
     )
@@ -393,6 +414,7 @@ def run(
         },
         "dataset": {
             "annotations_sha256": manifest.annotations_sha256,
+            "image_corpus_sha256": image_corpus_sha256,
             "example_count": len(manifest.examples),
         },
         "detector": {
