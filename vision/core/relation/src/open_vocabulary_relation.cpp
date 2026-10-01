@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -682,7 +683,7 @@ void OpenVocabularyRelation::set_vocabulary(
     }
 }
 
-RelationFrame OpenVocabularyRelation::infer(
+TimedRelationFrame OpenVocabularyRelation::infer_timed(
     const image::ImageView& image,
     const std::vector<Region>& regions)
 {
@@ -691,6 +692,7 @@ RelationFrame OpenVocabularyRelation::infer(
         throw_invalid("model state is unavailable");
     }
     UseGuard guard(impl_->in_use);
+    const auto total_start = std::chrono::steady_clock::now();
     if (impl_->vocabulary.predicates.empty())
     {
         throw_invalid("set_vocabulary must be called before infer");
@@ -771,6 +773,7 @@ RelationFrame OpenVocabularyRelation::infer(
              runtime::MemoryKind::Host, {}},
         };
         std::vector<runtime::MutableTensorView> outputs;
+        const auto preprocess_end = std::chrono::steady_clock::now();
 
         if (impl_->mode == ScoringMode::BackendLogits)
         {
@@ -884,6 +887,8 @@ RelationFrame OpenVocabularyRelation::infer(
                 impl_->pred_logits.data());
         }
 
+        const auto runtime_end = std::chrono::steady_clock::now();
+
         const detail::RawRelationOutputs raw {
             impl_->pred_logits.data(),
             impl_->pair_logits.data(),
@@ -901,7 +906,35 @@ RelationFrame OpenVocabularyRelation::infer(
         result.edges = detail::decode_relation_outputs(
             raw, regions,
             decode_options(impl_->options, impl_->vocabulary));
-        return result;
+        const auto decode_end = std::chrono::steady_clock::now();
+
+        const auto milliseconds = [](auto begin, auto end) {
+            return std::chrono::duration<double, std::milli>(
+                       end - begin)
+                .count();
+        };
+
+        TimedRelationFrame timed;
+        timed.timing.preprocess_ms =
+            milliseconds(total_start, preprocess_end);
+        timed.timing.runtime_ms =
+            milliseconds(preprocess_end, runtime_end);
+        timed.timing.decode_ms =
+            milliseconds(runtime_end, decode_end);
+        timed.timing.total_ms =
+            milliseconds(total_start, decode_end);
+        timed.timing.region_count = regions.size();
+        timed.timing.predicate_count =
+            impl_->vocabulary.predicates.size();
+        timed.timing.valid_pair_count =
+            static_cast<std::size_t>(
+                std::count_if(
+                    impl_->valid_mask.begin(),
+                    impl_->valid_mask.end(),
+                    [](std::uint8_t value) { return value != 0U; }));
+        timed.timing.edge_count = result.edges.size();
+        timed.frame = std::move(result);
+        return timed;
     }
     catch (const RelationError&)
     {
@@ -924,6 +957,13 @@ RelationFrame OpenVocabularyRelation::infer(
     {
         throw_resource("inference allocation failed");
     }
+}
+
+RelationFrame OpenVocabularyRelation::infer(
+    const image::ImageView& image,
+    const std::vector<Region>& regions)
+{
+    return infer_timed(image, regions).frame;
 }
 
 std::int32_t OpenVocabularyRelation::input_size() const noexcept

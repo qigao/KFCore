@@ -63,6 +63,25 @@ struct OpenVocabularyRelationOptions
     std::size_t max_vocabulary_bytes = 64U * 1024U * 1024U;
 };
 
+struct RelationInferenceTiming
+{
+    double preprocess_ms = 0.0;
+    double runtime_ms = 0.0;
+    double decode_ms = 0.0;
+    double total_ms = 0.0;
+
+    std::size_t region_count = 0U;
+    std::size_t predicate_count = 0U;
+    std::size_t valid_pair_count = 0U;
+    std::size_t edge_count = 0U;
+};
+
+struct TimedRelationFrame
+{
+    RelationFrame frame;
+    RelationInferenceTiming timing;
+};
+
 [[nodiscard]] inline OpenVocabularyRelationOptions
 apache_released_open_vocabulary_relation_options()
 {
@@ -89,6 +108,10 @@ public:
 
     [[nodiscard]] RelationFrame infer(const image::ImageView& image,
                                       const std::vector<Region>& regions);
+
+    [[nodiscard]] TimedRelationFrame
+    infer_timed(const image::ImageView& image,
+                const std::vector<Region>& regions);
 
     [[nodiscard]] std::int32_t input_size() const noexcept;
     [[nodiscard]] std::size_t max_boxes() const noexcept;

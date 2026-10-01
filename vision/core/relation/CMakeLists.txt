@@ -29,7 +29,7 @@ cmake_config_target(kfcore_relation_core
   EXPORT_SET KFCoreTargets
   FOLDER "vision/core/relation")
 
-if(BUILD_TESTS)
+if(BUILD_TESTS OR KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION)
   add_subdirectory(tests)
 endif()
 

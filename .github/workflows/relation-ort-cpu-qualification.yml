@@ -1,0 +1,246 @@
+name: Relation ORT CPU C++ qualification
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/relation/**'
+      - 'vision/pipelines/scene_graph/include/**'
+      - 'vision/core/yolo/include/**'
+      - 'tools/relation_training/make_ort_cpu_cpp_qualification_fixture.py'
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/relation-ort-cpu-qualification.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/relation/**'
+      - 'vision/pipelines/scene_graph/include/**'
+      - 'vision/core/yolo/include/**'
+      - 'tools/relation_training/make_ort_cpu_cpp_qualification_fixture.py'
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/relation-ort-cpu-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relation-ort-cpu-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ort-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_VERSION: 1.8.9
+      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
+      SALTS_UTILS_VERSION: 4.1.13
+      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      ORT_VERSION: 1.22.0
+      ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/relation_training/requirements-ci.txt
+
+      - name: Install fixture/reference dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check             numpy==2.2.6             onnx==1.18.0             onnxruntime==1.22.0
+
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-relation-ort-cpu
+          key: relation-ort-cpu-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}-ort-${{ env.ORT_VERSION }}
+
+      - name: Restore pinned native SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cache="$HOME/.cache/kfcore-relation-ort-cpu"
+          mkdir -p "$cache"
+
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          if [ ! -f "$salts_pkg" ]; then
+            curl -fL --retry 3               "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg"               -o "$salts_pkg"
+          fi
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          if [ ! -f "$salts_utils_pkg" ]; then
+            curl -fL --retry 3               "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"               -o "$salts_utils_pkg"
+          fi
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+
+          ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          if [ ! -f "$ort_pkg" ]; then
+            curl -fL --retry 3               "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz"               -o "$ort_pkg"
+          fi
+          echo "$ORT_SHA512  $ort_pkg" | sha512sum -c -
+
+          sdk="$RUNNER_TEMP/relation-ort-cpu-sdk"
+          rm -rf "$sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils" "$sdk/ort"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+          tar -xzf "$ort_pkg" -C "$sdk/ort"
+
+          salts_root="$sdk/salts/sdk/linux-x64"
+          salts_utils_root="$sdk/salts-utils/sdk/linux-x64"
+          ort_root="$sdk/ort/onnxruntime-linux-x64-$ORT_VERSION"
+
+          test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$salts_utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$ort_root/include/onnxruntime_cxx_api.h"
+          test -f "$ort_root/lib/libonnxruntime.so"
+
+          echo "SALTS_ROOT=$salts_root" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
+          echo "ONNXRUNTIME_ROOT=$ort_root" >> "$GITHUB_ENV"
+
+      - name: Generate independent Python/ORT reference fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          fixture="$RUNNER_TEMP/relation-ort-cpu-fixture"
+          python tools/relation_training/make_ort_cpu_cpp_qualification_fixture.py             --out-dir "$fixture"
+          test -f "$fixture/relation.onnx"
+          test -f "$fixture/model.json"
+          test -f "$fixture/vocabularies.tsv"
+          test -f "$fixture/reference.tsv"
+          test -f "$fixture/fixture-evidence.json"
+
+      - name: Configure focused C++ ORT CPU qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S cmake/tests/relation_ort_cpu_qualification -B build/relation-ort-cpu -G Ninja             -DCMAKE_BUILD_TYPE=Release             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+
+      - name: Build ORT plugin and C++ qualification executable
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/relation-ort-cpu             --target               kfcore_backend_onnxruntime               kfcore_relation_ort_cpu_qualification             --parallel 2
+
+      - name: Run GT-box dynamic-vocabulary C++ qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          fixture="$RUNNER_TEMP/relation-ort-cpu-fixture"
+          plugin="$GITHUB_WORKSPACE/build/relation-ort-cpu/bin/libkfcore_backend_onnxruntime.so"
+          executable="$GITHUB_WORKSPACE/build/relation-ort-cpu/bin/kfcore_relation_ort_cpu_qualification"
+          report="$RUNNER_TEMP/relation-ort-cpu-report.json"
+
+          test -f "$plugin"
+          test -x "$executable"
+
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          "$executable"             "$plugin"             "$fixture"             "$fixture/vocabularies.tsv"             "$fixture/reference.tsv"             "$report"
+          test -f "$report"
+
+      - name: Validate qualification evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          fixture = json.loads(
+              (root / "relation-ort-cpu-fixture" / "fixture-evidence.json")
+              .read_text(encoding="utf-8")
+          )
+          report = json.loads(
+              (root / "relation-ort-cpu-report.json")
+              .read_text(encoding="utf-8")
+          )
+
+          assert report["schema"] == "kfcore.relation-ort-cpu-cpp-qualification/1"
+          assert report["passed"] is True
+          assert report["runtime_language"] == "C++17"
+          assert report["backend_scoring"] is True
+          assert report["provider"] == "onnxruntime"
+          assert report["device"] == "cpu"
+          assert report["vocabulary_source"] == "precomputed"
+          assert report["text_encoder_sha256"] is None
+          assert report["tokenizer_sha256"] is None
+          assert report["model_sha256"] == fixture["model_sha256"]
+          assert report["package_sha256"] == fixture["package_sha256"]
+          assert report["vocabulary_fixture_sha256"] == fixture["vocabulary_fixture_sha256"]
+          assert report["python_ort_reference_sha256"] == fixture["reference_sha256"]
+          assert report["model_load_count"] == 1
+          assert report["same_model_reused_across_vocabularies"] is True
+          assert report["object_labels_enter_relation_inference"] is False
+          assert report["python_ort_edge_parity"] is True
+          assert report["relation_frame_scene_graph_composition"] is True
+          assert report["vocabulary_version_sequence"] == [1, 2, 3, 4]
+
+          cases = report["cases"]
+          assert [case["label"] for case in cases] == ["v1", "v3", "default", "v1-repeat"]
+          assert [case["predicate_count"] for case in cases] == [1, 3, 4, 1]
+          for case in cases:
+              assert case["region_count"] == 3
+              assert case["valid_pair_count"] == 3
+              assert case["edge_count"] == 3
+              assert case["preprocess_ms"] >= 0.0
+              assert case["runtime_ms"] >= 0.0
+              assert case["decode_ms"] >= 0.0
+              assert case["total_ms"] >= 0.0
+
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relation-ort-cpu-cpp-qualification
+          path: |
+            ${{ runner.temp }}/relation-ort-cpu-report.json
+            ${{ runner.temp }}/relation-ort-cpu-fixture/fixture-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
