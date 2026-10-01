@@ -216,6 +216,16 @@ jobs:
           assert report["same_model_reused_across_vocabularies"] is True
           assert report["same_host_model_reused_across_vocabularies"] is True
           assert report["object_labels_enter_relation_inference"] is False
+          assert report["score_decode_policy"] == {
+              "logit_scale": 1.0,
+              "logit_bias": 0.0,
+              "pair_weight": 1.0,
+              "calibration_a": 1.0,
+              "calibration_b": 0.0,
+              "threshold": 0.0,
+              "top_k": 4,
+              "weight_ranking_by_detector_score": False,
+          }
           assert report["python_ort_edge_parity"] is True
           assert report["relation_frame_scene_graph_composition"] is True
           assert report["vocabulary_version_sequence"] == [1, 2, 3, 4, 5]
