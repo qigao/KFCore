@@ -5,6 +5,14 @@ from dataclasses import asdict
 import hashlib
 import unittest
 
+from apache_indoorvg_holdout import (
+    DERIVATION_SCHEMA as INDOORVG_DERIVATION_SCHEMA,
+    RELEASED_NOTE as INDOORVG_RELEASED_NOTE,
+    RELEASED_SOURCE as INDOORVG_RELEASED_SOURCE,
+    RELEASED_SPLITS as INDOORVG_RELEASED_SPLITS,
+    holdout_bytes as indoorvg_holdout_bytes,
+    stable_json_sha256 as indoorvg_stable_json_sha256,
+)
 from apache_objective import (
     SOURCE_ALLOW_SCHEMA,
 )
@@ -266,13 +274,112 @@ def corpus() -> dict:
         ),
     }
 
+    indoorvg_vg_ids = [
+        "100",
+        "200",
+    ]
+    indoorvg_coco_stems = [
+        "000000000001",
+    ]
+    indoorvg_stems = sorted(
+        set(indoorvg_vg_ids)
+        | set(indoorvg_coco_stems)
+    )
+    indoorvg_mapped_pairs = [
+        {
+            "vg_id": "100",
+            "coco_stem": "000000000001",
+        },
+    ]
+    indoorvg_payload = {
+        "source": INDOORVG_RELEASED_SOURCE,
+        "splits": list(
+            INDOORVG_RELEASED_SPLITS
+        ),
+        "note": INDOORVG_RELEASED_NOTE,
+        "vg_ids": indoorvg_vg_ids,
+        "coco_stems": indoorvg_coco_stems,
+        "stems": indoorvg_stems,
+    }
+    exclude_ids_sha = hashlib.sha256(
+        indoorvg_holdout_bytes(
+            indoorvg_payload
+        )
+    ).hexdigest()
+    exclude_ids_derivation = {
+        "schema": INDOORVG_DERIVATION_SCHEMA,
+        "source": INDOORVG_RELEASED_SOURCE,
+        "splits": list(
+            INDOORVG_RELEASED_SPLITS
+        ),
+        "split_inputs": [
+            {
+                "split": "val",
+                "vg_ids": ["100"],
+                "vg_id_count": 1,
+                "vg_ids_sha256": names_h(
+                    ("100",)
+                ),
+            },
+            {
+                "split": "test",
+                "vg_ids": ["200"],
+                "vg_id_count": 1,
+                "vg_ids_sha256": names_h(
+                    ("200",)
+                ),
+            },
+        ],
+        "vg_ids": indoorvg_vg_ids,
+        "vg_id_count": 2,
+        "vg_ids_sha256": names_h(
+            tuple(
+                indoorvg_vg_ids
+            )
+        ),
+        "vg2coco_sha256": h("d"),
+        "mapped_pairs": indoorvg_mapped_pairs,
+        "mapped_vg_count": 1,
+        "mapped_pairs_sha256": (
+            indoorvg_stable_json_sha256(
+                indoorvg_mapped_pairs
+            )
+        ),
+        "unmapped_vg_ids": [
+            "200",
+        ],
+        "unmapped_vg_count": 1,
+        "coco_stems": indoorvg_coco_stems,
+        "coco_stem_count": 1,
+        "coco_stems_sha256": names_h(
+            tuple(
+                indoorvg_coco_stems
+            )
+        ),
+        "stems": indoorvg_stems,
+        "stem_count": len(
+            indoorvg_stems
+        ),
+        "stems_sha256": names_h(
+            tuple(
+                indoorvg_stems
+            )
+        ),
+        "output_sha256": (
+            exclude_ids_sha
+        ),
+    }
+
     return {
         "schema": CORPUS_SCHEMA,
         "reference_source_commit": (
             REFERENCE_SOURCE_COMMIT
         ),
         "sources": sources,
-        "exclude_ids_sha256": h("4"),
+        "exclude_ids_sha256": exclude_ids_sha,
+        "exclude_ids_derivation": (
+            exclude_ids_derivation
+        ),
         "source_column_allow_sha256": (
             source_column_sha
         ),
@@ -736,6 +843,18 @@ class ApacheReleaseQualificationTest(
             list(
                 RELEASED_PREDICATE_TEMPLATES
             ),
+        )
+        self.assertEqual(
+            result["exclude_ids_derivation"][
+                "output_sha256"
+            ],
+            corpus()["exclude_ids_sha256"],
+        )
+        self.assertEqual(
+            result["exclude_ids_derivation"][
+                "splits"
+            ],
+            ["val", "test"],
         )
         self.assertEqual(
             result["source_column_derivation"][
@@ -1228,6 +1347,101 @@ class ApacheReleaseQualificationTest(
             qualify_training_run(
                 value,
                 training(),
+            )
+
+    def test_indoorvg_exclusion_derivation_is_required_and_bound(self):
+        value = corpus()
+        del value[
+            "exclude_ids_derivation"
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            "IndoorVG exclusion derivation",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "exclude_ids_derivation"
+        ]["splits"] = [
+            "test",
+            "val",
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"splits=\['val','test'\]",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "exclude_ids_derivation"
+        ]["mapped_pairs"][0][
+            "coco_stem"
+        ] = "1"
+        with self.assertRaisesRegex(
+            ValueError,
+            "exactly 12 digits",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        split = value[
+            "exclude_ids_derivation"
+        ]["split_inputs"][0]
+        split["vg_ids"] = [
+            "100",
+            "999",
+        ]
+        split["vg_id_count"] = 2
+        split["vg_ids_sha256"] = names_h(
+            (
+                "100",
+                "999",
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "val/test union",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "exclude_ids_derivation"
+        ]["stems"] = (
+            value[
+                "exclude_ids_derivation"
+            ]["stems"]
+            + ["extra"]
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "VG/COCO union",
+        ):
+            validate_corpus(value)
+
+        value = corpus()
+        value[
+            "exclude_ids_derivation"
+        ]["output_sha256"] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "output hash",
+        ):
+            validate_corpus(value)
+
+        run = training()
+        run["train_mixture"][
+            "exclude_ids_sha256"
+        ] = h("1")
+        with self.assertRaisesRegex(
+            ValueError,
+            "exclusion artifact",
+        ):
+            qualify_training_run(
+                corpus(),
+                run,
             )
 
     def test_pair_opportunity_rebuild_is_bound(self):
