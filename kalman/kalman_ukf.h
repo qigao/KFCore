@@ -12,6 +12,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** Unscented transform tuning parameters.
  *
  * If params is NULL, KFCore uses alpha = 1.0f, beta = 2.0f, kappa = 0.0f.
@@ -52,6 +56,10 @@ kfcore_kalman_status kalman_ukf_update(
     kalman_ukf_measurement_fn measurement, size_t n, size_t m,
     const kalman_ukf_params* params, float chi2_threshold, float* chi2,
     void* user, float* workspace, size_t workspace_floats);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* KALMAN_UKF_H */
 
