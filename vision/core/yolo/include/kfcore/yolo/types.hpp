@@ -47,6 +47,10 @@ struct TrackFrame {
     std::int32_t image_width;
     std::int32_t image_height;
     std::vector<TrackedDetection> detections;
+
+    // Positive identity epoch for track IDs in this frame. ByteTrack reset
+    // increments the epoch so numerically reused IDs cannot alias prior state.
+    std::uint64_t tracking_epoch = 1U;
 };
 
 }  // namespace kfcore::yolo
