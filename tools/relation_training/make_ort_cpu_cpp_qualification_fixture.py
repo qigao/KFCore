@@ -42,6 +42,19 @@ def sha256_file(path: Path) -> str:
 
 
 def cases() -> list[dict[str, object]]:
+    large_predicates = [
+        f"large-relation-{index:02d}"
+        for index in range(64)
+    ]
+    large_embeddings = [
+        [
+            1.0 if index % 2 == 0 else -1.0,
+            float((index % 3) - 1),
+            float((index % 5) - 2),
+            float((index % 7) - 3),
+        ]
+        for index in range(64)
+    ]
     return [
         {
             "label": "v1",
@@ -69,6 +82,12 @@ def cases() -> list[dict[str, object]]:
                 [1.0, 0.0, 0.0, 0.0],
             ],
             "alpha": [0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "label": "large",
+            "predicates": large_predicates,
+            "embeddings": large_embeddings,
+            "alpha": [0.0 for _ in large_predicates],
         },
         {
             "label": "v1-repeat",
