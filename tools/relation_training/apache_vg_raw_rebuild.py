@@ -12,6 +12,8 @@ from apache_pack_builder import (
     PACK_COMPONENTS,
     pack_coco_sgg_train,
 )
+from apache_pack_materializer import materialize_pack
+from benchmark import RelationVocabulary
 
 
 EVIDENCE_SCHEMA = "kfcore.apache-vg-raw-rebuild/1"
@@ -482,6 +484,8 @@ def rebuild_vg_raw(
     pack_output: str | Path,
     evidence_output: str | Path,
     expected_input_sha256: dict[str, str] | None = None,
+    vocabulary_path: str | Path | None = None,
+    canonical_output: str | Path | None = None,
 ) -> dict[str, object]:
     coco_path = Path(coco_output)
     pack_path = Path(pack_output)
@@ -519,11 +523,23 @@ def rebuild_vg_raw(
         if not (pack_path / component).is_file():
             raise RuntimeError(f"VG raw pack is missing {component}")
 
+    canonical_evidence = None
+    if vocabulary_path is not None or canonical_output is not None:
+        if vocabulary_path is None or canonical_output is None:
+            raise ValueError("vocabulary_path and canonical_output must be supplied together")
+        vocabulary = RelationVocabulary.load(vocabulary_path)
+        canonical_evidence = materialize_pack(
+            pack_path,
+            vocabulary,
+            canonical_output,
+        )
+
     report = {
         **converter_evidence,
         "coco_sgg_path": str(coco_path.resolve()),
         "pack_path": str(pack_path.resolve()),
         "pack": pack_evidence,
+        "canonical_materialization": canonical_evidence,
     }
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
     evidence_path.write_text(
@@ -555,6 +571,14 @@ def main() -> None:
         "--expected-input-hashes",
         help="Optional JSON object pinning all five semantic input SHA-256 values.",
     )
+    parser.add_argument(
+        "--vocabulary",
+        help="Optional released union vocabulary for pack->canonical materialization.",
+    )
+    parser.add_argument(
+        "--canonical-out",
+        help="Canonical JSONL output; requires --vocabulary.",
+    )
     args = parser.parse_args()
 
     expected_input_sha256 = None
@@ -577,6 +601,8 @@ def main() -> None:
         pack_output=args.pack_out,
         evidence_output=args.evidence,
         expected_input_sha256=expected_input_sha256,
+        vocabulary_path=args.vocabulary,
+        canonical_output=args.canonical_out,
     )
     print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
 
