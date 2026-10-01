@@ -9,6 +9,7 @@
  * SYSTEM INCLUDE FILES
  ******************************************************************************/
 
+#include <assert.h>
 #include <math.h>
 #include <string.h> /* memset */
 
