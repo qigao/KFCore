@@ -8,6 +8,8 @@ on:
       - 'vision/core/relation/src/predicate_tokenizer_hf.cpp'
       - 'vision/core/relation/tests/test_predicate_tokenizer_hf.cpp'
       - 'vision/core/relation/tests/predicate_tokenizer_runtime_stub.cpp'
+      - 'vision/core/relation/CMakeLists.txt'
+      - 'docs/relation/predicate-tokenizer-provider.md'
       - 'tools/relation_training/make_clip_tokenizer_contract.py'
       - 'tools/relation_training/requirements-clip-tokenizer-contract.txt'
       - '.github/workflows/predicate-tokenizer-contract.yml'
@@ -18,6 +20,8 @@ on:
       - 'vision/core/relation/src/predicate_tokenizer_hf.cpp'
       - 'vision/core/relation/tests/test_predicate_tokenizer_hf.cpp'
       - 'vision/core/relation/tests/predicate_tokenizer_runtime_stub.cpp'
+      - 'vision/core/relation/CMakeLists.txt'
+      - 'docs/relation/predicate-tokenizer-provider.md'
       - 'tools/relation_training/make_clip_tokenizer_contract.py'
       - 'tools/relation_training/requirements-clip-tokenizer-contract.txt'
       - '.github/workflows/predicate-tokenizer-contract.yml'
@@ -141,3 +145,165 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
+
+  windows-provider-link:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TOKENIZERS_CPP_SHA: c586c52f93f7b060753bd2388eb96a105cb7374d
+      RUST_TOOLCHAIN: 1.90.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned tokenizers-cpp
+        uses: actions/checkout@v4
+        with:
+          repository: mlc-ai/tokenizers-cpp
+          ref: ${{ env.TOKENIZERS_CPP_SHA }}
+          path: tokenizers-cpp
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Pin Windows Rust target
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+          rustup target add x86_64-pc-windows-msvc --toolchain "$RUST_TOOLCHAIN"
+          rustc --version
+          cargo --version
+
+      - name: Build Windows provider link smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SRC="$RUNNER_TEMP/tokenizer-platform-smoke"
+          BUILD="$RUNNER_TEMP/tokenizer-platform-build"
+          mkdir -p "$SRC"
+          cat > "$SRC/smoke.cpp" <<'CPP'
+          #include "kfcore/relation/predicate_tokenizer_hf.hpp"
+          #include <exception>
+          #include <filesystem>
+          int main() {
+            try {
+              auto tokenizer = kfcore::relation::load_clip_tokenizer_json(
+                  std::filesystem::path("missing-tokenizer.json"));
+              return tokenizer ? 2 : 3;
+            } catch (const std::exception&) {
+              return 0;
+            }
+          }
+          CPP
+          cat > "$SRC/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.19)
+          project(kfcore_tokenizer_platform_smoke LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
+          set(MLC_ENABLE_SENTENCEPIECE_TOKENIZER OFF CACHE BOOL "" FORCE)
+          add_subdirectory("$ENV{GITHUB_WORKSPACE}/tokenizers-cpp"
+                           tokenizers-cpp EXCLUDE_FROM_ALL)
+          add_executable(kfcore_tokenizer_provider_smoke
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/src/predicate_tokenizer_hf.cpp"
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/tests/predicate_tokenizer_runtime_stub.cpp"
+            smoke.cpp)
+          target_include_directories(kfcore_tokenizer_provider_smoke PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/include"
+            "$ENV{GITHUB_WORKSPACE}/runtime/core/include"
+            "$ENV{GITHUB_WORKSPACE}/vision/core/image_processor/include"
+            "$ENV{GITHUB_WORKSPACE}/tokenizers-cpp/include")
+          target_link_libraries(kfcore_tokenizer_provider_smoke PRIVATE tokenizers_c)
+          CMAKE
+          cmake -S "$SRC" -B "$BUILD" -A x64
+          cmake --build "$BUILD" --config Release --target kfcore_tokenizer_provider_smoke --parallel 2
+          "$BUILD/Release/kfcore_tokenizer_provider_smoke.exe"
+
+  android-arm64-provider-link:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      TOKENIZERS_CPP_SHA: c586c52f93f7b060753bd2388eb96a105cb7374d
+      RUST_TOOLCHAIN: 1.90.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned tokenizers-cpp
+        uses: actions/checkout@v4
+        with:
+          repository: mlc-ai/tokenizers-cpp
+          ref: ${{ env.TOKENIZERS_CPP_SHA }}
+          path: tokenizers-cpp
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Pin Android Rust target
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+          rustup target add aarch64-linux-android --toolchain "$RUST_TOOLCHAIN"
+          rustc --version
+          cargo --version
+
+      - name: Cross-compile Android arm64 provider link smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
+          test -n "$NDK"
+          test -f "$NDK/build/cmake/android.toolchain.cmake"
+          SRC="$RUNNER_TEMP/tokenizer-platform-smoke"
+          BUILD="$RUNNER_TEMP/tokenizer-platform-build"
+          mkdir -p "$SRC"
+          cat > "$SRC/smoke.cpp" <<'CPP'
+          #include "kfcore/relation/predicate_tokenizer_hf.hpp"
+          #include <exception>
+          #include <filesystem>
+          int main() {
+            try {
+              auto tokenizer = kfcore::relation::load_clip_tokenizer_json(
+                  std::filesystem::path("missing-tokenizer.json"));
+              return tokenizer ? 2 : 3;
+            } catch (const std::exception&) {
+              return 0;
+            }
+          }
+          CPP
+          cat > "$SRC/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.19)
+          project(kfcore_tokenizer_platform_smoke LANGUAGES C CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
+          set(MLC_ENABLE_SENTENCEPIECE_TOKENIZER OFF CACHE BOOL "" FORCE)
+          add_subdirectory("$ENV{GITHUB_WORKSPACE}/tokenizers-cpp"
+                           tokenizers-cpp EXCLUDE_FROM_ALL)
+          add_executable(kfcore_tokenizer_provider_smoke
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/src/predicate_tokenizer_hf.cpp"
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/tests/predicate_tokenizer_runtime_stub.cpp"
+            smoke.cpp)
+          target_include_directories(kfcore_tokenizer_provider_smoke PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/vision/core/relation/include"
+            "$ENV{GITHUB_WORKSPACE}/runtime/core/include"
+            "$ENV{GITHUB_WORKSPACE}/vision/core/image_processor/include"
+            "$ENV{GITHUB_WORKSPACE}/tokenizers-cpp/include")
+          target_link_libraries(kfcore_tokenizer_provider_smoke PRIVATE tokenizers_c)
+          CMAKE
+          cmake -S "$SRC" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24
+          cmake --build "$BUILD" --target kfcore_tokenizer_provider_smoke --parallel 2
