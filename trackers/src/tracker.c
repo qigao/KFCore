@@ -55,6 +55,7 @@ typedef struct byte_frame_scratch {
     int* low_match_cols;
     int* low_unmatched_rows;
     int* low_unmatched_cols;
+    void* track_snapshot;
 } byte_frame_scratch_t;
 
 typedef struct kf_xyxy {
@@ -525,6 +526,7 @@ static void byte_frame_scratch_release(byte_frame_scratch_t* scratch) {
     free(scratch->low_match_cols);
     free(scratch->low_unmatched_rows);
     free(scratch->low_unmatched_cols);
+    free(scratch->track_snapshot);
     memset(scratch, 0, sizeof(*scratch));
 }
 
@@ -616,19 +618,47 @@ static void kf_xyxy_init(kf_xyxy_t* kf, box_t bbox) {
     kf->x[3] = bbox.y2;
 }
 
-static void kf_xyxy_predict(kf_xyxy_t* kf) {
+static tracker_status_t kf_xyxy_predict(kf_xyxy_t* kf) {
+    kf_xyxy_t candidate = *kf;
     float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
-    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 8, 8,
-                         workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
+
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+    if (trackers_test_kalman_should_fail()) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+#endif
+
+    if (kalman_predict(candidate.x, candidate.P, candidate.Phi, candidate.G, candidate.Q,
+                       8, 8, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+
+    *kf = candidate;
+    return TRACKER_STATUS_OK;
 }
 
-static void kf_xyxy_update(kf_xyxy_t* kf, box_t bbox) {
+static tracker_status_t kf_xyxy_update(kf_xyxy_t* kf, box_t bbox) {
+    kf_xyxy_t candidate = *kf;
     float z[4] = {bbox.x1, bbox.y1, bbox.x2, bbox.y2};
     float dz[4];
     float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+    if (trackers_test_kalman_should_fail()) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+#endif
+
     memcpy(dz, z, sizeof(dz));
-    matmul("T", "N", 4, 1, 8, -1.0f, kf->Ht, kf->x, 1.0f, dz);
-    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 8, 4, 0.0f, NULL, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
+    matmul("T", "N", 4, 1, 8, -1.0f, candidate.Ht, candidate.x, 1.0f, dz);
+    if (kalman_takasu(candidate.x, candidate.P, dz, candidate.R, candidate.Ht,
+                      8, 4, 0.0f, NULL, workspace,
+                      TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+
+    *kf = candidate;
+    return TRACKER_STATUS_OK;
 }
 
 static box_t kf_xyxy_box(const kf_xyxy_t* kf) {
@@ -659,32 +689,71 @@ static void kf_xcycsr_init(kf_xcycsr_t* kf, box_t bbox) {
     xyxy_to_xcycsr(bbox, kf->x);
 }
 
-static void kf_xcycsr_predict(kf_xcycsr_t* kf) {
-    if (kf->x[6] + kf->x[2] <= 0.0f) {
-        kf->x[6] = 0.0f;
+static tracker_status_t kf_xcycsr_predict(kf_xcycsr_t* kf) {
+    kf_xcycsr_t candidate = *kf;
+    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+
+    if (candidate.x[6] + candidate.x[2] <= 0.0f) {
+        candidate.x[6] = 0.0f;
     }
-    float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
-    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+    if (trackers_test_kalman_should_fail()) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+#endif
+    if (kalman_predict(candidate.x, candidate.P, candidate.Phi, candidate.G, candidate.Q,
+                       7, 7, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+
+    *kf = candidate;
+    return TRACKER_STATUS_OK;
 }
 
-static void kf_xcycsr_predict_raw(kf_xcycsr_t* kf) {
+static tracker_status_t kf_xcycsr_predict_raw(kf_xcycsr_t* kf) {
+    kf_xcycsr_t candidate = *kf;
     float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
-    (void)kalman_predict(kf->x, kf->P, kf->Phi, kf->G, kf->Q, 7, 7,
-                         workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
+
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+    if (trackers_test_kalman_should_fail()) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+#endif
+    if (kalman_predict(candidate.x, candidate.P, candidate.Phi, candidate.G, candidate.Q,
+                       7, 7, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+
+    *kf = candidate;
+    return TRACKER_STATUS_OK;
 }
 
-static void kf_xcycsr_update_measurement(kf_xcycsr_t* kf, const float z[4]) {
+static tracker_status_t kf_xcycsr_update_measurement(kf_xcycsr_t* kf, const float z[4]) {
+    kf_xcycsr_t candidate = *kf;
     float dz[4];
     float workspace[TRACKER_KALMAN_WORKSPACE_FLOATS];
+
+#ifdef KFCORE_TRACKERS_TEST_ALLOCATOR
+    if (trackers_test_kalman_should_fail()) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+#endif
     memcpy(dz, z, sizeof(dz));
-    matmul("T", "N", 4, 1, 7, -1.0f, kf->Ht, kf->x, 1.0f, dz);
-    (void)kalman_takasu(kf->x, kf->P, dz, kf->R, kf->Ht, 7, 4, 0.0f, NULL, workspace, TRACKER_KALMAN_WORKSPACE_FLOATS);
+    matmul("T", "N", 4, 1, 7, -1.0f, candidate.Ht, candidate.x, 1.0f, dz);
+    if (kalman_takasu(candidate.x, candidate.P, dz, candidate.R, candidate.Ht,
+                      7, 4, 0.0f, NULL, workspace,
+                      TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
+
+    *kf = candidate;
+    return TRACKER_STATUS_OK;
 }
 
-static void kf_xcycsr_update(kf_xcycsr_t* kf, box_t bbox) {
+static tracker_status_t kf_xcycsr_update(kf_xcycsr_t* kf, box_t bbox) {
     float z[4];
     xyxy_to_xcycsr(bbox, z);
-    kf_xcycsr_update_measurement(kf, z);
+    return kf_xcycsr_update_measurement(kf, z);
 }
 
 static box_t kf_xcycsr_box(const kf_xcycsr_t* kf) {
@@ -1066,7 +1135,28 @@ static tracker_status_t byte_allocate_frame_scratch(
     BYTE_ALLOCATE(low_unmatched_rows, track_count);
     BYTE_ALLOCATE(low_unmatched_cols, low_count);
 #undef BYTE_ALLOCATE
+
+    status = allocate_array(&scratch->track_snapshot, track_count, sizeof(byte_track_t));
+    if (status != TRACKER_STATUS_OK) {
+        return status;
+    }
     return TRACKER_STATUS_OK;
+}
+
+static void byte_restore_kalman_snapshot(
+    bytetrack_t* tracker,
+    const byte_frame_scratch_t* scratch,
+    size_t saved_track_count,
+    int saved_next_id,
+    size_t* output_count
+) {
+    if (saved_track_count) {
+        memcpy(tracker->tracks, scratch->track_snapshot,
+               sizeof(*tracker->tracks) * saved_track_count);
+    }
+    tracker->track_count = saved_track_count;
+    tracker->next_id = saved_next_id;
+    *output_count = 0;
 }
 
 tracker_status_t bytetrack_update_ex(
@@ -1083,6 +1173,8 @@ tracker_status_t bytetrack_update_ex(
     size_t high_count = 0;
     size_t low_count = 0;
     size_t required_capacity = 0;
+    size_t saved_track_count = 0;
+    int saved_next_id = 0;
     tracker_status_t status;
 
     if (output_count) {
@@ -1133,10 +1225,23 @@ tracker_status_t bytetrack_update_ex(
         return status;
     }
 
+    saved_track_count = tracker->track_count;
+    saved_next_id = tracker->next_id;
+    if (saved_track_count) {
+        memcpy(scratch.track_snapshot, tracker->tracks,
+               sizeof(*tracker->tracks) * saved_track_count);
+    }
+
     gather_boxes_into(scratch.high_boxes, detections, scratch.high_indices, high_count);
     gather_boxes_into(scratch.low_boxes, detections, scratch.low_indices, low_count);
     for (size_t i = 0; i < tracker->track_count; ++i) {
-        kf_xyxy_predict(&tracker->tracks[i].estimator);
+        status = kf_xyxy_predict(&tracker->tracks[i].estimator);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++tracker->tracks[i].time_since_update;
         scratch.track_boxes[i] = kf_xyxy_box(&tracker->tracks[i].estimator);
     }
@@ -1155,7 +1260,13 @@ tracker_status_t bytetrack_update_ex(
         const int row = high.match_rows[i];
         const int det_idx = scratch.high_indices[high.match_cols[i]];
         byte_track_t* track = &tracker->tracks[row];
-        kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        status = kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++track->number_of_successful_updates;
         track->time_since_update = 0;
         if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames &&
@@ -1185,7 +1296,13 @@ tracker_status_t bytetrack_update_ex(
         const int track_idx = high.unmatched_rows[low.match_rows[i]];
         const int det_idx = scratch.low_indices[low.match_cols[i]];
         byte_track_t* track = &tracker->tracks[track_idx];
-        kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        status = kf_xyxy_update(&track->estimator, detections[det_idx].box);
+        if (status != TRACKER_STATUS_OK) {
+            byte_restore_kalman_snapshot(tracker, &scratch, saved_track_count,
+                                         saved_next_id, output_count);
+            byte_frame_scratch_release(&scratch);
+            return status;
+        }
         ++track->number_of_successful_updates;
         track->time_since_update = 0;
         if (track->number_of_successful_updates >= tracker->minimum_consecutive_frames &&
