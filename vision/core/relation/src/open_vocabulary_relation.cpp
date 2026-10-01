@@ -774,6 +774,8 @@ TimedRelationFrame OpenVocabularyRelation::infer_timed(
         };
         std::vector<runtime::MutableTensorView> outputs;
         const auto preprocess_end = std::chrono::steady_clock::now();
+        auto backend_end = preprocess_end;
+        auto predicate_score_end = preprocess_end;
 
         if (impl_->mode == ScoringMode::BackendLogits)
         {
@@ -829,6 +831,8 @@ TimedRelationFrame OpenVocabularyRelation::infer_timed(
                  runtime::MemoryKind::Host, {}},
             };
             impl_->context->run(inputs, outputs);
+            backend_end = std::chrono::steady_clock::now();
+            predicate_score_end = backend_end;
         }
         else
         {
@@ -866,6 +870,7 @@ TimedRelationFrame OpenVocabularyRelation::infer_timed(
                  runtime::MemoryKind::Host, {}},
             };
             impl_->context->run(inputs, outputs);
+            backend_end = std::chrono::steady_clock::now();
 
             const detail::RawOpenVocabularyQueries queries {
                 impl_->semantic_query.data(),
@@ -885,9 +890,10 @@ TimedRelationFrame OpenVocabularyRelation::infer_timed(
                 impl_->options.logit_scale,
                 impl_->options.logit_bias,
                 impl_->pred_logits.data());
+            predicate_score_end = std::chrono::steady_clock::now();
         }
 
-        const auto runtime_end = std::chrono::steady_clock::now();
+        const auto runtime_end = predicate_score_end;
 
         const detail::RawRelationOutputs raw {
             impl_->pred_logits.data(),
@@ -917,6 +923,10 @@ TimedRelationFrame OpenVocabularyRelation::infer_timed(
         TimedRelationFrame timed;
         timed.timing.preprocess_ms =
             milliseconds(total_start, preprocess_end);
+        timed.timing.backend_ms =
+            milliseconds(preprocess_end, backend_end);
+        timed.timing.predicate_score_ms =
+            milliseconds(backend_end, predicate_score_end);
         timed.timing.runtime_ms =
             milliseconds(preprocess_end, runtime_end);
         timed.timing.decode_ms =

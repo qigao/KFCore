@@ -113,13 +113,13 @@ load_vocabularies(const std::filesystem::path& path)
             std::stof(fields[6]));
     }
 
-    if (result.size() != 4U)
+    if (result.size() != 5U)
     {
         throw std::runtime_error(
-            "qualification requires four vocabulary cases");
+            "qualification requires five vocabulary cases");
     }
-    const std::array<std::string, 4U> expected {
-        "v1", "v3", "default", "v1-repeat"
+    const std::array<std::string, 5U> expected {
+        "v1", "v3", "default", "large", "v1-repeat"
     };
     for (std::size_t index = 0U;
          index < result.size(); ++index)
@@ -217,6 +217,32 @@ void compare_edges(
     }
 }
 
+void compare_relation_edges(
+    const std::vector<RelationEdge>& actual,
+    const std::vector<RelationEdge>& expected)
+{
+    require(
+        actual.size() == expected.size(),
+        "backend/host edge count differs");
+    for (std::size_t index = 0U;
+         index < actual.size(); ++index)
+    {
+        require(
+            actual[index].subject_index ==
+                    expected[index].subject_index &&
+                actual[index].object_index ==
+                    expected[index].object_index &&
+                actual[index].predicate_index ==
+                    expected[index].predicate_index,
+            "backend/host relation key differs");
+        require(
+            std::fabs(
+                actual[index].score -
+                expected[index].score) <= 1.0e-6F,
+            "backend/host relation score differs");
+    }
+}
+
 std::string json_escape(const std::string& value)
 {
     std::ostringstream stream;
@@ -249,15 +275,99 @@ std::string json_escape(const std::string& value)
     return stream.str();
 }
 
+void write_case_array(
+    std::ofstream& stream,
+    const char* key,
+    const std::vector<VocabularyCase>& vocabularies,
+    const std::vector<kfcore::relation::TimedRelationFrame>& runs,
+    bool backend_scoring)
+{
+    stream << "  \"" << key << "\": [\n";
+    for (std::size_t index = 0U;
+         index < runs.size(); ++index)
+    {
+        const auto& value = runs[index];
+        stream << "    {\n";
+        stream << "      \"label\": \""
+               << json_escape(vocabularies[index].label)
+               << "\",\n";
+        stream << "      \"predicate_count\": "
+               << value.timing.predicate_count << ",\n";
+        stream << "      \"vocabulary_version\": "
+               << value.frame.vocabulary_version << ",\n";
+        stream << "      \"region_count\": "
+               << value.timing.region_count << ",\n";
+        stream << "      \"valid_pair_count\": "
+               << value.timing.valid_pair_count << ",\n";
+        stream << "      \"edge_count\": "
+               << value.timing.edge_count << ",\n";
+        stream << "      \"preprocess_ms\": "
+               << value.timing.preprocess_ms << ",\n";
+        stream << "      \"backend_ms\": "
+               << value.timing.backend_ms << ",\n";
+        stream << "      \"predicate_score_ms\": "
+               << value.timing.predicate_score_ms << ",\n";
+        stream << "      \"backbone_context_ms\": ";
+        if (backend_scoring)
+        {
+            stream << "null,\n";
+        }
+        else
+        {
+            stream << value.timing.backend_ms << ",\n";
+        }
+        stream << "      \"predicate_scoring_ms\": ";
+        if (backend_scoring)
+        {
+            stream << "null,\n";
+        }
+        else
+        {
+            stream << value.timing.predicate_score_ms << ",\n";
+        }
+        stream << "      \"predicate_scoring_in_backend\": "
+               << (backend_scoring ? "true" : "false")
+               << ",\n";
+        stream << "      \"runtime_ms\": "
+               << value.timing.runtime_ms << ",\n";
+        stream << "      \"decode_ms\": "
+               << value.timing.decode_ms << ",\n";
+        stream << "      \"total_ms\": "
+               << value.timing.total_ms << ",\n";
+        stream << "      \"pair_keys\": [";
+        for (std::size_t edge_index = 0U;
+             edge_index < value.frame.edges.size();
+             ++edge_index)
+        {
+            if (edge_index != 0U)
+            {
+                stream << ", ";
+            }
+            const auto& edge = value.frame.edges[edge_index];
+            stream << "[" << edge.subject_index
+                   << ", " << edge.object_index << "]";
+        }
+        stream << "]\n";
+        stream << "    }"
+               << (index + 1U == runs.size()
+                       ? "\n"
+                       : ",\n");
+    }
+    stream << "  ],\n";
+}
+
 void write_report(
     const std::filesystem::path& path,
     const std::string& model_sha,
     const std::string& package_sha,
+    const std::string& host_model_sha,
+    const std::string& host_package_sha,
     const std::string& vocabulary_sha,
     const std::string& reference_sha,
     const std::string& plugin_sha,
     const std::vector<VocabularyCase>& vocabularies,
     const std::vector<kfcore::relation::TimedRelationFrame>& runs,
+    const std::vector<kfcore::relation::TimedRelationFrame>& host_runs,
     const kfcore::runtime::ExecutionRoute& route)
 {
     if (path.empty())
@@ -284,12 +394,15 @@ void write_report(
     stream << "  \"passed\": true,\n";
     stream << "  \"runtime_language\": \"C++17\",\n";
     stream << "  \"backend_scoring\": true,\n";
+    stream << "  \"host_fallback_reference\": true,\n";
+    stream << "  \"backend_host_pair_keyed_parity\": true,\n";
     stream << "  \"provider\": \""
            << json_escape(route.backend_id)
            << "\",\n";
     stream << "  \"device\": \""
            << json_escape(route.device_id)
            << "\",\n";
+    stream << "  \"image_size\": 8,\n";
     stream << "  \"vocabulary_source\": \"precomputed\",\n";
     stream << "  \"text_encoder_sha256\": null,\n";
     stream << "  \"tokenizer_sha256\": null,\n";
@@ -297,6 +410,10 @@ void write_report(
            << model_sha << "\",\n";
     stream << "  \"package_sha256\": \""
            << package_sha << "\",\n";
+    stream << "  \"host_model_sha256\": \""
+           << host_model_sha << "\",\n";
+    stream << "  \"host_package_sha256\": \""
+           << host_package_sha << "\",\n";
     stream << "  \"vocabulary_fixture_sha256\": \""
            << vocabulary_sha << "\",\n";
     stream << "  \"python_ort_reference_sha256\": \""
@@ -304,43 +421,26 @@ void write_report(
     stream << "  \"backend_plugin_sha256\": \""
            << plugin_sha << "\",\n";
     stream << "  \"model_load_count\": 1,\n";
+    stream << "  \"host_model_load_count\": 1,\n";
     stream << "  \"same_model_reused_across_vocabularies\": true,\n";
+    stream << "  \"same_host_model_reused_across_vocabularies\": true,\n";
     stream << "  \"object_labels_enter_relation_inference\": false,\n";
-    stream << "  \"cases\": [\n";
+    stream << "  \"score_decode_policy\": {\n";
+    stream << "    \"logit_scale\": 1.0,\n";
+    stream << "    \"logit_bias\": 0.0,\n";
+    stream << "    \"pair_weight\": 1.0,\n";
+    stream << "    \"calibration_a\": 1.0,\n";
+    stream << "    \"calibration_b\": 0.0,\n";
+    stream << "    \"threshold\": 0.0,\n";
+    stream << "    \"top_k\": 4,\n";
+    stream << "    \"weight_ranking_by_detector_score\": false\n";
+    stream << "  },\n";
 
-    for (std::size_t index = 0U;
-         index < runs.size(); ++index)
-    {
-        const auto& value = runs[index];
-        stream << "    {\n";
-        stream << "      \"label\": \""
-               << json_escape(vocabularies[index].label)
-               << "\",\n";
-        stream << "      \"predicate_count\": "
-               << value.timing.predicate_count << ",\n";
-        stream << "      \"vocabulary_version\": "
-               << value.frame.vocabulary_version << ",\n";
-        stream << "      \"region_count\": "
-               << value.timing.region_count << ",\n";
-        stream << "      \"valid_pair_count\": "
-               << value.timing.valid_pair_count << ",\n";
-        stream << "      \"edge_count\": "
-               << value.timing.edge_count << ",\n";
-        stream << "      \"preprocess_ms\": "
-               << value.timing.preprocess_ms << ",\n";
-        stream << "      \"runtime_ms\": "
-               << value.timing.runtime_ms << ",\n";
-        stream << "      \"decode_ms\": "
-               << value.timing.decode_ms << ",\n";
-        stream << "      \"total_ms\": "
-               << value.timing.total_ms << "\n";
-        stream << "    }"
-               << (index + 1U == runs.size()
-                       ? "\n"
-                       : ",\n");
-    }
+    write_case_array(
+        stream, "cases", vocabularies, runs, true);
+    write_case_array(
+        stream, "host_cases", vocabularies, host_runs, false);
 
-    stream << "  ],\n";
     stream << "  \"vocabulary_version_sequence\": [";
     for (std::size_t index = 0U;
          index < runs.size(); ++index)
@@ -399,6 +499,17 @@ int main(int argc, char** argv)
                     kDynamicOpenVocabularyRelationModelType,
             "fixture is not relation.open-vocabulary");
 
+        const auto host_package_path =
+            package_path / "host";
+        const auto host_package =
+            kfcore::runtime::ModelPackage::load(
+                host_package_path);
+        require(
+            host_package.model_type() ==
+                kfcore::relation::
+                    kOpenVocabularyRelationModelType,
+            "host fixture is not relation.open-vocabulary-encoder");
+
         auto options =
             kfcore::relation::
                 OpenVocabularyRelationOptions {};
@@ -406,6 +517,8 @@ int main(int argc, char** argv)
         options.max_boxes = 3U;
         options.max_pairs = 4U;
         options.query_dim = 4U;
+        options.logit_scale = 1.0F;
+        options.logit_bias = 0.0F;
         options.threshold = 0.0F;
         options.top_k = 4U;
         options.weight_ranking_by_detector_score = false;
@@ -419,15 +532,33 @@ int main(int argc, char** argv)
                     "cpu"),
                 options);
 
+        auto host_relation =
+            kfcore::relation::OpenVocabularyRelation::load(
+                runtime,
+                host_package,
+                kfcore::runtime::ExecutionPolicy::exact(
+                    "onnxruntime",
+                    "cpu"),
+                options);
+
         require(
             relation->backend_scoring(),
             "qualification did not select backend scoring");
+        require(
+            !host_relation->backend_scoring(),
+            "qualification did not select host query/scorer fallback");
         require(
             relation->execution_route().backend_id ==
                     "onnxruntime" &&
                 relation->execution_route().device_id ==
                     "cpu",
             "qualification route is not ORT CPU");
+        require(
+            host_relation->execution_route().backend_id ==
+                    "onnxruntime" &&
+                host_relation->execution_route().device_id ==
+                    "cpu",
+            "host qualification route is not ORT CPU");
 
         std::array<std::uint8_t, 8U * 8U * 3U> pixels {};
         const kfcore::image::ImageView image {
@@ -448,12 +579,18 @@ int main(int argc, char** argv)
         std::vector<
             kfcore::relation::TimedRelationFrame>
             runs;
+        std::vector<
+            kfcore::relation::TimedRelationFrame>
+            host_runs;
         runs.reserve(vocabularies.size());
+        host_runs.reserve(vocabularies.size());
 
         for (std::size_t index = 0U;
              index < vocabularies.size(); ++index)
         {
             relation->set_vocabulary(
+                vocabularies[index].vocabulary);
+            host_relation->set_vocabulary(
                 vocabularies[index].vocabulary);
             require(
                 relation->predicate_count() ==
@@ -464,9 +601,15 @@ int main(int argc, char** argv)
                 relation->vocabulary_version() ==
                     index + 1U,
                 "vocabulary version is not positive/monotonic");
+            require(
+                host_relation->vocabulary_version() ==
+                    index + 1U,
+                "host vocabulary version is not positive/monotonic");
 
             auto timed =
                 relation->infer_timed(image, regions);
+            auto host_timed =
+                host_relation->infer_timed(image, regions);
             require(
                 timed.frame.vocabulary_version ==
                     relation->vocabulary_version(),
@@ -481,10 +624,32 @@ int main(int argc, char** argv)
                 "timing predicate count drifted");
             require(
                 timed.timing.preprocess_ms >= 0.0 &&
+                    timed.timing.backend_ms >= 0.0 &&
+                    timed.timing.predicate_score_ms >= 0.0 &&
                     timed.timing.runtime_ms >= 0.0 &&
                     timed.timing.decode_ms >= 0.0 &&
                     timed.timing.total_ms >= 0.0,
-                "negative timing value");
+                "negative backend-scoring timing value");
+            require(
+                host_timed.timing.preprocess_ms >= 0.0 &&
+                    host_timed.timing.backend_ms >= 0.0 &&
+                    host_timed.timing.predicate_score_ms >= 0.0 &&
+                    host_timed.timing.runtime_ms >= 0.0 &&
+                    host_timed.timing.decode_ms >= 0.0 &&
+                    host_timed.timing.total_ms >= 0.0,
+                "negative host-scoring timing value");
+            require(
+                std::fabs(
+                    timed.timing.runtime_ms -
+                    (timed.timing.backend_ms +
+                     timed.timing.predicate_score_ms)) <= 1.0e-3,
+                "backend timing split does not sum to runtime");
+            require(
+                std::fabs(
+                    host_timed.timing.runtime_ms -
+                    (host_timed.timing.backend_ms +
+                     host_timed.timing.predicate_score_ms)) <= 1.0e-3,
+                "host timing split does not sum to runtime");
             require(
                 timed.timing.edge_count ==
                     timed.frame.edges.size(),
@@ -499,6 +664,12 @@ int main(int argc, char** argv)
             compare_edges(
                 timed.frame.edges,
                 reference->second);
+            compare_edges(
+                host_timed.frame.edges,
+                reference->second);
+            compare_relation_edges(
+                timed.frame.edges,
+                host_timed.frame.edges);
 
             kfcore::pipelines::SceneGraphFrame scene;
             scene.objects.image_width = 8;
@@ -529,6 +700,7 @@ int main(int argc, char** argv)
             }
 
             runs.push_back(std::move(timed));
+            host_runs.push_back(std::move(host_timed));
         }
 
         require(
@@ -566,12 +738,27 @@ int main(int argc, char** argv)
             model_sha == artifact.sha256,
             "executed ONNX hash differs from package manifest");
 
+        const auto& host_artifact =
+            host_package.artifact("ort-cpu");
+        const std::string host_model_sha =
+            kfcore::runtime::
+                compute_model_artifact_sha256(
+                    host_package.artifact_path(
+                        host_artifact));
+        require(
+            host_model_sha == host_artifact.sha256,
+            "executed host ONNX hash differs from package manifest");
+
         write_report(
             report_path,
             model_sha,
             kfcore::runtime::
                 compute_model_artifact_sha256(
                     package_path / "model.json"),
+            host_model_sha,
+            kfcore::runtime::
+                compute_model_artifact_sha256(
+                    host_package_path / "model.json"),
             kfcore::runtime::
                 compute_model_artifact_sha256(
                     vocab_path),
@@ -583,6 +770,7 @@ int main(int argc, char** argv)
                     plugin_path),
             vocabularies,
             runs,
+            host_runs,
             relation->execution_route());
 
         std::cout

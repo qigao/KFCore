@@ -23,6 +23,14 @@ OUTPUT_NAMES = [
     "obj_idx",
     "valid_mask",
 ]
+ENCODER_OUTPUT_NAMES = [
+    "semantic_query",
+    "spatial_query",
+    "pair_logits",
+    "sub_idx",
+    "obj_idx",
+    "valid_mask",
+]
 
 
 def sha256_file(path: Path) -> str:
@@ -34,6 +42,19 @@ def sha256_file(path: Path) -> str:
 
 
 def cases() -> list[dict[str, object]]:
+    large_predicates = [
+        f"large-relation-{index:02d}"
+        for index in range(64)
+    ]
+    large_embeddings = [
+        [
+            1.0 if index % 2 == 0 else -1.0,
+            float((index % 3) - 1),
+            float((index % 5) - 2),
+            float((index % 7) - 3),
+        ]
+        for index in range(64)
+    ]
     return [
         {
             "label": "v1",
@@ -61,6 +82,12 @@ def cases() -> list[dict[str, object]]:
                 [1.0, 0.0, 0.0, 0.0],
             ],
             "alpha": [0.0, 0.0, 0.0, 0.0],
+        },
+        {
+            "label": "large",
+            "predicates": large_predicates,
+            "embeddings": large_embeddings,
+            "alpha": [0.0 for _ in large_predicates],
         },
         {
             "label": "v1-repeat",
@@ -151,6 +178,94 @@ def make_model(path: Path) -> None:
     graph = helper.make_graph(
         nodes,
         "kfcore-ort-cpu-cpp-qualification",
+        inputs,
+        outputs,
+        initializer=initializers,
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid("", 18)],
+        producer_name="kfcore-qualification",
+    )
+    model.ir_version = 10
+    onnx.checker.check_model(model)
+    onnx.save(model, path)
+
+
+def make_encoder_model(path: Path) -> None:
+    inputs = [
+        helper.make_tensor_value_info(
+            "image", TensorProto.FLOAT, [1, 3, IMAGE_SIZE, IMAGE_SIZE]
+        ),
+        helper.make_tensor_value_info(
+            "boxes", TensorProto.FLOAT, [1, MAX_BOXES, 4]
+        ),
+        helper.make_tensor_value_info("box_counts", TensorProto.INT64, [1]),
+    ]
+    outputs = [
+        helper.make_tensor_value_info(
+            "semantic_query",
+            TensorProto.FLOAT,
+            [1, PAIR_BUDGET, QUERY_DIM],
+        ),
+        helper.make_tensor_value_info(
+            "spatial_query",
+            TensorProto.FLOAT,
+            [1, PAIR_BUDGET, QUERY_DIM],
+        ),
+        helper.make_tensor_value_info(
+            "pair_logits", TensorProto.FLOAT, [1, PAIR_BUDGET]
+        ),
+        helper.make_tensor_value_info(
+            "sub_idx", TensorProto.INT64, [1, PAIR_BUDGET]
+        ),
+        helper.make_tensor_value_info(
+            "obj_idx", TensorProto.INT64, [1, PAIR_BUDGET]
+        ),
+        helper.make_tensor_value_info(
+            "valid_mask", TensorProto.BOOL, [1, PAIR_BUDGET]
+        ),
+    ]
+
+    query = np.zeros((1, PAIR_BUDGET, QUERY_DIM), dtype=np.float32)
+    query[:, :, 0] = 1.0
+    initializers = [
+        numpy_helper.from_array(np.asarray(0.0, dtype=np.float32), name="zero"),
+        numpy_helper.from_array(query, name="semantic_base"),
+        numpy_helper.from_array(query, name="spatial_base"),
+        numpy_helper.from_array(
+            np.asarray([[2.0, 1.0, 0.0, -1.0]], dtype=np.float32),
+            name="pair_base",
+        ),
+        numpy_helper.from_array(
+            np.asarray([[0, 1, 0, 0]], dtype=np.int64), name="sub_base"
+        ),
+        numpy_helper.from_array(
+            np.asarray([[1, 0, 2, 0]], dtype=np.int64), name="obj_base"
+        ),
+        numpy_helper.from_array(
+            np.asarray([[True, True, True, False]], dtype=np.bool_),
+            name="valid_base",
+        ),
+    ]
+    nodes = [
+        helper.make_node("ReduceSum", ["image"], ["image_sum"], keepdims=0),
+        helper.make_node("ReduceSum", ["boxes"], ["boxes_sum"], keepdims=0),
+        helper.make_node("Cast", ["box_counts"], ["count_float"], to=TensorProto.FLOAT),
+        helper.make_node("ReduceSum", ["count_float"], ["count_sum"], keepdims=0),
+        helper.make_node("Add", ["image_sum", "boxes_sum"], ["dep0"]),
+        helper.make_node("Add", ["dep0", "count_sum"], ["dep1"]),
+        helper.make_node("Mul", ["dep1", "zero"], ["zero_dep"]),
+        helper.make_node("Add", ["semantic_base", "zero_dep"], ["semantic_query"]),
+        helper.make_node("Add", ["spatial_base", "zero_dep"], ["spatial_query"]),
+        helper.make_node("Add", ["pair_base", "zero_dep"], ["pair_logits"]),
+        helper.make_node("Identity", ["sub_base"], ["sub_idx"]),
+        helper.make_node("Identity", ["obj_base"], ["obj_idx"]),
+        helper.make_node("Identity", ["valid_base"], ["valid_mask"]),
+    ]
+    graph = helper.make_graph(
+        nodes,
+        "kfcore-ort-cpu-cpp-host-scoring-qualification",
         inputs,
         outputs,
         initializer=initializers,
@@ -274,12 +389,18 @@ def write_reference(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_package(path: Path, model_path: Path) -> None:
+def write_package(
+    path: Path,
+    model_path: Path,
+    *,
+    package_id: str = "relation-ort-cpu-cpp-qualification",
+    model_type: str = "relation.open-vocabulary",
+) -> None:
     payload = {
         "schema": "kfcore.model/1",
-        "id": "relation-ort-cpu-cpp-qualification",
+        "id": package_id,
         "version": "1",
-        "model_type": "relation.open-vocabulary",
+        "model_type": model_type,
         "artifacts": [
             {
                 "id": "ort-cpu",
@@ -306,13 +427,24 @@ def main() -> None:
     root.mkdir(parents=True, exist_ok=False)
     model_path = root / "relation.onnx"
     package_path = root / "model.json"
+    host_root = root / "host"
+    host_root.mkdir()
+    host_model_path = host_root / "relation-encoder.onnx"
+    host_package_path = host_root / "model.json"
     vocab_path = root / "vocabularies.tsv"
     reference_path = root / "reference.tsv"
 
     make_model(model_path)
+    make_encoder_model(host_model_path)
     write_vocabularies(vocab_path)
     write_reference(reference_path, model_path)
     write_package(package_path, model_path)
+    write_package(
+        host_package_path,
+        host_model_path,
+        package_id="relation-ort-cpu-cpp-host-qualification",
+        model_type="relation.open-vocabulary-encoder",
+    )
 
     evidence = {
         "schema": "kfcore.relation-ort-cpu-fixture/1",
@@ -320,6 +452,8 @@ def main() -> None:
         "provider": "CPUExecutionProvider",
         "model_sha256": sha256_file(model_path),
         "package_sha256": sha256_file(package_path),
+        "host_model_sha256": sha256_file(host_model_path),
+        "host_package_sha256": sha256_file(host_package_path),
         "vocabulary_fixture_sha256": sha256_file(vocab_path),
         "reference_sha256": sha256_file(reference_path),
         "cases": [str(case["label"]) for case in cases()],

@@ -66,6 +66,8 @@ struct OpenVocabularyRelationOptions
 struct RelationInferenceTiming
 {
     double preprocess_ms = 0.0;
+    double backend_ms = 0.0;
+    double predicate_score_ms = 0.0;
     double runtime_ms = 0.0;
     double decode_ms = 0.0;
     double total_ms = 0.0;

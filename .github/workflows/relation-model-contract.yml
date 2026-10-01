@@ -109,6 +109,7 @@ jobs:
             tools/relation_training/build_dynamic_vocab_tensorrt.py \
             tools/relation_training/tensorrt_dynamic_vocab_qualification.py \
             tools/relation_training/make_relation_qualification_report.py \
+            tools/relation_training/relation_backend_matrix.py \
             tools/relation_training/summarize_scene_behavior_latency.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
@@ -141,6 +142,7 @@ jobs:
             tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
             tools/relation_training/test_tensorrt_dynamic_vocab_qualification.py \
             tools/relation_training/test_relation_qualification_report.py \
+            tools/relation_training/test_relation_backend_matrix.py \
             tools/relation_training/test_scene_behavior_latency_summary.py \
             tools/relation_training/test_benchmark.py \
             tools/relation_training/test_detector_ceiling.py \
@@ -153,7 +155,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_detector_ceiling.py test_detector_relation_qualification.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_pair_opportunity.py test_apache_released_contract.py test_apache_context.py test_apache_vocab_head.py test_predicate_routing_gate.py test_apache_text_student.py test_apache_text_bank.py test_apache_objective.py test_apache_training_recipe.py test_apache_training_regularization.py test_apache_mixture.py test_apache_indoorvg_holdout.py test_apache_object_bank.py test_apache_pack_builder.py test_apache_vg_raw_rebuild.py test_apache_hico_train_rebuild.py test_apache_pack_materializer.py test_apache_release_qualification.py test_apache_spatial_flags.py test_apache_source_columns.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_tensorrt_dynamic_vocab_qualification.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_detector_ceiling.py test_detector_relation_qualification.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_pair_opportunity.py test_apache_released_contract.py test_apache_context.py test_apache_vocab_head.py test_predicate_routing_gate.py test_apache_text_student.py test_apache_text_bank.py test_apache_objective.py test_apache_training_recipe.py test_apache_training_regularization.py test_apache_mixture.py test_apache_indoorvg_holdout.py test_apache_object_bank.py test_apache_pack_builder.py test_apache_vg_raw_rebuild.py test_apache_hico_train_rebuild.py test_apache_pack_materializer.py test_apache_release_qualification.py test_apache_spatial_flags.py test_apache_source_columns.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_tensorrt_dynamic_vocab_qualification.py test_relation_backend_matrix.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
