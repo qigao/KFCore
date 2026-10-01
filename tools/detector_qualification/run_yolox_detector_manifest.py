@@ -174,7 +174,10 @@ def _iou(left: tuple[float, float, float, float],
     return intersection / union if union > 0.0 else 0.0
 
 
-def _score_summary(output: np.ndarray) -> tuple[float, float, int]:
+def _score_summary(
+    output: np.ndarray,
+    score_threshold: float,
+) -> tuple[float, float, int]:
     values = np.asarray(output)
     if values.ndim != 3 or values.shape[0] != 1 or values.shape[2] <= 5:
         raise ValueError("YOLOX output must be [1,A,5+C]")
@@ -187,7 +190,7 @@ def _score_summary(output: np.ndarray) -> tuple[float, float, int]:
     return (
         float(objectness.max(initial=0.0)),
         float(fused.max(initial=0.0)),
-        int(np.count_nonzero(fused >= DEFAULT_SCORE_THRESHOLD)),
+        int(np.count_nonzero(fused >= score_threshold)),
     )
 
 
@@ -322,7 +325,7 @@ def run(
             {inputs[0].name: tensor},
         )[0]
         image_max_objectness, image_max_fused, image_candidates = (
-            _score_summary(output)
+            _score_summary(output, score_threshold)
         )
         max_objectness = max(max_objectness, image_max_objectness)
         max_fused_score = max(max_fused_score, image_max_fused)
