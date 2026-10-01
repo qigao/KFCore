@@ -174,6 +174,23 @@ def _iou(left: tuple[float, float, float, float],
     return intersection / union if union > 0.0 else 0.0
 
 
+def _score_summary(output: np.ndarray) -> tuple[float, float, int]:
+    values = np.asarray(output)
+    if values.ndim != 3 or values.shape[0] != 1 or values.shape[2] <= 5:
+        raise ValueError("YOLOX output must be [1,A,5+C]")
+    objectness = np.asarray(values[0, :, 4], dtype=np.float64)
+    class_scores = np.asarray(values[0, :, 5:], dtype=np.float64)
+    if not np.isfinite(objectness).all() or not np.isfinite(class_scores).all():
+        raise ValueError("YOLOX confidence contains non-finite values")
+    best_class = class_scores.max(axis=1)
+    fused = objectness * best_class
+    return (
+        float(objectness.max(initial=0.0)),
+        float(fused.max(initial=0.0)),
+        int(np.count_nonzero(fused >= DEFAULT_SCORE_THRESHOLD)),
+    )
+
+
 def _decode(
     output: np.ndarray,
     *,
@@ -285,6 +302,10 @@ def run(
 
     lines: list[str] = []
     total_boxes = 0
+    max_objectness = 0.0
+    max_fused_score = 0.0
+    threshold_candidates = 0
+    images_with_threshold_candidates = 0
     for image_name, expected_width, expected_height in rows:
         path = root / Path(image_name)
         with Image.open(path) as source:
@@ -300,6 +321,14 @@ def run(
             None,
             {inputs[0].name: tensor},
         )[0]
+        image_max_objectness, image_max_fused, image_candidates = (
+            _score_summary(output)
+        )
+        max_objectness = max(max_objectness, image_max_objectness)
+        max_fused_score = max(max_fused_score, image_max_fused)
+        threshold_candidates += image_candidates
+        if image_candidates > 0:
+            images_with_threshold_candidates += 1
         boxes, scores = _decode(
             output,
             source_width=expected_width,
@@ -364,6 +393,12 @@ def run(
         "max_detections": max_detections,
         "image_count": len(rows),
         "box_count": total_boxes,
+        "raw_score_diagnostics": {
+            "max_objectness": max_objectness,
+            "max_fused_score": max_fused_score,
+            "threshold_candidates_before_nms": threshold_candidates,
+            "images_with_threshold_candidates": images_with_threshold_candidates,
+        },
         "manifest_sha256": sha256_file(output_file),
         "class_labels_emitted": False,
         "provider": "CPUExecutionProvider",
