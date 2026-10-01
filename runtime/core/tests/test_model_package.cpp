@@ -75,6 +75,31 @@ spec("runtime model package")
             loaded, loaded.artifacts().front()));
     }
 
+    it("accepts the raw-yolox detector flavor")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "yolox_tiny.onnx";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"yolox-tiny\","
+            "\"version\":\"0.1.1rc0\",\"model_type\":\"yolo-detection\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"yolox_tiny.onnx\",\"flavor\":\"raw-yolox\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        const auto loaded = kfcore::runtime::ModelPackage::load(root);
+        check_true(loaded.model_type() == "yolo-detection");
+        check_true(loaded.artifacts().front().flavor == "raw-yolox");
+        check_nothrow(kfcore::runtime::verify_model_artifact(
+            loaded, loaded.artifacts().front()));
+    }
+
     it("loads a flat manifest and sibling ONNX artifact")
     {
         TempPackage package;

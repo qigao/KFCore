@@ -105,7 +105,7 @@ spec("CPU image processor")
         check_true(approximately_equal(tensor[3], 114.0F / 255.0F));
     }
 
-    it("supports top-left letterbox placement for detector contracts")
+    it("matches pinned YOLOX top-left RGB ImageNet preprocessing")
     {
         const std::array<std::uint8_t, 6> source = {
             10, 20, 30, 40, 50, 60
@@ -115,12 +115,17 @@ spec("CPU image processor")
             PixelFormat::Bgr8, MemoryKind::Host
         };
         PreprocessOptions options;
-        options.output_format = PixelFormat::Bgr8;
+        options.output_format = PixelFormat::Rgb8;
         options.center_letterbox = false;
+        options.mean = {
+            0.485F,
+            0.456F,
+            0.406F,
+        };
         options.stddev = {
-            1.0F / 255.0F,
-            1.0F / 255.0F,
-            1.0F / 255.0F,
+            0.229F,
+            0.224F,
+            0.225F,
         };
         LetterboxTransform transform;
 
@@ -129,15 +134,25 @@ spec("CPU image processor")
                 view, 2, 2, options,
                 1024, 1024, &transform);
 
+        const auto normalized = [](float value, float mean, float stddev)
+        {
+            return (value / 255.0F - mean) / stddev;
+        };
         check_true(approximately_equal(transform.scale, 1.0F));
         check_true(approximately_equal(transform.pad_x, 0.0F));
         check_true(approximately_equal(transform.pad_y, 0.0F));
-        check_true(approximately_equal(tensor[0], 10.0F, 1.0e-4F));
-        check_true(approximately_equal(tensor[1], 40.0F, 1.0e-4F));
-        check_true(approximately_equal(tensor[2], 114.0F, 1.0e-4F));
-        check_true(approximately_equal(tensor[3], 114.0F, 1.0e-4F));
-        check_true(approximately_equal(tensor[4], 20.0F, 1.0e-4F));
-        check_true(approximately_equal(tensor[8], 30.0F, 1.0e-4F));
+        check_true(approximately_equal(
+            tensor[0], normalized(30.0F, 0.485F, 0.229F)));
+        check_true(approximately_equal(
+            tensor[1], normalized(60.0F, 0.485F, 0.229F)));
+        check_true(approximately_equal(
+            tensor[2], normalized(114.0F, 0.485F, 0.229F)));
+        check_true(approximately_equal(
+            tensor[3], normalized(114.0F, 0.485F, 0.229F)));
+        check_true(approximately_equal(
+            tensor[4], normalized(20.0F, 0.456F, 0.224F)));
+        check_true(approximately_equal(
+            tensor[8], normalized(10.0F, 0.406F, 0.225F)));
     }
 
     it("converts packed NV12 and I420 red pixels to identical BGR and RGB tensors")
