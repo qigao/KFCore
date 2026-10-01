@@ -534,12 +534,37 @@ def rebuild_vg_raw(
             canonical_output,
         )
 
+    corpus_source_candidate = None
+    if converter_evidence["input_hashes_pinned"] and canonical_evidence is not None:
+        revision_payload = {
+            "input_sha256": converter_evidence["input_sha256"],
+            "image_stem_allow_set_sha256": converter_evidence[
+                "image_stem_allow_set"
+            ]["sha256"],
+        }
+        revision = "sha256:" + stable_json_sha256(revision_payload)
+        corpus_source_candidate = {
+            "name": RELEASED_DATASET_NAME,
+            "provenance_kind": "deterministic-rebuild",
+            "origin": "Visual Genome raw metadata + VG150_coco_format/train",
+            "revision": revision,
+            "recipe": (
+                REFERENCE_SOURCE_COMMIT
+                + ":training/convert_vg_raw.py+training/pack_megasg.py"
+            ),
+            "annotations_sha256": canonical_evidence[
+                "canonical_annotations_sha256"
+            ],
+            "post_exclusion_count": canonical_evidence["images"],
+        }
+
     report = {
         **converter_evidence,
         "coco_sgg_path": str(coco_path.resolve()),
         "pack_path": str(pack_path.resolve()),
         "pack": pack_evidence,
         "canonical_materialization": canonical_evidence,
+        "corpus_source_candidate": corpus_source_candidate,
     }
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
     evidence_path.write_text(
