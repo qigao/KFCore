@@ -1754,6 +1754,44 @@ union vocabulary is supplied, the same command materializes the pack through
 KFCore's canonical JSONL boundary and records the canonical annotation
 SHA-256/image/relation counts used by the released-corpus manifest.
 
+### Released HICO train deterministic rebuild
+
+The released `hicodet/train` source is rebuilt from the exact train parquet
+snapshot and `list_action.csv` contract:
+
+```bash
+python tools/relation_training/apache_hico_train_rebuild.py \
+  --list-action /data/HICO_DET/list_action.csv \
+  --parquet-dir /data/HICO_DET/train_dl/data \
+  --image-out-dir /data/HICO_DET/train_images \
+  --expected-input hico_train_expected_inputs.json \
+  --source-revision <immutable-hf-or-source-revision> \
+  --vocabulary released-vocabulary.json \
+  --canonical-out build/hicodet-canonical.jsonl \
+  --coco-out build/hicodet_train_coco.json \
+  --negatives-out build/hicodet_negatives_train.json \
+  --pack-out build/hicodet/train \
+  --evidence build/hicodet-rebuild.json
+```
+
+The traversal order is part of provenance: lexicographically sorted
+`train-*.parquet` shards, then row-group order, then row order. Evidence
+records every shard filename/SHA-256/row-group/row count and the
+`list_action.csv` SHA-256.
+
+The converter reproduces the released `iou_merge=0.5` rule: exact rounded
+box-coordinate reuse first, then same-category union-find at IoU >= 0.5 with
+the merged box equal to the member mean. Positive pairs are remapped,
+self-loops and duplicate positives are dropped, `no_interaction` remains a
+negative source rather than a positive predicate, and only the first 40 merged
+boxes enter the train pack.
+
+A development rebuild may omit `--expected-input` / `--source-revision`.
+Such evidence cannot emit a corpus source candidate. Released qualification
+requires the exact action-table hash, the ordered complete parquet hash list,
+an immutable source revision, and canonical pack materialization. Any shard
+addition/removal/reorder or file hash drift fails closed.
+
 ### Released IndoorVG exclusion derivation
 
 IndoorVG evaluation images originate from Visual Genome and can leak into
