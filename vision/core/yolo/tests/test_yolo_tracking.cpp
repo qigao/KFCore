@@ -214,20 +214,29 @@ spec("YOLO ByteTrack session") {
         options.max_class_trackers = 1;
         ByteTrackSession source(options);
         ByteTrackSession session(std::move(source));
-        source.reset();
+        check(source.reset() == std::uint64_t{0U});
+        check(source.tracking_epoch() == std::uint64_t{0U});
         check_throws_as(source.update(frame_for()), YoloError);
 
+        check(session.tracking_epoch() == std::uint64_t{1U});
         (void)session.update(frame_for(0));
         TrackFrame before_reset = session.update(frame_for(0));
+        check(before_reset.tracking_epoch == std::uint64_t{1U});
         check(*before_reset.detections[0].track_id == (std::uint64_t)0);
-        session.reset();
+
+        check(session.reset() == std::uint64_t{2U});
+        check(session.tracking_epoch() == std::uint64_t{2U});
         check_nothrow(session.update(frame_for(1)));
         TrackFrame different_class = session.update(frame_for(1));
+        check(different_class.tracking_epoch == std::uint64_t{2U});
         check(*different_class.detections[0].track_id == (UINT64_C(1) << 32U));
-        session.reset();
+
+        check(session.reset() == std::uint64_t{3U});
         (void)session.update(frame_for(0));
         TrackFrame reused_epoch = session.update(frame_for(0));
+        check(reused_epoch.tracking_epoch == std::uint64_t{3U});
         check(*reused_epoch.detections[0].track_id == (std::uint64_t)0);
+        check(reused_epoch.tracking_epoch != before_reset.tracking_epoch);
     }
 
     it("rejects a negative class before reserving a tracker or consuming its first ID") {
