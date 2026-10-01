@@ -133,6 +133,32 @@ static int test_kalman_ekf_udu_update(
         workspace, TEST_KALMAN_WORKSPACE_FLOATS);
 }
 
+static int test_kalman_ukf_predict(
+    float* x, float* P, const float* Q, kalman_ukf_transition_fn transition,
+    int n, const kalman_ukf_params* params, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS * 2U];
+    return (int)(kalman_ukf_predict)(
+        x, P, Q, transition, (size_t)n, params, user,
+        workspace, sizeof(workspace) / sizeof(workspace[0]));
+}
+
+static int test_kalman_ukf_update(
+    float* x, float* P, const float* z, const float* R,
+    kalman_ukf_measurement_fn measurement, int n, int m,
+    const kalman_ukf_params* params, float chi2_threshold, float* chi2,
+    void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS * 2U];
+    return (int)(kalman_ukf_update)(
+        x, P, z, R, measurement, (size_t)n, (size_t)m,
+        params, chi2_threshold, chi2, user,
+        workspace, sizeof(workspace) / sizeof(workspace[0]));
+}
+
+#define kalman_ukf_predict(...) test_kalman_ukf_predict(__VA_ARGS__)
+#define kalman_ukf_update(...) test_kalman_ukf_update(__VA_ARGS__)
+
 #define kalman_ekf_takasu_predict(...) test_kalman_ekf_takasu_predict(__VA_ARGS__)
 #define kalman_ekf_takasu_update(...) test_kalman_ekf_takasu_update(__VA_ARGS__)
 #define kalman_ekf_udu_predict(...) test_kalman_ekf_udu_predict(__VA_ARGS__)
