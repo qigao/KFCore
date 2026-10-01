@@ -149,12 +149,27 @@ SceneBehaviorPipeline::reset_temporal(double seconds)
     return impl_->interaction.reset(seconds);
 }
 
-void SceneBehaviorPipeline::reset_tracking() noexcept
+std::vector<SceneBehaviorEvent>
+SceneBehaviorPipeline::reset_tracking(double seconds)
 {
-    if (impl_ && impl_->scene_graph)
+    if (!impl_ || !impl_->scene_graph)
     {
-        impl_->scene_graph->reset_tracking();
+        throw std::logic_error(
+            "SceneBehaviorPipeline state is unavailable");
     }
+    const std::uint64_t epoch =
+        impl_->scene_graph->reset_tracking();
+    return impl_->interaction.reset_tracking_epoch(
+        epoch,
+        seconds);
+}
+
+std::uint64_t
+SceneBehaviorPipeline::tracking_epoch() const noexcept
+{
+    return (
+        impl_ && impl_->scene_graph
+    ) ? impl_->scene_graph->tracking_epoch() : 0U;
 }
 
 bool SceneBehaviorPipeline::supports_dynamic_vocabulary() const noexcept
