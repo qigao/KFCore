@@ -132,12 +132,12 @@ spec("CPU image processor")
         check_true(approximately_equal(transform.scale, 1.0F));
         check_true(approximately_equal(transform.pad_x, 0.0F));
         check_true(approximately_equal(transform.pad_y, 0.0F));
-        check_true(approximately_equal(tensor[0], 10.0F));
-        check_true(approximately_equal(tensor[1], 40.0F));
-        check_true(approximately_equal(tensor[2], 114.0F));
-        check_true(approximately_equal(tensor[3], 114.0F));
-        check_true(approximately_equal(tensor[4], 20.0F));
-        check_true(approximately_equal(tensor[8], 30.0F));
+        check_true(approximately_equal(tensor[0], 10.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[1], 40.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[2], 114.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[3], 114.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[4], 20.0F, 1.0e-4F));
+        check_true(approximately_equal(tensor[8], 30.0F, 1.0e-4F));
     }
 
     it("converts packed NV12 and I420 red pixels to identical BGR and RGB tensors")
