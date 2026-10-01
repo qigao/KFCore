@@ -386,16 +386,20 @@ void collect_metadata(kf_model_handle_v1 model)
     for (std::size_t index = 0U; index < input_count; ++index)
     {
         auto name = model->session->GetInputNameAllocated(index, allocator);
-        auto info = model->session->GetInputTypeInfo(index).GetTensorTypeAndShapeInfo();
-        model->inputs.push_back({name.get(), info.GetElementType(),
-                                 abi_type(info.GetElementType()), info.GetShape(), true});
+        auto type_info = model->session->GetInputTypeInfo(index);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        const auto element_type = tensor_info.GetElementType();
+        model->inputs.push_back({name.get(), element_type,
+                                 abi_type(element_type), tensor_info.GetShape(), true});
     }
     for (std::size_t index = 0U; index < output_count; ++index)
     {
         auto name = model->session->GetOutputNameAllocated(index, allocator);
-        auto info = model->session->GetOutputTypeInfo(index).GetTensorTypeAndShapeInfo();
-        model->outputs.push_back({name.get(), info.GetElementType(),
-                                  abi_type(info.GetElementType()), info.GetShape(), false});
+        auto type_info = model->session->GetOutputTypeInfo(index);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        const auto element_type = tensor_info.GetElementType();
+        model->outputs.push_back({name.get(), element_type,
+                                  abi_type(element_type), tensor_info.GetShape(), false});
     }
     model->input_names.reserve(model->inputs.size());
     for (const auto& input : model->inputs) model->input_names.push_back(input.name.c_str());
