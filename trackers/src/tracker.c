@@ -679,7 +679,9 @@ static tracker_status_t kf_xyxy_update(kf_xyxy_t* kf, box_t bbox) {
 #endif
 
     memcpy(dz, z, sizeof(dz));
-    matmul("T", "N", 4, 1, 8, -1.0f, candidate.Ht, candidate.x, 1.0f, dz);
+    if (matmul("T", "N", 4, 1, 8, -1.0f, candidate.Ht, candidate.x, 1.0f, dz) != 0) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
     if (kalman_takasu(candidate.x, candidate.P, dz, candidate.R, candidate.Ht,
                       8, 4, 0.0f, NULL, workspace,
                       TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {
@@ -768,7 +770,9 @@ static tracker_status_t kf_xcycsr_update_measurement(kf_xcycsr_t* kf, const floa
     }
 #endif
     memcpy(dz, z, sizeof(dz));
-    matmul("T", "N", 4, 1, 7, -1.0f, candidate.Ht, candidate.x, 1.0f, dz);
+    if (matmul("T", "N", 4, 1, 7, -1.0f, candidate.Ht, candidate.x, 1.0f, dz) != 0) {
+        return TRACKER_STATUS_NUMERICAL_FAILURE;
+    }
     if (kalman_takasu(candidate.x, candidate.P, dz, candidate.R, candidate.Ht,
                       7, 4, 0.0f, NULL, workspace,
                       TRACKER_KALMAN_WORKSPACE_FLOATS) != KFCORE_KALMAN_OK) {

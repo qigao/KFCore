@@ -175,7 +175,10 @@ int nav_fusion3d_predict_imu(nav_fusion3d* fusion, const float accel_body_m_s2[3
         return -1;
     }
     fusion3d_skew(accel_corr, skew_accel);
-    matmul("N", "N", 3, 3, 3, 1.0f, Rbn, skew_accel, 0.0f, R_skew);
+    if (matmul("N", "N", 3, 3, 3, 1.0f, Rbn, skew_accel, 0.0f, R_skew) != 0)
+    {
+        return -1;
+    }
     for (int row = 0; row < 3; ++row)
     {
         for (int col = 0; col < 3; ++col)

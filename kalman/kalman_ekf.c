@@ -333,8 +333,9 @@ kfcore_kalman_status kalman_ekf_udu_update(
         if (chi2_threshold > 0.0f)
         {
             float HPHT = 0.0f;
-            matmul("N", "N", 1, (int)n, (int)n, 1.0f,
-                   H_line, U, 0.0f, scalar_workspace);
+            if (matmul("N", "N", 1, (int)n, (int)n, 1.0f,
+                       H_line, U, 0.0f, scalar_workspace) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
             for (size_t j = 0U; j < n; ++j)
             {
                 HPHT += scalar_workspace[j] * scalar_workspace[j] * d[j];

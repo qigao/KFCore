@@ -400,7 +400,8 @@ kfcore_kalman_status kalman_ukf_update(
     {
         float chi2sum = 0.0f;
         memcpy(y, dz, sizeof(float) * m);
-        trisolve(S, y, (int)m, 1, "N");
+        if (trisolve(S, y, (int)m, 1, "N") != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
         for (size_t i = 0U; i < m; ++i)
         {
             chi2sum += y[i] * y[i];
@@ -417,10 +418,11 @@ kfcore_kalman_status kalman_ukf_update(
         }
     }
 
-    trisolveright(S, Pxz, (int)m, (int)n, "T");
-    symmetricrankupdate(P, Pxz, (int)n, (int)m);
-    trisolveright(S, Pxz, (int)m, (int)n, "N");
-    matmul("N", "N", (int)n, 1, (int)m, 1.0f, Pxz, dz, 1.0f, x);
+    if (trisolveright(S, Pxz, (int)m, (int)n, "T") != 0 ||
+        symmetricrankupdate(P, Pxz, (int)n, (int)m) != 0 ||
+        trisolveright(S, Pxz, (int)m, (int)n, "N") != 0 ||
+        matmul("N", "N", (int)n, 1, (int)m, 1.0f, Pxz, dz, 1.0f, x) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
     symmetrize_from_upper(P, (int)n);
 
     return KFCORE_KALMAN_OK;

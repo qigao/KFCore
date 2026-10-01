@@ -30,6 +30,31 @@ static void expect_float(const char* name, float actual, float expected)
     }
 }
 
+static void test_linalg_failure_propagation(void)
+{
+    float x[1] = { 0.0f };
+    float P[1] = { 1.0f };
+    float dz[1] = { 0.0f };
+    float R[1] = { 1.0f };
+    float Ht[1] = { 1.0f };
+    float U[1] = { 1.0f };
+    float d[1] = { 1.0f };
+    float z[1] = { 0.0f };
+    float workspace[4] = { 0.0f };
+
+    kfcore_linalg_test_fail_next();
+    expect_int("Takasu propagates linalg failure",
+               kalman_takasu(x, P, dz, R, Ht, 1, 1, 0.0f, NULL,
+                             workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_NUMERICAL_FAILURE);
+
+    kfcore_linalg_test_fail_next();
+    expect_int("UDU propagates linalg failure",
+               kalman_udu(x, U, d, z, R, Ht, 1, 1, 0.0f, 0,
+                          workspace, sizeof(workspace) / sizeof(workspace[0])),
+               KFCORE_KALMAN_NUMERICAL_FAILURE);
+}
+
 static void test_udu_pivots(void)
 {
     const float identity[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
@@ -419,6 +444,7 @@ static void test_ukf_workspace_contract(void)
 
 int main(void)
 {
+    test_linalg_failure_propagation();
     test_udu_pivots();
     test_linear_workspace_contract();
     test_ekf_workspace_contract();

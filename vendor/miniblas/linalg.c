@@ -40,36 +40,64 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
+#ifdef KFCORE_LINALG_TEST_FAILURE
+static int kfcore_linalg_test_fail_next_value;
+
+void kfcore_linalg_test_fail_next(void)
+{
+    kfcore_linalg_test_fail_next_value = 1;
+}
+
+static int kfcore_linalg_test_status(int status)
+{
+    if (kfcore_linalg_test_fail_next_value)
+    {
+        kfcore_linalg_test_fail_next_value = 0;
+        return -1;
+    }
+    return status;
+}
+#else
+static int kfcore_linalg_test_status(int status)
+{
+    return status;
+}
+#endif
+
 int matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
            const float* B, float beta, float* C)
 {
     int lda = lsame_(ta, "T") ? m : n;
     int ldb = lsame_(tb, "T") ? k : m;
-    return sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha,
-                  (float*)A, &lda, (float*)B, &ldb, &beta, C, &n);
+    return kfcore_linalg_test_status(
+        sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha,
+               (float*)A, &lda, (float*)B, &ldb, &beta, C, &n));
 }
 
 int matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
 {
     float alpha = 1.0f;
     float beta = 0.0f;
-    return ssymm_("L" /* calculate C = A*B not C = B*A */,
-                  "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
-                  &m,                                                 /* cols of B / C */
-                  &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n);
+    return kfcore_linalg_test_status(
+        ssymm_("L" /* calculate C = A*B not C = B*A */,
+               "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
+               &m,                                                 /* cols of B / C */
+               &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n));
 }
 
 int matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
            float beta, float* y)
 {
     int inc = 1;
-    return sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc);
+    return kfcore_linalg_test_status(
+        sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc));
 }
 
 int rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
 {
     int inc = 1;
-    return sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows);
+    return kfcore_linalg_test_status(
+        sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows));
 }
 
 void mateye(float* A, int n)
@@ -236,22 +264,25 @@ int mat3inv(const float* A, float* Ainv, float eps)
 int trisolve(const float* A, float* B, int n, int m, const char* tp)
 {
     float alpha = 1.0f;
-    return strsm_("L" /* left hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-                  "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n);
+    return kfcore_linalg_test_status(
+        strsm_("L" /* left hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
+               "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n));
 }
 
 int trisolveright(const float* L, float* A, int n, int m, const char* tp)
 {
     float alpha = 1.0f;
-    return strsm_("R" /* right hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-                  "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m);
+    return kfcore_linalg_test_status(
+        strsm_("R" /* right hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
+               "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m));
 }
 
 int symmetricrankupdate(float* P, const float* E, int n, int m)
 {
     float alpha = -1.0f;
     float beta = 1.0f;
-    return ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n);
+    return kfcore_linalg_test_status(
+        ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n));
 }
 
 int udu(const float* A, float* U, float* d, const int m)

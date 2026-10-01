@@ -38,4 +38,9 @@ static inline kfcore_kalman_status kfcore_kalman_require_workspace(
     return KFCORE_KALMAN_OK;
 }
 
+static inline kfcore_kalman_status kfcore_kalman_linalg_status(int status)
+{
+    return status == 0 ? KFCORE_KALMAN_OK : KFCORE_KALMAN_NUMERICAL_FAILURE;
+}
+
 #endif

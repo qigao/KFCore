@@ -44,7 +44,7 @@ int frame_transform_point(const float R_a2b[9], const float t_a_in_b[3],
         return -1;
     }
 
-    matvec("N", 3, 3, 1.0f, R_a2b, p_a, 0.0f, p_b);
+    if (matvec("N", 3, 3, 1.0f, R_a2b, p_a, 0.0f, p_b) != 0) return -1;
     for (int i = 0; i < 3; ++i)
     {
         p_b[i] += t_a_in_b[i];
@@ -67,7 +67,7 @@ int frame_inverse_transform_point(const float R_a2b[9], const float t_a_in_b[3],
     {
         shifted[i] = p_b[i] - t_a_in_b[i];
     }
-    matvec("T", 3, 3, 1.0f, R_a2b, shifted, 0.0f, p_a);
+    if (matvec("T", 3, 3, 1.0f, R_a2b, shifted, 0.0f, p_a) != 0) return -1;
 
     return 0;
 }
@@ -79,7 +79,7 @@ int frame_rotate_vector(const float R_a2b[9], const float v_a[3], float v_b[3])
         return -1;
     }
 
-    matvec("N", 3, 3, 1.0f, R_a2b, v_a, 0.0f, v_b);
+    if (matvec("N", 3, 3, 1.0f, R_a2b, v_a, 0.0f, v_b) != 0) return -1;
     return 0;
 }
 
@@ -90,7 +90,7 @@ int frame_inverse_rotate_vector(const float R_a2b[9], const float v_b[3], float 
         return -1;
     }
 
-    matvec("T", 3, 3, 1.0f, R_a2b, v_b, 0.0f, v_a);
+    if (matvec("T", 3, 3, 1.0f, R_a2b, v_b, 0.0f, v_a) != 0) return -1;
     return 0;
 }
 
@@ -113,7 +113,7 @@ int frame_pose_inverse(const float R_a2b[9], const float t_a_in_b[3],
         neg_t[row] = -t_a_in_b[row];
     }
 
-    matvec("T", 3, 3, 1.0f, R_a2b, neg_t, 0.0f, t_b_in_a);
+    if (matvec("T", 3, 3, 1.0f, R_a2b, neg_t, 0.0f, t_b_in_a) != 0) return -1;
     return 0;
 }
 
@@ -126,8 +126,8 @@ int frame_pose_compose(const float R_a2b[9], const float t_a_in_b[3],
         return -1;
     }
 
-    matmul("N", "N", 3, 3, 3, 1.0f, R_b2c, R_a2b, 0.0f, R_a2c);
-    matvec("N", 3, 3, 1.0f, R_b2c, t_a_in_b, 0.0f, t_a_in_c);
+    if (matmul("N", "N", 3, 3, 3, 1.0f, R_b2c, R_a2b, 0.0f, R_a2c) != 0 ||
+        matvec("N", 3, 3, 1.0f, R_b2c, t_a_in_b, 0.0f, t_a_in_c) != 0) return -1;
     for (int i = 0; i < 3; ++i)
     {
         t_a_in_c[i] += t_b_in_c[i];
@@ -145,8 +145,8 @@ int frame_transform_covariance3(const float R_a2b[9], const float P_a[9], float 
         return -1;
     }
 
-    matmul("N", "N", 3, 3, 3, 1.0f, R_a2b, P_a, 0.0f, tmp);
-    matmul("N", "T", 3, 3, 3, 1.0f, tmp, R_a2b, 0.0f, P_b);
+    if (matmul("N", "N", 3, 3, 3, 1.0f, R_a2b, P_a, 0.0f, tmp) != 0 ||
+        matmul("N", "T", 3, 3, 3, 1.0f, tmp, R_a2b, 0.0f, P_b) != 0) return -1;
     return 0;
 }
 
@@ -176,8 +176,8 @@ int frame_enu_to_ned_rotation(const float R_enu[9], float R_ned[9])
         return -1;
     }
 
-    matmul("N", "N", 3, 3, 3, 1.0f, FRAME_ENU_TO_NED, R_enu, 0.0f, tmp);
-    matmul("N", "T", 3, 3, 3, 1.0f, tmp, FRAME_ENU_TO_NED, 0.0f, R_ned);
+    if (matmul("N", "N", 3, 3, 3, 1.0f, FRAME_ENU_TO_NED, R_enu, 0.0f, tmp) != 0 ||
+        matmul("N", "T", 3, 3, 3, 1.0f, tmp, FRAME_ENU_TO_NED, 0.0f, R_ned) != 0) return -1;
     return 0;
 }
 
@@ -207,8 +207,8 @@ int frame_handedness_flip_y_rotation(const float R_in[9], float R_out[9])
         return -1;
     }
 
-    matmul("N", "N", 3, 3, 3, 1.0f, FRAME_FLIP_Y, R_in, 0.0f, tmp);
-    matmul("N", "N", 3, 3, 3, 1.0f, tmp, FRAME_FLIP_Y, 0.0f, R_out);
+    if (matmul("N", "N", 3, 3, 3, 1.0f, FRAME_FLIP_Y, R_in, 0.0f, tmp) != 0 ||
+        matmul("N", "N", 3, 3, 3, 1.0f, tmp, FRAME_FLIP_Y, 0.0f, R_out) != 0) return -1;
     return 0;
 }
 
