@@ -163,6 +163,7 @@ class TensorRtDynamicVocabularyQualificationTest(unittest.TestCase):
             "same_context_reused": True,
             "engine_sha256_before": "a" * 64,
             "engine_sha256_after": "a" * 64,
+            "passed": True,
             "cases": [
                 {**case, "label": "v1"},
                 {**case, "label": "v3"},
@@ -175,6 +176,11 @@ class TensorRtDynamicVocabularyQualificationTest(unittest.TestCase):
         invalid = dict(report)
         invalid["hardware_executed"] = False
         with self.assertRaisesRegex(ValueError, "real hardware"):
+            validate_qualification_report(invalid)
+
+        invalid = dict(report)
+        invalid["passed"] = False
+        with self.assertRaisesRegex(ValueError, "globally passing"):
             validate_qualification_report(invalid)
 
         invalid = dict(report)
