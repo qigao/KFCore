@@ -151,6 +151,14 @@ size_t cbiou_update(
 ocsort_t* ocsort_create(const ocsort_config_t* config);
 void ocsort_destroy(ocsort_t* tracker);
 void ocsort_reset(ocsort_t* tracker);
+tracker_status_t ocsort_update_ex(
+    ocsort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t ocsort_update(
     ocsort_t* tracker,
     const detection_t* detections,
