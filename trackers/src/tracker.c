@@ -1929,15 +1929,24 @@ static void ocsort_commit_clone(ocsort_t* tracker, ocsort_t* working) {
     ocsort_destroy(working);
 }
 
-static int ocsort_add_observation(ocsort_track_t* track, int age, box_t box) {
-    if (!ensure_capacity((void**)&track->observations, &track->observation_capacity,
-                         sizeof(track->observations[0]), track->observation_count + 1)) {
-        return 0;
+static tracker_status_t ocsort_add_observation(
+    ocsort_track_t* track,
+    int age,
+    box_t box
+) {
+    if (track->observation_count == SIZE_MAX) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+    tracker_status_t status =
+        reserve_capacity((void**)&track->observations, &track->observation_capacity,
+                         sizeof(track->observations[0]), track->observation_count + 1);
+    if (status != TRACKER_STATUS_OK) {
+        return status;
     }
     track->observations[track->observation_count].age = age;
     track->observations[track->observation_count].box = box;
     ++track->observation_count;
-    return 1;
+    return TRACKER_STATUS_OK;
 }
 
 static int ocsort_previous_observation(const ocsort_track_t* track, box_t* out) {
@@ -2056,12 +2065,16 @@ static tracker_status_t ocsort_update_track(ocsort_track_t* track, const box_t* 
             return status;
         }
 
+        if (track->number_of_successful_updates == INT_MAX) {
+            return TRACKER_STATUS_OVERFLOW;
+        }
         track->observed = 1;
         track->time_since_update = 0;
         ++track->number_of_successful_updates;
         track->last_observation = *bbox;
-        if (!ocsort_add_observation(track, track->age, *bbox)) {
-            return TRACKER_STATUS_ALLOCATION_FAILED;
+        status = ocsort_add_observation(track, track->age, *bbox);
+        if (status != TRACKER_STATUS_OK) {
+            return status;
         }
         return TRACKER_STATUS_OK;
     }
@@ -2074,6 +2087,10 @@ static tracker_status_t ocsort_update_track(ocsort_track_t* track, const box_t* 
 }
 
 static tracker_status_t ocsort_predict_track(ocsort_track_t* track) {
+    if (track->age == INT_MAX || track->time_since_update == INT_MAX) {
+        return TRACKER_STATUS_OVERFLOW;
+    }
+
     tracker_status_t status = kf_xcycsr_predict(&track->estimator);
     if (status != TRACKER_STATUS_OK) {
         return status;
