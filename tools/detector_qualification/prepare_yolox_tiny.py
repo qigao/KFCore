@@ -17,6 +17,18 @@ UPSTREAM_REPOSITORY = "Megvii-BaseDetection/YOLOX"
 UPSTREAM_TAG = "0.1.1rc0"
 UPSTREAM_COMMIT = "e1052df71842031413f6030723c3607b839c80ce"
 UPSTREAM_LICENSE = "Apache-2.0"
+UPSTREAM_SOURCE_SHA256 = (
+    "427cc366d34e27ff7a03e2899b5e3671"
+    "425c262ea2291f88bb942bc1cc70b0f7"
+)
+QUALIFIED_DECODED_ONNX_SHA256 = (
+    "a09bb9dc5b77553181182535842ab1fc"
+    "66d29469f291adec01335433e8d4e858"
+)
+QUALIFIED_PACKAGE_SHA256 = (
+    "7130ba963858c2c00155eedbf698e4e1"
+    "1508880893fe5384176247b85e6959f9"
+)
 MODEL_NAME = "yolox-tiny"
 INPUT_SIZE = (416, 416)
 CLASS_COUNT = 80
@@ -363,14 +375,27 @@ def main() -> None:
     )
     parser.add_argument("--source-onnx", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--expected-source-sha256", default="")
     args = parser.parse_args()
 
     report = prepare(
         args.source_onnx,
         args.out_dir,
-        expected_source_sha256=args.expected_source_sha256,
+        expected_source_sha256=UPSTREAM_SOURCE_SHA256,
     )
+    if (
+        report["artifact"]["decoded_onnx_sha256"]
+        != QUALIFIED_DECODED_ONNX_SHA256
+    ):
+        raise RuntimeError(
+            "decoded YOLOX-Tiny ONNX differs from the qualified SHA-256"
+        )
+    if (
+        report["artifact"]["package_sha256"]
+        != QUALIFIED_PACKAGE_SHA256
+    ):
+        raise RuntimeError(
+            "YOLOX-Tiny model package differs from the qualified SHA-256"
+        )
     print(json.dumps(report, indent=2, sort_keys=True))
 
 
