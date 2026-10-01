@@ -143,6 +143,7 @@ jobs:
             -Ivision/core/relation/include \
             -Ivision/core/yolo/include \
             -Ivision/core/image_processor/include \
+            -Iruntime/core/include \
             -c vision/pipelines/scene_graph/src/scene_graph_detail.cpp \
             -o "$out/scene_graph_detail.o"
 
@@ -154,6 +155,7 @@ jobs:
             -Ivision/core/relation/include \
             -Ivision/core/yolo/include \
             -Ivision/core/image_processor/include \
+            -Iruntime/core/include \
             -Itrackers/include -Iesn \
             -c scene_interaction/tests/tracking_continuity_qualification.cpp \
             -o "$out/tracking_continuity_qualification.o"
