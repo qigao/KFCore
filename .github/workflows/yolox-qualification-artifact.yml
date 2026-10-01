@@ -132,6 +132,7 @@ jobs:
             -DKFCORE_SOURCE_DIR="$GITHUB_WORKSPACE" \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
           cmake --build "$build" --parallel 2
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}"
           "$build/kfcore_model_package_yolox_contract"
 
       - name: Download official YOLOX-Tiny ONNX
