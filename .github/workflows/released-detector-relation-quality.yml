@@ -86,6 +86,51 @@ jobs:
           echo "$YOLOX_SOURCE_SHA256  $src/yolox_tiny.onnx" | sha256sum -c -
           python tools/detector_qualification/prepare_yolox_tiny.py             --source-onnx "$src/yolox_tiny.onnx"             --out-dir "$RUNNER_TEMP/yolox-qualified"
 
+      - name: Verify pinned YOLOX on upstream demo image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          demo="$RUNNER_TEMP/yolox-demo"
+          mkdir -p "$demo/images"
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/e1052df71842031413f6030723c3607b839c80ce/assets/demo.png" \
+            -o "$demo/images/demo.png"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from PIL import Image
+          root = Path(os.environ["RUNNER_TEMP"]) / "yolox-demo"
+          with Image.open(root / "images" / "demo.png") as image:
+              width, height = image.size
+          (root / "annotations.jsonl").write_text(
+              json.dumps({
+                  "image": "demo.png",
+                  "width": width,
+                  "height": height,
+              }) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python tools/detector_qualification/run_yolox_detector_manifest.py \
+            --model "$RUNNER_TEMP/yolox-qualified/yolox_tiny_decoded.onnx" \
+            --annotations "$demo/annotations.jsonl" \
+            --image-root "$demo/images" \
+            --score-threshold 0.1 \
+            --iou-threshold 0.45 \
+            --out "$demo/detector-boxes.jsonl" \
+            --evidence-out "$demo/evidence.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "yolox-demo"
+          evidence = json.loads((root / "evidence.json").read_text())
+          print(json.dumps(evidence["raw_score_diagnostics"], indent=2, sort_keys=True))
+          if evidence["box_count"] <= 0:
+              raise SystemExit("pinned YOLOX produced zero boxes on upstream demo.png")
+          PY
+
       - name: Materialize deterministic HICO-DET test slice
         shell: bash
         run: |
