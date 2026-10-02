@@ -42,7 +42,7 @@ jobs:
       YOLOX_SOURCE_BYTES: '20219662'
       YOLOX_SOURCE_SHA256: 427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7
       YOLOX_DECODED_SHA256: a09bb9dc5b77553181182535842ab1fc66d29469f291adec01335433e8d4e858
-      YOLOX_PACKAGE_SHA256: 7130ba963858c2c00155eedbf698e4e11508880893fe5384176247b85e6959f9
+      YOLOX_PACKAGE_SHA256: a8e677481844888d12fa736bda54b1121ba0babe1739e6435e91f38d407629c7
 
     steps:
       - uses: actions/checkout@v4
@@ -189,10 +189,16 @@ jobs:
           assert evidence["conversion"]["source_output_shape"] == [1, 3549, 85]
           assert evidence["conversion"]["decoded_output_shape"] == [1, 3549, 85]
           assert package["model_type"] == "yolo-detection"
-          artifact = package["artifacts"][0]
+          artifacts = package["artifacts"]
+          assert [
+              (artifact["backend"], artifact["device"])
+              for artifact in artifacts
+          ] == [
+              ("onnxruntime", "cpu"),
+              ("onnxruntime", "cuda"),
+          ]
+          artifact = artifacts[0]
           assert artifact["flavor"] == "raw-yolox"
-          assert artifact["backend"] == "onnxruntime"
-          assert artifact["device"] == "cpu"
 
           model_path = root / artifact["path"]
           session = ort.InferenceSession(
