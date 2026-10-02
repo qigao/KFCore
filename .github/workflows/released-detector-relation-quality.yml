@@ -14,6 +14,7 @@ on:
       - 'scene_interaction/tests/released_scene_behavior_latency.cpp'
       - 'scene_interaction/CMakeLists.txt'
       - 'CMakeOptions.cmake'
+      - 'cmake/tests/released_scene_behavior_latency/**'
       - 'tools/relation_training/test_prepare_hico_test_qualification.py'
       - 'tools/relation_training/test_released_detector_relation_qualification.py'
       - '.github/workflows/released-detector-relation-quality.yml'
@@ -357,11 +358,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S . -B build/released-scene-behavior -G Ninja \
+          cmake \
+            -S cmake/tests/released_scene_behavior_latency \
+            -B build/released-scene-behavior \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF \
-            -DKFCORE_ENABLE_ONNXRUNTIME=ON \
-            -DKFCORE_BUILD_RELEASED_SCENE_BEHAVIOR_QUALIFICATION=ON \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
           cmake --build build/released-scene-behavior \
             --target kfcore_backend_onnxruntime kfcore_released_scene_behavior_latency \
