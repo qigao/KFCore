@@ -5,6 +5,8 @@ on:
     branches: [master]
     paths:
       - 'tools/relation_training/prepare_released_relsgg.py'
+      - 'tools/relation_training/package_released_relsgg_gpu.py'
+      - 'tools/relation_training/test_package_released_relsgg_gpu.py'
       - 'vision/core/relation/tests/released_relsgg_qualification.cpp'
       - 'vision/core/relation/tests/CMakeLists.txt'
       - '.github/workflows/released-relsgg-qualification.yml'
@@ -92,6 +94,28 @@ jobs:
             --predicate-bank "$RUNNER_TEMP/released-relsgg-source/predicate_bank.npz" \
             --metadata "$RUNNER_TEMP/released-relsgg-source/relateanything.json" \
             --out-dir "$RUNNER_TEMP/released-relsgg-package"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "released-relsgg-package"
+          manifest = json.loads((root / "model.json").read_text())
+          routes = [
+              (artifact["backend"], artifact["device"])
+              for artifact in manifest["artifacts"]
+          ]
+          assert routes == [
+              ("onnxruntime", "cpu"),
+              ("onnxruntime", "cuda"),
+          ]
+          evidence = json.loads((root / "evidence.json").read_text())
+          assert evidence["deployment"]["backends"] == {
+              "onnxruntime_cpu": True,
+              "onnxruntime_cuda": True,
+              "tensorrt": False,
+          }
+          PY
 
       - name: Restore native SDK download cache
         uses: actions/cache@v4
