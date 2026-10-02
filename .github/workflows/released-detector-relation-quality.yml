@@ -206,8 +206,28 @@ jobs:
             --model "$RUNNER_TEMP/yolox-qualified/yolox_tiny_decoded.onnx" \
             --annotations "$RUNNER_TEMP/openimages-validation/validation.jsonl" \
             --image-root "$RUNNER_TEMP/openimages-images" \
+            --score-threshold 0.1 \
+            --iou-threshold 0.45 \
             --out "$RUNNER_TEMP/detector-boxes.jsonl" \
             --evidence-out "$RUNNER_TEMP/detector-evidence.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = json.loads((root / "detector-evidence.json").read_text())
+          assert evidence["score_threshold"] == 0.1
+          assert evidence["iou_threshold"] == 0.45
+          if evidence["box_count"] <= 0:
+              raise SystemExit(
+                  "real qualification corpus produced zero detector boxes"
+              )
+          print(
+              f"detected_boxes={evidence['box_count']} "
+              f"images={evidence['image_count']}"
+          )
+          PY
 
       - name: Run released RelateAnything detector-box quality
         shell: bash
