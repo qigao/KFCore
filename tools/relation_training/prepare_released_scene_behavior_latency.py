@@ -257,6 +257,7 @@ def prepare(
         "dataset_revision": dataset_revision,
         "dataset_source_parquet_sha256": parquet_sha,
         "quality_input_contract": "detector-boxes",
+        "quality_iou_threshold": quality["detector"]["iou_threshold"],
         "pair_weight": 1.0,
         "top_ks": [20, 50, 100],
         "tracking_sample_policy": "independent-epoch-warm-then-measure",
