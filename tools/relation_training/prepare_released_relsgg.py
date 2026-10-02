@@ -183,7 +183,15 @@ def prepare(
                 "sha256": onnx_sha,
                 "backend": "onnxruntime",
                 "device": "cpu",
-            }
+            },
+            {
+                "id": "ort-cuda",
+                "format": "onnx",
+                "path": "relateanything.onnx",
+                "sha256": onnx_sha,
+                "backend": "onnxruntime",
+                "device": "cuda",
+            },
         ],
     }
     (root / "model.json").write_text(
@@ -207,6 +215,11 @@ def prepare(
             "package_sha256": sha256_file(root / "model.json"),
         },
         "deployment": {
+            "backends": {
+                "onnxruntime_cpu": True,
+                "onnxruntime_cuda": True,
+                "tensorrt": False,
+            },
             "image_size": metadata["img_size"],
             "max_boxes": metadata["max_boxes"],
             "final_budget": metadata["final_budget"],
