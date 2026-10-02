@@ -190,6 +190,19 @@ jobs:
           print(json.dumps(report, indent=2, sort_keys=True))
           PY
 
+      - name: Package hardware-qualified engine for C++ production
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          python3 tools/relation_training/package_released_relsgg_gpu.py \
+            --onnx "$root/relateanything.onnx" \
+            --predicate-bank "$root/predicate_bank.npz" \
+            --engine "$root/relation.engine" \
+            --engine-metadata "$root/relation.json" \
+            --out-dir "$root/production-package" \
+            --hardware-compatibility exact-device
+
       - uses: actions/upload-artifact@v4
         with:
           name: tensorrt-dynamic-v-hardware-${{ github.run_id }}
@@ -200,3 +213,6 @@ jobs:
             ${{ runner.temp }}/kfcore-tensorrt-hardware/source-metadata.json
             ${{ runner.temp }}/kfcore-tensorrt-hardware/relation.json
             ${{ runner.temp }}/kfcore-tensorrt-hardware/tensorrt-dynamic-v-report.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/model.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/evidence.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/tensorrt.json
