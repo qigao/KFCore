@@ -314,6 +314,7 @@ jobs:
             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz" \
             --quality-report "$RUNNER_TEMP/released-detector-quality.json" \
             --dataset-evidence "$RUNNER_TEMP/hico-test/evidence.json" \
+            --runtime-ort-version "$ORT_VERSION" \
             --out-dir "$RUNNER_TEMP/released-latency-fixture"
 
       - name: Restore native SDK download cache
