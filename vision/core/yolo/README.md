@@ -58,10 +58,14 @@ ModelPackage artifact `flavor` 决定 detector tensor contract：
   `objectness * class_confidence`。
 
 `raw-yolox` 不是 `raw-yolo` 的别名。对于 #236 固定的 YOLOX
-`0.1.1rc0` 官方 ONNX，它还固定该 release 的 ONNXRuntime demo preprocessing：
-左上对齐 letterbox、114 border、BGR->RGB、除以 255，然后按
-`mean=(0.485,0.456,0.406)` / `std=(0.229,0.224,0.225)` 标准化。现有其他
-flavor 继续使用既有 RGB、0..1、居中 letterbox contract，因此不会因 YOLOX 支持改变既有模型语义。
+`0.1.1rc0` release weights，预处理使用 2021-08-19 upstream breaking-change
+contract（`c9fe0aae2db90adccc90f7e5a16f044bf110c816`）：
+左上对齐 letterbox、114 border、BGR、raw FP32 0..255、CHW；**不**做
+BGR->RGB、`/255` 或 mean/std 标准化。YOLOX 的 0.1.1 pre-release notes 明确说明
+新权重移除了 normalization，旧权重因此不兼容。release tag 中仍保留 legacy
+mean/std 的 ONNXRuntime 示例，不能用来解释该 release asset 的输入数值域。
+现有其他 flavor 继续使用既有 RGB、0..1、居中 letterbox contract，因此不会因
+YOLOX 支持改变既有模型语义。
 
 用于 `raw-yolox` 的 ONNX 必须已经解码 grid/stride，使前四列为输入图像坐标系中的
 `cx,cy,w,h`。使用官方 Megvii YOLOX exporter 时应显式启用
