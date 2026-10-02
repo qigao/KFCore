@@ -44,6 +44,9 @@ jobs:
       HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
       REL_ONNX_SHA256: b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a
       PREDICATE_BANK_SHA256: 708f812d6579eab1be85b3378b79e376453c2d4f65b4fad9bcebb9f5bf05da06
+      YOLOX_SOURCE_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+      YOLOX_SOURCE_SHA256: 427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7
+      YOLOX_DEMO_URL: https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/e1052df71842031413f6030723c3607b839c80ce/assets/demo.png
       SALTS_VERSION: 1.8.9
       SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
       SALTS_UTILS_VERSION: 4.1.13
@@ -128,6 +131,12 @@ jobs:
             --predicate-bank "$root/predicate_bank.npz" \
             --out "$root/tensorrt-source.json"
 
+          curl -fL --retry 3 "$YOLOX_SOURCE_URL" -o "$root/yolox_tiny.onnx"
+          echo "$YOLOX_SOURCE_SHA256  $root/yolox_tiny.onnx" | sha256sum -c -
+          python3 tools/detector_qualification/prepare_yolox_tiny.py \
+            --source-onnx "$root/yolox_tiny.onnx" \
+            --out-dir "$RUNNER_TEMP/yolox-gpu-package"
+
       - name: Build one released dynamic-V TensorRT engine
         shell: bash
         run: |
@@ -172,6 +181,67 @@ jobs:
             --out-dir "$RUNNER_TEMP/released-gpu-package" \
             --hardware-compatibility exact-device
 
+      - name: Prepare real SceneBehavior smoke fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/released-gpu-source"
+          fixture="$RUNNER_TEMP/gpu-scene-fixture"
+          mkdir -p "$fixture/frames"
+          curl -fL --retry 3 "$YOLOX_DEMO_URL" -o "$fixture/demo.png"
+
+          python3 - <<'PY'
+          import os
+          import struct
+          from pathlib import Path
+
+          import numpy as np
+          from PIL import Image
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          source = root / "released-gpu-source"
+          fixture = root / "gpu-scene-fixture"
+
+          with Image.open(fixture / "demo.png") as image:
+              rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+          height, width, _ = rgb.shape
+          bgr = np.ascontiguousarray(rgb[:, :, ::-1])
+          (fixture / "frames" / "demo.bgr").write_bytes(
+              bgr.tobytes(order="C")
+          )
+          (fixture / "frames.tsv").write_text(
+              f"frames/demo.bgr\t{width}\t{height}\tdemo.png\n",
+              encoding="utf-8",
+          )
+
+          bank = np.load(
+              source / "predicate_bank.npz",
+              allow_pickle=True,
+          )
+          names = [str(value) for value in bank["names"]]
+          W = np.asarray(bank["W"], dtype=np.float32)
+          alpha = np.asarray(bank["alpha"], dtype=np.float32)
+          selected = [
+              str(value)
+              for value in bank["default"]
+          ][: min(14, len(bank["default"]))]
+          index = {name: i for i, name in enumerate(names)}
+          if not selected or any(name not in index for name in selected):
+              raise SystemExit("released default vocabulary cannot be resolved")
+          with (fixture / "vocabulary.bin").open("wb") as stream:
+              stream.write(b"KFRELVO1")
+              stream.write(struct.pack("<II", len(selected), 512))
+              for name in selected:
+                  row = index[name]
+                  encoded = name.encode("utf-8")
+                  stream.write(struct.pack("<I", len(encoded)))
+                  stream.write(encoded)
+                  stream.write(struct.pack("<f", float(alpha[row])))
+                  stream.write(
+                      np.asarray(W[row], dtype="<f4").tobytes(order="C")
+                  )
+          PY
+
       - name: Restore native SDK download cache
         uses: actions/cache@v4
         with:
@@ -208,24 +278,25 @@ jobs:
         run: |
           set -euxo pipefail
           cmake \
-            -S cmake/tests/relation_gpu_qualification \
-            -B build/relation-gpu \
+            -S cmake/tests/released_scene_behavior_gpu \
+            -B build/scene-gpu \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
-          cmake --build build/relation-gpu \
+          cmake --build build/scene-gpu \
             --target \
               kfcore_backend_onnxruntime \
               kfcore_backend_tensorrt \
               kfcore_released_relsgg_qualification \
+              kfcore_released_scene_behavior_latency \
             --parallel 2
 
       - name: Run C++ ORT CUDA production route
         shell: bash
         run: |
           set -euxo pipefail
-          exe="$GITHUB_WORKSPACE/build/relation-gpu/bin/kfcore_released_relsgg_qualification"
-          plugin="$GITHUB_WORKSPACE/build/relation-gpu/bin/libkfcore_backend_onnxruntime.so"
+          exe="$GITHUB_WORKSPACE/build/scene-gpu/bin/kfcore_released_relsgg_qualification"
+          plugin="$GITHUB_WORKSPACE/build/scene-gpu/bin/libkfcore_backend_onnxruntime.so"
           trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
 
@@ -240,8 +311,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          exe="$GITHUB_WORKSPACE/build/relation-gpu/bin/kfcore_released_relsgg_qualification"
-          plugin="$GITHUB_WORKSPACE/build/relation-gpu/bin/libkfcore_backend_tensorrt.so"
+          exe="$GITHUB_WORKSPACE/build/scene-gpu/bin/kfcore_released_relsgg_qualification"
+          plugin="$GITHUB_WORKSPACE/build/scene-gpu/bin/libkfcore_backend_tensorrt.so"
           trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
 
@@ -251,6 +322,45 @@ jobs:
             "$RUNNER_TEMP/released-tensorrt-runtime.json" \
             tensorrt \
             "${{ inputs.device_id }}"
+
+      - name: Run full C++ SceneBehavior on ORT CUDA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          exe="$GITHUB_WORKSPACE/build/scene-gpu/bin/kfcore_released_scene_behavior_latency"
+          ort="$GITHUB_WORKSPACE/build/scene-gpu/bin/libkfcore_backend_onnxruntime.so"
+          trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
+
+          "$exe" \
+            "$ort" "$ort" \
+            "$RUNNER_TEMP/yolox-gpu-package" \
+            "$RUNNER_TEMP/released-gpu-package" \
+            "$RUNNER_TEMP/gpu-scene-fixture/vocabulary.bin" \
+            "$RUNNER_TEMP/gpu-scene-fixture/frames.tsv" \
+            "$RUNNER_TEMP/scene-ort-cuda.jsonl" \
+            onnxruntime "${{ inputs.device_id }}" \
+            onnxruntime "${{ inputs.device_id }}"
+
+      - name: Run full C++ SceneBehavior with TensorRT relation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          exe="$GITHUB_WORKSPACE/build/scene-gpu/bin/kfcore_released_scene_behavior_latency"
+          ort="$GITHUB_WORKSPACE/build/scene-gpu/bin/libkfcore_backend_onnxruntime.so"
+          trt="$GITHUB_WORKSPACE/build/scene-gpu/bin/libkfcore_backend_tensorrt.so"
+          trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
+
+          "$exe" \
+            "$ort" "$trt" \
+            "$RUNNER_TEMP/yolox-gpu-package" \
+            "$RUNNER_TEMP/released-gpu-package" \
+            "$RUNNER_TEMP/gpu-scene-fixture/vocabulary.bin" \
+            "$RUNNER_TEMP/gpu-scene-fixture/frames.tsv" \
+            "$RUNNER_TEMP/scene-tensorrt.jsonl" \
+            onnxruntime "${{ inputs.device_id }}" \
+            tensorrt "${{ inputs.device_id }}"
 
       - name: Verify production routes
         shell: bash
@@ -293,6 +403,22 @@ jobs:
           assert ("onnxruntime", "cpu") in routes
           assert ("onnxruntime", "cuda") in routes
           assert ("tensorrt", "cuda") in routes
+
+          for name in ("scene-ort-cuda.jsonl", "scene-tensorrt.jsonl"):
+              rows = [
+                  json.loads(line)
+                  for line in (root / name).read_text().splitlines()
+                  if line.strip()
+              ]
+              assert len(rows) == 1
+              sample = rows[0]
+              assert sample["schema"] == "kfcore.scene-behavior-timing-sample/1"
+              assert sample["detection_count"] > 0
+              assert sample["tracked_object_count"] > 0
+              assert sample["detector_ms"] >= 0.0
+              assert sample["relation_ms"] >= 0.0
+              assert sample["temporal_ms"] >= 0.0
+              assert sample["total_ms"] >= 0.0
           PY
 
       - uses: actions/upload-artifact@v4
@@ -307,6 +433,10 @@ jobs:
             ${{ runner.temp }}/tensorrt-dynamic-v-report.json
             ${{ runner.temp }}/released-ort-cuda-runtime.json
             ${{ runner.temp }}/released-tensorrt-runtime.json
+            ${{ runner.temp }}/scene-ort-cuda.jsonl
+            ${{ runner.temp }}/scene-tensorrt.jsonl
+            ${{ runner.temp }}/yolox-gpu-package/model.json
+            ${{ runner.temp }}/yolox-gpu-package/evidence.json
 
       - name: Verify unchanged tracked sources
         if: always()
