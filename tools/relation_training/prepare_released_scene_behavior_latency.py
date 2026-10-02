@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import platform
 import struct
+import subprocess
 from typing import Any
 
 import numpy as np
@@ -79,6 +82,7 @@ def prepare(
     predicate_bank_path: str | Path,
     quality_report_path: str | Path,
     dataset_evidence_path: str | Path,
+    runtime_ort_version: str,
     out_dir: str | Path,
 ) -> dict[str, object]:
     root = Path(out_dir)
@@ -120,6 +124,13 @@ def prepare(
         raise ValueError("quality image corpus differs from fixture pixels")
     if evaluation.get("pair_weight") != 1.0:
         raise ValueError("released latency fixture requires pair_weight=1.0")
+    if not runtime_ort_version:
+        raise ValueError("runtime ONNX Runtime version must be non-empty")
+    python_ort_version = evaluation.get("onnxruntime_version")
+    if python_ort_version != runtime_ort_version:
+        raise ValueError(
+            "quality Python ORT and production ORT SDK versions differ"
+        )
     if evaluation.get("top_ks") != [20, 50, 100]:
         raise ValueError("released latency fixture requires top_k 20/50/100")
 
@@ -199,6 +210,32 @@ def prepare(
 
     write_vocabulary(root / "vocabulary.bin", vocabulary, W, alpha)
 
+    cpu_model = ""
+    cpuinfo = Path("/proc/cpuinfo")
+    if cpuinfo.is_file():
+        for line in cpuinfo.read_text(encoding="utf-8").splitlines():
+            if line.lower().startswith("model name"):
+                cpu_model = line.split(":", 1)[1].strip()
+                break
+    compiler = subprocess.check_output(
+        ["c++", "--version"],
+        text=True,
+    ).splitlines()[0]
+    runtime_provenance = {
+        "hardware": {
+            "machine": platform.machine(),
+            "cpu_model": cpu_model or platform.processor() or "unknown",
+            "logical_cpu_count": os.cpu_count(),
+        },
+        "software": {
+            "os": platform.platform(),
+            "python": platform.python_version(),
+            "onnxruntime_python": python_ort_version,
+            "onnxruntime_sdk": runtime_ort_version,
+            "compiler": compiler,
+        },
+    }
+
     context = {
         "schema": "kfcore.relation-qualification-context/1",
         "relation_model_sha256": ONNX_SHA256,
@@ -223,6 +260,7 @@ def prepare(
         "pair_weight": 1.0,
         "top_ks": [20, 50, 100],
         "tracking_sample_policy": "independent-epoch-warm-then-measure",
+        "runtime_provenance": runtime_provenance,
     }
     (root / "context.json").write_text(
         json.dumps(context, indent=2, sort_keys=True) + "\n",
@@ -256,6 +294,7 @@ def prepare(
             "config_sha256": detector_config_sha,
             "predictions_sha256": detector_predictions_sha,
         },
+        "runtime_provenance": runtime_provenance,
         "relation": {
             "onnx_sha256": ONNX_SHA256,
             "predicate_bank_sha256": PREDICATE_BANK_SHA256,
@@ -277,6 +316,7 @@ def main() -> None:
     parser.add_argument("--predicate-bank", required=True)
     parser.add_argument("--quality-report", required=True)
     parser.add_argument("--dataset-evidence", required=True)
+    parser.add_argument("--runtime-ort-version", required=True)
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args()
     report = prepare(
@@ -286,6 +326,7 @@ def main() -> None:
         predicate_bank_path=args.predicate_bank,
         quality_report_path=args.quality_report,
         dataset_evidence_path=args.dataset_evidence,
+        runtime_ort_version=args.runtime_ort_version,
         out_dir=args.out_dir,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
