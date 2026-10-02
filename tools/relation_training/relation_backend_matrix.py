@@ -6,6 +6,13 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
+from make_relation_qualification_report import (
+    context_digest as release_context_digest,
+    validate_context as validate_release_context,
+    validate_latency as validate_release_latency,
+    validate_quality as validate_release_quality,
+)
+
 
 MATRIX_SCHEMA = "kfcore.relation-backend-matrix/1"
 PROVENANCE_SCHEMA = "kfcore.relation-backend-provenance/1"
@@ -13,6 +20,7 @@ ORT_CPU_SCHEMA = "kfcore.relation-ort-cpu-cpp-qualification/1"
 TRT_SCHEMA = "kfcore.tensorrt-dynamic-vocab-qualification/1"
 QUALITY_SCHEMA = "kfcore.detector-box-relation-qualification/1"
 EXPORT_SCHEMA = "kfcore.relation-onnx/2"
+RELEASE_REPORT_SCHEMA = "kfcore.relation-qualification-report/1"
 
 _REQUIRED_CASES = (
     ("v1", 1),
@@ -488,6 +496,219 @@ def normalize_ort_cpu(
     return backend, host
 
 
+def normalize_released_deployment(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    if payload.get("schema") != RELEASE_REPORT_SCHEMA:
+        raise ValueError(
+            "unsupported released deployment qualification schema"
+        )
+
+    raw_context = payload.get("context")
+    raw_quality = payload.get("quality")
+    raw_latency = payload.get("latency")
+    if not isinstance(raw_context, dict):
+        raise ValueError("released deployment context is missing")
+    if not isinstance(raw_quality, dict):
+        raise ValueError("released deployment quality is missing")
+    if not isinstance(raw_latency, dict):
+        raise ValueError("released deployment latency is missing")
+
+    context = validate_release_context(raw_context)
+    quality = validate_release_quality(raw_quality)
+    latency = validate_release_latency(raw_latency)
+    digest = release_context_digest(context)
+    if payload.get("context_sha256") != digest:
+        raise ValueError("released deployment report context digest differs")
+    if latency.get("context_sha256") != digest:
+        raise ValueError("released deployment latency context digest differs")
+
+    if context.get("backend") != "onnxruntime":
+        raise ValueError("released deployment backend must be onnxruntime")
+    if context.get("device") != "cpu":
+        raise ValueError("released deployment device must be cpu")
+    if context.get("relation_model_type") != "relation.open-vocabulary":
+        raise ValueError(
+            "released deployment relation model type is unsupported"
+        )
+    if context.get("quality_input_contract") != "detector-boxes":
+        raise ValueError(
+            "released deployment must use detector-box quality evidence"
+        )
+
+    for key in (
+        "predicate_bank_sha256",
+        "detector_predictions_sha256",
+        "annotations_sha256",
+        "image_corpus_sha256",
+        "dataset_source_parquet_sha256",
+    ):
+        _sha(context.get(key), f"released context {key}")
+
+    pair_weight = _number(
+        context.get("pair_weight"),
+        "released context pair_weight",
+        minimum=-float("inf"),
+    )
+    top_ks = context.get("top_ks")
+    if (
+        not isinstance(top_ks, list)
+        or not top_ks
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            for value in top_ks
+        )
+        or top_ks != sorted(set(top_ks))
+    ):
+        raise ValueError("released context top_ks must be sorted positive ints")
+
+    quality_iou = _number(
+        context.get("quality_iou_threshold"),
+        "released context quality_iou_threshold",
+    )
+    if quality_iou <= 0.0 or quality_iou > 1.0:
+        raise ValueError(
+            "released context quality_iou_threshold must be within (0,1]"
+        )
+
+    detector = quality.get("detector")
+    if not isinstance(detector, dict):
+        raise ValueError("released quality detector block is missing")
+    if detector.get("id") != context["detector_id"]:
+        raise ValueError("released quality detector id differs from context")
+    if detector.get("model_sha256") != context["detector_model_sha256"]:
+        raise ValueError(
+            "released quality detector model differs from context"
+        )
+    if detector.get("config_sha256") != context["detector_config_sha256"]:
+        raise ValueError(
+            "released quality detector config differs from context"
+        )
+    if (
+        quality.get("detector_predictions_sha256")
+        != context["detector_predictions_sha256"]
+    ):
+        raise ValueError(
+            "released quality detector predictions differ from context"
+        )
+    if quality.get("annotations_sha256") != context["annotations_sha256"]:
+        raise ValueError(
+            "released quality annotations differ from context"
+        )
+    if abs(
+        float(detector.get("iou_threshold", -1.0))
+        - quality_iou
+    ) > 1.0e-9:
+        raise ValueError(
+            "released quality IoU threshold differs from context"
+        )
+
+    decomp = quality.get("failure_decomposition_at_max_k")
+    if not isinstance(decomp, dict):
+        raise ValueError("released quality failure decomposition is missing")
+    if decomp.get("max_k") != top_ks[-1]:
+        raise ValueError(
+            "released quality max-K differs from context top_ks"
+        )
+
+    runtime_provenance = context.get("runtime_provenance")
+    if not isinstance(runtime_provenance, dict):
+        raise ValueError("released runtime provenance is missing")
+    hardware = runtime_provenance.get("hardware")
+    software = runtime_provenance.get("software")
+    if not isinstance(hardware, dict) or not hardware:
+        raise ValueError("released hardware provenance is missing")
+    if not isinstance(software, dict) or not software:
+        raise ValueError("released software provenance is missing")
+    python_ort = software.get("onnxruntime_python")
+    sdk_ort = software.get("onnxruntime_sdk")
+    if (
+        not isinstance(python_ort, str)
+        or not python_ort
+        or python_ort != sdk_ort
+    ):
+        raise ValueError(
+            "released Python and C++ ONNX Runtime versions differ"
+        )
+
+    return {
+        "id": "upstream-released-onnxruntime-cpu",
+        "kind": "measured-full-production-deployment",
+        "lineage": {
+            "relation_model_sha256": context["relation_model_sha256"],
+            "relation_config_sha256": context["relation_config_sha256"],
+            "vocabulary_sha256": context["vocabulary_sha256"],
+            "predicate_bank_sha256": context["predicate_bank_sha256"],
+            "detector_model_sha256": context["detector_model_sha256"],
+            "detector_config_sha256": context["detector_config_sha256"],
+            "detector_predictions_sha256": context[
+                "detector_predictions_sha256"
+            ],
+            "annotations_sha256": context["annotations_sha256"],
+            "image_corpus_sha256": context["image_corpus_sha256"],
+            "dataset_revision": context.get("dataset_revision"),
+            "dataset_source_parquet_sha256": context[
+                "dataset_source_parquet_sha256"
+            ],
+        },
+        "score_decode_policy": {
+            "pair_weight": pair_weight,
+            "top_ks": list(top_ks),
+            "quality_iou_threshold": quality_iou,
+            "relation_config_sha256": context[
+                "relation_config_sha256"
+            ],
+        },
+        "quality": quality,
+        "latency": latency,
+        "runtime_provenance": runtime_provenance,
+        "context_sha256": digest,
+        "boundary": {
+            "host_query_scorer_reference_available": False,
+            "encoder_query_export_available": False,
+            "reason": (
+                "upstream released artifact publishes the dynamic-logit "
+                "deployment graph but no paired encoder/query export"
+            ),
+            "training_reproduction_complete": False,
+        },
+    }
+
+
+def make_released_deployment_matrix(
+    released_deployment_report: Mapping[str, object],
+) -> dict[str, object]:
+    deployment = normalize_released_deployment(
+        released_deployment_report
+    )
+    return {
+        "schema": MATRIX_SCHEMA,
+        "mode": "upstream-released-deployment",
+        "lineage": deployment["lineage"],
+        "quality": deployment["quality"],
+        "score_decode_policy": deployment["score_decode_policy"],
+        "backends": [deployment],
+        "optional_engine_qualifications": [],
+        "availability": {
+            "onnxruntime_cpu": True,
+            "host_query_scorer_reference": False,
+            "onnxruntime_cuda": False,
+            "tensorrt_full_relation": False,
+            "tensorrt_engine_proof": False,
+        },
+        "acceptance": {
+            "quality_and_latency_together": True,
+            "score_decode_policy_shared": True,
+            "hardware_software_provenance_explicit": True,
+            "released_context_digest_valid": True,
+            "baseline_pair_keyed_output_parity_applicable": False,
+        },
+        "boundary": deployment["boundary"],
+    }
+
+
 def normalize_tensorrt_engine(
     payload: Mapping[str, object],
     lineage: Mapping[str, object],
@@ -566,6 +787,7 @@ def make_matrix(
     ort_cpu_report: Mapping[str, object],
     ort_cpu_provenance: Mapping[str, object],
     tensorrt_report: Mapping[str, object] | None = None,
+    released_deployment_report: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     lineage = validate_export_pair(dynamic_export, encoder_export)
     quality = validate_quality(quality_report, lineage)
@@ -582,6 +804,14 @@ def make_matrix(
             normalize_tensorrt_engine(tensorrt_report, lineage)
         )
 
+    measured_deployments: list[dict[str, object]] = []
+    if released_deployment_report is not None:
+        measured_deployments.append(
+            normalize_released_deployment(
+                released_deployment_report
+            )
+        )
+
     return {
         "schema": MATRIX_SCHEMA,
         "lineage": {
@@ -596,6 +826,7 @@ def make_matrix(
             ort_cpu,
         ],
         "optional_engine_qualifications": optional,
+        "measured_deployments": measured_deployments,
         "availability": {
             "onnxruntime_cpu": True,
             "host_query_scorer_reference": True,
@@ -608,6 +839,7 @@ def make_matrix(
             "score_decode_policy_shared": True,
             "pair_keyed_output_parity": True,
             "hardware_software_provenance_explicit": True,
+            "released_deployment_attachments_valid": True,
         },
     }
 
@@ -615,31 +847,69 @@ def make_matrix(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a deterministic KFCore relation backend parity/latency matrix "
-            "from one checkpoint/export lineage and detector-box quality report."
+            "Build a deterministic KFCore relation backend matrix from "
+            "either the KFCore paired-export parity lineage or a measured "
+            "upstream released deployment qualification."
         )
     )
-    parser.add_argument("--quality", required=True)
-    parser.add_argument("--dynamic-export", required=True)
-    parser.add_argument("--encoder-export", required=True)
-    parser.add_argument("--ort-cpu", required=True)
-    parser.add_argument("--ort-cpu-provenance", required=True)
+    parser.add_argument("--quality")
+    parser.add_argument("--dynamic-export")
+    parser.add_argument("--encoder-export")
+    parser.add_argument("--ort-cpu")
+    parser.add_argument("--ort-cpu-provenance")
     parser.add_argument("--tensorrt")
+    parser.add_argument("--released-deployment")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
-    matrix = make_matrix(
-        quality_report=load_json(args.quality),
-        dynamic_export=load_json(args.dynamic_export),
-        encoder_export=load_json(args.encoder_export),
-        ort_cpu_report=load_json(args.ort_cpu),
-        ort_cpu_provenance=load_json(args.ort_cpu_provenance),
-        tensorrt_report=(
-            load_json(args.tensorrt)
-            if args.tensorrt
-            else None
-        ),
+    baseline_args = (
+        args.quality,
+        args.dynamic_export,
+        args.encoder_export,
+        args.ort_cpu,
+        args.ort_cpu_provenance,
     )
+    baseline_selected = any(value is not None for value in baseline_args)
+    if baseline_selected and not all(
+        value is not None for value in baseline_args
+    ):
+        parser.error(
+            "paired-export matrix mode requires --quality, "
+            "--dynamic-export, --encoder-export, --ort-cpu and "
+            "--ort-cpu-provenance together"
+        )
+    if not baseline_selected and not args.released_deployment:
+        parser.error(
+            "select paired-export inputs or --released-deployment"
+        )
+    if args.tensorrt and not baseline_selected:
+        parser.error(
+            "--tensorrt requires the paired-export baseline lineage"
+        )
+
+    released = (
+        load_json(args.released_deployment)
+        if args.released_deployment
+        else None
+    )
+    if baseline_selected:
+        matrix = make_matrix(
+            quality_report=load_json(args.quality),
+            dynamic_export=load_json(args.dynamic_export),
+            encoder_export=load_json(args.encoder_export),
+            ort_cpu_report=load_json(args.ort_cpu),
+            ort_cpu_provenance=load_json(args.ort_cpu_provenance),
+            tensorrt_report=(
+                load_json(args.tensorrt)
+                if args.tensorrt
+                else None
+            ),
+            released_deployment_report=released,
+        )
+    else:
+        assert released is not None
+        matrix = make_released_deployment_matrix(released)
+
     output = Path(args.out)
     if output.exists():
         raise FileExistsError(output)
