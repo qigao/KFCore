@@ -26,6 +26,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       HICO_REVISION: 4d65d61c99931737c2b7a9636c7e3501eab69850
+      HICO_TEST_SHARD_SHA256: b02dd7ad2aa6103a974c3323bfce8f28224824e27fb0362a5825412d64e40db4
       YOLOX_SOURCE_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
       YOLOX_SOURCE_SHA256: 427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7
       HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
@@ -59,7 +60,7 @@ jobs:
           set -euxo pipefail
           python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-ci-torch.txt
           python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-ci.txt
-          python -m pip install --disable-pip-version-check             datasets==3.6.0
+          python -m pip install --disable-pip-version-check             pyarrow==25.0.1
 
       - name: Compile and run focused qualification tests
         shell: bash
@@ -91,8 +92,10 @@ jobs:
           set -euxo pipefail
           hico="$RUNNER_TEMP/hico-test"
           curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/list_action.csv"             -o "$RUNNER_TEMP/list_action.csv"
+          curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/data/test-00000-of-00004.parquet"             -o "$RUNNER_TEMP/hico-test-00000.parquet"
+          echo "$HICO_TEST_SHARD_SHA256  $RUNNER_TEMP/hico-test-00000.parquet" | sha256sum -c -
 
-          python tools/relation_training/prepare_hico_test_qualification.py             --list-action "$RUNNER_TEMP/list_action.csv"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --revision "$HICO_REVISION"             --max-images 32             --out-dir "$hico"
+          python tools/relation_training/prepare_hico_test_qualification.py             --list-action "$RUNNER_TEMP/list_action.csv"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --parquet "$RUNNER_TEMP/hico-test-00000.parquet"             --revision "$HICO_REVISION"             --max-images 32             --out-dir "$hico"
 
           python - <<'PY'
           import json
@@ -102,6 +105,7 @@ jobs:
           evidence = json.loads((root / "evidence.json").read_text())
           assert evidence["dataset"]["revision"] == os.environ["HICO_REVISION"]
           assert evidence["dataset"]["split"] == "test"
+          assert evidence["dataset"]["source_parquet"]["sha256"] == os.environ["HICO_TEST_SHARD_SHA256"]
           assert evidence["selection"]["images"] == 32
           assert evidence["selection"]["relations"] > 0
           assert evidence["selection"]["predicate_count"] > 0
