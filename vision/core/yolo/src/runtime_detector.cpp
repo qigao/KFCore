@@ -151,6 +151,98 @@ kfcore::image::ImageView to_image_view(const ImageView& image)
             format, kfcore::image::MemoryKind::Host};
 }
 
+std::vector<float> preprocess_raw_yolox_release(
+    const kfcore::image::ImageView& source,
+    std::int32_t destination_width,
+    std::int32_t destination_height,
+    const YoloDetectorOptions& options,
+    kfcore::image::LetterboxTransform* transform)
+{
+    if (transform == nullptr)
+    {
+        throw_invalid("raw-yolox letterbox transform output must not be null");
+    }
+    const auto packed =
+        kfcore::image::CpuImageProcessor::copy_bgr(
+            source,
+            options.max_source_bytes);
+    const float scale = (std::min)(
+        static_cast<float>(destination_width) /
+            static_cast<float>(packed.width),
+        static_cast<float>(destination_height) /
+            static_cast<float>(packed.height));
+    const std::int32_t resized_width = (std::max)(
+        1,
+        static_cast<std::int32_t>(
+            static_cast<float>(packed.width) * scale));
+    const std::int32_t resized_height = (std::max)(
+        1,
+        static_cast<std::int32_t>(
+            static_cast<float>(packed.height) * scale));
+    const auto resized =
+        kfcore::image::CpuImageProcessor::resize_bgr(
+            packed,
+            resized_width,
+            resized_height,
+            options.max_source_bytes);
+
+    std::size_t elements = checked_multiply(
+        static_cast<std::size_t>(destination_width),
+        static_cast<std::size_t>(destination_height),
+        "raw-yolox input tensor");
+    elements = checked_multiply(
+        elements,
+        kChannels,
+        "raw-yolox input tensor");
+    const std::size_t bytes = checked_multiply(
+        elements,
+        sizeof(float),
+        "raw-yolox input tensor");
+    if (bytes > options.max_tensor_bytes)
+    {
+        throw_resource("raw-yolox input tensor exceeds max_tensor_bytes");
+    }
+
+    std::vector<float> result(elements, options.border_value);
+    const std::size_t plane =
+        static_cast<std::size_t>(destination_width) *
+        static_cast<std::size_t>(destination_height);
+    for (std::int32_t y = 0; y < resized_height; ++y)
+    {
+        for (std::int32_t x = 0; x < resized_width; ++x)
+        {
+            const std::int32_t source_x =
+                options.mirror_horizontal
+                    ? resized_width - 1 - x
+                    : x;
+            const std::size_t source_pixel =
+                (static_cast<std::size_t>(y) *
+                     static_cast<std::size_t>(resized_width) +
+                 static_cast<std::size_t>(source_x)) *
+                kChannels;
+            const std::size_t destination_pixel =
+                static_cast<std::size_t>(y) *
+                    static_cast<std::size_t>(destination_width) +
+                static_cast<std::size_t>(x);
+            result[destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel]);
+            result[plane + destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel + 1U]);
+            result[2U * plane + destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel + 2U]);
+        }
+    }
+
+    *transform = {
+        scale,
+        0.0F,
+        0.0F,
+        packed.width,
+        packed.height,
+    };
+    return result;
+}
+
 std::size_t element_size(runtime::DataType type)
 {
     using runtime::DataType;
@@ -702,24 +794,28 @@ DetectionFrame YoloDetector::detect(const ImageView& image)
         preprocess.border_value = impl_->options.border_value;
         preprocess.mirror_horizontal =
             impl_->options.mirror_horizontal;
+        kfcore::image::LetterboxTransform transform;
+        std::vector<float> input;
         if (impl_->layout == Impl::OutputLayout::RawYoloX)
         {
-            preprocess.center_letterbox = false;
-            preprocess.mean = {
-                0.485F,
-                0.456F,
-                0.406F,
-            };
-            preprocess.stddev = {
-                0.229F,
-                0.224F,
-                0.225F,
-            };
+            input = preprocess_raw_yolox_release(
+                source,
+                impl_->input_width_value,
+                impl_->input_height_value,
+                impl_->options,
+                &transform);
         }
-        kfcore::image::LetterboxTransform transform;
-        std::vector<float> input = kfcore::image::CpuImageProcessor::letterbox_nchw(
-            source, impl_->input_width_value, impl_->input_height_value, preprocess,
-            impl_->options.max_source_bytes, impl_->options.max_tensor_bytes, &transform);
+        else
+        {
+            input = kfcore::image::CpuImageProcessor::letterbox_nchw(
+                source,
+                impl_->input_width_value,
+                impl_->input_height_value,
+                preprocess,
+                impl_->options.max_source_bytes,
+                impl_->options.max_tensor_bytes,
+                &transform);
+        }
 
         std::vector<std::uint16_t> half_input;
         const void* input_data = input.data();
