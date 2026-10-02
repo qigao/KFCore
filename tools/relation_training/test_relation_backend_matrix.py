@@ -6,8 +6,10 @@ import unittest
 from relation_backend_matrix import (
     MATRIX_SCHEMA,
     make_matrix,
+    make_released_deployment_matrix,
     stable_json,
 )
+from make_relation_qualification_report import context_digest
 
 
 def h(char: str) -> str:
@@ -203,8 +205,155 @@ def tensorrt_report() -> dict[str, object]:
     }
 
 
+def released_context() -> dict[str, object]:
+    return {
+        "schema": "kfcore.relation-qualification-context/1",
+        "relation_model_sha256": h("a"),
+        "vocabulary_sha256": h("b"),
+        "relation_config_sha256": h("c"),
+        "detector_model_sha256": h("d"),
+        "detector_config_sha256": h("e"),
+        "backend": "onnxruntime",
+        "device": "cpu",
+        "relation_model_type": "relation.open-vocabulary",
+        "detector_id": "yolox-tiny",
+        "max_boxes": 32,
+        "vocabulary_size": 14,
+        "predicate_bank_sha256": h("f"),
+        "detector_predictions_sha256": h("1"),
+        "annotations_sha256": h("2"),
+        "image_corpus_sha256": h("3"),
+        "dataset": "HICO-DET test",
+        "dataset_revision": "fixture-revision",
+        "dataset_source_parquet_sha256": h("4"),
+        "quality_input_contract": "detector-boxes",
+        "quality_iou_threshold": 0.5,
+        "pair_weight": 1.0,
+        "top_ks": [20, 50, 100],
+        "tracking_sample_policy": "independent-epoch-warm-then-measure",
+        "runtime_provenance": {
+            "hardware": {
+                "machine": "x86_64",
+                "cpu_model": "fixture-cpu",
+                "logical_cpu_count": 4,
+            },
+            "software": {
+                "os": "fixture-os",
+                "python": "3.11.0",
+                "onnxruntime_python": "1.22.0",
+                "onnxruntime_sdk": "1.22.0",
+                "compiler": "fixture-c++",
+            },
+        },
+    }
+
+
+def released_quality() -> dict[str, object]:
+    return {
+        "schema": "kfcore.detector-relation-ceiling/1",
+        "examples": 32,
+        "annotations_sha256": h("2"),
+        "detector_predictions_sha256": h("1"),
+        "detector": {
+            "id": "yolox-tiny",
+            "model_sha256": h("d"),
+            "config_sha256": h("e"),
+            "iou_threshold": 0.5,
+            "boxes_before_cap": 303,
+            "boxes_used": 303,
+        },
+        "ground_truth_objects": 74,
+        "recoverable_ground_truth_objects": 63,
+        "object_recoverability_ceiling": 0.85,
+        "ground_truth_directed_pairs": 38,
+        "recoverable_directed_pairs": 26,
+        "directed_pair_recoverability_ceiling": 0.68,
+        "sampled_recoverable_pairs": 26,
+        "sampler_recall_conditional_on_recoverable_pairs": 1.0,
+        "sampler_pair_recall_end_to_end": 0.68,
+        "ground_truth_triplets": 53,
+        "recoverable_ground_truth_triplets": 36,
+        "sampled_recoverable_triplets": 36,
+        "conditional_recall_at_k": {
+            "20": 0.86,
+            "50": 0.94,
+            "100": 0.94,
+        },
+        "end_to_end_recall_at_k": {
+            "20": 0.58,
+            "50": 0.64,
+            "100": 0.64,
+        },
+        "conditional_mean_recall_at_k": {
+            "20": 0.83,
+            "50": 0.91,
+            "100": 0.91,
+        },
+        "end_to_end_mean_recall_at_k": {
+            "20": 0.60,
+            "50": 0.66,
+            "100": 0.66,
+        },
+        "failure_decomposition_at_max_k": {
+            "max_k": 100,
+            "detector_miss": 17,
+            "sampler_miss": 0,
+            "predicate_miss": 2,
+            "recovered": 34,
+        },
+    }
+
+
+def released_latency(context_sha: str) -> dict[str, object]:
+    stats = {
+        "p50": 1.0,
+        "p90": 2.0,
+        "p95": 3.0,
+        "p99": 4.0,
+        "mean": 2.0,
+    }
+    return {
+        "schema": "kfcore.scene-behavior-latency/1",
+        "context_sha256": context_sha,
+        "samples": 32,
+        "percentile_method": "nearest-rank",
+        "stages_ms": {
+            name: dict(stats)
+            for name in (
+                "detector",
+                "tracker",
+                "region_prepare",
+                "relation",
+                "assembly",
+                "temporal",
+                "total",
+            )
+        },
+        "cardinality": {
+            "detections_mean": 9.0,
+            "tracked_objects_mean": 9.0,
+            "relation_edges_mean": 50.0,
+            "events_mean": 0.0,
+            "pair_states_mean": 7.0,
+        },
+        "scene_graph_total_ms": dict(stats),
+    }
+
+
+def released_report() -> dict[str, object]:
+    context = released_context()
+    digest = context_digest(context)
+    return {
+        "schema": "kfcore.relation-qualification-report/1",
+        "context_sha256": digest,
+        "context": context,
+        "quality": released_quality(),
+        "latency": released_latency(digest),
+    }
+
+
 class RelationBackendMatrixTest(unittest.TestCase):
-    def build(self, *, trt=None):
+    def build(self, *, trt=None, released=None):
         return make_matrix(
             quality_report=quality_report(),
             dynamic_export=export_metadata(),
@@ -212,6 +361,7 @@ class RelationBackendMatrixTest(unittest.TestCase):
             ort_cpu_report=ort_cpu_report(),
             ort_cpu_provenance=provenance(),
             tensorrt_report=trt,
+            released_deployment_report=released,
         )
 
     def test_builds_deterministic_quality_latency_matrix(self):
@@ -320,6 +470,84 @@ class RelationBackendMatrixTest(unittest.TestCase):
             "engine-only",
         )
         self.assertFalse(evidence["full_relation_stage_latency"])
+
+    def test_released_deployment_matrix_is_explicitly_separate(self):
+        report = released_report()
+        matrix = make_released_deployment_matrix(report)
+        self.assertEqual(matrix["schema"], MATRIX_SCHEMA)
+        self.assertEqual(
+            matrix["mode"],
+            "upstream-released-deployment",
+        )
+        self.assertEqual(
+            [row["id"] for row in matrix["backends"]],
+            ["upstream-released-onnxruntime-cpu"],
+        )
+        self.assertTrue(
+            matrix["acceptance"]["quality_and_latency_together"]
+        )
+        self.assertTrue(
+            matrix["acceptance"]["released_context_digest_valid"]
+        )
+        self.assertFalse(
+            matrix["acceptance"][
+                "baseline_pair_keyed_output_parity_applicable"
+            ]
+        )
+        self.assertFalse(
+            matrix["availability"]["host_query_scorer_reference"]
+        )
+        self.assertFalse(
+            matrix["boundary"]["encoder_query_export_available"]
+        )
+
+    def test_released_deployment_can_attach_without_changing_baseline(self):
+        matrix = self.build(released=released_report())
+        self.assertEqual(
+            [row["id"] for row in matrix["backends"]],
+            [
+                "host-query-scorer-reference",
+                "onnxruntime-cpu",
+            ],
+        )
+        self.assertEqual(
+            len(matrix["measured_deployments"]),
+            1,
+        )
+        self.assertEqual(
+            matrix["measured_deployments"][0]["id"],
+            "upstream-released-onnxruntime-cpu",
+        )
+        self.assertTrue(
+            matrix["acceptance"]["pair_keyed_output_parity"]
+        )
+
+    def test_released_deployment_rejects_context_digest_drift(self):
+        report = released_report()
+        report["context_sha256"] = h("9")
+        with self.assertRaisesRegex(
+            ValueError,
+            "context digest differs",
+        ):
+            make_released_deployment_matrix(report)
+
+    def test_released_deployment_rejects_detector_prediction_drift(self):
+        report = released_report()
+        report["quality"]["detector_predictions_sha256"] = h("9")
+        with self.assertRaisesRegex(
+            ValueError,
+            "detector predictions differ",
+        ):
+            make_released_deployment_matrix(report)
+
+    def test_released_deployment_rejects_quality_iou_drift(self):
+        report = released_report()
+        report["quality"]["detector"]["iou_threshold"] = 0.6
+        with self.assertRaisesRegex(
+            ValueError,
+            "IoU threshold differs",
+        ):
+            make_released_deployment_matrix(report)
 
     def test_tensorrt_must_use_same_dynamic_onnx(self):
         trt = tensorrt_report()

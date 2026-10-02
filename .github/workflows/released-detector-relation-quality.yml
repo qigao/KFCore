@@ -11,6 +11,8 @@ on:
       - 'tools/relation_training/prepare_released_relsgg.py'
       - 'tools/relation_training/summarize_scene_behavior_latency.py'
       - 'tools/relation_training/make_relation_qualification_report.py'
+      - 'tools/relation_training/relation_backend_matrix.py'
+      - 'tools/relation_training/test_relation_backend_matrix.py'
       - 'scene_interaction/tests/released_scene_behavior_latency.cpp'
       - 'scene_interaction/CMakeLists.txt'
       - 'CMakeOptions.cmake'
@@ -87,9 +89,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python -m py_compile             tools/detector_qualification/run_yolox_detector_manifest.py             tools/relation_training/prepare_hico_test_qualification.py             tools/relation_training/run_released_detector_relation_qualification.py             tools/relation_training/prepare_released_scene_behavior_latency.py             tools/relation_training/prepare_released_relsgg.py             tools/relation_training/summarize_scene_behavior_latency.py             tools/relation_training/make_relation_qualification_report.py             tools/relation_training/test_prepare_hico_test_qualification.py             tools/relation_training/test_released_detector_relation_qualification.py
+          python -m py_compile             tools/detector_qualification/run_yolox_detector_manifest.py             tools/relation_training/prepare_hico_test_qualification.py             tools/relation_training/run_released_detector_relation_qualification.py             tools/relation_training/prepare_released_scene_behavior_latency.py             tools/relation_training/prepare_released_relsgg.py             tools/relation_training/summarize_scene_behavior_latency.py             tools/relation_training/make_relation_qualification_report.py             tools/relation_training/relation_backend_matrix.py             tools/relation_training/test_relation_backend_matrix.py             tools/relation_training/test_prepare_hico_test_qualification.py             tools/relation_training/test_released_detector_relation_qualification.py
           cd tools/relation_training
-          python -m unittest -v             test_prepare_hico_test_qualification.py             test_released_detector_relation_qualification.py
+          python -m unittest -v             test_prepare_hico_test_qualification.py             test_released_detector_relation_qualification.py             test_relation_backend_matrix.py
 
       - name: Download pinned relation and detector artifacts
         shell: bash
@@ -400,6 +402,10 @@ jobs:
             --out-json "$RUNNER_TEMP/released-quality-latency-report.json" \
             --out-md "$RUNNER_TEMP/released-quality-latency-report.md"
 
+          python tools/relation_training/relation_backend_matrix.py \
+            --released-deployment "$RUNNER_TEMP/released-quality-latency-report.json" \
+            --out "$RUNNER_TEMP/released-deployment-backend-matrix.json"
+
           python - <<'PY'
           import json
           import os
@@ -408,12 +414,20 @@ jobs:
           report = json.loads(
               (root / "released-quality-latency-report.json").read_text()
           )
+          matrix = json.loads(
+              (root / "released-deployment-backend-matrix.json").read_text()
+          )
           latency = report["latency"]
           assert latency["samples"] == 32
           assert latency["context_sha256"] == report["context_sha256"]
           assert latency["cardinality"]["detections_mean"] > 0
           assert latency["cardinality"]["tracked_objects_mean"] > 0
           assert report["quality"]["object_recoverability_ceiling"] > 0
+          assert matrix["mode"] == "upstream-released-deployment"
+          assert matrix["acceptance"]["released_context_digest_valid"] is True
+          assert matrix["acceptance"]["quality_and_latency_together"] is True
+          assert matrix["availability"]["host_query_scorer_reference"] is False
+          assert matrix["backends"][0]["context_sha256"] == report["context_sha256"]
           print(json.dumps(latency, indent=2, sort_keys=True))
           PY
 
@@ -434,6 +448,7 @@ jobs:
             ${{ runner.temp }}/scene-behavior-latency.json
             ${{ runner.temp }}/released-quality-latency-report.json
             ${{ runner.temp }}/released-quality-latency-report.md
+            ${{ runner.temp }}/released-deployment-backend-matrix.json
 
       - name: Verify unchanged tracked sources
         if: always()
