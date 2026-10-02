@@ -42,6 +42,7 @@ class ReleasedTensorRtSourceTest(unittest.TestCase):
                     predicate_bank_path=bank,
                     out_path=out,
                 )
+            self.assertTrue(out.is_file())
 
         self.assertEqual(report["schema"], "kfcore.relation-onnx/2")
         self.assertEqual(report["model_type"], "relation.open-vocabulary")
@@ -57,7 +58,6 @@ class ReleasedTensorRtSourceTest(unittest.TestCase):
             report["source"]["kind"],
             "upstream-released-deployment",
         )
-        self.assertTrue(out.is_file())
 
     def test_rejects_default_outside_bank(self):
         with tempfile.TemporaryDirectory() as directory:
