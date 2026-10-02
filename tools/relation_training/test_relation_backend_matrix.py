@@ -6,8 +6,10 @@ import unittest
 from relation_backend_matrix import (
     MATRIX_SCHEMA,
     make_matrix,
+    make_released_matrix,
     stable_json,
 )
+from make_relation_qualification_report import context_digest
 
 
 def h(char: str) -> str:
@@ -203,6 +205,113 @@ def tensorrt_report() -> dict[str, object]:
     }
 
 
+
+def released_context() -> dict[str, object]:
+    return {
+        "schema": "kfcore.relation-qualification-context/1",
+        "relation_model_sha256": h("1"),
+        "vocabulary_sha256": h("2"),
+        "relation_config_sha256": h("3"),
+        "detector_model_sha256": h("4"),
+        "detector_config_sha256": h("5"),
+        "backend": "onnxruntime",
+        "device": "cpu",
+        "relation_model_type": "relation.open-vocabulary",
+        "detector_id": "yolox-tiny-coco-0.1.1rc0",
+        "max_boxes": 32,
+        "vocabulary_size": 14,
+        "predicate_bank_sha256": h("6"),
+        "detector_predictions_sha256": h("7"),
+        "annotations_sha256": h("8"),
+        "image_corpus_sha256": h("9"),
+        "pair_weight": 1.0,
+        "top_ks": [20, 50, 100],
+        "runtime_provenance": {
+            "hardware": {
+                "machine": "x86_64",
+                "cpu_model": "fixture-cpu",
+                "logical_cpu_count": 4,
+            },
+            "software": {
+                "os": "fixture-os",
+                "python": "3.11",
+                "onnxruntime_python": "1.22.0",
+                "onnxruntime_sdk": "1.22.0",
+                "compiler": "fixture-c++",
+            },
+        },
+    }
+
+
+def released_quality() -> dict[str, object]:
+    return {
+        "schema": "kfcore.detector-relation-ceiling/1",
+        "examples": 32,
+        "detector": {
+            "id": "yolox-tiny-coco-0.1.1rc0",
+            "model_sha256": h("4"),
+            "config_sha256": h("5"),
+        },
+        "object_recoverability_ceiling": 0.85,
+        "directed_pair_recoverability_ceiling": 0.68,
+        "sampler_recall_conditional_on_recoverable_pairs": 1.0,
+        "sampler_pair_recall_end_to_end": 0.68,
+        "ground_truth_triplets": 53,
+        "failure_decomposition_at_max_k": {
+            "max_k": 100,
+            "detector_miss": 17,
+            "sampler_miss": 0,
+            "predicate_miss": 2,
+            "recovered": 34,
+        },
+    }
+
+
+def released_latency(digest: str) -> dict[str, object]:
+    stages = {}
+    for name, base in (
+        ("detector", 80.0),
+        ("tracker", 0.04),
+        ("region_prepare", 0.001),
+        ("relation", 500.0),
+        ("assembly", 0.001),
+        ("temporal", 0.01),
+        ("total", 590.0),
+    ):
+        stages[name] = {
+            "p50": base,
+            "p90": base + 1.0,
+            "p95": base + 2.0,
+            "p99": base + 3.0,
+            "mean": base + 0.5,
+        }
+    return {
+        "schema": "kfcore.scene-behavior-latency/1",
+        "context_sha256": digest,
+        "samples": 32,
+        "stages_ms": stages,
+        "cardinality": {
+            "detections_mean": 9.4,
+            "tracked_objects_mean": 9.4,
+            "relation_edges_mean": 50.0,
+            "events_mean": 0.0,
+            "pair_states_mean": 7.0,
+        },
+    }
+
+
+def released_report() -> dict[str, object]:
+    context = released_context()
+    digest = context_digest(context)
+    return {
+        "schema": "kfcore.relation-qualification-report/1",
+        "context_sha256": digest,
+        "context": context,
+        "quality": released_quality(),
+        "latency": released_latency(digest),
+    }
+
+
 class RelationBackendMatrixTest(unittest.TestCase):
     def build(self, *, trt=None):
         return make_matrix(
@@ -329,6 +438,59 @@ class RelationBackendMatrixTest(unittest.TestCase):
             "source ONNX",
         ):
             self.build(trt=trt)
+
+
+
+class ReleasedRelationBackendMatrixTest(unittest.TestCase):
+    def test_released_matrix_keeps_missing_encoder_explicit(self):
+        matrix = make_released_matrix(released_report())
+        self.assertEqual(matrix["schema"], MATRIX_SCHEMA)
+        self.assertEqual(
+            matrix["lineage"]["kind"],
+            "upstream-released-deployment",
+        )
+        self.assertFalse(
+            matrix["availability"]["encoder_export_available"]
+        )
+        self.assertFalse(
+            matrix["availability"]["host_query_scorer_reference"]
+        )
+        self.assertFalse(
+            matrix["acceptance"]["pair_keyed_output_parity"]
+        )
+        self.assertTrue(
+            matrix["acceptance"]["no_synthetic_encoder_lineage"]
+        )
+        self.assertEqual(
+            matrix["backends"][0]["measurement_scope"],
+            "full-scene-behavior",
+        )
+        self.assertTrue(
+            matrix["acceptance"]["quality_and_latency_together"]
+        )
+
+    def test_released_matrix_rejects_context_digest_drift(self):
+        report = released_report()
+        report["context_sha256"] = h("a")
+        with self.assertRaisesRegex(
+            ValueError,
+            "context digest differs",
+        ):
+            make_released_matrix(report)
+
+    def test_released_matrix_rejects_detector_lineage_drift(self):
+        report = released_report()
+        report["quality"]["detector"]["model_sha256"] = h("b")
+        with self.assertRaisesRegex(
+            ValueError,
+            "detector model differs",
+        ):
+            make_released_matrix(report)
+
+    def test_released_matrix_is_deterministic(self):
+        first = make_released_matrix(released_report())
+        second = make_released_matrix(released_report())
+        self.assertEqual(stable_json(first), stable_json(second))
 
 
 if __name__ == "__main__":
