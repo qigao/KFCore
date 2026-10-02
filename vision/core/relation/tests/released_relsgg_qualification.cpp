@@ -47,28 +47,71 @@ void require(bool condition, const char* message)
     }
 }
 
+bool valid_backend_id(const std::string& value)
+{
+    return value == "onnxruntime" || value == "tensorrt";
+}
+
+bool valid_device_id(const std::string& value)
+{
+    if (value == "cpu" || value == "cuda")
+    {
+        return true;
+    }
+    if (value.rfind("cuda:", 0U) != 0U || value.size() <= 5U)
+    {
+        return false;
+    }
+    for (std::size_t index = 5U; index < value.size(); ++index)
+    {
+        if (value[index] < '0' || value[index] > '9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 4)
+        if (argc != 4 && argc != 6)
         {
             std::cerr
                 << "usage: released_relsgg_qualification "
-                << "<plugin> <package-dir> <report.json>\n";
+                << "<plugin> <package-dir> <report.json> "
+                   "[<backend-id> <device-id>]\n";
             return 2;
         }
 
         const std::filesystem::path plugin_path(argv[1]);
         const std::filesystem::path package_path(argv[2]);
         const std::filesystem::path report_path(argv[3]);
+        const std::string backend_id =
+            argc == 6 ? std::string(argv[4]) : "onnxruntime";
+        const std::string device_id =
+            argc == 6 ? std::string(argv[5]) : "cpu";
+        require(
+            valid_backend_id(backend_id),
+            "released qualification backend must be onnxruntime or tensorrt");
+        require(
+            valid_device_id(device_id),
+            "released qualification device must be cpu, cuda, or cuda:N");
+        if (backend_id == "tensorrt")
+        {
+            require(
+                device_id == "cuda" ||
+                    device_id.rfind("cuda:", 0U) == 0U,
+                "TensorRT qualification requires an explicit CUDA device");
+        }
 
         kfcore::runtime::Runtime runtime;
         const auto backend = runtime.load_backend(plugin_path);
         require(
-            backend->id() == "onnxruntime",
+            backend->id() == backend_id,
             "released qualification loaded wrong backend");
 
         const auto package =
@@ -95,17 +138,17 @@ int main(int argc, char** argv)
                 runtime,
                 package,
                 kfcore::runtime::ExecutionPolicy::exact(
-                    "onnxruntime",
-                    "cpu"),
+                    backend_id,
+                    device_id),
                 options);
 
         require(
             relation->backend_scoring(),
             "released graph did not select backend scoring");
         require(
-            relation->execution_route().backend_id == "onnxruntime" &&
-                relation->execution_route().device_id == "cpu",
-            "released graph did not resolve to ORT CPU");
+            relation->execution_route().backend_id == backend_id &&
+                relation->execution_route().device_id == device_id,
+            "released graph did not resolve to requested backend/device");
 
         std::vector<std::uint8_t> pixels(
             448U * 448U * 3U,
@@ -159,8 +202,8 @@ int main(int argc, char** argv)
             << "  \"schema\": "
                "\"kfcore.released-relsgg-runtime-qualification/1\",\n"
             << "  \"passed\": true,\n"
-            << "  \"provider\": \"onnxruntime\",\n"
-            << "  \"device\": \"cpu\",\n"
+            << "  \"provider\": \"" << backend_id << "\",\n"
+            << "  \"device\": \"" << device_id << "\",\n"
             << "  \"backend_scoring\": true,\n"
             << "  \"object_labels_enter_relation_inference\": false,\n"
             << "  \"vocabulary_versions\": [1, 2],\n"
@@ -170,13 +213,14 @@ int main(int argc, char** argv)
             << "}\n";
 
         std::cout
-            << "released relsgg ORT CPU qualification: PASS\n";
+            << "released relsgg " << backend_id << "/" << device_id
+            << " qualification: PASS\n";
         return 0;
     }
     catch (const std::exception& error)
     {
         std::cerr
-            << "released relsgg ORT CPU qualification: FAIL: "
+            << "released relsgg qualification: FAIL: "
             << error.what() << '\n';
         return 1;
     }
