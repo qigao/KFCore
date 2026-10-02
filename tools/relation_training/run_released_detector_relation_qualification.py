@@ -18,6 +18,7 @@ from detector_ceiling import (
     DetectorRecoverabilityBenchmark,
     DetectorRecoverabilityConfig,
 )
+from run_detector_relation_qualification import dataset_image_corpus_sha256
 from prepare_released_relsgg import (
     HF_REPOSITORY,
     HF_REVISION,
