@@ -238,27 +238,96 @@ void require(bool condition, const char* message)
     }
 }
 
+bool valid_backend_id(const std::string& value)
+{
+    return value == "onnxruntime" || value == "tensorrt";
+}
+
+bool valid_device_id(const std::string& value)
+{
+    if (value == "cpu" || value == "cuda")
+    {
+        return true;
+    }
+    if (value.rfind("cuda:", 0U) != 0U || value.size() <= 5U)
+    {
+        return false;
+    }
+    for (std::size_t index = 5U; index < value.size(); ++index)
+    {
+        if (value[index] < '0' || value[index] > '9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool same_plugin_path(const std::filesystem::path& left,
+                      const std::filesystem::path& right)
+{
+    std::error_code left_error;
+    std::error_code right_error;
+    const auto left_canonical =
+        std::filesystem::canonical(left, left_error);
+    const auto right_canonical =
+        std::filesystem::canonical(right, right_error);
+    return !left_error && !right_error &&
+        left_canonical == right_canonical;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 7)
+        if (argc != 7 && argc != 12)
         {
             std::cerr
                 << "usage: released_scene_behavior_latency "
                 << "<ort-plugin> <detector-package> <relation-package> "
-                << "<vocabulary.bin> <frames.tsv> <timing.jsonl>\n";
+                   "<vocabulary.bin> <frames.tsv> <timing.jsonl>\n"
+                << "   or: released_scene_behavior_latency "
+                   "<detector-plugin> <relation-plugin> "
+                   "<detector-package> <relation-package> "
+                   "<vocabulary.bin> <frames.tsv> <timing.jsonl> "
+                   "<detector-backend> <detector-device> "
+                   "<relation-backend> <relation-device>\n";
             return 2;
         }
 
-        const std::filesystem::path plugin_path(argv[1]);
-        const std::filesystem::path detector_package_path(argv[2]);
-        const std::filesystem::path relation_package_path(argv[3]);
-        const std::filesystem::path vocabulary_path(argv[4]);
-        const std::filesystem::path frames_path(argv[5]);
-        const std::filesystem::path output_path(argv[6]);
+        const bool explicit_routes = argc == 12;
+        const std::filesystem::path detector_plugin_path(argv[1]);
+        const std::filesystem::path relation_plugin_path(
+            explicit_routes ? argv[2] : argv[1]);
+        const std::filesystem::path detector_package_path(
+            explicit_routes ? argv[3] : argv[2]);
+        const std::filesystem::path relation_package_path(
+            explicit_routes ? argv[4] : argv[3]);
+        const std::filesystem::path vocabulary_path(
+            explicit_routes ? argv[5] : argv[4]);
+        const std::filesystem::path frames_path(
+            explicit_routes ? argv[6] : argv[5]);
+        const std::filesystem::path output_path(
+            explicit_routes ? argv[7] : argv[6]);
+        const std::string detector_backend_id =
+            explicit_routes ? std::string(argv[8]) : "onnxruntime";
+        const std::string detector_device_id =
+            explicit_routes ? std::string(argv[9]) : "cpu";
+        const std::string relation_backend_id =
+            explicit_routes ? std::string(argv[10]) : "onnxruntime";
+        const std::string relation_device_id =
+            explicit_routes ? std::string(argv[11]) : "cpu";
+
+        require(
+            valid_backend_id(detector_backend_id) &&
+                valid_backend_id(relation_backend_id),
+            "scene behavior backend must be onnxruntime or tensorrt");
+        require(
+            valid_device_id(detector_device_id) &&
+                valid_device_id(relation_device_id),
+            "scene behavior device must be cpu, cuda, or cuda:N");
 
         if (std::filesystem::exists(output_path))
         {
@@ -267,10 +336,28 @@ int main(int argc, char** argv)
         }
 
         kfcore::runtime::Runtime runtime;
-        const auto backend = runtime.load_backend(plugin_path);
+        const auto detector_backend =
+            runtime.load_backend(detector_plugin_path);
         require(
-            backend->id() == "onnxruntime",
-            "latency qualification loaded wrong backend");
+            detector_backend->id() == detector_backend_id,
+            "latency qualification loaded wrong detector backend");
+
+        if (relation_backend_id == detector_backend_id)
+        {
+            require(
+                same_plugin_path(
+                    detector_plugin_path,
+                    relation_plugin_path),
+                "same backend id requires the same plugin path");
+        }
+        else
+        {
+            const auto relation_backend =
+                runtime.load_backend(relation_plugin_path);
+            require(
+                relation_backend->id() == relation_backend_id,
+                "latency qualification loaded wrong relation backend");
+        }
 
         const auto detector_package =
             kfcore::runtime::ModelPackage::load(
@@ -289,9 +376,15 @@ int main(int argc, char** argv)
                 runtime,
                 detector_package,
                 kfcore::runtime::ExecutionPolicy::exact(
-                    "onnxruntime",
-                    "cpu"),
+                    detector_backend_id,
+                    detector_device_id),
                 detector_options);
+        require(
+            detector->execution_route().backend_id ==
+                    detector_backend_id &&
+                detector->execution_route().device_id ==
+                    detector_device_id,
+            "detector did not resolve to requested backend/device");
 
         kfcore::relation::OpenVocabularyRelationOptions relation_options;
         relation_options.input_size = 448;
@@ -310,9 +403,15 @@ int main(int argc, char** argv)
                 runtime,
                 relation_package,
                 kfcore::runtime::ExecutionPolicy::exact(
-                    "onnxruntime",
-                    "cpu"),
+                    relation_backend_id,
+                    relation_device_id),
                 relation_options);
+        require(
+            relation->execution_route().backend_id ==
+                    relation_backend_id &&
+                relation->execution_route().device_id ==
+                    relation_device_id,
+            "relation did not resolve to requested backend/device");
 
         auto vocabulary =
             load_vocabulary(vocabulary_path);
@@ -392,7 +491,12 @@ int main(int argc, char** argv)
             "timing sample count mismatch");
         std::cout
             << "released SceneBehavior latency samples="
-            << samples << "\n";
+            << samples
+            << " detector=" << detector_backend_id
+            << "/" << detector_device_id
+            << " relation=" << relation_backend_id
+            << "/" << relation_device_id
+            << "\n";
         return 0;
     }
     catch (const std::exception& error)

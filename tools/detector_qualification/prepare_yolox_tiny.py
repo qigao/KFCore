@@ -26,8 +26,8 @@ QUALIFIED_DECODED_ONNX_SHA256 = (
     "66d29469f291adec01335433e8d4e858"
 )
 QUALIFIED_PACKAGE_SHA256 = (
-    "7130ba963858c2c00155eedbf698e4e1"
-    "1508880893fe5384176247b85e6959f9"
+    "a8e677481844888d12fa736bda54b112"
+    "1ba0babe1739e6435e91f38d407629c7"
 )
 MODEL_NAME = "yolox-tiny"
 INPUT_SIZE = (416, 416)
@@ -327,7 +327,16 @@ def prepare(
                 "sha256": decoded_sha,
                 "backend": "onnxruntime",
                 "device": "cpu",
-            }
+            },
+            {
+                "id": "ort-cuda",
+                "format": "onnx",
+                "path": decoded_path.name,
+                "flavor": "raw-yolox",
+                "sha256": decoded_sha,
+                "backend": "onnxruntime",
+                "device": "cuda",
+            },
         ],
     }
     package_path = root / "model.json"
