@@ -1,0 +1,295 @@
+name: Released detector-box relation quality
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/detector_qualification/run_yolox_detector_manifest.py'
+      - 'tools/relation_training/prepare_hico_test_qualification.py'
+      - 'tools/relation_training/run_released_detector_relation_qualification.py'
+      - 'tools/relation_training/test_prepare_hico_test_qualification.py'
+      - 'tools/relation_training/test_released_detector_relation_qualification.py'
+      - '.github/workflows/released-detector-relation-quality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: released-detector-quality-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  hico-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HICO_REVISION: 4d65d61c99931737c2b7a9636c7e3501eab69850
+      HICO_TEST_SHARD_SHA256: b02dd7ad2aa6103a974c3323bfce8f28224824e27fb0362a5825412d64e40db4
+      YOLOX_SOURCE_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+      YOLOX_SOURCE_SHA256: 427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7
+      HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
+      REL_ONNX_SHA256: b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a
+      PREDICATE_BANK_SHA256: 708f812d6579eab1be85b3378b79e376453c2d4f65b4fad9bcebb9f5bf05da06
+      HF_HUB_DISABLE_TELEMETRY: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-ci.txt
+
+      - name: Install qualification dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-ci-torch.txt
+          python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-ci.txt
+          python -m pip install --disable-pip-version-check             pyarrow==25.0.1 opencv-python-headless==4.13.0.92
+
+      - name: Compile and run focused qualification tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m py_compile             tools/detector_qualification/run_yolox_detector_manifest.py             tools/relation_training/prepare_hico_test_qualification.py             tools/relation_training/run_released_detector_relation_qualification.py             tools/relation_training/test_prepare_hico_test_qualification.py             tools/relation_training/test_released_detector_relation_qualification.py
+          cd tools/relation_training
+          python -m unittest -v             test_prepare_hico_test_qualification.py             test_released_detector_relation_qualification.py
+
+      - name: Download pinned relation and detector artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          src="$RUNNER_TEMP/released-quality-source"
+          mkdir -p "$src"
+          base="https://huggingface.co/maelic/relsgg-vits16plus/resolve/$HF_REVISION"
+          curl -fL --retry 3 "$base/relateanything.onnx" -o "$src/relateanything.onnx"
+          curl -fL --retry 3 "$base/predicate_bank.npz" -o "$src/predicate_bank.npz"
+          curl -fL --retry 3 "$base/relateanything.json" -o "$src/relateanything.json"
+          curl -fL --retry 3 "$YOLOX_SOURCE_URL" -o "$src/yolox_tiny.onnx"
+          echo "$REL_ONNX_SHA256  $src/relateanything.onnx" | sha256sum -c -
+          echo "$PREDICATE_BANK_SHA256  $src/predicate_bank.npz" | sha256sum -c -
+          echo "$YOLOX_SOURCE_SHA256  $src/yolox_tiny.onnx" | sha256sum -c -
+          python tools/detector_qualification/prepare_yolox_tiny.py             --source-onnx "$src/yolox_tiny.onnx"             --out-dir "$RUNNER_TEMP/yolox-qualified"
+
+      - name: Verify YOLOX release-weight preprocessing on upstream demo image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          demo="$RUNNER_TEMP/yolox-demo"
+          mkdir -p "$demo/images"
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/e1052df71842031413f6030723c3607b839c80ce/assets/demo.png" \
+            -o "$demo/images/demo.png"
+
+          PYTHONPATH="$GITHUB_WORKSPACE/tools/detector_qualification" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          import cv2
+          import numpy as np
+          import onnxruntime as ort
+          from PIL import Image
+
+          from run_yolox_detector_manifest import _letterbox_nchw
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          image_path = root / "yolox-demo" / "images" / "demo.png"
+          model_path = root / "yolox-qualified" / "yolox_tiny_decoded.onnx"
+          session = ort.InferenceSession(
+              str(model_path),
+              providers=["CPUExecutionProvider"],
+          )
+          input_name = session.get_inputs()[0].name
+
+          bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+          if bgr is None:
+              raise SystemExit("cannot decode upstream demo.png")
+          height, width = bgr.shape[:2]
+          size = 416
+          ratio = min(size / height, size / width)
+          resized_width = int(width * ratio)
+          resized_height = int(height * ratio)
+          resized = cv2.resize(
+              bgr,
+              (resized_width, resized_height),
+              interpolation=cv2.INTER_LINEAR,
+          ).astype(np.float32)
+          padded = np.ones((size, size, 3), dtype=np.float32) * 114.0
+          padded[:resized_height, :resized_width] = resized
+          upstream_release = np.ascontiguousarray(
+              padded.transpose(2, 0, 1)[None],
+              dtype=np.float32,
+          )
+
+          rgb = np.asarray(
+              Image.open(image_path).convert("RGB"),
+              dtype=np.uint8,
+          )
+          current, current_ratio = _letterbox_nchw(rgb)
+
+          def summary(tensor):
+              output = np.asarray(
+                  session.run(None, {input_name: tensor})[0]
+              )
+              objectness = output[0, :, 4].astype(np.float64)
+              classes = output[0, :, 5:].astype(np.float64)
+              fused = objectness * classes.max(axis=1)
+              return {
+                  "max_objectness": float(objectness.max()),
+                  "max_fused_score": float(fused.max()),
+                  "candidates_ge_0_1": int((fused >= 0.1).sum()),
+                  "input_min": float(tensor.min()),
+                  "input_max": float(tensor.max()),
+              }
+
+          report = {
+              "image_size": [width, height],
+              "upstream_ratio": ratio,
+              "current_ratio": current_ratio,
+              "resized_size": [resized_width, resized_height],
+              "current_vs_upstream_max_abs_input_diff": float(
+                  np.max(np.abs(current - upstream_release))
+              ),
+              "upstream_release_bgr_raw": summary(upstream_release),
+              "kfcore_release_bgr_raw": summary(current),
+          }
+          print(json.dumps(report, indent=2, sort_keys=True))
+          (root / "yolox-demo-diagnostic.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          if report["upstream_release_bgr_raw"]["max_fused_score"] <= 0.1:
+              raise SystemExit(
+                  "upstream release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["max_fused_score"] <= 0.1:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["candidates_ge_0_1"] <= 0:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing produced no threshold candidates"
+              )
+          PY
+
+      - name: Materialize deterministic HICO-DET test slice
+        shell: bash
+        run: |
+          set -euxo pipefail
+          hico="$RUNNER_TEMP/hico-test"
+          curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/list_action.csv"             -o "$RUNNER_TEMP/list_action.csv"
+          curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/data/test-00000-of-00004.parquet"             -o "$RUNNER_TEMP/hico-test-00000.parquet"
+          echo "$HICO_TEST_SHARD_SHA256  $RUNNER_TEMP/hico-test-00000.parquet" | sha256sum -c -
+
+          python tools/relation_training/prepare_hico_test_qualification.py             --list-action "$RUNNER_TEMP/list_action.csv"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --parquet "$RUNNER_TEMP/hico-test-00000.parquet"             --revision "$HICO_REVISION"             --max-images 32             --out-dir "$hico"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "hico-test"
+          evidence = json.loads((root / "evidence.json").read_text())
+          assert evidence["dataset"]["revision"] == os.environ["HICO_REVISION"]
+          assert evidence["dataset"]["split"] == "test"
+          assert evidence["dataset"]["source_parquet"]["sha256"] == os.environ["HICO_TEST_SHARD_SHA256"]
+          assert evidence["selection"]["images"] == 32
+          assert evidence["selection"]["relations"] > 0
+          assert evidence["selection"]["predicate_count"] > 0
+          assert len(list((root / "images").glob("*.jpg"))) == 32
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          PY
+
+      - name: Run fixed YOLOX detector over HICO qualification corpus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/detector_qualification/run_yolox_detector_manifest.py             --model "$RUNNER_TEMP/yolox-qualified/yolox_tiny_decoded.onnx"             --annotations "$RUNNER_TEMP/hico-test/test.jsonl"             --image-root "$RUNNER_TEMP/hico-test/images"             --score-threshold 0.1             --iou-threshold 0.45             --out "$RUNNER_TEMP/detector-boxes.jsonl"             --evidence-out "$RUNNER_TEMP/detector-evidence.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = json.loads((root / "detector-evidence.json").read_text())
+          assert evidence["score_threshold"] == 0.1
+          assert evidence["iou_threshold"] == 0.45
+          if evidence["box_count"] <= 0:
+              raise SystemExit(
+                  "real HICO qualification corpus produced zero detector boxes"
+              )
+          print(
+              f"detected_boxes={evidence['box_count']} "
+              f"images={evidence['image_count']}"
+          )
+          PY
+
+      - name: Run released RelateAnything detector-box quality
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/run_released_detector_relation_qualification.py             --onnx "$RUNNER_TEMP/released-quality-source/relateanything.onnx"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --metadata "$RUNNER_TEMP/released-quality-source/relateanything.json"             --vocabulary "$RUNNER_TEMP/hico-test/vocabulary.json"             --annotations "$RUNNER_TEMP/hico-test/test.jsonl"             --image-root "$RUNNER_TEMP/hico-test/images"             --detector-predictions "$RUNNER_TEMP/detector-boxes.jsonl"             --detector-evidence "$RUNNER_TEMP/detector-evidence.json"             --iou-threshold 0.5             --top-k 20 --top-k 50 --top-k 100             --pair-weight 1.0             --out "$RUNNER_TEMP/released-detector-quality.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          report = json.loads(
+              (root / "released-detector-quality.json").read_text()
+          )
+          quality = report["quality"]
+          assert report["schema"] == "kfcore.released-detector-box-relation-qualification/1"
+          assert report["relation"]["training_reproduction_complete"] is False
+          assert report["evaluation"]["detector_class_labels_enter_relation_inference"] is False
+          if quality["object_recoverability_ceiling"] <= 0.0:
+              raise SystemExit("HICO object recoverability must be non-zero")
+          if quality["directed_pair_recoverability_ceiling"] <= 0.0:
+              raise SystemExit("HICO pair recoverability must be non-zero")
+          if quality["recoverable_ground_truth_triplets"] <= 0:
+              raise SystemExit("HICO must contain recoverable GT triplets")
+          failure = quality["failure_decomposition_at_max_k"]
+          assert (
+              failure["detector_miss"]
+              + failure["sampler_miss"]
+              + failure["predicate_miss"]
+              + failure["recovered"]
+              == quality["ground_truth_triplets"]
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: released-detector-relation-quality
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/released-detector-quality.json
+            ${{ runner.temp }}/detector-evidence.json
+            ${{ runner.temp }}/hico-test/evidence.json
+            ${{ runner.temp }}/hico-test/vocabulary.json
+            ${{ runner.temp }}/hico-test/test.jsonl
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

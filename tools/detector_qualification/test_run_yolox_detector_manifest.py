@@ -15,27 +15,25 @@ from run_yolox_detector_manifest import (
 
 
 class YoloXDetectorManifestTest(unittest.TestCase):
-    def test_letterbox_matches_top_left_rgb_normalization_contract(self):
+    def test_letterbox_matches_release_weight_raw_bgr_contract(self):
         rgb = np.asarray(
             [
                 [[255, 0, 0], [0, 255, 0]],
-                [[0, 0, 255], [255, 255, 255]],
             ],
             dtype=np.uint8,
         )
         tensor, scale = _letterbox_nchw(rgb)
         self.assertEqual(tensor.shape, (1, 3, 416, 416))
         self.assertEqual(scale, 208.0)
-        expected = (
-            np.asarray([255.0, 0.0, 0.0], dtype=np.float32) / 255.0
-            - np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
-        ) / np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
         np.testing.assert_allclose(
             tensor[0, :, 0, 0],
-            expected,
+            np.asarray([0.0, 0.0, 255.0], dtype=np.float32),
             rtol=0.0,
             atol=1.0e-6,
         )
+        self.assertEqual(float(tensor[0, 0, -1, -1]), 114.0)
+        self.assertEqual(float(tensor[0, 1, -1, -1]), 114.0)
+        self.assertEqual(float(tensor[0, 2, -1, -1]), 114.0)
 
     def test_decode_uses_objectness_class_score_stable_order_and_class_nms(self):
         output = np.zeros((1, 4, 7), dtype=np.float32)
