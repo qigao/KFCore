@@ -86,7 +86,7 @@ jobs:
           echo "$YOLOX_SOURCE_SHA256  $src/yolox_tiny.onnx" | sha256sum -c -
           python tools/detector_qualification/prepare_yolox_tiny.py             --source-onnx "$src/yolox_tiny.onnx"             --out-dir "$RUNNER_TEMP/yolox-qualified"
 
-      - name: Diagnose pinned YOLOX preprocessing on upstream demo image
+      - name: Verify YOLOX release-weight preprocessing on upstream demo image
         shell: bash
         run: |
           set -euxo pipefail
@@ -132,14 +132,8 @@ jobs:
           ).astype(np.float32)
           padded = np.ones((size, size, 3), dtype=np.float32) * 114.0
           padded[:resized_height, :resized_width] = resized
-
-          mean = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
-          std = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
-
-          upstream = padded[:, :, ::-1] / 255.0
-          upstream = (upstream - mean) / std
-          upstream = np.ascontiguousarray(
-              upstream.transpose(2, 0, 1)[None],
+          upstream_release = np.ascontiguousarray(
+              padded.transpose(2, 0, 1)[None],
               dtype=np.float32,
           )
 
@@ -148,30 +142,6 @@ jobs:
               dtype=np.uint8,
           )
           current, current_ratio = _letterbox_nchw(rgb)
-
-          variants = {
-              "upstream_mean_std_rgb": upstream,
-              "current_kfcore": current,
-              "rgb_div255": np.ascontiguousarray(
-                  (padded[:, :, ::-1] / 255.0)
-                  .transpose(2, 0, 1)[None],
-                  dtype=np.float32,
-              ),
-              "bgr_div255": np.ascontiguousarray(
-                  (padded / 255.0)
-                  .transpose(2, 0, 1)[None],
-                  dtype=np.float32,
-              ),
-              "rgb_raw255": np.ascontiguousarray(
-                  padded[:, :, ::-1]
-                  .transpose(2, 0, 1)[None],
-                  dtype=np.float32,
-              ),
-              "bgr_raw255": np.ascontiguousarray(
-                  padded.transpose(2, 0, 1)[None],
-                  dtype=np.float32,
-              ),
-          }
 
           def summary(tensor):
               output = np.asarray(
@@ -194,12 +164,10 @@ jobs:
               "current_ratio": current_ratio,
               "resized_size": [resized_width, resized_height],
               "current_vs_upstream_max_abs_input_diff": float(
-                  np.max(np.abs(current - upstream))
+                  np.max(np.abs(current - upstream_release))
               ),
-              "variants": {
-                  name: summary(tensor)
-                  for name, tensor in variants.items()
-              },
+              "upstream_release_bgr_raw": summary(upstream_release),
+              "kfcore_release_bgr_raw": summary(current),
           }
           print(json.dumps(report, indent=2, sort_keys=True))
           (root / "yolox-demo-diagnostic.json").write_text(
@@ -207,10 +175,17 @@ jobs:
               encoding="utf-8",
           )
 
-          if report["variants"]["upstream_mean_std_rgb"]["max_fused_score"] <= 0.01:
+          if report["upstream_release_bgr_raw"]["max_fused_score"] <= 0.1:
               raise SystemExit(
-                  "official YOLOX demo remains low-confidence under exact "
-                  "0.1.1rc0 ONNXRuntime preprocessing"
+                  "upstream release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["max_fused_score"] <= 0.1:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["candidates_ge_0_1"] <= 0:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing produced no threshold candidates"
               )
           PY
 
