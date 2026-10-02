@@ -7,7 +7,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 import numpy as np
 from PIL import Image
@@ -342,26 +342,35 @@ def materialize(
     return report
 
 
-def stream_hico_test(
-    *,
-    revision: str,
-) -> Iterable[dict[str, Any]]:
+def iter_hico_test_parquet(
+    path: str | Path,
+) -> Iterator[dict[str, Any]]:
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(source)
     try:
-        from datasets import load_dataset
+        import pyarrow.parquet as pq
     except ImportError as error:
-        raise RuntimeError("HICO streaming requires huggingface datasets") from error
-    return load_dataset(
-        DATASET_ID,
-        split="test",
-        revision=revision,
-        streaming=True,
-    )
+        raise RuntimeError("HICO parquet qualification requires pyarrow") from error
+
+    parquet = pq.ParquetFile(source)
+    for row_group in range(parquet.num_row_groups):
+        batch = parquet.read_row_group(row_group).to_pydict()
+        if "image" not in batch or "objects" not in batch:
+            raise ValueError("HICO parquet is missing image/objects columns")
+        rows = len(batch["image"])
+        for row_index in range(rows):
+            yield {
+                column: batch[column][row_index]
+                for column in batch
+            }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--list-action", required=True)
     parser.add_argument("--predicate-bank", required=True)
+    parser.add_argument("--parquet", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--max-images", type=int, default=32)
     parser.add_argument("--revision", default=DATASET_REVISION)
@@ -370,10 +379,17 @@ def main() -> None:
     report = materialize(
         actions_path=args.list_action,
         predicate_bank_path=args.predicate_bank,
-        rows=stream_hico_test(revision=args.revision),
+        rows=iter_hico_test_parquet(args.parquet),
         output_dir=args.out_dir,
         max_images=args.max_images,
         dataset_revision=args.revision,
+    )
+    report["dataset"]["source_parquet"] = {
+        "name": Path(args.parquet).name,
+        "sha256": sha256_file(Path(args.parquet)),
+    }
+    (Path(args.out_dir) / "evidence.json").write_bytes(
+        stable_json_bytes(report)
     )
     print(json.dumps(report, indent=2, sort_keys=True))
 
