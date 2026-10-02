@@ -58,6 +58,7 @@ def build_engine(
     onnx_path: str | Path,
     output_path: str | Path,
     *,
+    metadata_path: str | Path | None = None,
     opt_vocab: int | None = None,
     max_vocab: int | None = None,
     workspace_gib: float = 4.0,
@@ -75,9 +76,13 @@ def build_engine(
             "TensorRT output must use .engine or .plan"
         )
 
-    metadata_path = source.with_suffix(".json")
+    metadata_file = (
+        source.with_suffix(".json")
+        if metadata_path is None
+        else Path(metadata_path)
+    )
     metadata = json.loads(
-        metadata_path.read_text(encoding="utf-8")
+        metadata_file.read_text(encoding="utf-8")
     )
     profiles = dynamic_vocabulary_profiles(
         metadata,
@@ -245,6 +250,7 @@ def main() -> None:
         )
     )
     parser.add_argument("--onnx", required=True)
+    parser.add_argument("--metadata")
     parser.add_argument("--out", required=True)
     parser.add_argument("--opt-vocab", type=int)
     parser.add_argument("--max-vocab", type=int)
@@ -262,6 +268,7 @@ def main() -> None:
     metadata = build_engine(
         args.onnx,
         args.out,
+        metadata_path=args.metadata,
         opt_vocab=args.opt_vocab,
         max_vocab=args.max_vocab,
         workspace_gib=args.workspace_gib,
