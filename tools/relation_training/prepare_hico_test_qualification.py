@@ -270,12 +270,7 @@ def materialize(
     ) in enumerate(selected):
         image_name = f"hico_test_{row_index:06d}.jpg"
         image_path = images_dir / image_name
-        with Image.open(io.BytesIO(raw)) as image:
-            image.convert("RGB").save(
-                image_path,
-                format="JPEG",
-                quality=95,
-            )
+        image_path.write_bytes(raw)
         payload = {
             "image": image_name,
             "width": width,
