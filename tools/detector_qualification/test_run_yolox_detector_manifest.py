@@ -19,7 +19,6 @@ class YoloXDetectorManifestTest(unittest.TestCase):
         rgb = np.asarray(
             [
                 [[255, 0, 0], [0, 255, 0]],
-                [[0, 0, 255], [255, 255, 255]],
             ],
             dtype=np.uint8,
         )
