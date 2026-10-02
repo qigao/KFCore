@@ -28,8 +28,6 @@ DEFAULT_SCORE_THRESHOLD = 0.25
 DEFAULT_IOU_THRESHOLD = 0.45
 DEFAULT_MAX_DETECTIONS = 300
 _BORDER_VALUE = 114.0
-_MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
-_STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def stable_json_bytes(payload: object) -> bytes:
@@ -101,7 +99,73 @@ def _load_annotation_images(path: str | Path) -> list[tuple[str, int, int]]:
     return rows
 
 
+def _resize_bgr_half_pixel(
+    bgr: np.ndarray,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    if (
+        bgr.dtype != np.uint8
+        or bgr.ndim != 3
+        or bgr.shape[2] != 3
+        or width <= 0
+        or height <= 0
+    ):
+        raise ValueError("BGR resize contract is invalid")
+    source_height, source_width, _ = bgr.shape
+    scale_x = np.float32(source_width) / np.float32(width)
+    scale_y = np.float32(source_height) / np.float32(height)
+    xs = (
+        (np.arange(width, dtype=np.float32) + np.float32(0.5))
+        * scale_x
+        - np.float32(0.5)
+    )
+    ys = (
+        (np.arange(height, dtype=np.float32) + np.float32(0.5))
+        * scale_y
+        - np.float32(0.5)
+    )
+    x0 = np.clip(np.floor(xs).astype(np.int64), 0, source_width - 1)
+    y0 = np.clip(np.floor(ys).astype(np.int64), 0, source_height - 1)
+    x1 = np.minimum(x0 + 1, source_width - 1)
+    y1 = np.minimum(y0 + 1, source_height - 1)
+    fx = np.clip(
+        xs - x0.astype(np.float32),
+        np.float32(0.0),
+        np.float32(1.0),
+    )
+    fy = np.clip(
+        ys - y0.astype(np.float32),
+        np.float32(0.0),
+        np.float32(1.0),
+    )
+    top = (
+        bgr[y0[:, None], x0[None, :]].astype(np.float32)
+        * (np.float32(1.0) - fx[None, :, None])
+        + bgr[y0[:, None], x1[None, :]].astype(np.float32)
+        * fx[None, :, None]
+    )
+    bottom = (
+        bgr[y1[:, None], x0[None, :]].astype(np.float32)
+        * (np.float32(1.0) - fx[None, :, None])
+        + bgr[y1[:, None], x1[None, :]].astype(np.float32)
+        * fx[None, :, None]
+    )
+    return np.clip(
+        top * (np.float32(1.0) - fy[:, None, None])
+        + bottom * fy[:, None, None],
+        0.0,
+        255.0,
+    ).astype(np.uint8)
+
+
 def _letterbox_nchw(rgb: np.ndarray) -> tuple[np.ndarray, float]:
+    """YOLOX 0.1.1rc0 release-weight preprocessing.
+
+    The 2021-08-19 upstream preprocessing change removed input normalization
+    for the new release weights.  The release artifact consumes top-left
+    letterboxed BGR values as raw FP32 0..255 CHW.
+    """
     if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.dtype != np.uint8:
         raise ValueError("decoded image must be uint8 HWC RGB")
     source_height, source_width, _ = rgb.shape
@@ -110,50 +174,25 @@ def _letterbox_nchw(rgb: np.ndarray) -> tuple[np.ndarray, float]:
         destination_width / float(source_width),
         destination_height / float(source_height),
     )
-    output = np.empty(
+    resized_width = max(1, int(source_width * scale))
+    resized_height = max(1, int(source_height * scale))
+
+    bgr = np.ascontiguousarray(rgb[:, :, ::-1])
+    resized = _resize_bgr_half_pixel(
+        bgr,
+        resized_width,
+        resized_height,
+    )
+    output = np.full(
         (3, destination_height, destination_width),
+        np.float32(_BORDER_VALUE),
         dtype=np.float32,
     )
-
-    for y in range(destination_height):
-        center_y = y + 0.5
-        for x in range(destination_width):
-            center_x = x + 0.5
-            border = (
-                center_x >= source_width * scale
-                or center_y >= source_height * scale
-            )
-            if border:
-                value = np.asarray(
-                    [_BORDER_VALUE, _BORDER_VALUE, _BORDER_VALUE],
-                    dtype=np.float32,
-                )
-            else:
-                source_x = min(
-                    max(center_x / scale - 0.5, 0.0),
-                    source_width - 1.0,
-                )
-                source_y = min(
-                    max(center_y / scale - 0.5, 0.0),
-                    source_height - 1.0,
-                )
-                x0 = int(math.floor(source_x))
-                y0 = int(math.floor(source_y))
-                x1 = min(x0 + 1, source_width - 1)
-                y1 = min(y0 + 1, source_height - 1)
-                fx = source_x - x0
-                fy = source_y - y0
-                top = (
-                    rgb[y0, x0].astype(np.float32) * (1.0 - fx)
-                    + rgb[y0, x1].astype(np.float32) * fx
-                )
-                bottom = (
-                    rgb[y1, x0].astype(np.float32) * (1.0 - fx)
-                    + rgb[y1, x1].astype(np.float32) * fx
-                )
-                value = top * (1.0 - fy) + bottom * fy
-            output[:, y, x] = (value / 255.0 - _MEAN) / _STD
-
+    output[
+        :,
+        :resized_height,
+        :resized_width,
+    ] = resized.transpose(2, 0, 1).astype(np.float32)
     return output[None, ...], scale
 
 
@@ -371,7 +410,8 @@ def run(
         "iou_threshold": iou_threshold,
         "max_detections": max_detections,
         "preprocess": (
-            "top-left-letterbox-114/rgb/imagenet-mean-std/chw-fp32"
+            "yolox-0.1.1rc0-new-weights/"
+            "top-left-letterbox-114/bgr/raw-0-255/chw-fp32"
         ),
         "decode": "objectness-times-best-class/class-aware-nms",
     }
