@@ -29,6 +29,22 @@ if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
+if(KFCORE_BUILD_RELEASED_SCENE_BEHAVIOR_QUALIFICATION)
+  add_executable(kfcore_released_scene_behavior_latency
+    tests/released_scene_behavior_latency.cpp)
+  target_compile_features(
+    kfcore_released_scene_behavior_latency PRIVATE cxx_std_17)
+  target_link_libraries(
+    kfcore_released_scene_behavior_latency PRIVATE
+      KFCore::scene_interaction)
+  set_target_properties(
+    kfcore_released_scene_behavior_latency PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      FOLDER "vision/interaction/qualification")
+endif()
+
 cmake_install_headers(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
