@@ -16,3 +16,18 @@ cmake_add_test(
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_pose_test_folder}")
 endif()
+
+if(KFCORE_BUILD_POSE_RTMW_ORT_CPU_QUALIFICATION)
+add_executable(kfcore_pose_rtmw_ort_cpu_qualification
+  rtmw_ort_cpu_qualification.cpp)
+target_include_directories(kfcore_pose_rtmw_ort_cpu_qualification PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_compile_features(kfcore_pose_rtmw_ort_cpu_qualification PRIVATE cxx_std_17)
+target_link_libraries(kfcore_pose_rtmw_ort_cpu_qualification PRIVATE
+  KFCore::pose_core)
+set_target_properties(kfcore_pose_rtmw_ort_cpu_qualification PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  FOLDER "${_pose_test_folder}")
+endif()
