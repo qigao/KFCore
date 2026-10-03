@@ -12,19 +12,27 @@ permissions:
   contents: read
 
 jobs:
-  discover-reference:
+  inspect-reference:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
+      RTMW_SDK_SHA256: a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd
+
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Download released RTMW-l 384x288 ONNX SDK
+      - name: Verify released RTMW-l 384x288 ONNX SDK provenance
         shell: bash
         run: |
           set -euxo pipefail
-          url='https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip'
-          curl --fail --location --retry 3 --output "$RUNNER_TEMP/rtmw.zip" "$url"
-          sha256sum "$RUNNER_TEMP/rtmw.zip"
-          unzip -l "$RUNNER_TEMP/rtmw.zip"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/rtmw.zip" "$RTMW_SDK_URL"
+          echo "$RTMW_SDK_SHA256  $RUNNER_TEMP/rtmw.zip" | sha256sum --check -
+          mkdir -p "$RUNNER_TEMP/rtmw"
+          unzip -q "$RUNNER_TEMP/rtmw.zip" end2end.onnx deploy.json detail.json pipeline.json -d "$RUNNER_TEMP/rtmw"
+          sha256sum "$RUNNER_TEMP/rtmw/end2end.onnx"
+          cat "$RUNNER_TEMP/rtmw/deploy.json"
+          cat "$RUNNER_TEMP/rtmw/detail.json"
+          cat "$RUNNER_TEMP/rtmw/pipeline.json"
