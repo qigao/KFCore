@@ -596,7 +596,7 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
                                  const RtmwOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != kRtmwModelType)
+    if (package.model_type() != kRtmwModelType.data())
     {
         throw_contract("ModelPackage model_type must be 'pose.rtmw'");
     }
@@ -791,11 +791,13 @@ std::vector<WholeBodyPose> Rtmw::infer(
     }
 }
 
-const PoseSchema& Rtmw::schema() const noexcept
+const PoseSchema& Rtmw::schema() const
 {
-    return impl_ && impl_->pose_schema
-               ? *impl_->pose_schema
-               : coco_wholebody_133_schema();
+    if (!impl_ || impl_->pose_schema == nullptr)
+    {
+        throw_invalid("model schema is unavailable");
+    }
+    return *impl_->pose_schema;
 }
 
 std::int32_t Rtmw::input_width() const noexcept
