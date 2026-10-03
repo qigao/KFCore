@@ -185,12 +185,15 @@ kfcore::image::BgrImage synthetic_image()
             const std::size_t offset =
                 (static_cast<std::size_t>(y) * image.width +
                  static_cast<std::size_t>(x)) * 3U;
-            image.pixels[offset + 0U] =
-                static_cast<std::uint8_t>((x * 3 + y * 5 + 17) & 0xff);
-            image.pixels[offset + 1U] =
-                static_cast<std::uint8_t>((x * 7 + y * 11 + 29) & 0xff);
-            image.pixels[offset + 2U] =
-                static_cast<std::uint8_t>((x * 13 + y * 17 + 43) & 0xff);
+            image.pixels[offset + 0U] = static_cast<std::uint8_t>(
+                16 + (x * 96) / (image.width - 1) +
+                (y * 48) / (image.height - 1));
+            image.pixels[offset + 1U] = static_cast<std::uint8_t>(
+                24 + (x * 48) / (image.width - 1) +
+                (y * 96) / (image.height - 1));
+            image.pixels[offset + 2U] = static_cast<std::uint8_t>(
+                32 + (x * 80) / (image.width - 1) +
+                (y * 80) / (image.height - 1));
         }
     }
     return image;
