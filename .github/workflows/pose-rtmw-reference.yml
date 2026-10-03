@@ -1,21 +1,53 @@
-name: RTMW released reference
+name: RTMW ORT CPU golden qualification
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/pose/**'
+      - 'tools/pose_qualification/**'
+      - 'cmake/tests/pose_rtmw_ort_cpu_qualification/**'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/pose-rtmw-reference.yml'
   pull_request:
     branches: [master]
     paths:
-      - '.github/workflows/pose-rtmw-reference.yml'
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
       - 'vision/core/pose/**'
+      - 'tools/pose_qualification/**'
+      - 'cmake/tests/pose_rtmw_ort_cpu_qualification/**'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/pose-rtmw-reference.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: pose-rtmw-ort-cpu-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
-  inspect-reference:
+  linux-ort-cpu:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_VERSION: 1.8.9
+      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
+      SALTS_UTILS_VERSION: 4.1.13
+      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      ORT_VERSION: 1.22.0
+      ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
       RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
       RTMW_SDK_SHA256: a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd
       RTMW_ONNX_SHA256: bd033156e5104c4f5d2edfe0453e02661e30a2f3da453ec93c8764d561b83054
@@ -23,69 +55,152 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Verify released RTMW-l 384x288 ONNX SDK provenance
+      - name: Install independent Python reference dependencies
         shell: bash
         run: |
           set -euxo pipefail
-          curl --fail --location --retry 3 --output "$RUNNER_TEMP/rtmw.zip" "$RTMW_SDK_URL"
-          echo "$RTMW_SDK_SHA256  $RUNNER_TEMP/rtmw.zip" | sha256sum --check -
-          mkdir -p "$RUNNER_TEMP/rtmw"
-          unzip -q "$RUNNER_TEMP/rtmw.zip" end2end.onnx deploy.json detail.json pipeline.json -d "$RUNNER_TEMP/rtmw"
-          echo "$RTMW_ONNX_SHA256  $RUNNER_TEMP/rtmw/end2end.onnx" | sha256sum --check -
+          python -m pip install --disable-pip-version-check numpy==2.2.6 onnx==1.18.0 onnxruntime==1.22.0 opencv-python-headless==4.12.0.88
 
-      - name: Inspect ONNX graph contract
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-pose-rtmw-ort-cpu
+          key: pose-rtmw-ort-cpu-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}-ort-${{ env.ORT_VERSION }}
+
+      - name: Restore pinned native SDKs
         shell: bash
         run: |
           set -euxo pipefail
-          python -m pip install --disable-pip-version-check --no-cache-dir onnx==1.18.0
+          cache="$HOME/.cache/kfcore-pose-rtmw-ort-cpu"
+          mkdir -p "$cache"
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          if [ ! -f "$salts_pkg" ]; then curl -fL --retry 3 "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg" -o "$salts_pkg"; fi
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          if [ ! -f "$salts_utils_pkg" ]; then curl -fL --retry 3 "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg" -o "$salts_utils_pkg"; fi
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+          ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          if [ ! -f "$ort_pkg" ]; then curl -fL --retry 3 "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" -o "$ort_pkg"; fi
+          echo "$ORT_SHA512  $ort_pkg" | sha512sum -c -
+          sdk="$RUNNER_TEMP/pose-rtmw-ort-cpu-sdk"
+          rm -rf "$sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils" "$sdk/ort"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+          tar -xzf "$ort_pkg" -C "$sdk/ort"
+          echo "SALTS_ROOT=$sdk/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$sdk/salts-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "ONNXRUNTIME_ROOT=$sdk/ort/onnxruntime-linux-x64-$ORT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Restore released RTMW-l 384x288 ONNX
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ref="$RUNNER_TEMP/rtmw-reference"
+          mkdir -p "$ref"
+          curl --fail --location --retry 3 --output "$ref/sdk.zip" "$RTMW_SDK_URL"
+          echo "$RTMW_SDK_SHA256  $ref/sdk.zip" | sha256sum --check -
+          unzip -q "$ref/sdk.zip" end2end.onnx -d "$ref"
+          echo "$RTMW_ONNX_SHA256  $ref/end2end.onnx" | sha256sum --check -
+
+      - name: Generate independent Python ORT golden fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/pose_qualification/make_rtmw_ort_cpu_qualification_fixture.py --onnx "$RUNNER_TEMP/rtmw-reference/end2end.onnx" --out-dir "$RUNNER_TEMP/rtmw-fixture"
+          test -f "$RUNNER_TEMP/rtmw-fixture/model.json"
+          test -f "$RUNNER_TEMP/rtmw-fixture/reference.tsv"
+          test -f "$RUNNER_TEMP/rtmw-fixture/fixture-evidence.json"
+
+      - name: Configure focused C++ RTMW ORT CPU qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S cmake/tests/pose_rtmw_ort_cpu_qualification -B build/pose-rtmw-ort-cpu -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+
+      - name: Build ORT plugin and RTMW qualification executable
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/pose-rtmw-ort-cpu --target kfcore_backend_onnxruntime kfcore_pose_rtmw_ort_cpu_qualification --parallel 2
+
+      - name: Run layered C++ qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          plugin="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/libkfcore_backend_onnxruntime.so"
+          executable="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/kfcore_pose_rtmw_ort_cpu_qualification"
+          report="$RUNNER_TEMP/rtmw-report.json"
+          test -f "$plugin"
+          test -x "$executable"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          "$executable" "$plugin" "$RUNNER_TEMP/rtmw-fixture" "$report"
+          test -f "$report"
+
+      - name: Validate qualification evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
           python - <<'PY'
           import json
           import os
           from pathlib import Path
-          import onnx
 
-          root = Path(os.environ["RUNNER_TEMP"]) / "rtmw"
-          model = onnx.load(root / "end2end.onnx", load_external_data=False)
-          onnx.checker.check_model(model)
-
-          def dims(value):
-              result = []
-              for d in value.type.tensor_type.shape.dim:
-                  if d.HasField("dim_value"):
-                      result.append(d.dim_value)
-                  elif d.HasField("dim_param"):
-                      result.append(d.dim_param)
-                  else:
-                      result.append(None)
-              return result
-
-          payload = {
-              "ir_version": model.ir_version,
-              "opsets": [
-                  {"domain": o.domain, "version": o.version}
-                  for o in model.opset_import
-              ],
-              "inputs": [
-                  {"name": v.name, "shape": dims(v)}
-                  for v in model.graph.input
-              ],
-              "outputs": [
-                  {"name": v.name, "shape": dims(v)}
-                  for v in model.graph.output
-              ],
-          }
-          print(json.dumps(payload, indent=2, sort_keys=True))
-
-          detail = json.loads((root / "detail.json").read_text())
-          pipeline = json.loads((root / "pipeline.json").read_text())
-          print("detail.onnx_config.input_shape=", detail["onnx_config"]["input_shape"])
-          post = pipeline["pipeline"]["tasks"][-1]["params"]
-          print("pipeline.postprocess.input_size=", post["input_size"])
-          print("pipeline.postprocess.simcc_split_ratio=", post["simcc_split_ratio"])
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = json.loads((root / "rtmw-fixture" / "fixture-evidence.json").read_text())
+          report = json.loads((root / "rtmw-report.json").read_text())
+          assert evidence["schema"] == "kfcore.rtmw-ort-cpu-fixture/1"
+          assert evidence["model_sha256"] == os.environ["RTMW_ONNX_SHA256"]
+          assert evidence["input_size"] == [288, 384]
+          assert evidence["keypoint_count"] == 133
+          assert evidence["simcc_split_ratio"] == 2.0
+          assert report["schema"] == "kfcore.rtmw-ort-cpu-cpp-qualification/1"
+          assert report["passed"] is True
+          assert report["provider"] == "onnxruntime"
+          assert report["device"] == "cpu"
+          assert report["case_count"] == 3
+          assert report["preprocess_max_abs"] <= 0.020
+          assert report["preprocess_mean_abs"] <= 0.0015
+          assert report["simcc_max_abs"] <= 1.0e-4
+          assert report["model_coord_max_abs"] <= 1.0e-6
+          assert report["model_score_max_abs"] <= 1.0e-5
+          assert report["source_coord_max_abs"] <= 0.25
+          assert report["source_score_max_abs"] <= 0.01
+          print(json.dumps(report, indent=2, sort_keys=True))
           PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pose-rtmw-ort-cpu-qualification
+          path: |
+            ${{ runner.temp }}/rtmw-report.json
+            ${{ runner.temp }}/rtmw-fixture/fixture-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
