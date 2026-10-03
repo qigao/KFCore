@@ -33,9 +33,9 @@ endif()
 
 find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED
-             PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+             HINTS "$ENV{SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED
-             PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
+             HINTS "$ENV{SALTS_UTILS_ROOT}")
 
 add_subdirectory(vendor)
 add_subdirectory(esn)
@@ -98,7 +98,7 @@ add_subdirectory(kalman)
 
 include(CMakePackageConfigHelpers)
 
-install(FILES kalman/kalman_takasu.h kalman/kalman_udu.h kalman/kalman_ekf.h
+install(FILES kalman/kalman_status.h kalman/kalman_takasu.h kalman/kalman_udu.h kalman/kalman_ekf.h
               kalman/kalman_ukf.h kalman/signal_filters.h
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kfcore")
 

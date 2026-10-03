@@ -1,6 +1,13 @@
 name: DINO relation model contract
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/relation_training/**'
+      - 'THIRD_PARTY_NOTICES.md'
+      - '.github/workflows/relation-model-contract.yml'
+      - '.github/workflows/real-dinov3-relation-smoke.yml'
   pull_request:
     branches: [master]
     paths:
@@ -59,20 +66,91 @@ jobs:
           set -euxo pipefail
           python -m py_compile \
             tools/relation_training/model.py \
+            tools/relation_training/apache_pair_evidence.py \
+            tools/relation_training/apache_pair_sampler.py \
+            tools/relation_training/apache_pair_opportunity.py \
+            tools/relation_training/apache_released_contract.py \
+            tools/relation_training/apache_context.py \
+            tools/relation_training/apache_vocab_head.py \
+            tools/relation_training/apache_text_student.py \
+            tools/relation_training/apache_text_bank.py \
+            tools/relation_training/apache_objective.py \
+            tools/relation_training/apache_training_recipe.py \
+            tools/relation_training/apache_multiscale.py \
+            tools/relation_training/apache_mixture.py \
+            tools/relation_training/apache_indoorvg_holdout.py \
+            tools/relation_training/apache_object_bank.py \
+            tools/relation_training/apache_pack_builder.py \
+            tools/relation_training/apache_vg_raw_rebuild.py \
+            tools/relation_training/apache_hico_train_rebuild.py \
+            tools/relation_training/apache_pack_materializer.py \
+            tools/relation_training/apache_release_qualification.py \
+            tools/relation_training/apache_spatial_flags.py \
+            tools/relation_training/apache_source_columns.py \
+            tools/relation_training/export_predicate_text_student.py \
+            tools/relation_training/export_predicate_routing_gate.py \
             tools/relation_training/losses.py \
             tools/relation_training/checkpoint.py \
             tools/relation_training/export_onnx.py \
             tools/relation_training/real_dinov3_smoke.py \
             tools/relation_training/benchmark.py \
+            tools/relation_training/detector_ceiling.py \
+            tools/relation_training/run_detector_relation_qualification.py \
             tools/relation_training/training.py \
             tools/relation_training/train_baseline.py \
             tools/relation_training/compare_zero_support_sweep.py \
+            tools/relation_training/compare_predicate_objective_v2.py \
+            tools/relation_training/compare_predicate_hard_negatives.py \
+            tools/relation_training/compare_predicate_calibration.py \
+            tools/relation_training/compare_predicate_calibration_sweep.py \
+            tools/relation_training/compare_pair_visual_evidence.py \
+            tools/relation_training/compare_pair_geometry_evidence.py \
+            tools/relation_training/tensorrt_dynamic_vocab_profile.py \
+            tools/relation_training/build_dynamic_vocab_tensorrt.py \
+            tools/relation_training/prepare_released_tensorrt_source.py \
+            tools/relation_training/package_released_relsgg_gpu.py \
+            tools/relation_training/tensorrt_dynamic_vocab_qualification.py \
+            tools/relation_training/make_relation_qualification_report.py \
+            tools/relation_training/relation_backend_matrix.py \
+            tools/relation_training/summarize_scene_behavior_latency.py \
             tools/relation_training/openimages.py \
             tools/relation_training/convert_openimages.py \
             tools/relation_training/make_predicate_embeddings.py \
             tools/relation_training/test_predicate_embeddings.py \
             tools/relation_training/test_model.py \
+            tools/relation_training/test_apache_pair_evidence.py \
+            tools/relation_training/test_apache_pair_sampler.py \
+            tools/relation_training/test_apache_pair_opportunity.py \
+            tools/relation_training/test_apache_released_contract.py \
+            tools/relation_training/test_apache_context.py \
+            tools/relation_training/test_apache_vocab_head.py \
+            tools/relation_training/test_predicate_routing_gate.py \
+            tools/relation_training/test_apache_text_student.py \
+            tools/relation_training/test_apache_text_bank.py \
+            tools/relation_training/test_apache_objective.py \
+            tools/relation_training/test_apache_training_recipe.py \
+            tools/relation_training/test_apache_training_regularization.py \
+            tools/relation_training/test_apache_mixture.py \
+            tools/relation_training/test_apache_indoorvg_holdout.py \
+            tools/relation_training/test_apache_object_bank.py \
+            tools/relation_training/test_apache_pack_builder.py \
+            tools/relation_training/test_apache_vg_raw_rebuild.py \
+            tools/relation_training/test_apache_hico_train_rebuild.py \
+            tools/relation_training/test_apache_pack_materializer.py \
+            tools/relation_training/test_apache_release_qualification.py \
+            tools/relation_training/test_apache_spatial_flags.py \
+            tools/relation_training/test_apache_source_columns.py \
+            tools/relation_training/test_tensorrt_dynamic_vocab_profile.py \
+            tools/relation_training/test_build_dynamic_vocab_tensorrt.py \
+            tools/relation_training/test_prepare_released_tensorrt_source.py \
+            tools/relation_training/test_package_released_relsgg_gpu.py \
+            tools/relation_training/test_tensorrt_dynamic_vocab_qualification.py \
+            tools/relation_training/test_relation_qualification_report.py \
+            tools/relation_training/test_relation_backend_matrix.py \
+            tools/relation_training/test_scene_behavior_latency_summary.py \
             tools/relation_training/test_benchmark.py \
+            tools/relation_training/test_detector_ceiling.py \
+            tools/relation_training/test_detector_relation_qualification.py \
             tools/relation_training/test_training.py \
             tools/relation_training/test_openimages.py
 
@@ -81,7 +159,7 @@ jobs:
         working-directory: tools/relation_training
         run: |
           set -euxo pipefail
-          python -m unittest -v test_model.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
+          python -m unittest -v test_model.py test_detector_ceiling.py test_detector_relation_qualification.py test_apache_pair_evidence.py test_apache_pair_sampler.py test_apache_pair_opportunity.py test_apache_released_contract.py test_apache_context.py test_apache_vocab_head.py test_predicate_routing_gate.py test_apache_text_student.py test_apache_text_bank.py test_apache_objective.py test_apache_training_recipe.py test_apache_training_regularization.py test_apache_mixture.py test_apache_indoorvg_holdout.py test_apache_object_bank.py test_apache_pack_builder.py test_apache_vg_raw_rebuild.py test_apache_hico_train_rebuild.py test_apache_pack_materializer.py test_apache_release_qualification.py test_apache_spatial_flags.py test_apache_source_columns.py test_tensorrt_dynamic_vocab_profile.py test_build_dynamic_vocab_tensorrt.py test_prepare_released_tensorrt_source.py test_package_released_relsgg_gpu.py test_tensorrt_dynamic_vocab_qualification.py test_relation_backend_matrix.py test_benchmark.py test_training.py test_openimages.py test_predicate_embeddings.py
 
       - name: Verify unchanged tracked sources
         if: always()
@@ -93,7 +171,7 @@ jobs:
 
   real-vits16:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DINOV3_REPO: timm/vit_small_patch16_dinov3.lvd1689m
@@ -170,11 +248,94 @@ jobs:
             --image-size 224 \
             --output-dir "$OUT"
 
+      - name: Run Apache pair-evidence real DINOv3 smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke-apache"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --pair-evidence-contract apache \
+            --output-dir "$OUT"
+
+      - name: Run Apache relatedness-sampler real DINOv3 smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke-apache-sampler"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --pair-evidence-contract apache \
+            --pair-sampler-contract apache \
+            --output-dir "$OUT"
+
+      - name: Run Apache relation-context real DINOv3 smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke-apache-context"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --pair-evidence-contract apache \
+            --pair-sampler-contract apache \
+            --relation-context-contract apache \
+            --output-dir "$OUT"
+
+      - name: Run Apache dual-vocab-head real DINOv3 smoke
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT="$RUNNER_TEMP/real-dinov3-smoke-apache-head"
+          mkdir -p "$OUT"
+          python tools/relation_training/real_dinov3_smoke.py \
+            --repo "$DINOV3_REPO" \
+            --filename "$DINOV3_FILENAME" \
+            --model "$DINOV3_MODEL" \
+            --image-size 224 \
+            --max-boxes 40 \
+            --hidden-dim 512 \
+            --predicate-dim 512 \
+            --pair-evidence-contract apache \
+            --pair-sampler-contract apache \
+            --relation-context-contract apache \
+            --predicate-head-contract apache \
+            --verify-backbone-finetune \
+            --output-dir "$OUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: real-dinov3-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 1
-          path: ${{ runner.temp }}/real-dinov3-smoke/real-dinov3-smoke.json
+          path: |
+            ${{ runner.temp }}/real-dinov3-smoke/real-dinov3-smoke.json
+            ${{ runner.temp }}/real-dinov3-smoke-apache/real-dinov3-smoke.json
+            ${{ runner.temp }}/real-dinov3-smoke-apache-sampler/real-dinov3-smoke.json
+            ${{ runner.temp }}/real-dinov3-smoke-apache-context/real-dinov3-smoke.json
+            ${{ runner.temp }}/real-dinov3-smoke-apache-head/real-dinov3-smoke.json
 
       - name: Verify unchanged tracked sources
         if: always()

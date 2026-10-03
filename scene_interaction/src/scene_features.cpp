@@ -170,7 +170,16 @@ encode_pair_observations(const pipelines::SceneGraphFrame& frame,
                 "scene behavior object class IDs must not be negative");
         }
 
-        const PairKey key{*subject.track_id, *object.track_id};
+        if (frame.objects.tracking_epoch == 0U)
+        {
+            throw std::invalid_argument(
+                "tracked SceneGraphFrame must carry a positive tracking epoch");
+        }
+        const PairKey key{
+            *subject.track_id,
+            *object.track_id,
+            frame.objects.tracking_epoch,
+        };
         if (key.subject_track_id == key.object_track_id)
         {
             throw std::invalid_argument(

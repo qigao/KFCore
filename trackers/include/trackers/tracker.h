@@ -31,7 +31,8 @@ typedef enum tracker_status {
     TRACKER_STATUS_INVALID_ARGUMENT = 1,
     TRACKER_STATUS_CAPACITY = 2,
     TRACKER_STATUS_OVERFLOW = 3,
-    TRACKER_STATUS_ALLOCATION_FAILED = 4
+    TRACKER_STATUS_ALLOCATION_FAILED = 4,
+    TRACKER_STATUS_NUMERICAL_FAILURE = 5
 } tracker_status_t;
 
 typedef struct tracked_detection_ex {
@@ -92,6 +93,14 @@ ocsort_config_t ocsort_default_config(void);
 sort_t* sort_create(const sort_config_t* config);
 void sort_destroy(sort_t* tracker);
 void sort_reset(sort_t* tracker);
+tracker_status_t sort_update_ex(
+    sort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t sort_update(
     sort_t* tracker,
     const detection_t* detections,
@@ -123,6 +132,14 @@ size_t bytetrack_update(
 cbiou_t* cbiou_create(const cbiou_config_t* config);
 void cbiou_destroy(cbiou_t* tracker);
 void cbiou_reset(cbiou_t* tracker);
+tracker_status_t cbiou_update_ex(
+    cbiou_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t cbiou_update(
     cbiou_t* tracker,
     const detection_t* detections,
@@ -134,6 +151,14 @@ size_t cbiou_update(
 ocsort_t* ocsort_create(const ocsort_config_t* config);
 void ocsort_destroy(ocsort_t* tracker);
 void ocsort_reset(ocsort_t* tracker);
+tracker_status_t ocsort_update_ex(
+    ocsort_t* tracker,
+    const detection_t* detections,
+    size_t detection_count,
+    tracked_detection_ex_t* output,
+    size_t output_capacity,
+    size_t* output_count
+);
 size_t ocsort_update(
     ocsort_t* tracker,
     const detection_t* detections,

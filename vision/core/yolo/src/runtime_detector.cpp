@@ -151,6 +151,98 @@ kfcore::image::ImageView to_image_view(const ImageView& image)
             format, kfcore::image::MemoryKind::Host};
 }
 
+std::vector<float> preprocess_raw_yolox_release(
+    const kfcore::image::ImageView& source,
+    std::int32_t destination_width,
+    std::int32_t destination_height,
+    const YoloDetectorOptions& options,
+    kfcore::image::LetterboxTransform* transform)
+{
+    if (transform == nullptr)
+    {
+        throw_invalid("raw-yolox letterbox transform output must not be null");
+    }
+    const auto packed =
+        kfcore::image::CpuImageProcessor::copy_bgr(
+            source,
+            options.max_source_bytes);
+    const float scale = (std::min)(
+        static_cast<float>(destination_width) /
+            static_cast<float>(packed.width),
+        static_cast<float>(destination_height) /
+            static_cast<float>(packed.height));
+    const std::int32_t resized_width = (std::max)(
+        1,
+        static_cast<std::int32_t>(
+            static_cast<float>(packed.width) * scale));
+    const std::int32_t resized_height = (std::max)(
+        1,
+        static_cast<std::int32_t>(
+            static_cast<float>(packed.height) * scale));
+    const auto resized =
+        kfcore::image::CpuImageProcessor::resize_bgr(
+            packed,
+            resized_width,
+            resized_height,
+            options.max_source_bytes);
+
+    std::size_t elements = checked_multiply(
+        static_cast<std::size_t>(destination_width),
+        static_cast<std::size_t>(destination_height),
+        "raw-yolox input tensor");
+    elements = checked_multiply(
+        elements,
+        kChannels,
+        "raw-yolox input tensor");
+    const std::size_t bytes = checked_multiply(
+        elements,
+        sizeof(float),
+        "raw-yolox input tensor");
+    if (bytes > options.max_tensor_bytes)
+    {
+        throw_resource("raw-yolox input tensor exceeds max_tensor_bytes");
+    }
+
+    std::vector<float> result(elements, options.border_value);
+    const std::size_t plane =
+        static_cast<std::size_t>(destination_width) *
+        static_cast<std::size_t>(destination_height);
+    for (std::int32_t y = 0; y < resized_height; ++y)
+    {
+        for (std::int32_t x = 0; x < resized_width; ++x)
+        {
+            const std::int32_t source_x =
+                options.mirror_horizontal
+                    ? resized_width - 1 - x
+                    : x;
+            const std::size_t source_pixel =
+                (static_cast<std::size_t>(y) *
+                     static_cast<std::size_t>(resized_width) +
+                 static_cast<std::size_t>(source_x)) *
+                kChannels;
+            const std::size_t destination_pixel =
+                static_cast<std::size_t>(y) *
+                    static_cast<std::size_t>(destination_width) +
+                static_cast<std::size_t>(x);
+            result[destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel]);
+            result[plane + destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel + 1U]);
+            result[2U * plane + destination_pixel] =
+                static_cast<float>(resized.pixels[source_pixel + 2U]);
+        }
+    }
+
+    *transform = {
+        scale,
+        0.0F,
+        0.0F,
+        packed.width,
+        packed.height,
+    };
+    return result;
+}
+
 std::size_t element_size(runtime::DataType type)
 {
     using runtime::DataType;
@@ -382,7 +474,13 @@ std::string lower(std::string value)
 
 struct YoloDetector::Impl final
 {
-    enum class OutputLayout { CompactNms, RawYolo, EfficientNms };
+    enum class OutputLayout
+    {
+        CompactNms,
+        RawYolo,
+        RawYoloX,
+        EfficientNms
+    };
 
     Impl(runtime::ResolvedModel resolved_value, YoloDetectorOptions options_value)
         : resolved(std::move(resolved_value))
@@ -455,28 +553,68 @@ struct YoloDetector::Impl final
             output.allocate(options.max_output_bytes);
             outputs.push_back(std::move(output));
         }
-        else if (flavor == "raw-yolo")
+        else if (flavor == "raw-yolo" ||
+                 flavor == "raw-yolox")
         {
-            layout = OutputLayout::RawYolo;
-            if (output_descriptors.size() != 1U || output_descriptors[0].shape.size() != 3U)
+            layout =
+                flavor == "raw-yolox"
+                    ? OutputLayout::RawYoloX
+                    : OutputLayout::RawYolo;
+            if (output_descriptors.size() != 1U ||
+                output_descriptors[0].shape.size() != 3U)
             {
-                throw_contract("raw-yolo requires one rank-3 output tensor");
+                throw_contract(
+                    "raw YOLO flavors require one rank-3 output tensor");
             }
             HostOutput output;
             output.descriptor = output_descriptors[0];
-            output.shape = resolve_output_shape(output.descriptor, options.max_detections, false);
-            if (output.shape[0] != 1 || output.shape[1] <= static_cast<std::int64_t>(kRawBoxValues) ||
-                output.shape[2] <= 0)
-            {
-                throw_contract("raw-yolo output shape must be [1,4+C,A]");
-            }
+            output.shape =
+                resolve_output_shape(
+                    output.descriptor,
+                    options.max_detections,
+                    false);
             if (output.descriptor.data_type != runtime::DataType::Float32 &&
                 output.descriptor.data_type != runtime::DataType::Float16)
             {
-                throw_contract("raw-yolo output must be FP32 or FP16");
+                throw_contract("raw YOLO output must be FP32 or FP16");
             }
-            class_count = static_cast<std::size_t>(output.shape[1]) - kRawBoxValues;
-            candidate_count = static_cast<std::size_t>(output.shape[2]);
+
+            if (layout == OutputLayout::RawYolo)
+            {
+                if (output.shape[0] != 1 ||
+                    output.shape[1] <=
+                        static_cast<std::int64_t>(kRawBoxValues) ||
+                    output.shape[2] <= 0)
+                {
+                    throw_contract(
+                        "raw-yolo output shape must be [1,4+C,A]");
+                }
+                class_count =
+                    static_cast<std::size_t>(
+                        output.shape[1]) -
+                    kRawBoxValues;
+                candidate_count =
+                    static_cast<std::size_t>(
+                        output.shape[2]);
+            }
+            else
+            {
+                constexpr std::int64_t kYoloXBaseValues = 5;
+                if (output.shape[0] != 1 ||
+                    output.shape[1] <= 0 ||
+                    output.shape[2] <= kYoloXBaseValues)
+                {
+                    throw_contract(
+                        "raw-yolox output shape must be [1,A,5+C]");
+                }
+                candidate_count =
+                    static_cast<std::size_t>(
+                        output.shape[1]);
+                class_count =
+                    static_cast<std::size_t>(
+                        output.shape[2] -
+                        kYoloXBaseValues);
+            }
             output.allocate(options.max_output_bytes);
             outputs.push_back(std::move(output));
         }
@@ -651,13 +789,33 @@ DetectionFrame YoloDetector::detect(const ImageView& image)
     {
         const kfcore::image::ImageView source = to_image_view(image);
         kfcore::image::PreprocessOptions preprocess;
-        preprocess.output_format = kfcore::image::PixelFormat::Rgb8;
+        preprocess.output_format =
+            kfcore::image::PixelFormat::Rgb8;
         preprocess.border_value = impl_->options.border_value;
-        preprocess.mirror_horizontal = impl_->options.mirror_horizontal;
+        preprocess.mirror_horizontal =
+            impl_->options.mirror_horizontal;
         kfcore::image::LetterboxTransform transform;
-        std::vector<float> input = kfcore::image::CpuImageProcessor::letterbox_nchw(
-            source, impl_->input_width_value, impl_->input_height_value, preprocess,
-            impl_->options.max_source_bytes, impl_->options.max_tensor_bytes, &transform);
+        std::vector<float> input;
+        if (impl_->layout == Impl::OutputLayout::RawYoloX)
+        {
+            input = preprocess_raw_yolox_release(
+                source,
+                impl_->input_width_value,
+                impl_->input_height_value,
+                impl_->options,
+                &transform);
+        }
+        else
+        {
+            input = kfcore::image::CpuImageProcessor::letterbox_nchw(
+                source,
+                impl_->input_width_value,
+                impl_->input_height_value,
+                preprocess,
+                impl_->options.max_source_bytes,
+                impl_->options.max_tensor_bytes,
+                &transform);
+        }
 
         std::vector<std::uint16_t> half_input;
         const void* input_data = input.data();
@@ -736,14 +894,26 @@ DetectionFrame YoloDetector::detect(const ImageView& image)
                 decoder_type(output.descriptor.data_type)};
             return detail::decode_compact_nms(images, transforms, view).front();
         }
-        if (impl_->layout == Impl::OutputLayout::RawYolo)
+        if (impl_->layout == Impl::OutputLayout::RawYolo ||
+            impl_->layout == Impl::OutputLayout::RawYoloX)
         {
             const auto& output = impl_->outputs.front();
             const detail::RawYoloOutputView view{
-                output.data(), output.count(), impl_->class_count, impl_->candidate_count,
-                decoder_type(output.descriptor.data_type), impl_->options.score_threshold,
-                impl_->options.iou_threshold, impl_->options.max_detections};
-            return detail::decode_raw_yolo(images, transforms, view).front();
+                output.data(),
+                output.count(),
+                impl_->class_count,
+                impl_->candidate_count,
+                decoder_type(output.descriptor.data_type),
+                impl_->options.score_threshold,
+                impl_->options.iou_threshold,
+                impl_->options.max_detections,
+                impl_->layout == Impl::OutputLayout::RawYoloX
+                    ? detail::RawYoloOutputLayout::
+                          AnchorsFirstObjectnessClassScores
+                    : detail::RawYoloOutputLayout::
+                          ChannelsFirstClassScores};
+            return detail::decode_raw_yolo(
+                images, transforms, view).front();
         }
 
         const auto& counts = impl_->outputs[impl_->count_index];

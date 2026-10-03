@@ -49,10 +49,32 @@ target_link_libraries(my_app PRIVATE KFCore::yolo_tensorrt)
 NV12、I420、NV21、YUY2 和 UYVY；预处理分别由 `image_processor_cpu` 与
 `image_processor_cuda` 完成。
 
-ONNX detector 要求一个名为 `images` 的静态 FP32 `[1,3,H,W]` 输入，以及一个名为
-`output0` 的静态 FP32 `[1,N,6]` 输出。TensorRT detector 支持同语义 compact-NMS 输出，
-以及经过严格 tensor/profile 校验的 EfficientNMS 输出。两者都要求模型已经完成 NMS，不处理
-raw YOLO head。
+ModelPackage artifact `flavor` 决定 detector tensor contract：
+
+- `compact-nms`：`[1,N,6]` compact NMS 输出；
+- `efficient-nms`：TensorRT EfficientNMS 四输出；
+- `raw-yolo`：`[1,4+C,A]`、class-score-only 的 channel-major raw head；
+- `raw-yolox`：解码后的 YOLOX `[1,A,5+C]`，score 使用
+  `objectness * class_confidence`。
+
+`raw-yolox` 不是 `raw-yolo` 的别名。对于 #236 固定的 YOLOX
+`0.1.1rc0` release weights，预处理使用 2021-08-19 upstream breaking-change
+contract（`c9fe0aae2db90adccc90f7e5a16f044bf110c816`）：
+左上对齐 letterbox、114 border、BGR、raw FP32 0..255、CHW；**不**做
+BGR->RGB、`/255` 或 mean/std 标准化。YOLOX 的 0.1.1 pre-release notes 明确说明
+新权重移除了 normalization，旧权重因此不兼容。release tag 中仍保留 legacy
+mean/std 的 ONNXRuntime 示例，不能用来解释该 release asset 的输入数值域。
+现有其他 flavor 继续使用既有 RGB、0..1、居中 letterbox contract，因此不会因
+YOLOX 支持改变既有模型语义。
+
+用于 `raw-yolox` 的 ONNX 必须已经解码 grid/stride，使前四列为输入图像坐标系中的
+`cx,cy,w,h`。使用官方 Megvii YOLOX exporter 时应显式启用
+`--decode_in_inference`；未解码的官方 ONNX 输出需要先按 YOLOX 官方 postprocess
+处理，不能仅通过改 artifact flavor 强行加载。
+
+YOLOX 官方代码与模型发布链采用 Apache-2.0，可作为 #236 fixed-detector
+qualification 的候选；detector 模型、配置、源 commit 和 license 仍必须作为独立
+provenance 记录，不能归入 KFCore relation checkpoint 的许可证元数据。
 
 ## 构建与验证
 

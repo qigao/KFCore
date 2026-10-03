@@ -17,24 +17,32 @@ struct PairKey
 {
     std::uint64_t subject_track_id = 0U;
     std::uint64_t object_track_id = 0U;
+    std::uint64_t tracking_epoch = 1U;
 
     friend bool operator==(const PairKey& left, const PairKey& right) noexcept
     {
         return left.subject_track_id == right.subject_track_id &&
-               left.object_track_id == right.object_track_id;
+               left.object_track_id == right.object_track_id &&
+               left.tracking_epoch == right.tracking_epoch;
     }
 
     friend bool operator<(const PairKey& left, const PairKey& right) noexcept
     {
-        return left.subject_track_id < right.subject_track_id ||
-               (left.subject_track_id == right.subject_track_id &&
-                left.object_track_id < right.object_track_id);
+        return left.tracking_epoch < right.tracking_epoch ||
+               (left.tracking_epoch == right.tracking_epoch &&
+                (left.subject_track_id < right.subject_track_id ||
+                 (left.subject_track_id == right.subject_track_id &&
+                  left.object_track_id < right.object_track_id)));
     }
 };
 
 struct SceneBehaviorModel
 {
     std::size_t predicate_count = 0U;
+
+    // Zero keeps legacy/wildcard behavior. A positive version binds the
+    // predicate-index semantics to RelationFrame::vocabulary_version.
+    std::uint64_t vocabulary_version = 0U;
     int reservoir_size = 0;
     float leak_rate = 0.5F;
     std::size_t neutral_index = 0U;
@@ -72,7 +80,9 @@ enum class SceneBehaviorEventReason
     PairLost,
     FrameGap,
     Reset,
+    TrackingReset,
     ModelChanged,
+    VocabularyChanged,
 };
 
 struct SceneBehaviorEvent
@@ -104,6 +114,9 @@ public:
 
     [[nodiscard]] std::vector<SceneBehaviorEvent> advance(double seconds);
     [[nodiscard]] std::vector<SceneBehaviorEvent> reset(double seconds);
+
+    [[nodiscard]] std::vector<SceneBehaviorEvent>
+    reset_tracking_epoch(std::uint64_t tracking_epoch, double seconds);
 
     [[nodiscard]] bool configured() const noexcept;
     [[nodiscard]] std::size_t pair_state_count() const noexcept;

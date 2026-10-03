@@ -19,7 +19,7 @@ See:
 
 - `docs/runtime/model-package-v1.md`
 - `docs/runtime/manual-build.md`
-- `docs/superpowers/specs/2026-09-14-backend-neutral-runtime-plugin-abi-design.md`
+- `docs/runtime/backend-plugin-abi.md`
 
 ## Runtime loading
 
@@ -86,7 +86,7 @@ Plugin deployment uses:
 KFCORE_INSTALL_PLUGINDIR=plugins
 ```
 
-`CMakeUserPresets.json` defines the execution capabilities through reusable runtime capability presets.
+Portable execution-capability presets are tracked in `presets/RuntimeCapabilities.json` and included by `CMakePresets.json`. Keep machine-specific paths in an ignored `CMakeUserPresets.json`; `CMakeUserPresets.json.example` is a starting point for local overrides.
 
 A CUDA-enabled installed static SDK requires CMake consumers to have `CUDAToolkit` available for CUDA-backed static targets. TensorRT and ONNX Runtime remain runtime plugin dependencies rather than normal KFCore link dependencies.
 

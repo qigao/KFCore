@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -221,34 +222,32 @@ void validate_pair_tensor(const runtime::TensorDescriptor& tensor,
     require_dimension(tensor.shape[1], options.max_pairs, name);
 }
 
-void validate_contract(
+enum class ScoringMode
+{
+    HostQueries,
+    BackendLogits,
+};
+
+void require_dynamic_dimension(
+    std::int64_t declared,
+    const char* subject)
+{
+    if (declared != -1)
+    {
+        throw_contract(
+            std::string(subject) +
+            " must use a dynamic vocabulary extent");
+    }
+}
+
+void validate_common_inputs(
     const std::vector<runtime::TensorDescriptor>& tensors,
     const OpenVocabularyRelationOptions& options,
     std::int32_t& input_size)
 {
-    std::size_t input_count = 0U;
-    std::size_t output_count = 0U;
-    for (const auto& tensor : tensors)
-    {
-        tensor.is_input ? ++input_count : ++output_count;
-    }
-    if (input_count != 3U || output_count != 6U)
-    {
-        throw_contract(
-            "encoder requires exactly 3 inputs and 6 outputs");
-    }
-
     const auto& image = require_tensor(tensors, "image", true);
     const auto& boxes = require_tensor(tensors, "boxes", true);
     const auto& box_counts = require_tensor(tensors, "box_counts", true);
-    const auto& semantic =
-        require_tensor(tensors, "semantic_query", false);
-    const auto& spatial =
-        require_tensor(tensors, "spatial_query", false);
-    const auto& pair = require_tensor(tensors, "pair_logits", false);
-    const auto& sub = require_tensor(tensors, "sub_idx", false);
-    const auto& obj = require_tensor(tensors, "obj_idx", false);
-    const auto& valid = require_tensor(tensors, "valid_mask", false);
 
     input_size = resolve_image_size(image, options.input_size);
 
@@ -267,6 +266,35 @@ void validate_contract(
         throw_contract("box_counts must be INT64 [1]");
     }
     require_dimension(box_counts.shape[0], 1U, "box_counts");
+}
+
+void validate_encoder_contract(
+    const std::vector<runtime::TensorDescriptor>& tensors,
+    const OpenVocabularyRelationOptions& options,
+    std::int32_t& input_size)
+{
+    std::size_t input_count = 0U;
+    std::size_t output_count = 0U;
+    for (const auto& tensor : tensors)
+    {
+        tensor.is_input ? ++input_count : ++output_count;
+    }
+    if (input_count != 3U || output_count != 6U)
+    {
+        throw_contract(
+            "encoder requires exactly 3 inputs and 6 outputs");
+    }
+
+    validate_common_inputs(tensors, options, input_size);
+
+    const auto& semantic =
+        require_tensor(tensors, "semantic_query", false);
+    const auto& spatial =
+        require_tensor(tensors, "spatial_query", false);
+    const auto& pair = require_tensor(tensors, "pair_logits", false);
+    const auto& sub = require_tensor(tensors, "sub_idx", false);
+    const auto& obj = require_tensor(tensors, "obj_idx", false);
+    const auto& valid = require_tensor(tensors, "valid_mask", false);
 
     validate_query_tensor(semantic, options, "semantic_query");
     validate_query_tensor(spatial, options, "spatial_query");
@@ -279,6 +307,68 @@ void validate_contract(
     validate_pair_tensor(
         valid, options, runtime::DataType::Bool, "valid_mask");
 }
+
+void validate_backend_contract(
+    const std::vector<runtime::TensorDescriptor>& tensors,
+    const OpenVocabularyRelationOptions& options,
+    std::int32_t& input_size)
+{
+    std::size_t input_count = 0U;
+    std::size_t output_count = 0U;
+    for (const auto& tensor : tensors)
+    {
+        tensor.is_input ? ++input_count : ++output_count;
+    }
+    if (input_count != 5U || output_count != 5U)
+    {
+        throw_contract(
+            "backend-scoring graph requires exactly 5 inputs and 5 outputs");
+    }
+
+    validate_common_inputs(tensors, options, input_size);
+
+    const auto& bank = require_tensor(tensors, "W", true);
+    const auto& alpha = require_tensor(tensors, "alpha", true);
+    const auto& pred = require_tensor(tensors, "pred_logits", false);
+    const auto& pair = require_tensor(tensors, "pair_logits", false);
+    const auto& sub = require_tensor(tensors, "sub_idx", false);
+    const auto& obj = require_tensor(tensors, "obj_idx", false);
+    const auto& valid = require_tensor(tensors, "valid_mask", false);
+
+    if (bank.data_type != runtime::DataType::Float32 ||
+        bank.shape.size() != 2U)
+    {
+        throw_contract("W must be FP32 [V,D]");
+    }
+    require_dynamic_dimension(bank.shape[0], "W vocabulary axis");
+    require_dimension(bank.shape[1], options.query_dim, "W embedding axis");
+
+    if (alpha.data_type != runtime::DataType::Float32 ||
+        alpha.shape.size() != 1U)
+    {
+        throw_contract("alpha must be FP32 [V]");
+    }
+    require_dynamic_dimension(alpha.shape[0], "alpha vocabulary axis");
+
+    if (pred.data_type != runtime::DataType::Float32 ||
+        pred.shape.size() != 3U)
+    {
+        throw_contract("pred_logits must be FP32 [1,K,V]");
+    }
+    require_batch_one(pred.shape[0], "pred_logits");
+    require_dimension(pred.shape[1], options.max_pairs, "pred_logits pair axis");
+    require_dynamic_dimension(pred.shape[2], "pred_logits vocabulary axis");
+
+    validate_pair_tensor(
+        pair, options, runtime::DataType::Float32, "pair_logits");
+    validate_pair_tensor(
+        sub, options, runtime::DataType::Int64, "sub_idx");
+    validate_pair_tensor(
+        obj, options, runtime::DataType::Int64, "obj_idx");
+    validate_pair_tensor(
+        valid, options, runtime::DataType::Bool, "valid_mask");
+}
+
 
 void validate_regions(const std::vector<Region>& regions,
                       std::int32_t image_width,
@@ -358,54 +448,86 @@ RelateAnythingOptions decode_options(
 struct OpenVocabularyRelation::Impl final
 {
     Impl(runtime::ResolvedModel resolved_value,
-         OpenVocabularyRelationOptions options_value)
+         OpenVocabularyRelationOptions options_value,
+         ScoringMode mode_value)
         : resolved(std::move(resolved_value))
         , options(std::move(options_value))
+        , mode(mode_value)
         , context(resolved.model->create_context())
     {
-        validate_contract(
-            resolved.model->tensors(), options, input_size_value);
+        if (mode == ScoringMode::BackendLogits)
+        {
+            validate_backend_contract(
+                resolved.model->tensors(),
+                options,
+                input_size_value);
+        }
+        else
+        {
+            validate_encoder_contract(
+                resolved.model->tensors(),
+                options,
+                input_size_value);
+        }
 
-        const std::size_t query_values =
-            checked_multiply(options.max_pairs, options.query_dim,
-                             "relation query");
-        semantic_query.resize(query_values);
-        spatial_query.resize(query_values);
         pair_logits.resize(options.max_pairs);
         subject_indices.resize(options.max_pairs);
         object_indices.resize(options.max_pairs);
         valid_mask.resize(options.max_pairs);
 
         std::size_t bytes = checked_multiply(
-            query_values, sizeof(float) * 2U, "relation queries");
+            options.max_pairs,
+            sizeof(float),
+            "pair logits");
         bytes = checked_add(
             bytes,
-            checked_multiply(options.max_pairs, sizeof(float),
-                             "pair logits"),
-            "relation encoder outputs");
+            checked_multiply(
+                options.max_pairs,
+                sizeof(std::int64_t) * 2U,
+                "pair indices"),
+            "relation fixed outputs");
         bytes = checked_add(
             bytes,
-            checked_multiply(options.max_pairs,
-                             sizeof(std::int64_t) * 2U,
-                             "pair indices"),
-            "relation encoder outputs");
-        bytes = checked_add(
-            bytes,
-            checked_multiply(options.max_pairs, sizeof(std::uint8_t),
-                             "valid mask"),
-            "relation encoder outputs");
-        if (bytes > options.max_output_bytes)
+            checked_multiply(
+                options.max_pairs,
+                sizeof(std::uint8_t),
+                "valid mask"),
+            "relation fixed outputs");
+
+        if (mode == ScoringMode::HostQueries)
+        {
+            const std::size_t query_values =
+                checked_multiply(
+                    options.max_pairs,
+                    options.query_dim,
+                    "relation query");
+            semantic_query.resize(query_values);
+            spatial_query.resize(query_values);
+            bytes = checked_add(
+                bytes,
+                checked_multiply(
+                    query_values,
+                    sizeof(float) * 2U,
+                    "relation queries"),
+                "relation fixed outputs");
+        }
+
+        fixed_output_bytes = bytes;
+        if (fixed_output_bytes > options.max_output_bytes)
         {
             throw_resource(
-                "relation encoder outputs exceed configured byte limit");
+                "relation fixed outputs exceed configured byte limit");
         }
     }
 
     runtime::ResolvedModel resolved;
     OpenVocabularyRelationOptions options;
+    ScoringMode mode = ScoringMode::HostQueries;
     std::unique_ptr<runtime::ExecutionContext> context;
     PredicateVocabulary vocabulary;
+    std::uint64_t vocabulary_version = 0U;
     std::int32_t input_size_value = 0;
+    std::size_t fixed_output_bytes = 0U;
 
     std::vector<float> semantic_query;
     std::vector<float> spatial_query;
@@ -434,11 +556,18 @@ OpenVocabularyRelation::load(
     const OpenVocabularyRelationOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != kOpenVocabularyRelationModelType)
+
+    ScoringMode mode = ScoringMode::HostQueries;
+    if (package.model_type() == kDynamicOpenVocabularyRelationModelType)
+    {
+        mode = ScoringMode::BackendLogits;
+    }
+    else if (package.model_type() != kOpenVocabularyRelationModelType)
     {
         throw_contract(
             "ModelPackage model_type must be "
-            "'relation.open-vocabulary-encoder'");
+            "'relation.open-vocabulary-encoder' or "
+            "'relation.open-vocabulary'");
     }
 
     try
@@ -447,7 +576,7 @@ OpenVocabularyRelation::load(
         return std::unique_ptr<OpenVocabularyRelation>(
             new OpenVocabularyRelation(
                 std::make_unique<Impl>(
-                    std::move(resolved), options)));
+                    std::move(resolved), options, mode)));
     }
     catch (const RelationError&)
     {
@@ -471,26 +600,90 @@ void OpenVocabularyRelation::set_vocabulary(
         throw_invalid("model state is unavailable");
     }
     UseGuard guard(impl_->in_use);
-    impl_->vocabulary = normalize_predicate_vocabulary(
-        std::move(vocabulary),
-        impl_->options.query_dim,
-        impl_->options.max_vocabulary_bytes);
 
-    const std::size_t pred_values = checked_multiply(
-        impl_->options.max_pairs,
-        impl_->vocabulary.predicates.size(),
-        "predicate logits");
-    const std::size_t pred_bytes = checked_multiply(
-        pred_values, sizeof(float), "predicate logits");
-    if (pred_bytes > impl_->options.max_output_bytes)
+    const bool complete_alpha =
+        !vocabulary.predicates.empty() &&
+        vocabulary.spatial_weights.size() ==
+            vocabulary.predicates.size();
+    if (impl_->mode == ScoringMode::BackendLogits &&
+        !complete_alpha)
+    {
+        throw_invalid(
+            "backend-scoring vocabulary requires one alpha value per predicate");
+    }
+
+    try
+    {
+        PredicateVocabulary candidate =
+            normalize_predicate_vocabulary(
+                std::move(vocabulary),
+                impl_->options.query_dim,
+                impl_->options.max_vocabulary_bytes);
+
+        if (impl_->mode == ScoringMode::BackendLogits)
+        {
+            std::size_t input_bytes = checked_multiply(
+                candidate.embeddings.size(),
+                sizeof(float),
+                "predicate embedding input");
+            input_bytes = checked_add(
+                input_bytes,
+                checked_multiply(
+                    candidate.spatial_weights.size(),
+                    sizeof(float),
+                    "predicate alpha input"),
+                "dynamic vocabulary inputs");
+            if (input_bytes > impl_->options.max_tensor_bytes)
+            {
+                throw_resource(
+                    "dynamic vocabulary inputs exceed configured tensor byte limit");
+            }
+        }
+
+        const std::size_t pred_values = checked_multiply(
+            impl_->options.max_pairs,
+            candidate.predicates.size(),
+            "predicate logits");
+        const std::size_t pred_bytes = checked_multiply(
+            pred_values,
+            sizeof(float),
+            "predicate logits");
+        const std::size_t total_output_bytes = checked_add(
+            impl_->fixed_output_bytes,
+            pred_bytes,
+            "relation outputs");
+        if (total_output_bytes > impl_->options.max_output_bytes)
+        {
+            throw_resource(
+                "dynamic predicate logits exceed configured output byte limit");
+        }
+        if (impl_->vocabulary_version ==
+            (std::numeric_limits<std::uint64_t>::max)())
+        {
+            throw_resource(
+                "predicate vocabulary version exhausted");
+        }
+
+        std::vector<float> candidate_logits(
+            pred_values,
+            0.0F);
+
+        impl_->vocabulary = std::move(candidate);
+        impl_->pred_logits.swap(candidate_logits);
+        ++impl_->vocabulary_version;
+    }
+    catch (const RelationError&)
+    {
+        throw;
+    }
+    catch (const std::bad_alloc&)
     {
         throw_resource(
-            "dynamic predicate logits exceed configured output byte limit");
+            "dynamic predicate vocabulary allocation failed");
     }
-    impl_->pred_logits.resize(pred_values);
 }
 
-RelationFrame OpenVocabularyRelation::infer(
+TimedRelationFrame OpenVocabularyRelation::infer_timed(
     const image::ImageView& image,
     const std::vector<Region>& regions)
 {
@@ -499,6 +692,7 @@ RelationFrame OpenVocabularyRelation::infer(
         throw_invalid("model state is unavailable");
     }
     UseGuard guard(impl_->in_use);
+    const auto total_start = std::chrono::steady_clock::now();
     if (impl_->vocabulary.predicates.empty())
     {
         throw_invalid("set_vocabulary must be called before infer");
@@ -561,11 +755,6 @@ RelationFrame OpenVocabularyRelation::infer(
             4
         };
         const runtime::TensorShape count_shape {1};
-        const runtime::TensorShape query_shape {
-            1,
-            static_cast<std::int64_t>(impl_->options.max_pairs),
-            static_cast<std::int64_t>(impl_->options.query_dim)
-        };
         const runtime::TensorShape pair_shape {
             1,
             static_cast<std::int64_t>(impl_->options.max_pairs)
@@ -583,52 +772,128 @@ RelationFrame OpenVocabularyRelation::infer(
              &box_count, sizeof(box_count),
              runtime::MemoryKind::Host, {}},
         };
-        std::vector<runtime::MutableTensorView> outputs {
-            {"semantic_query", runtime::DataType::Float32, query_shape,
-             impl_->semantic_query.data(),
-             impl_->semantic_query.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"spatial_query", runtime::DataType::Float32, query_shape,
-             impl_->spatial_query.data(),
-             impl_->spatial_query.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"pair_logits", runtime::DataType::Float32, pair_shape,
-             impl_->pair_logits.data(),
-             impl_->pair_logits.size() * sizeof(float),
-             runtime::MemoryKind::Host, {}},
-            {"sub_idx", runtime::DataType::Int64, pair_shape,
-             impl_->subject_indices.data(),
-             impl_->subject_indices.size() * sizeof(std::int64_t),
-             runtime::MemoryKind::Host, {}},
-            {"obj_idx", runtime::DataType::Int64, pair_shape,
-             impl_->object_indices.data(),
-             impl_->object_indices.size() * sizeof(std::int64_t),
-             runtime::MemoryKind::Host, {}},
-            {"valid_mask", runtime::DataType::Bool, pair_shape,
-             impl_->valid_mask.data(),
-             impl_->valid_mask.size() * sizeof(std::uint8_t),
-             runtime::MemoryKind::Host, {}},
-        };
-        impl_->context->run(inputs, outputs);
+        std::vector<runtime::MutableTensorView> outputs;
+        const auto preprocess_end = std::chrono::steady_clock::now();
+        auto backend_end = preprocess_end;
+        auto predicate_score_end = preprocess_end;
 
-        const detail::RawOpenVocabularyQueries queries {
-            impl_->semantic_query.data(),
-            impl_->spatial_query.data(),
-            impl_->valid_mask.data(),
-            impl_->options.max_pairs,
-            impl_->options.query_dim,
-        };
-        const detail::NormalizedVocabularyView vocabulary {
-            impl_->vocabulary.embeddings.data(),
-            impl_->vocabulary.spatial_weights.data(),
-            impl_->vocabulary.predicates.size(),
-            impl_->vocabulary.embedding_dim,
-        };
-        detail::score_open_vocabulary_queries(
-            queries, vocabulary,
-            impl_->options.logit_scale,
-            impl_->options.logit_bias,
-            impl_->pred_logits.data());
+        if (impl_->mode == ScoringMode::BackendLogits)
+        {
+            const std::int64_t predicate_count =
+                static_cast<std::int64_t>(
+                    impl_->vocabulary.predicates.size());
+            const runtime::TensorShape bank_shape {
+                predicate_count,
+                static_cast<std::int64_t>(
+                    impl_->options.query_dim)
+            };
+            const runtime::TensorShape alpha_shape {
+                predicate_count
+            };
+            const runtime::TensorShape pred_shape {
+                1,
+                static_cast<std::int64_t>(
+                    impl_->options.max_pairs),
+                predicate_count
+            };
+
+            inputs.push_back(
+                {"W", runtime::DataType::Float32, bank_shape,
+                 impl_->vocabulary.embeddings.data(),
+                 impl_->vocabulary.embeddings.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}});
+            inputs.push_back(
+                {"alpha", runtime::DataType::Float32, alpha_shape,
+                 impl_->vocabulary.spatial_weights.data(),
+                 impl_->vocabulary.spatial_weights.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}});
+
+            outputs = {
+                {"pred_logits", runtime::DataType::Float32, pred_shape,
+                 impl_->pred_logits.data(),
+                 impl_->pred_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"pair_logits", runtime::DataType::Float32, pair_shape,
+                 impl_->pair_logits.data(),
+                 impl_->pair_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"sub_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->subject_indices.data(),
+                 impl_->subject_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"obj_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->object_indices.data(),
+                 impl_->object_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"valid_mask", runtime::DataType::Bool, pair_shape,
+                 impl_->valid_mask.data(),
+                 impl_->valid_mask.size() * sizeof(std::uint8_t),
+                 runtime::MemoryKind::Host, {}},
+            };
+            impl_->context->run(inputs, outputs);
+            backend_end = std::chrono::steady_clock::now();
+            predicate_score_end = backend_end;
+        }
+        else
+        {
+            const runtime::TensorShape query_shape {
+                1,
+                static_cast<std::int64_t>(
+                    impl_->options.max_pairs),
+                static_cast<std::int64_t>(
+                    impl_->options.query_dim)
+            };
+            outputs = {
+                {"semantic_query", runtime::DataType::Float32, query_shape,
+                 impl_->semantic_query.data(),
+                 impl_->semantic_query.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"spatial_query", runtime::DataType::Float32, query_shape,
+                 impl_->spatial_query.data(),
+                 impl_->spatial_query.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"pair_logits", runtime::DataType::Float32, pair_shape,
+                 impl_->pair_logits.data(),
+                 impl_->pair_logits.size() * sizeof(float),
+                 runtime::MemoryKind::Host, {}},
+                {"sub_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->subject_indices.data(),
+                 impl_->subject_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"obj_idx", runtime::DataType::Int64, pair_shape,
+                 impl_->object_indices.data(),
+                 impl_->object_indices.size() * sizeof(std::int64_t),
+                 runtime::MemoryKind::Host, {}},
+                {"valid_mask", runtime::DataType::Bool, pair_shape,
+                 impl_->valid_mask.data(),
+                 impl_->valid_mask.size() * sizeof(std::uint8_t),
+                 runtime::MemoryKind::Host, {}},
+            };
+            impl_->context->run(inputs, outputs);
+            backend_end = std::chrono::steady_clock::now();
+
+            const detail::RawOpenVocabularyQueries queries {
+                impl_->semantic_query.data(),
+                impl_->spatial_query.data(),
+                impl_->valid_mask.data(),
+                impl_->options.max_pairs,
+                impl_->options.query_dim,
+            };
+            const detail::NormalizedVocabularyView vocabulary {
+                impl_->vocabulary.embeddings.data(),
+                impl_->vocabulary.spatial_weights.data(),
+                impl_->vocabulary.predicates.size(),
+                impl_->vocabulary.embedding_dim,
+            };
+            detail::score_open_vocabulary_queries(
+                queries, vocabulary,
+                impl_->options.logit_scale,
+                impl_->options.logit_bias,
+                impl_->pred_logits.data());
+            predicate_score_end = std::chrono::steady_clock::now();
+        }
+
+        const auto runtime_end = predicate_score_end;
 
         const detail::RawRelationOutputs raw {
             impl_->pred_logits.data(),
@@ -643,10 +908,43 @@ RelationFrame OpenVocabularyRelation::infer(
         RelationFrame result;
         result.image_width = source.width;
         result.image_height = source.height;
+        result.vocabulary_version = impl_->vocabulary_version;
         result.edges = detail::decode_relation_outputs(
             raw, regions,
             decode_options(impl_->options, impl_->vocabulary));
-        return result;
+        const auto decode_end = std::chrono::steady_clock::now();
+
+        const auto milliseconds = [](auto begin, auto end) {
+            return std::chrono::duration<double, std::milli>(
+                       end - begin)
+                .count();
+        };
+
+        TimedRelationFrame timed;
+        timed.timing.preprocess_ms =
+            milliseconds(total_start, preprocess_end);
+        timed.timing.backend_ms =
+            milliseconds(preprocess_end, backend_end);
+        timed.timing.predicate_score_ms =
+            milliseconds(backend_end, predicate_score_end);
+        timed.timing.runtime_ms =
+            milliseconds(preprocess_end, runtime_end);
+        timed.timing.decode_ms =
+            milliseconds(runtime_end, decode_end);
+        timed.timing.total_ms =
+            milliseconds(total_start, decode_end);
+        timed.timing.region_count = regions.size();
+        timed.timing.predicate_count =
+            impl_->vocabulary.predicates.size();
+        timed.timing.valid_pair_count =
+            static_cast<std::size_t>(
+                std::count_if(
+                    impl_->valid_mask.begin(),
+                    impl_->valid_mask.end(),
+                    [](std::uint8_t value) { return value != 0U; }));
+        timed.timing.edge_count = result.edges.size();
+        timed.frame = std::move(result);
+        return timed;
     }
     catch (const RelationError&)
     {
@@ -669,6 +967,13 @@ RelationFrame OpenVocabularyRelation::infer(
     {
         throw_resource("inference allocation failed");
     }
+}
+
+RelationFrame OpenVocabularyRelation::infer(
+    const image::ImageView& image,
+    const std::vector<Region>& regions)
+{
+    return infer_timed(image, regions).frame;
 }
 
 std::int32_t OpenVocabularyRelation::input_size() const noexcept
@@ -694,6 +999,17 @@ std::size_t OpenVocabularyRelation::query_dim() const noexcept
 std::size_t OpenVocabularyRelation::predicate_count() const noexcept
 {
     return impl_ ? impl_->vocabulary.predicates.size() : 0U;
+}
+
+std::uint64_t OpenVocabularyRelation::vocabulary_version() const noexcept
+{
+    return impl_ ? impl_->vocabulary_version : 0U;
+}
+
+bool OpenVocabularyRelation::backend_scoring() const noexcept
+{
+    return impl_ &&
+        impl_->mode == ScoringMode::BackendLogits;
 }
 
 const std::vector<std::string>&

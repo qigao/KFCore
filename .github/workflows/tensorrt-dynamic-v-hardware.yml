@@ -1,0 +1,218 @@
+name: TensorRT dynamic-V hardware qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: 'Explicit self-hosted NVIDIA/TensorRT runner label'
+        required: true
+        type: string
+      device:
+        description: 'CUDA device passed to torch/TensorRT, e.g. cuda or cuda:0'
+        required: true
+        default: 'cuda'
+        type: string
+      opt_vocab:
+        description: 'TensorRT optimization-profile opt V'
+        required: true
+        default: '64'
+        type: string
+      max_vocab:
+        description: 'TensorRT optimization-profile max V'
+        required: true
+        default: '243'
+        type: string
+      workspace_gib:
+        description: 'TensorRT builder workspace GiB'
+        required: true
+        default: '4'
+        type: string
+      warmup:
+        description: 'Latency warmup iterations'
+        required: true
+        default: '2'
+        type: string
+      iterations:
+        description: 'Measured latency iterations per V'
+        required: true
+        default: '5'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tensorrt-dynamic-v-hardware-${{ inputs.runner_label }}
+  cancel-in-progress: false
+
+jobs:
+  hardware:
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 60
+    env:
+      HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
+      REL_ONNX_SHA256: b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a
+      PREDICATE_BANK_SHA256: 708f812d6579eab1be85b3378b79e376453c2d4f65b4fad9bcebb9f5bf05da06
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Require real NVIDIA TensorRT environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          nvidia-smi
+          python3 - <<'PY'
+          import json
+          import platform
+          import sys
+
+          import numpy
+          import onnx
+          import onnxruntime as ort
+          import tensorrt as trt
+          import torch
+
+          if not torch.cuda.is_available():
+              raise SystemExit("CUDA-enabled torch with a visible NVIDIA GPU is required")
+          major = int(str(trt.__version__).split(".", 1)[0])
+          if major < 10:
+              raise SystemExit(
+                  f"TensorRT >=10 is required; got {trt.__version__}"
+              )
+          device = torch.cuda.current_device()
+          payload = {
+              "python": sys.version.split()[0],
+              "platform": platform.platform(),
+              "numpy": numpy.__version__,
+              "onnx": onnx.__version__,
+              "onnxruntime": ort.__version__,
+              "tensorrt": trt.__version__,
+              "torch": torch.__version__,
+              "torch_cuda": torch.version.cuda,
+              "gpu": torch.cuda.get_device_name(device),
+              "compute_capability": list(
+                  torch.cuda.get_device_capability(device)
+              ),
+          }
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
+          mkdir -p "$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          {
+            echo "=== nvidia-smi ==="
+            nvidia-smi
+            echo
+            echo "=== python ==="
+            python3 - <<'PY'
+          import json
+          import platform
+          import sys
+          import onnxruntime as ort
+          import tensorrt as trt
+          import torch
+          device = torch.cuda.current_device()
+          print(json.dumps({
+              "python": sys.version.split()[0],
+              "platform": platform.platform(),
+              "onnxruntime": ort.__version__,
+              "tensorrt": trt.__version__,
+              "torch": torch.__version__,
+              "torch_cuda": torch.version.cuda,
+              "gpu": torch.cuda.get_device_name(device),
+              "compute_capability": list(
+                  torch.cuda.get_device_capability(device)
+              ),
+          }, indent=2, sort_keys=True))
+          PY
+          } > "$RUNNER_TEMP/kfcore-tensorrt-hardware/hardware.txt"
+
+      - name: Run CPU-side harness contract tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd tools/relation_training
+          python3 -m unittest -v             test_tensorrt_dynamic_vocab_profile.py             test_build_dynamic_vocab_tensorrt.py             test_prepare_released_tensorrt_source.py             test_tensorrt_dynamic_vocab_qualification.py
+
+      - name: Download pinned released dynamic-vocabulary source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          base="https://huggingface.co/maelic/relsgg-vits16plus/resolve/$HF_REVISION"
+          curl -fL --retry 3 "$base/relateanything.onnx"             -o "$root/relateanything.onnx"
+          curl -fL --retry 3 "$base/predicate_bank.npz"             -o "$root/predicate_bank.npz"
+          echo "$REL_ONNX_SHA256  $root/relateanything.onnx" | sha256sum -c -
+          echo "$PREDICATE_BANK_SHA256  $root/predicate_bank.npz" | sha256sum -c -
+
+          python3 tools/relation_training/prepare_released_tensorrt_source.py             --onnx "$root/relateanything.onnx"             --predicate-bank "$root/predicate_bank.npz"             --out "$root/source-metadata.json"
+
+      - name: Build one dynamic-V TensorRT engine
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          python3 tools/relation_training/build_dynamic_vocab_tensorrt.py             --onnx "$root/relateanything.onnx"             --metadata "$root/source-metadata.json"             --out "$root/relation.engine"             --opt-vocab "${{ inputs.opt_vocab }}"             --max-vocab "${{ inputs.max_vocab }}"             --workspace-gib "${{ inputs.workspace_gib }}"             --device "${{ inputs.device }}"
+
+          test -s "$root/relation.engine"
+          test -s "$root/relation.json"
+
+      - name: Qualify one engine across V=1/3/opt/max
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          before="$(sha256sum "$root/relation.engine" | awk '{print $1}')"
+
+          python3 tools/relation_training/tensorrt_dynamic_vocab_qualification.py             --onnx "$root/relateanything.onnx"             --engine "$root/relation.engine"             --engine-metadata "$root/relation.json"             --out "$root/tensorrt-dynamic-v-report.json"             --warmup "${{ inputs.warmup }}"             --iterations "${{ inputs.iterations }}"             --ort-provider CPUExecutionProvider
+
+          after="$(sha256sum "$root/relation.engine" | awk '{print $1}')"
+          test "$before" = "$after"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "kfcore-tensorrt-hardware"
+          report = json.loads(
+              (root / "tensorrt-dynamic-v-report.json").read_text()
+          )
+          assert report["hardware_executed"] is True
+          assert report["same_engine_reused"] is True
+          assert report["same_context_reused"] is True
+          assert report["passed"] is True
+          assert report["engine_sha256_before"] == report["engine_sha256_after"]
+          assert [case["vocabulary_size"] for case in report["cases"]][:2] == [1, 3]
+          assert all(case["passed"] is True for case in report["cases"])
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Package hardware-qualified engine for C++ production
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root="$RUNNER_TEMP/kfcore-tensorrt-hardware"
+          python3 tools/relation_training/package_released_relsgg_gpu.py \
+            --onnx "$root/relateanything.onnx" \
+            --predicate-bank "$root/predicate_bank.npz" \
+            --engine "$root/relation.engine" \
+            --engine-metadata "$root/relation.json" \
+            --out-dir "$root/production-package" \
+            --hardware-compatibility exact-device
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tensorrt-dynamic-v-hardware-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/hardware.txt
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/source-metadata.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/relation.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/tensorrt-dynamic-v-report.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/model.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/evidence.json
+            ${{ runner.temp }}/kfcore-tensorrt-hardware/production-package/tensorrt.json

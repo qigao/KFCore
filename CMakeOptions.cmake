@@ -19,12 +19,23 @@ if(_kfcore_install_plugindir_normalized MATCHES "(^|/)\\.\\.(/|$)")
 endif()
 unset(_kfcore_install_plugindir_normalized)
 
-option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" ON)
-option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" ON)
+option(KFCORE_ENABLE_CUDA "Build CUDA image/compute support" OFF)
+option(KFCORE_ENABLE_TENSORRT "Build TensorRT execution backend" OFF)
 option(KFCORE_ENABLE_ONNXRUNTIME "Build ONNX Runtime execution backend" OFF)
 option(KFCORE_ENABLE_TEMPORAL_GESTURE_GRU
        "Build the experimental temporal gesture GRU library and smoke tool"
        OFF)
+option(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER
+       "Build the optional HuggingFace tokenizer.json provider for relation predicates"
+       OFF)
+option(KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION
+       "Build the focused C++ ORT CPU open-vocabulary qualification executable"
+       OFF)
+option(KFCORE_BUILD_RELEASED_SCENE_BEHAVIOR_QUALIFICATION
+       "Build the released detector/relation SceneBehavior latency qualification"
+       OFF)
+set(KFCORE_TOKENIZERS_CPP_SOURCE_DIR "" CACHE PATH
+    "Path to a pinned mlc-ai/tokenizers-cpp source checkout when KFCORE_ENABLE_HF_TOKENIZER_PROVIDER=ON")
 option(KFCORE_ONNXRUNTIME_ENABLE_CUDA
        "Expose CUDA devices from the ONNX Runtime backend when the installed ORT SDK provides CUDA EP"
        OFF)

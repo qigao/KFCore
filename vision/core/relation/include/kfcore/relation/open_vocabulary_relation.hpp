@@ -18,6 +18,8 @@ namespace kfcore::relation
 
 inline constexpr std::string_view kOpenVocabularyRelationModelType =
     "relation.open-vocabulary-encoder";
+inline constexpr std::string_view kDynamicOpenVocabularyRelationModelType =
+    "relation.open-vocabulary";
 
 struct PredicateVocabulary
 {
@@ -25,6 +27,12 @@ struct PredicateVocabulary
     std::vector<float> embeddings;
     std::vector<float> spatial_weights;
     std::size_t embedding_dim = 0U;
+
+    // Optional provenance for vocabularies produced by a text encoder.
+    std::string text_encoder_provenance;
+    std::string tokenizer_provenance;
+    std::string template_provenance;
+    std::string routing_gate_provenance;
 };
 
 [[nodiscard]] PredicateVocabulary normalize_predicate_vocabulary(
@@ -35,7 +43,7 @@ struct PredicateVocabulary
 struct OpenVocabularyRelationOptions
 {
     std::int32_t input_size = 0;
-    std::size_t max_boxes = 32U;
+    std::size_t max_boxes = kLegacyRelationMaxBoxes;
     std::size_t max_pairs = 128U;
     std::size_t query_dim = 512U;
 
@@ -54,6 +62,35 @@ struct OpenVocabularyRelationOptions
     std::size_t max_output_bytes = 64U * 1024U * 1024U;
     std::size_t max_vocabulary_bytes = 64U * 1024U * 1024U;
 };
+
+struct RelationInferenceTiming
+{
+    double preprocess_ms = 0.0;
+    double backend_ms = 0.0;
+    double predicate_score_ms = 0.0;
+    double runtime_ms = 0.0;
+    double decode_ms = 0.0;
+    double total_ms = 0.0;
+
+    std::size_t region_count = 0U;
+    std::size_t predicate_count = 0U;
+    std::size_t valid_pair_count = 0U;
+    std::size_t edge_count = 0U;
+};
+
+struct TimedRelationFrame
+{
+    RelationFrame frame;
+    RelationInferenceTiming timing;
+};
+
+[[nodiscard]] inline OpenVocabularyRelationOptions
+apache_released_open_vocabulary_relation_options()
+{
+    OpenVocabularyRelationOptions options;
+    options.max_boxes = kApacheReleasedMaxBoxes;
+    return options;
+}
 
 class OpenVocabularyRelation final
 {
@@ -74,11 +111,17 @@ public:
     [[nodiscard]] RelationFrame infer(const image::ImageView& image,
                                       const std::vector<Region>& regions);
 
+    [[nodiscard]] TimedRelationFrame
+    infer_timed(const image::ImageView& image,
+                const std::vector<Region>& regions);
+
     [[nodiscard]] std::int32_t input_size() const noexcept;
     [[nodiscard]] std::size_t max_boxes() const noexcept;
     [[nodiscard]] std::size_t max_pairs() const noexcept;
     [[nodiscard]] std::size_t query_dim() const noexcept;
     [[nodiscard]] std::size_t predicate_count() const noexcept;
+    [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
+    [[nodiscard]] bool backend_scoring() const noexcept;
     [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
 

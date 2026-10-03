@@ -1,0 +1,81 @@
+name: CMake presets contract
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'CMakePresets.json'
+      - 'CMakeUserPresets.json.example'
+      - 'presets/**'
+      - '.gitignore'
+      - '.github/workflows/cmake-presets-contract.yml'
+  pull_request:
+    branches: [master, fix/backend-neutral-package]
+    paths:
+      - 'CMakePresets.json'
+      - 'CMakeUserPresets.json.example'
+      - 'presets/**'
+      - '.gitignore'
+      - '.github/workflows/cmake-presets-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cmake-presets-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  portable-presets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Validate tracked presets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test ! -e CMakeUserPresets.json
+          git check-ignore -q CMakeUserPresets.json
+          python -m json.tool CMakePresets.json >/dev/null
+          python -m json.tool CMakeUserPresets.json.example >/dev/null
+          python -m json.tool presets/RuntimeCapabilities.json >/dev/null
+          cmake --list-presets=configure
+
+      - name: Validate user-preset example
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp CMakeUserPresets.json.example CMakeUserPresets.json
+          cmake --list-presets=configure
+          rm CMakeUserPresets.json
+
+      - name: Reject repository-local machine paths
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if grep -REn             'C:/projects|C:/tools|Program Files/NVIDIA|(^|[":[:space:]])/opt/'             CMakePresets.json CMakeUserPresets.json.example presets; then
+            echo "tracked CMake presets contain machine-specific absolute paths" >&2
+            exit 1
+          fi
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

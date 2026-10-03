@@ -10,7 +10,7 @@ add_library(kfcore_backend_onnxruntime SHARED
   src/plugin.cpp)
 target_compile_features(kfcore_backend_onnxruntime PRIVATE cxx_std_17)
 target_include_directories(kfcore_backend_onnxruntime PRIVATE
-  ${CMAKE_SOURCE_DIR}/runtime/abi/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/abi/include
   ${ONNXRuntime_INCLUDE_DIR})
 target_link_libraries(kfcore_backend_onnxruntime PRIVATE
   KFCore::runtime_abi

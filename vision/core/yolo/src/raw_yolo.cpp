@@ -17,6 +17,7 @@ namespace
 {
 
 constexpr std::size_t kBoxValueCount = 4U;
+constexpr std::size_t kObjectnessValueCount = 1U;
 
 [[noreturn]] void throw_resource(std::string message)
 {
@@ -62,6 +63,37 @@ float value_at(const RawYoloOutputView& outputs, std::size_t index)
         return half_to_float(static_cast<const std::uint16_t*>(outputs.predictions)[index]);
     }
     throw_inference("raw YOLO output type must be Float16 or Float32");
+}
+
+std::size_t channel_count(const RawYoloOutputView& outputs)
+{
+    return kBoxValueCount + outputs.class_count +
+        (outputs.layout ==
+                 RawYoloOutputLayout::AnchorsFirstObjectnessClassScores
+             ? kObjectnessValueCount
+             : 0U);
+}
+
+float prediction_value(
+    const RawYoloOutputView& outputs,
+    std::size_t image_base,
+    std::size_t channel,
+    std::size_t candidate)
+{
+    if (outputs.layout ==
+        RawYoloOutputLayout::ChannelsFirstClassScores)
+    {
+        return value_at(
+            outputs,
+            image_base +
+                channel * outputs.candidate_count +
+                candidate);
+    }
+    return value_at(
+        outputs,
+        image_base +
+            candidate * channel_count(outputs) +
+            channel);
 }
 
 float intersection_over_union(const BoxF& left, const BoxF& right) noexcept
@@ -112,8 +144,10 @@ std::vector<DetectionFrame> decode_raw_yolo(
             throw_inference("raw YOLO thresholds must be finite within [0,1]");
         }
         std::size_t values_per_image = 0U;
-        if (!checked_multiply_size(kBoxValueCount + outputs.class_count,
-                                   outputs.candidate_count, &values_per_image))
+        if (!checked_multiply_size(
+                channel_count(outputs),
+                outputs.candidate_count,
+                &values_per_image))
         {
             throw_resource("raw YOLO output element count overflow");
         }
@@ -146,20 +180,46 @@ std::vector<DetectionFrame> decode_raw_yolo(
             for (std::size_t candidate_index = 0U;
                  candidate_index < outputs.candidate_count; ++candidate_index)
             {
+                float objectness = 1.0F;
+                std::size_t class_offset = kBoxValueCount;
+                if (outputs.layout ==
+                    RawYoloOutputLayout::
+                        AnchorsFirstObjectnessClassScores)
+                {
+                    objectness = prediction_value(
+                        outputs,
+                        image_base,
+                        kBoxValueCount,
+                        candidate_index);
+                    class_offset += kObjectnessValueCount;
+                    if (!std::isfinite(objectness) ||
+                        objectness < 0.0F ||
+                        objectness > 1.0F)
+                    {
+                        throw_inference(
+                            "raw YOLO objectness is outside [0,1]");
+                    }
+                }
+
                 float best_score = -1.0F;
                 std::size_t best_class = 0U;
                 for (std::size_t class_index = 0U;
                      class_index < outputs.class_count; ++class_index)
                 {
-                    const float score = value_at(
-                        outputs, image_base +
-                                     (kBoxValueCount + class_index) *
-                                         outputs.candidate_count +
-                                     candidate_index);
-                    if (!std::isfinite(score) || score < 0.0F || score > 1.0F)
+                    const float class_score = prediction_value(
+                        outputs,
+                        image_base,
+                        class_offset + class_index,
+                        candidate_index);
+                    if (!std::isfinite(class_score) ||
+                        class_score < 0.0F ||
+                        class_score > 1.0F)
                     {
-                        throw_inference("raw YOLO score is outside [0,1]");
+                        throw_inference(
+                            "raw YOLO class score is outside [0,1]");
                     }
+                    const float score =
+                        objectness * class_score;
                     if (score > best_score)
                     {
                         best_score = score;
@@ -171,14 +231,14 @@ std::vector<DetectionFrame> decode_raw_yolo(
                     continue;
                 }
 
-                const float center_x = value_at(
-                    outputs, image_base + candidate_index);
-                const float center_y = value_at(
-                    outputs, image_base + outputs.candidate_count + candidate_index);
-                const float width = value_at(
-                    outputs, image_base + 2U * outputs.candidate_count + candidate_index);
-                const float height = value_at(
-                    outputs, image_base + 3U * outputs.candidate_count + candidate_index);
+                const float center_x = prediction_value(
+                    outputs, image_base, 0U, candidate_index);
+                const float center_y = prediction_value(
+                    outputs, image_base, 1U, candidate_index);
+                const float width = prediction_value(
+                    outputs, image_base, 2U, candidate_index);
+                const float height = prediction_value(
+                    outputs, image_base, 3U, candidate_index);
                 if (!std::isfinite(center_x) || !std::isfinite(center_y) ||
                     !std::isfinite(width) || !std::isfinite(height) ||
                     width <= 0.0F || height <= 0.0F)

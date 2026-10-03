@@ -1,0 +1,465 @@
+name: Released detector-box relation quality
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/detector_qualification/run_yolox_detector_manifest.py'
+      - 'tools/relation_training/prepare_hico_test_qualification.py'
+      - 'tools/relation_training/run_released_detector_relation_qualification.py'
+      - 'tools/relation_training/prepare_released_scene_behavior_latency.py'
+      - 'tools/relation_training/prepare_released_relsgg.py'
+      - 'tools/relation_training/summarize_scene_behavior_latency.py'
+      - 'tools/relation_training/make_relation_qualification_report.py'
+      - 'tools/relation_training/relation_backend_matrix.py'
+      - 'tools/relation_training/test_relation_backend_matrix.py'
+      - 'scene_interaction/tests/released_scene_behavior_latency.cpp'
+      - 'scene_interaction/CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'cmake/tests/released_scene_behavior_latency/**'
+      - 'tools/relation_training/test_prepare_hico_test_qualification.py'
+      - 'tools/relation_training/test_released_detector_relation_qualification.py'
+      - '.github/workflows/released-detector-relation-quality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: released-detector-quality-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  hico-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HICO_REVISION: 4d65d61c99931737c2b7a9636c7e3501eab69850
+      HICO_TEST_SHARD_SHA256: b02dd7ad2aa6103a974c3323bfce8f28224824e27fb0362a5825412d64e40db4
+      YOLOX_SOURCE_URL: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+      YOLOX_SOURCE_SHA256: 427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7
+      HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
+      REL_ONNX_SHA256: b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a
+      PREDICATE_BANK_SHA256: 708f812d6579eab1be85b3378b79e376453c2d4f65b4fad9bcebb9f5bf05da06
+      SALTS_VERSION: 1.8.9
+      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
+      SALTS_UTILS_VERSION: 4.1.13
+      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      ORT_VERSION: 1.22.0
+      ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
+      HF_HUB_DISABLE_TELEMETRY: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            tools/relation_training/requirements-ci-torch.txt
+            tools/relation_training/requirements-ci.txt
+
+      - name: Install qualification dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check             --index-url https://download.pytorch.org/whl/cpu             -r tools/relation_training/requirements-ci-torch.txt
+          python -m pip install --disable-pip-version-check             -r tools/relation_training/requirements-ci.txt
+          python -m pip install --disable-pip-version-check             pyarrow==25.0.1 opencv-python-headless==4.13.0.92
+
+      - name: Compile and run focused qualification tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m py_compile             tools/detector_qualification/run_yolox_detector_manifest.py             tools/relation_training/prepare_hico_test_qualification.py             tools/relation_training/run_released_detector_relation_qualification.py             tools/relation_training/prepare_released_scene_behavior_latency.py             tools/relation_training/prepare_released_relsgg.py             tools/relation_training/summarize_scene_behavior_latency.py             tools/relation_training/make_relation_qualification_report.py             tools/relation_training/relation_backend_matrix.py             tools/relation_training/test_prepare_hico_test_qualification.py             tools/relation_training/test_released_detector_relation_qualification.py             tools/relation_training/test_relation_backend_matrix.py
+          cd tools/relation_training
+          python -m unittest -v             test_prepare_hico_test_qualification.py             test_released_detector_relation_qualification.py             test_relation_backend_matrix.py
+
+      - name: Download pinned relation and detector artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          src="$RUNNER_TEMP/released-quality-source"
+          mkdir -p "$src"
+          base="https://huggingface.co/maelic/relsgg-vits16plus/resolve/$HF_REVISION"
+          curl -fL --retry 3 "$base/relateanything.onnx" -o "$src/relateanything.onnx"
+          curl -fL --retry 3 "$base/predicate_bank.npz" -o "$src/predicate_bank.npz"
+          curl -fL --retry 3 "$base/relateanything.json" -o "$src/relateanything.json"
+          curl -fL --retry 3 "$YOLOX_SOURCE_URL" -o "$src/yolox_tiny.onnx"
+          echo "$REL_ONNX_SHA256  $src/relateanything.onnx" | sha256sum -c -
+          echo "$PREDICATE_BANK_SHA256  $src/predicate_bank.npz" | sha256sum -c -
+          echo "$YOLOX_SOURCE_SHA256  $src/yolox_tiny.onnx" | sha256sum -c -
+          python tools/detector_qualification/prepare_yolox_tiny.py             --source-onnx "$src/yolox_tiny.onnx"             --out-dir "$RUNNER_TEMP/yolox-qualified"
+
+      - name: Verify YOLOX release-weight preprocessing on upstream demo image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          demo="$RUNNER_TEMP/yolox-demo"
+          mkdir -p "$demo/images"
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/e1052df71842031413f6030723c3607b839c80ce/assets/demo.png" \
+            -o "$demo/images/demo.png"
+
+          PYTHONPATH="$GITHUB_WORKSPACE/tools/detector_qualification" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          import cv2
+          import numpy as np
+          import onnxruntime as ort
+          from PIL import Image
+
+          from run_yolox_detector_manifest import _letterbox_nchw
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          image_path = root / "yolox-demo" / "images" / "demo.png"
+          model_path = root / "yolox-qualified" / "yolox_tiny_decoded.onnx"
+          session = ort.InferenceSession(
+              str(model_path),
+              providers=["CPUExecutionProvider"],
+          )
+          input_name = session.get_inputs()[0].name
+
+          bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+          if bgr is None:
+              raise SystemExit("cannot decode upstream demo.png")
+          height, width = bgr.shape[:2]
+          size = 416
+          ratio = min(size / height, size / width)
+          resized_width = int(width * ratio)
+          resized_height = int(height * ratio)
+          resized = cv2.resize(
+              bgr,
+              (resized_width, resized_height),
+              interpolation=cv2.INTER_LINEAR,
+          ).astype(np.float32)
+          padded = np.ones((size, size, 3), dtype=np.float32) * 114.0
+          padded[:resized_height, :resized_width] = resized
+          upstream_release = np.ascontiguousarray(
+              padded.transpose(2, 0, 1)[None],
+              dtype=np.float32,
+          )
+
+          rgb = np.asarray(
+              Image.open(image_path).convert("RGB"),
+              dtype=np.uint8,
+          )
+          current, current_ratio = _letterbox_nchw(rgb)
+
+          def summary(tensor):
+              output = np.asarray(
+                  session.run(None, {input_name: tensor})[0]
+              )
+              objectness = output[0, :, 4].astype(np.float64)
+              classes = output[0, :, 5:].astype(np.float64)
+              fused = objectness * classes.max(axis=1)
+              return {
+                  "max_objectness": float(objectness.max()),
+                  "max_fused_score": float(fused.max()),
+                  "candidates_ge_0_1": int((fused >= 0.1).sum()),
+                  "input_min": float(tensor.min()),
+                  "input_max": float(tensor.max()),
+              }
+
+          report = {
+              "image_size": [width, height],
+              "upstream_ratio": ratio,
+              "current_ratio": current_ratio,
+              "resized_size": [resized_width, resized_height],
+              "current_vs_upstream_max_abs_input_diff": float(
+                  np.max(np.abs(current - upstream_release))
+              ),
+              "upstream_release_bgr_raw": summary(upstream_release),
+              "kfcore_release_bgr_raw": summary(current),
+          }
+          print(json.dumps(report, indent=2, sort_keys=True))
+          (root / "yolox-demo-diagnostic.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          if report["upstream_release_bgr_raw"]["max_fused_score"] <= 0.1:
+              raise SystemExit(
+                  "upstream release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["max_fused_score"] <= 0.1:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing is unexpectedly low-confidence"
+              )
+          if report["kfcore_release_bgr_raw"]["candidates_ge_0_1"] <= 0:
+              raise SystemExit(
+                  "KFCore release-weight preprocessing produced no threshold candidates"
+              )
+          PY
+
+      - name: Materialize deterministic HICO-DET test slice
+        shell: bash
+        run: |
+          set -euxo pipefail
+          hico="$RUNNER_TEMP/hico-test"
+          curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/list_action.csv"             -o "$RUNNER_TEMP/list_action.csv"
+          curl -fL --retry 3             "https://huggingface.co/datasets/zhimeng/hico_det/resolve/$HICO_REVISION/data/test-00000-of-00004.parquet"             -o "$RUNNER_TEMP/hico-test-00000.parquet"
+          echo "$HICO_TEST_SHARD_SHA256  $RUNNER_TEMP/hico-test-00000.parquet" | sha256sum -c -
+
+          python tools/relation_training/prepare_hico_test_qualification.py             --list-action "$RUNNER_TEMP/list_action.csv"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --parquet "$RUNNER_TEMP/hico-test-00000.parquet"             --revision "$HICO_REVISION"             --max-images 32             --out-dir "$hico"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "hico-test"
+          evidence = json.loads((root / "evidence.json").read_text())
+          assert evidence["dataset"]["revision"] == os.environ["HICO_REVISION"]
+          assert evidence["dataset"]["split"] == "test"
+          assert evidence["dataset"]["source_parquet"]["sha256"] == os.environ["HICO_TEST_SHARD_SHA256"]
+          assert evidence["selection"]["images"] == 32
+          assert evidence["selection"]["relations"] > 0
+          assert evidence["selection"]["predicate_count"] > 0
+          assert len(list((root / "images").glob("*.jpg"))) == 32
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          PY
+
+      - name: Run fixed YOLOX detector over HICO qualification corpus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/detector_qualification/run_yolox_detector_manifest.py             --model "$RUNNER_TEMP/yolox-qualified/yolox_tiny_decoded.onnx"             --annotations "$RUNNER_TEMP/hico-test/test.jsonl"             --image-root "$RUNNER_TEMP/hico-test/images"             --score-threshold 0.1             --iou-threshold 0.45             --max-detections 32             --out "$RUNNER_TEMP/detector-boxes.jsonl"             --evidence-out "$RUNNER_TEMP/detector-evidence.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = json.loads((root / "detector-evidence.json").read_text())
+          assert evidence["score_threshold"] == 0.1
+          assert evidence["iou_threshold"] == 0.45
+          assert evidence["max_detections"] == 32
+          if evidence["box_count"] <= 0:
+              raise SystemExit(
+                  "real HICO qualification corpus produced zero detector boxes"
+              )
+          print(
+              f"detected_boxes={evidence['box_count']} "
+              f"images={evidence['image_count']}"
+          )
+          PY
+
+      - name: Run released RelateAnything detector-box quality
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/run_released_detector_relation_qualification.py             --onnx "$RUNNER_TEMP/released-quality-source/relateanything.onnx"             --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz"             --metadata "$RUNNER_TEMP/released-quality-source/relateanything.json"             --vocabulary "$RUNNER_TEMP/hico-test/vocabulary.json"             --annotations "$RUNNER_TEMP/hico-test/test.jsonl"             --image-root "$RUNNER_TEMP/hico-test/images"             --detector-predictions "$RUNNER_TEMP/detector-boxes.jsonl"             --detector-evidence "$RUNNER_TEMP/detector-evidence.json"             --iou-threshold 0.5             --top-k 20 --top-k 50 --top-k 100             --pair-weight 1.0             --out "$RUNNER_TEMP/released-detector-quality.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          report = json.loads(
+              (root / "released-detector-quality.json").read_text()
+          )
+          quality = report["quality"]
+          assert report["schema"] == "kfcore.released-detector-box-relation-qualification/1"
+          assert report["relation"]["training_reproduction_complete"] is False
+          assert report["evaluation"]["detector_class_labels_enter_relation_inference"] is False
+          if quality["object_recoverability_ceiling"] <= 0.0:
+              raise SystemExit("HICO object recoverability must be non-zero")
+          if quality["directed_pair_recoverability_ceiling"] <= 0.0:
+              raise SystemExit("HICO pair recoverability must be non-zero")
+          if quality["recoverable_ground_truth_triplets"] <= 0:
+              raise SystemExit("HICO must contain recoverable GT triplets")
+          failure = quality["failure_decomposition_at_max_k"]
+          assert (
+              failure["detector_miss"]
+              + failure["sampler_miss"]
+              + failure["predicate_miss"]
+              + failure["recovered"]
+              == quality["ground_truth_triplets"]
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Prepare same-context released latency fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/prepare_released_relsgg.py \
+            --onnx "$RUNNER_TEMP/released-quality-source/relateanything.onnx" \
+            --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz" \
+            --metadata "$RUNNER_TEMP/released-quality-source/relateanything.json" \
+            --out-dir "$RUNNER_TEMP/released-relsgg-package"
+
+          python tools/relation_training/prepare_released_scene_behavior_latency.py \
+            --annotations "$RUNNER_TEMP/hico-test/test.jsonl" \
+            --image-root "$RUNNER_TEMP/hico-test/images" \
+            --vocabulary "$RUNNER_TEMP/hico-test/vocabulary.json" \
+            --predicate-bank "$RUNNER_TEMP/released-quality-source/predicate_bank.npz" \
+            --quality-report "$RUNNER_TEMP/released-detector-quality.json" \
+            --dataset-evidence "$RUNNER_TEMP/hico-test/evidence.json" \
+            --runtime-ort-version "$ORT_VERSION" \
+            --out-dir "$RUNNER_TEMP/released-latency-fixture"
+
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-relation-ort-cpu
+          key: relation-ort-cpu-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}-ort-${{ env.ORT_VERSION }}
+
+      - name: Restore pinned native SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cache="$HOME/.cache/kfcore-relation-ort-cpu"
+          mkdir -p "$cache"
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          test -f "$salts_pkg" || curl -fL --retry 3 \
+            "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg" \
+            -o "$salts_pkg"
+          test -f "$salts_utils_pkg" || curl -fL --retry 3 \
+            "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg" \
+            -o "$salts_utils_pkg"
+          test -f "$ort_pkg" || curl -fL --retry 3 \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" \
+            -o "$ort_pkg"
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+          echo "$ORT_SHA512  $ort_pkg" | sha512sum -c -
+
+          sdk="$RUNNER_TEMP/released-latency-sdk"
+          rm -rf "$sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils" "$sdk/ort"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+          tar -xzf "$ort_pkg" -C "$sdk/ort"
+          echo "SALTS_ROOT=$sdk/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$sdk/salts-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "ONNXRUNTIME_ROOT=$sdk/ort/onnxruntime-linux-x64-$ORT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build production SceneBehavior latency runner
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake \
+            -S cmake/tests/released_scene_behavior_latency \
+            -B build/released-scene-behavior \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+          cmake --build build/released-scene-behavior \
+            --target kfcore_backend_onnxruntime kfcore_released_scene_behavior_latency \
+            --parallel 2
+
+      - name: Measure production SceneBehavior latency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          executable="$GITHUB_WORKSPACE/build/released-scene-behavior/bin/kfcore_released_scene_behavior_latency"
+          plugin="$GITHUB_WORKSPACE/build/released-scene-behavior/bin/libkfcore_backend_onnxruntime.so"
+          fixture="$RUNNER_TEMP/released-latency-fixture"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+
+          "$executable" \
+            "$plugin" \
+            "$RUNNER_TEMP/yolox-qualified" \
+            "$RUNNER_TEMP/released-relsgg-package" \
+            "$fixture/vocabulary.bin" \
+            "$fixture/frames.tsv" \
+            "$RUNNER_TEMP/scene-behavior-timing.jsonl"
+
+          test "$(wc -l < "$RUNNER_TEMP/scene-behavior-timing.jsonl")" -eq 32
+
+          python tools/relation_training/summarize_scene_behavior_latency.py \
+            --context "$fixture/context.json" \
+            --samples-jsonl "$RUNNER_TEMP/scene-behavior-timing.jsonl" \
+            --out "$RUNNER_TEMP/scene-behavior-latency.json"
+
+          python tools/relation_training/make_relation_qualification_report.py \
+            --context "$fixture/context.json" \
+            --quality "$fixture/quality.json" \
+            --latency "$RUNNER_TEMP/scene-behavior-latency.json" \
+            --out-json "$RUNNER_TEMP/released-quality-latency-report.json" \
+            --out-md "$RUNNER_TEMP/released-quality-latency-report.md"
+
+          python tools/relation_training/relation_backend_matrix.py \
+            --released-qualification-report "$RUNNER_TEMP/released-quality-latency-report.json" \
+            --out "$RUNNER_TEMP/released-backend-matrix.json"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          report = json.loads(
+              (root / "released-quality-latency-report.json").read_text()
+          )
+          latency = report["latency"]
+          assert latency["samples"] == 32
+          assert latency["context_sha256"] == report["context_sha256"]
+          assert latency["cardinality"]["detections_mean"] > 0
+          assert latency["cardinality"]["tracked_objects_mean"] > 0
+          assert report["quality"]["object_recoverability_ceiling"] > 0
+
+          matrix = json.loads(
+              (root / "released-backend-matrix.json").read_text()
+          )
+          assert matrix["schema"] == "kfcore.relation-backend-matrix/1"
+          assert matrix["lineage"]["kind"] == "upstream-released-deployment"
+          assert matrix["lineage"]["relation_model_sha256"] == report["context"]["relation_model_sha256"]
+          assert matrix["lineage"]["vocabulary_sha256"] == report["context"]["vocabulary_sha256"]
+          assert matrix["availability"]["onnxruntime_cpu"] is True
+          assert matrix["availability"]["encoder_export_available"] is False
+          assert matrix["availability"]["host_query_scorer_reference"] is False
+          assert matrix["acceptance"]["pair_keyed_output_parity"] is False
+          assert matrix["acceptance"]["no_synthetic_encoder_lineage"] is True
+          assert matrix["acceptance"]["quality_and_latency_together"] is True
+          print(json.dumps(latency, indent=2, sort_keys=True))
+          print(json.dumps(matrix, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: released-detector-relation-quality
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/released-detector-quality.json
+            ${{ runner.temp }}/detector-evidence.json
+            ${{ runner.temp }}/hico-test/evidence.json
+            ${{ runner.temp }}/hico-test/vocabulary.json
+            ${{ runner.temp }}/hico-test/test.jsonl
+            ${{ runner.temp }}/released-latency-fixture/evidence.json
+            ${{ runner.temp }}/released-latency-fixture/context.json
+            ${{ runner.temp }}/scene-behavior-timing.jsonl
+            ${{ runner.temp }}/scene-behavior-latency.json
+            ${{ runner.temp }}/released-quality-latency-report.json
+            ${{ runner.temp }}/released-quality-latency-report.md
+            ${{ runner.temp }}/released-backend-matrix.json
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

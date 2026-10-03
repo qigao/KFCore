@@ -1,0 +1,201 @@
+name: Released RelateAnything ORT CPU qualification
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'tools/relation_training/prepare_released_relsgg.py'
+      - 'tools/relation_training/package_released_relsgg_gpu.py'
+      - 'tools/relation_training/test_package_released_relsgg_gpu.py'
+      - 'vision/core/relation/tests/released_relsgg_qualification.cpp'
+      - 'vision/core/relation/tests/CMakeLists.txt'
+      - '.github/workflows/released-relsgg-qualification.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/relation_training/prepare_released_relsgg.py'
+      - 'vision/core/relation/tests/released_relsgg_qualification.cpp'
+      - 'vision/core/relation/tests/CMakeLists.txt'
+      - '.github/workflows/released-relsgg-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: released-relsgg-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ort-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HF_REVISION: 2db90096be5217bdc7a9003c042950f45723d105
+      REL_ONNX_SHA256: b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a
+      PREDICATE_BANK_SHA256: 708f812d6579eab1be85b3378b79e376453c2d4f65b4fad9bcebb9f5bf05da06
+      SALTS_VERSION: 1.8.9
+      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
+      SALTS_UTILS_VERSION: 4.1.13
+      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      ORT_VERSION: 1.22.0
+      ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install ONNX validation tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check onnx==1.18.0
+
+      - name: Download pinned upstream release bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          src="$RUNNER_TEMP/released-relsgg-source"
+          mkdir -p "$src"
+          base="https://huggingface.co/maelic/relsgg-vits16plus/resolve/$HF_REVISION"
+          curl -fL --retry 3 "$base/relateanything.onnx" -o "$src/relateanything.onnx"
+          curl -fL --retry 3 "$base/predicate_bank.npz" -o "$src/predicate_bank.npz"
+          curl -fL --retry 3 "$base/relateanything.json" -o "$src/relateanything.json"
+          echo "$REL_ONNX_SHA256  $src/relateanything.onnx" | sha256sum -c -
+          echo "$PREDICATE_BANK_SHA256  $src/predicate_bank.npz" | sha256sum -c -
+
+      - name: Prepare KFCore released ModelPackage
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/relation_training/prepare_released_relsgg.py \
+            --onnx "$RUNNER_TEMP/released-relsgg-source/relateanything.onnx" \
+            --predicate-bank "$RUNNER_TEMP/released-relsgg-source/predicate_bank.npz" \
+            --metadata "$RUNNER_TEMP/released-relsgg-source/relateanything.json" \
+            --out-dir "$RUNNER_TEMP/released-relsgg-package"
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "released-relsgg-package"
+          manifest = json.loads((root / "model.json").read_text())
+          routes = [
+              (artifact["backend"], artifact["device"])
+              for artifact in manifest["artifacts"]
+          ]
+          assert routes == [
+              ("onnxruntime", "cpu"),
+              ("onnxruntime", "cuda"),
+          ]
+          evidence = json.loads((root / "evidence.json").read_text())
+          assert evidence["deployment"]["backends"] == {
+              "onnxruntime_cpu": True,
+              "onnxruntime_cuda": True,
+              "tensorrt": False,
+          }
+          PY
+
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-relation-ort-cpu
+          key: relation-ort-cpu-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}-ort-${{ env.ORT_VERSION }}
+
+      - name: Restore pinned native SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cache="$HOME/.cache/kfcore-relation-ort-cpu"
+          mkdir -p "$cache"
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          test -f "$salts_pkg" || curl -fL --retry 3 "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg" -o "$salts_pkg"
+          test -f "$salts_utils_pkg" || curl -fL --retry 3 "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg" -o "$salts_utils_pkg"
+          test -f "$ort_pkg" || curl -fL --retry 3 "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" -o "$ort_pkg"
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+          echo "$ORT_SHA512  $ort_pkg" | sha512sum -c -
+
+          sdk="$RUNNER_TEMP/released-relsgg-sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils" "$sdk/ort"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+          tar -xzf "$ort_pkg" -C "$sdk/ort"
+          echo "SALTS_ROOT=$sdk/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$sdk/salts-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "ONNXRUNTIME_ROOT=$sdk/ort/onnxruntime-linux-x64-$ORT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build KFCore released runtime qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S cmake/tests/relation_ort_cpu_qualification -B build/released-relsgg -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+          cmake --build build/released-relsgg \
+            --target kfcore_backend_onnxruntime kfcore_released_relsgg_qualification \
+            --parallel 2
+
+      - name: Execute real released graph through KFCore runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          plugin="$GITHUB_WORKSPACE/build/released-relsgg/bin/libkfcore_backend_onnxruntime.so"
+          executable="$GITHUB_WORKSPACE/build/released-relsgg/bin/kfcore_released_relsgg_qualification"
+          report="$RUNNER_TEMP/released-relsgg-runtime.json"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          "$executable" "$plugin" "$RUNNER_TEMP/released-relsgg-package" "$report"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          report = json.loads((root / "released-relsgg-runtime.json").read_text())
+          evidence = json.loads((root / "released-relsgg-package" / "evidence.json").read_text())
+          assert report["passed"] is True
+          assert report["backend_scoring"] is True
+          assert report["object_labels_enter_relation_inference"] is False
+          assert report["vocabulary_sizes"] == [1, 3]
+          assert evidence["source"]["claim"] == "upstream-released-deployment-artifact"
+          assert evidence["training_reproduction_complete"] is False
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: released-relsgg-vits16plus-qualification
+          path: |
+            ${{ runner.temp }}/released-relsgg-package/evidence.json
+            ${{ runner.temp }}/released-relsgg-package/model.json
+            ${{ runner.temp }}/released-relsgg-runtime.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

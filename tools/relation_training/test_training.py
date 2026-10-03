@@ -10,6 +10,7 @@ from PIL import Image
 import torch
 from torch import nn
 
+from apache_training_recipe import ModelEMA, module_state_sha256
 from benchmark import DatasetManifest, RelationExample, RelationVocabulary
 from model import BackboneAdapter, KFRelationModel, RelationModelConfig
 from training import (
@@ -20,6 +21,7 @@ from training import (
     evaluate_gt_boxes,
     freeze_backbone,
     make_training_loader,
+    photometric_jitter,
     prepare_example,
     seed_everything,
     train_epoch,
@@ -115,6 +117,124 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.directory.cleanup()
+
+    def test_photometric_jitter_matches_apache_formula(self):
+        image = torch.tensor(
+            [
+                [[0.1, 0.2], [0.3, 0.4]],
+                [[0.5, 0.6], [0.7, 0.8]],
+                [[0.2, 0.4], [0.6, 0.9]],
+            ],
+            dtype=torch.float32,
+        )
+        strength = 0.3
+        torch.manual_seed(777)
+        factors = [
+            float(
+                1.0
+                + (
+                    torch.rand(()) * 2.0
+                    - 1.0
+                )
+                * strength
+            )
+            for _ in range(3)
+        ]
+        expected = image * factors[0]
+        mean = expected.mean(
+            dim=(1, 2),
+            keepdim=True,
+        )
+        expected = (
+            expected - mean
+        ) * factors[1] + mean
+        luma = torch.tensor(
+            [0.299, 0.587, 0.114],
+            dtype=torch.float32,
+        ).view(3, 1, 1)
+        grey = (
+            expected * luma
+        ).sum(
+            dim=0,
+            keepdim=True,
+        )
+        expected = (
+            expected - grey
+        ) * factors[2] + grey
+        expected = expected.clamp(
+            0.0,
+            1.0,
+        )
+
+        torch.manual_seed(777)
+        actual = photometric_jitter(
+            image.clone(),
+            strength,
+        )
+        self.assertTrue(
+            torch.equal(
+                actual,
+                expected,
+            )
+        )
+        self.assertGreaterEqual(
+            float(actual.min()),
+            0.0,
+        )
+        self.assertLessEqual(
+            float(actual.max()),
+            1.0,
+        )
+        identity = image.clone()
+        self.assertIs(
+            photometric_jitter(
+                identity,
+                0.0,
+            ),
+            identity,
+        )
+
+    def test_photometric_augmentation_changes_only_image_tensor(self):
+        torch.manual_seed(778)
+        plain = prepare_example(
+            self.train_manifest.examples[0],
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+            augment=0.0,
+        )
+        torch.manual_seed(778)
+        augmented = prepare_example(
+            self.train_manifest.examples[0],
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+            augment=0.3,
+        )
+        self.assertFalse(
+            torch.equal(
+                plain["image"],
+                augmented["image"],
+            )
+        )
+        for key in (
+            "boxes",
+            "box_count",
+            "pair_targets",
+            "predicate_targets",
+            "cfa_predicate_labels",
+            "object_label_indices",
+            "source_id",
+        ):
+            self.assertTrue(
+                torch.equal(
+                    plain[key],
+                    augmented[key],
+                ),
+                key,
+            )
 
     def test_prepare_example_builds_runtime_and_multilabel_targets(self):
         prepared = prepare_example(
@@ -315,6 +435,191 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
             self.validation_manifest.annotations_sha256,
         )
 
+    def test_ema_updates_only_on_optimizer_boundaries(self):
+        torch.manual_seed(123)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(2, 6),
+            model_config(),
+        )
+        freeze_backbone(model)
+        repeated = DatasetManifest(
+            examples=self.train_manifest.examples * 4,
+            annotations_sha256="e" * 64,
+            vocabulary_sha256=self.vocabulary.sha256(),
+        )
+        dataset = RelationTrainingDataset(
+            repeated,
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+        )
+        loader = make_training_loader(
+            dataset,
+            FrozenBaselineConfig(
+                epochs=1,
+                batch_size=1,
+                learning_rate=1.0e-2,
+                weight_decay=0.0,
+                seed=19,
+            ),
+        )
+        optimizer = torch.optim.AdamW(
+            trainable_parameters(model),
+            lr=1.0e-2,
+            weight_decay=0.0,
+        )
+        ema = ModelEMA(model)
+        initial_ema = module_state_sha256(
+            ema.ema_model
+        )
+
+        report = train_epoch(
+            model,
+            loader,
+            optimizer,
+            device=torch.device("cpu"),
+            grad_accum=2,
+            ema=ema,
+        )
+
+        self.assertEqual(
+            int(report["micro_batches"]),
+            4,
+        )
+        self.assertEqual(
+            int(report["optimizer_steps"]),
+            2,
+        )
+        self.assertEqual(ema.updates, 2)
+        self.assertNotEqual(
+            module_state_sha256(ema.ema_model),
+            initial_ema,
+        )
+        self.assertNotEqual(
+            module_state_sha256(ema.ema_model),
+            module_state_sha256(model),
+        )
+
+    def test_bf16_autocast_wraps_model_and_objective(self):
+        torch.manual_seed(124)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(2, 6),
+            model_config(),
+        )
+        freeze_backbone(model)
+        dataset = RelationTrainingDataset(
+            self.train_manifest,
+            image_root=self.root,
+            image_size=8,
+            max_boxes=4,
+            predicate_count=2,
+        )
+        loader = make_training_loader(
+            dataset,
+            FrozenBaselineConfig(
+                epochs=1,
+                batch_size=1,
+                learning_rate=1.0e-2,
+                weight_decay=0.0,
+                seed=20,
+            ),
+        )
+        optimizer = torch.optim.AdamW(
+            trainable_parameters(model),
+            lr=1.0e-2,
+            weight_decay=0.0,
+        )
+
+        def cpu_autocast_enabled() -> bool:
+            try:
+                return bool(
+                    torch.is_autocast_enabled(
+                        "cpu"
+                    )
+                )
+            except TypeError:
+                return bool(
+                    torch.is_autocast_cpu_enabled()
+                )
+
+        model_seen: list[bool] = []
+        original_forward_training = (
+            model.forward_training
+        )
+
+        def probed_forward_training(
+            *args,
+            **kwargs,
+        ):
+            model_seen.append(
+                cpu_autocast_enabled()
+            )
+            return original_forward_training(
+                *args,
+                **kwargs,
+            )
+
+        model.forward_training = (  # type: ignore[method-assign]
+            probed_forward_training
+        )
+
+        class ProbeObjective(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seen: list[bool] = []
+
+            def forward(
+                self,
+                outputs,
+                predicate_targets,
+                **kwargs,
+            ):
+                del predicate_targets, kwargs
+                self.seen.append(
+                    cpu_autocast_enabled()
+                )
+                return {
+                    "loss": outputs.runtime[0]
+                    .float()
+                    .square()
+                    .mean()
+                }
+
+        objective = ProbeObjective()
+        report = train_epoch(
+            model,
+            loader,
+            optimizer,
+            device=torch.device("cpu"),
+            apache_objective=objective,
+            amp_enabled=True,
+            amp_dtype=torch.bfloat16,
+        )
+
+        self.assertEqual(model_seen, [True])
+        self.assertEqual(objective.seen, [True])
+        self.assertEqual(
+            int(report["optimizer_steps"]),
+            1,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "BF16 only",
+        ):
+            train_epoch(
+                model,
+                loader,
+                optimizer,
+                device=torch.device("cpu"),
+                apache_objective=objective,
+                amp_enabled=True,
+                amp_dtype=torch.float16,
+            )
+
     def test_split_leakage_box_overflow_and_image_size_mismatch_fail(self):
         leaking = DatasetManifest(
             examples=self.train_manifest.examples,
@@ -344,6 +649,32 @@ class FrozenBaselineTrainingTest(unittest.TestCase):
                 image_root=self.root,
                 image_size=8,
                 max_boxes=4,
+                predicate_count=2,
+            )
+
+        released_overflow = RelationExample(
+            image=example.image,
+            width=example.width,
+            height=example.height,
+            boxes_xyxy=tuple(
+                (0.0, 0.0, 1.0, 1.0)
+                for _ in range(41)
+            ),
+            object_labels=tuple(
+                "a"
+                for _ in range(41)
+            ),
+            relations=(),
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "41 boxes",
+        ):
+            prepare_example(
+                released_overflow,
+                image_root=self.root,
+                image_size=8,
+                max_boxes=40,
                 predicate_count=2,
             )
 

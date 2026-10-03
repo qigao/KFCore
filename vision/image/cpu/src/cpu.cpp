@@ -490,10 +490,20 @@ std::vector<float> CpuImageProcessor::letterbox_nchw(
         const float scale = (std::min)(
             static_cast<float>(destination_width) / static_cast<float>(source.width),
             static_cast<float>(destination_height) / static_cast<float>(source.height));
+        const float pad_x =
+            options.center_letterbox
+                ? (static_cast<float>(destination_width) -
+                   source.width * scale) * 0.5F
+                : 0.0F;
+        const float pad_y =
+            options.center_letterbox
+                ? (static_cast<float>(destination_height) -
+                   source.height * scale) * 0.5F
+                : 0.0F;
         *transform = {
             scale,
-            (static_cast<float>(destination_width) - source.width * scale) * 0.5F,
-            (static_cast<float>(destination_height) - source.height * scale) * 0.5F,
+            pad_x,
+            pad_y,
             source.width,
             source.height,
         };

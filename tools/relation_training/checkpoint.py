@@ -37,6 +37,26 @@ def save_checkpoint(
             "dropout": model.config.dropout,
             "tap_indices": tuple(model.config.tap_indices),
             "predicate_adapter_rank": model.config.predicate_adapter_rank,
+            "pair_visual_evidence": model.config.pair_visual_evidence,
+            "pair_geometry_evidence": model.config.pair_geometry_evidence,
+            "pair_evidence_contract": model.config.pair_evidence_contract,
+            "pair_sampler_contract": model.config.pair_sampler_contract,
+            "relation_context_contract": (
+                model.config.relation_context_contract
+            ),
+            "predicate_head_contract": model.config.predicate_head_contract,
+            "apache_context_dropout": model.config.apache_context_dropout,
+            "apache_box_token_dropout": (
+                model.config.apache_box_token_dropout
+            ),
+            "apache_pair_negative_floor": (
+                model.config.apache_pair_negative_floor
+            ),
+            "apache_cfa_prob": model.config.apache_cfa_prob,
+            "apache_cfa_alpha": model.config.apache_cfa_alpha,
+            "allow_training_multiscale": (
+                model.config.allow_training_multiscale
+            ),
         },
         "predicates": list(predicates),
         "predicate_embeddings": model.predicate_bank.detach().cpu(),

@@ -9,7 +9,6 @@
  * SYSTEM INCLUDE FILES
  ******************************************************************************/
 
-#include <assert.h>
 #include <math.h>
 #include <string.h> /* memset */
 
@@ -40,40 +39,64 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-void matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
-            const float* B, float beta, float* C)
+#ifdef KFCORE_LINALG_TEST_FAILURE
+static int kfcore_linalg_test_fail_next_value;
+
+void kfcore_linalg_test_fail_next(void)
 {
-    int lda    = lsame_(ta, "T") ? m : n;
-    int ldb    = lsame_(tb, "T") ? k : m;
-    int result = sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha, (float*)A, &lda, (float*)B, &ldb,
-                       &beta, C, &n);
-    assert(result == 0);
+    kfcore_linalg_test_fail_next_value = 1;
 }
 
-void matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
+static int kfcore_linalg_test_status(int status)
 {
-    float alpha  = 1.0f;
-    float beta   = 0.0f;
-    int   result = ssymm_("L" /* calculate C = A*B not C = B*A */,
-                         "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
-                         &m,                                                 /* cols of B / C */
-                         &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n);
-    assert(result == 0);
+    if (kfcore_linalg_test_fail_next_value)
+    {
+        kfcore_linalg_test_fail_next_value = 0;
+        return -1;
+    }
+    return status;
+}
+#else
+static int kfcore_linalg_test_status(int status)
+{
+    return status;
+}
+#endif
+
+int matmul(const char* ta, const char* tb, int n, int k, int m, float alpha, const float* A,
+           const float* B, float beta, float* C)
+{
+    int lda = lsame_(ta, "T") ? m : n;
+    int ldb = lsame_(tb, "T") ? k : m;
+    return kfcore_linalg_test_status(
+        sgemm_((char*)ta, (char*)tb, &n, &k, &m, &alpha,
+               (float*)A, &lda, (float*)B, &ldb, &beta, C, &n));
 }
 
-void matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
-            float beta, float* y)
+int matmulsym(const float* A_sym, const float* B, int n, int m, float* C)
 {
-    int       inc    = 1;
-    const int result = sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc);
-    assert(result == 0);
+    float alpha = 1.0f;
+    float beta = 0.0f;
+    return kfcore_linalg_test_status(
+        ssymm_("L" /* calculate C = A*B not C = B*A */,
+               "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
+               &m,                                                 /* cols of B / C */
+               &alpha, (float*)A_sym, &n, (float*)B, &n, &beta, C, &n));
 }
 
-void rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
+int matvec(const char* trans, int rows, int cols, float alpha, const float* A, const float* x,
+           float beta, float* y)
 {
-    int       inc    = 1;
-    const int result = sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows);
-    assert(result == 0);
+    int inc = 1;
+    return kfcore_linalg_test_status(
+        sgemv_(trans, &rows, &cols, &alpha, A, &rows, x, &inc, &beta, y, &inc));
+}
+
+int rank1update(float* A, const float* x, const float* y, int rows, int cols, float alpha)
+{
+    int inc = 1;
+    return kfcore_linalg_test_status(
+        sger_(&rows, &cols, &alpha, x, &inc, y, &inc, A, &rows));
 }
 
 void mateye(float* A, int n)
@@ -141,37 +164,22 @@ float vecnorm(const float* x, int n)
     return snrm2_(&n, x, &inc);
 }
 
-float vecmean(const float* x, int n)
+int vecmean(const float* x, int n, float* mean)
 {
-    int   inc = 1;
-    float mean;
-    int   result = svec_mean_(&n, x, &inc, &mean);
-
-    assert(result == 0);
-
-    return mean;
+    int inc = 1;
+    return svec_mean_(&n, x, &inc, mean);
 }
 
-float vecvariance(const float* x, int n, int ddof)
+int vecvariance(const float* x, int n, int ddof, float* variance)
 {
-    int   inc = 1;
-    float variance;
-    int   result = svec_variance_(&n, x, &inc, &ddof, &variance);
-
-    assert(result == 0);
-
-    return variance;
+    int inc = 1;
+    return svec_variance_(&n, x, &inc, &ddof, variance);
 }
 
-float vecrms(const float* x, int n)
+int vecrms(const float* x, int n, float* rms)
 {
-    int   inc = 1;
-    float rms;
-    int   result = svec_rms_(&n, x, &inc, &rms);
-
-    assert(result == 0);
-
-    return rms;
+    int inc = 1;
+    return svec_rms_(&n, x, &inc, rms);
 }
 
 int vecnormalize(float* x, int n, float eps, float* norm)
@@ -188,26 +196,16 @@ int vecnormalize(float* x, int n, float eps, float* norm)
     return result;
 }
 
-float vecdist_l1(const float* x, const float* y, int n)
+int vecdist_l1(const float* x, const float* y, int n, float* distance)
 {
-    int   inc = 1;
-    float distance;
-    int   result = svec_l1_distance_(&n, x, &inc, y, &inc, &distance);
-
-    assert(result == 0);
-
-    return distance;
+    int inc = 1;
+    return svec_l1_distance_(&n, x, &inc, y, &inc, distance);
 }
 
-float vecdist_linf(const float* x, const float* y, int n)
+int vecdist_linf(const float* x, const float* y, int n, float* distance)
 {
-    int   inc = 1;
-    float distance;
-    int   result = svec_linf_distance_(&n, x, &inc, y, &inc, &distance);
-
-    assert(result == 0);
-
-    return distance;
+    int inc = 1;
+    return svec_linf_distance_(&n, x, &inc, y, &inc, distance);
 }
 
 int veccosine(const float* x, const float* y, int n, float* cosine)
@@ -237,37 +235,37 @@ int mat3inv(const float* A, float* Ainv, float eps)
     return smat3_inv_(A, Ainv, &eps);
 }
 
-void trisolve(const float* A, float* B, int n, int m, const char* tp)
+int trisolve(const float* A, float* B, int n, int m, const char* tp)
 {
-    float     alpha = 1.0f;
-    const int result =
+    float alpha = 1.0f;
+    return kfcore_linalg_test_status(
         strsm_("L" /* left hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-              "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n);
-    assert(result == 0);
-    /* strsm basically just checks for proper matrix dimensions, handle via assert */
+               "N" /* L is not unit triangular */, &n, &m, &alpha, A, &n, B, &n));
 }
 
-void trisolveright(const float* L, float* A, int n, int m, const char* tp)
+int trisolveright(const float* L, float* A, int n, int m, const char* tp)
 {
-    float     alpha = 1.0f;
-    const int result =
+    float alpha = 1.0f;
+    return kfcore_linalg_test_status(
         strsm_("R" /* right hand*/, "L" /* lower triangular matrix */, tp /* transpose L? */,
-              "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m);
-    assert(result == 0);
-    /* strsm basically just checks for proper matrix dimensions, handle via assert */
+               "N" /* L is not unit triangular */, &m, &n, &alpha, L, &n, A, &m));
 }
 
-void symmetricrankupdate(float* P, const float* E, int n, int m)
+int symmetricrankupdate(float* P, const float* E, int n, int m)
 {
     float alpha = -1.0f;
-    float beta  = 1.0f;
-
-    const int result = ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n);
-    assert(result == 0);
+    float beta = 1.0f;
+    return kfcore_linalg_test_status(
+        ssyrk_("U", "N", &n, &m, &alpha, (float*)E, &n, &beta, P, &n));
 }
 
 int udu(const float* A, float* U, float* d, const int m)
 {
+    if (!A || !U || !d || m <= 0)
+    {
+        return -1;
+    }
+
     /*    A = U*diag(d)*U' decomposition
      *    Source:
      *      1. Golub, Gene H., and Charles F. Van Loan. "Matrix Computations." 4rd ed.,
@@ -312,16 +310,15 @@ int udu(const float* A, float* U, float* d, const int m)
             }
             if (i == j)
             {
+                if (!(sigma > 0.0f) || !isfinite(sigma))
+                {
+                    return -1;
+                }
                 d[j]                    = sigma;
                 MAT_ELEM(U, j, j, m, m) = 1.0f;
             }
             else
             {
-                if ((d[j] <= 0.0f) || !isfinite(d[j]))
-                {
-                    /* matrix is not positive definite if d < 0 */
-                    return -1;
-                }
                 MAT_ELEM(U, i, j, m, m) = sigma / d[j];
             }
         }

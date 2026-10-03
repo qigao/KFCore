@@ -35,6 +35,23 @@ and [tf2onnx (Apache-2.0)](https://github.com/onnx/tensorflow-onnx/blob/main/LIC
 They are not additional native runtime dependencies. Pinned versions and model
 provenance are recorded in `tools/mediapipe_gesture/`.
 
+## RelateAnything Apache reference implementation
+
+The optional relation-training reference-port modules under
+`tools/relation_training/apache_*.py` implement/adapt model architecture and
+training behavior documented in
+[Maelic/RelateAnything](https://github.com/Maelic/RelateAnything) at commit
+`4a07de9d06f2e3f14309753b7907cf1d3a263b08`, the last repository snapshot
+licensed as Apache-2.0 before the subsequent relicensing commit.
+
+Upstream copyright: Copyright 2026 Maëlic Neau.
+Upstream code license for that exact snapshot: Apache License 2.0.
+
+KFCore's port records the exact source revision so later AGPL-only repository
+changes are not silently incorporated. Model weights, the predicate text
+student and training annotations are separate artifacts with their own upstream
+terms and are not relicensed by this notice.
+
 ## Optional DINOv3 relation-model training
 
 `tools/relation_training/` contains KFCore first-party model, training-loss and

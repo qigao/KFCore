@@ -15,7 +15,7 @@ cmake_add_test(
     ../src/tracking.cpp
     ${CMAKE_SOURCE_DIR}/trackers/src/tracker.c
     ${CMAKE_SOURCE_DIR}/trackers/tests/tracker_test_alloc.c
-  LIBS KFCore::kfcore miniblas Salts::TinyTest
+  LIBS KFCore::kalman miniblas Salts::TinyTest
   DEFS KFCORE_TRACKERS_TEST_ALLOCATOR
   INCLUDES
     ../include

@@ -5,7 +5,7 @@ target_include_directories(
   trackers PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                   $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(trackers PUBLIC KFCore::kfcore)
+target_link_libraries(trackers PUBLIC KFCore::kalman)
 target_link_libraries(trackers PRIVATE KFCore::miniblas_internal)
 
 set_target_properties(

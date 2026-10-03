@@ -44,6 +44,132 @@
         check_within((actual), (expected), (delta));                                               \
     } while (0)
 
+#define TEST_KALMAN_WORKSPACE_FLOATS 4096U
+
+static int test_kalman_takasu(float* x, float* P, const float* dz, const float* R,
+                              const float* Ht, int n, int m, float chi2_threshold, float* chi2)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_takasu)(x, P, dz, R, Ht, (size_t)n, (size_t)m,
+                               chi2_threshold, chi2, workspace,
+                               TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static void test_kalman_predict(float* x, float* P, const float* Phi, const float* G,
+                                const float* Q, int n, int r)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    (void)(kalman_predict)(x, P, Phi, G, Q, (size_t)n, (size_t)r,
+                           workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_udu(float* x, float* U, float* d, const float* z, const float* R,
+                           const float* Ht, int n, int m, float chi2_threshold,
+                           int downweight_outlier)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_udu)(x, U, d, z, R, Ht, (size_t)n, (size_t)m,
+                            chi2_threshold, downweight_outlier, workspace,
+                            TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_udu_scalar(float* x, float* U, float* d, float dz, float R,
+                                  const float* H_line, int n)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_udu_scalar)(x, U, d, dz, R, H_line, (size_t)n,
+                                   workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static void test_kalman_udu_predict(float* x, float* U, float* d, const float* Phi,
+                                    const float* G, const float* Q, int n, int r)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    (void)(kalman_udu_predict)(x, U, d, Phi, G, Q, (size_t)n, (size_t)r,
+                               workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_takasu_predict(
+    float* x, float* P, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, int n, int r, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_takasu_predict)(
+        x, P, transition, G, Q, (size_t)n, (size_t)r, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_takasu_update(
+    float* x, float* P, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, int n, int m,
+    float chi2_threshold, float* chi2, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_takasu_update)(
+        x, P, z, R, measurement, (size_t)n, (size_t)m,
+        chi2_threshold, chi2, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_udu_predict(
+    float* x, float* U, float* d, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, int n, int r, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_udu_predict)(
+        x, U, d, transition, G, Q, (size_t)n, (size_t)r, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ekf_udu_update(
+    float* x, float* U, float* d, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, int n, int m,
+    float chi2_threshold, int downweight_outlier, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS];
+    return (int)(kalman_ekf_udu_update)(
+        x, U, d, z, R, measurement, (size_t)n, (size_t)m,
+        chi2_threshold, downweight_outlier, user,
+        workspace, TEST_KALMAN_WORKSPACE_FLOATS);
+}
+
+static int test_kalman_ukf_predict(
+    float* x, float* P, const float* Q, kalman_ukf_transition_fn transition,
+    int n, const kalman_ukf_params* params, void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS * 2U];
+    return (int)(kalman_ukf_predict)(
+        x, P, Q, transition, (size_t)n, params, user,
+        workspace, sizeof(workspace) / sizeof(workspace[0]));
+}
+
+static int test_kalman_ukf_update(
+    float* x, float* P, const float* z, const float* R,
+    kalman_ukf_measurement_fn measurement, int n, int m,
+    const kalman_ukf_params* params, float chi2_threshold, float* chi2,
+    void* user)
+{
+    float workspace[TEST_KALMAN_WORKSPACE_FLOATS * 2U];
+    return (int)(kalman_ukf_update)(
+        x, P, z, R, measurement, (size_t)n, (size_t)m,
+        params, chi2_threshold, chi2, user,
+        workspace, sizeof(workspace) / sizeof(workspace[0]));
+}
+
+#define kalman_ukf_predict(...) test_kalman_ukf_predict(__VA_ARGS__)
+#define kalman_ukf_update(...) test_kalman_ukf_update(__VA_ARGS__)
+
+#define kalman_ekf_takasu_predict(...) test_kalman_ekf_takasu_predict(__VA_ARGS__)
+#define kalman_ekf_takasu_update(...) test_kalman_ekf_takasu_update(__VA_ARGS__)
+#define kalman_ekf_udu_predict(...) test_kalman_ekf_udu_predict(__VA_ARGS__)
+#define kalman_ekf_udu_update(...) test_kalman_ekf_udu_update(__VA_ARGS__)
+
+#define kalman_takasu(...) test_kalman_takasu(__VA_ARGS__)
+#define kalman_predict(...) test_kalman_predict(__VA_ARGS__)
+#define kalman_udu(...) test_kalman_udu(__VA_ARGS__)
+#define kalman_udu_scalar(...) test_kalman_udu_scalar(__VA_ARGS__)
+#define kalman_udu_predict(...) test_kalman_udu_predict(__VA_ARGS__)
+
 /******************************************************************************
  * TYPEDEFS
  ******************************************************************************/
@@ -274,8 +400,12 @@ static void testlinalg(void)
         TEST_FLOAT_WITHIN(threshold, 22.0f, G[2], "rank1update wrapper G[2] failed");
         TEST_FLOAT_WITHIN(threshold, 28.0f, G[3], "rank1update wrapper G[3] failed");
 
-        TEST_FLOAT_WITHIN(threshold, 2.5f, vecmean(v, 4), "vecmean wrapper failed");
-        TEST_FLOAT_WITHIN(threshold, 1.25f, vecvariance(v, 4, 0), "vecvariance wrapper failed");
+        float       mean = 0.0f;
+        float       variance = 0.0f;
+        check_equal(vecmean(v, 4, &mean), 0);
+        check_equal(vecvariance(v, 4, 0, &variance), 0);
+        TEST_FLOAT_WITHIN(threshold, 2.5f, mean, "vecmean wrapper failed");
+        TEST_FLOAT_WITHIN(threshold, 1.25f, variance, "vecvariance wrapper failed");
         TEST_FLOAT_WITHIN(threshold, 3.7416575f, vecnorm(x, 3), "vecnorm wrapper failed");
         check_equal(vecnormalize(vn, 2, 1.0e-06f, &norm), 0);
         TEST_FLOAT_WITHIN(threshold, 5.0f, norm, "vecnormalize wrapper norm failed");
@@ -435,6 +565,24 @@ static void testlinalg(void)
             TEST_FLOAT_WITHIN(threshold, d[i], dexp[i], "UDU: d test failed");
         }
     }
+    {
+        const float negative[1] = { -1.0f };
+        const float zero[1]     = { 0.0f };
+        const float nan_value[1] = { NAN };
+        const float final_zero_pivot[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        float U[4];
+        float d[2];
+
+        check_equal(udu(negative, U, d, 1), -1);
+        check_equal(udu(zero, U, d, 1), -1);
+        check_equal(udu(nan_value, U, d, 1), -1);
+        check_equal(udu(final_zero_pivot, U, d, 2), -1);
+        check_equal(udu(NULL, U, d, 1), -1);
+        check_equal(udu(negative, NULL, d, 1), -1);
+        check_equal(udu(negative, U, NULL, 1), -1);
+        check_equal(udu(negative, U, d, 0), -1);
+        printf("[x] UDU rejects invalid/final non-positive pivots\n");
+    }
     // Test magnetometer yaw
     {
         const float roll_rad         = DEG2RAD(45.0f);
@@ -448,6 +596,36 @@ static void testlinalg(void)
                           "Magnetometer heading test failed (nav_mag_heading)");
         printf("[x] Yaw from magnetometer (nav_mag_heading)\n");
     }
+}
+
+static void testkalmanbounds(void)
+{
+    float x[1]   = { 7.0f };
+    float P[1]   = { 9.0f };
+    float U[1]   = { 1.0f };
+    float d[1]   = { 2.0f };
+    float z[1]   = { 0.0f };
+    float R[1]   = { 1.0f };
+    float Ht[1]  = { 1.0f };
+    float Phi[1] = { 1.0f };
+
+    check_equal(kalman_takasu(x, P, z, R, Ht, 0, 1, 0.0f, NULL), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(kalman_takasu(NULL, P, z, R, Ht, 1, 1, 0.0f, NULL), KFCORE_KALMAN_INVALID_ARGUMENT);
+
+    check_equal(kalman_udu_scalar(x, U, d, 0.0f, NAN, Ht, 1), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(kalman_udu(x, U, d, z, R, Ht, 1, 0, 0.0f, 0), KFCORE_KALMAN_INVALID_ARGUMENT);
+    check_equal(decorrelate(z, Ht, R, 0, 1), KFCORE_KALMAN_INVALID_ARGUMENT);
+
+    check_equal(kalman_ekf_takasu_predict(x, P, NULL, NULL, NULL, 33, 0, NULL), -1);
+    check_equal(kalman_ekf_takasu_update(x, P, z, R, NULL, 1, 4, 0.0f, NULL, NULL), -1);
+    check_equal(kalman_ekf_udu_predict(x, U, d, NULL, NULL, NULL, 33, 0, NULL), -1);
+    check_equal(kalman_ekf_udu_update(x, U, d, z, R, NULL, 1, 4, 0.0f, 0, NULL), -1);
+
+    check_equal(kalman_ukf_predict(x, P, NULL, NULL, 33, NULL, NULL), -1);
+    check_equal(kalman_ukf_update(x, P, z, R, NULL, 1, 4, NULL, 0.0f, NULL, NULL), -1);
+
+    (void)Phi;
+    printf("[x] Kalman validation and remaining fixed-wrapper guards\n");
 }
 
 static void testnavtoolbox(void)
@@ -2145,6 +2323,7 @@ spec("kfcore")
     it("passes navigation and Kalman filter tests")
     {
         testframetransform();
+        testkalmanbounds();
         testnavtoolbox();
     }
 

@@ -17,6 +17,8 @@
  * PROJECT INCLUDE FILES
  ******************************************************************************/
 
+#include "kalman_takasu.h"
+#include "kalman_workspace_internal.h"
 #include "linalg.h"
 #include "miniblas.h"
 
@@ -24,12 +26,6 @@
  * DEFINES
  ******************************************************************************/
 
-#ifndef KALMAN_MAX_STATE_SIZE
-#define KALMAN_MAX_STATE_SIZE 32 /* kalman filter scratchpad buf size */
-#endif
-#ifndef KALMAN_MAX_MEASUREMENTS
-#define KALMAN_MAX_MEASUREMENTS 4 /* kalman filter scratchpad buf size */
-#endif
 
 /******************************************************************************
  * TYPEDEFS
@@ -47,142 +43,128 @@
  * FUNCTION BODIES
  ******************************************************************************/
 
-int kalman_takasu(float* x, float* P, const float* dz, const float* R, const float* Ht, int n,
-                  int m, float chi2_threshold, float* chi2)
+kfcore_kalman_status kalman_takasu_workspace_floats(size_t n, size_t m, size_t* required)
 {
-    float D[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_MEASUREMENTS];
-    float L[KALMAN_MAX_MEASUREMENTS * KALMAN_MAX_MEASUREMENTS];
-    assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
-    assert(m > 0 && m <= KALMAN_MAX_MEASUREMENTS);
-
-    /*  (1) D = P * H'              symm           |   Matrix dimensions:
-     *  (2) S = H * D + R           gemm           |   D = n x m
-     *  (3) L = chol(S) (L*L'=S)    potrf          |   S = m x m
-     *  (4) E = D * L^-T            trsm           |   L = m x m
-     *  (5) P = P - E*E'            syrk           |   E = n x m
-     *  (6) K = E * L^-1            trsm           |   K = n x m
-     *  (7) x = x + K*dz            gemm
-     *
-     *  n = state variables
-     *  m = measurements */
-
-    /* Inplace cholesky decomposition */
-    /* Only update the required triangular parts (save instructions and memory access) */
-    /* keep symmetry */
-    /* numerically stable */
-
-    matmulsym(P, Ht, n, m, D); // (1) D = P * H' (using upper triangular part of P)
-    memcpy(L /*dst*/, R /*src*/, sizeof(float) * m * m); // Use L as temp. matrix, preload R
-    matmul("T", "N", m, m, n, 1.0f, Ht, D, 1.0f, L);     // (2) L += H*D
-    int result =
-        cholesky(L, m, 1 /*don't fill upper triangular part of L*/); // (3) L = chol(H*D + R)
-                                                                     // (inplace calculation of L)
-    if (result != 0)
-    {
-        return -1; // Cholesky fails: bail out (*)
-    }
-
-    /* if chi2 stats are requested and/or outlier detection is activated,
-     * calculated the chi2 test statistics: */
-    if (chi2 || (chi2_threshold > 0.0f))
-    {
-        /*  Outlier test from:
-            M. S. Grewal, L. R. Weill and A. P. Andrews
-            Global Positioning Systems, Inertial Navigation and Integration
-            John Wiley & Sons, 2000.
-
-            chi2 = dz' * S^(-1) * dz / m
-            dz' * (L*L')^(-1) * dz
-            dz' * L^(-T) * L^(-1) * dz
-            y = L^(-1) * dz
-            L*y = dz, solve for y
-            chi2 = y'*y / m
-        */
-        float y[KALMAN_MAX_MEASUREMENTS]; /* temp variable */
-        memcpy(y, dz, sizeof(dz[0]) * m);
-        trisolve(L, y, m, 1, "N"); /* L*y = dz, solve for y */
-        float chi2sum = 0.0f;
-        for (int i = 0; i < m; i++)
-        {
-            chi2sum += y[i] * y[i]; /* y'*y */
-        }
-        chi2sum /= (float)m;
-        if (chi2)
-        {
-            *chi2 = chi2sum; /* supply chi2 stats requested by caller */
-        }
-        if ((chi2_threshold > 0.0f) && (chi2sum > chi2_threshold))
-        {
-            return -2; /* reject measurement */
-        }
-    }
-
-    trisolveright(L, D, m, n, "T"); // (4) given L' and D, solve E*L' = D, for E, overwrite D with E
-    symmetricrankupdate(P, D /*E*/, n, m); // (5) P = P - E*E'
-    trisolveright(L, D /*E*/, m, n, "N");  // (6) solve K*L = E, for K, overwrite D with K
-    matmul("N", "N", n, 1, m, 1.0f, D /*K*/, dz, 1.0f, x); // (7) x = x + K * dz (K is stored in D)
-
-    /* Verify state vector is finite after update (catches NaN/Inf propagation). */
-#ifndef NDEBUG
-    for (int _i = 0; _i < n; _i++)
-    {
-        assert(isfinite(x[_i]) && "State vector contains NaN or Inf after Takasu update");
-    }
-#endif
-    /* Note: kalman_predict() writes the full n×n P matrix (not upper-triangular only).
-     * Symmetry is restored here by the syrk update in step (5). */
-
-    return 0;
+    size_t nm, mm, total;
+    kfcore_kalman_status status;
+    if ((status = kfcore_kalman_check_dim(n, 0)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_check_dim(m, 0)) != KFCORE_KALMAN_OK || !required)
+        return status == KFCORE_KALMAN_OK ? KFCORE_KALMAN_INVALID_ARGUMENT : status;
+    if ((status = kfcore_kalman_checked_mul(n, m, &nm)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_mul(m, m, &mm)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(nm, mm, &total)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(total, m, required)) != KFCORE_KALMAN_OK)
+        return status;
+    return KFCORE_KALMAN_OK;
 }
 
-void kalman_predict(float* x, float* P, const float* Phi, const float* G, const float* Q, int n,
-                    int r)
+kfcore_kalman_status kalman_takasu(float* x, float* P, const float* dz, const float* R,
+                                   const float* Ht, size_t n, size_t m,
+                                   float chi2_threshold, float* chi2,
+                                   float* workspace, size_t workspace_floats)
 {
-    assert(n > 0 && n <= KALMAN_MAX_STATE_SIZE);
-    assert(r >= 0 && r <= KALMAN_MAX_STATE_SIZE);
-    float alpha, beta;
+    size_t required, nm, mm;
+    kfcore_kalman_status status = kalman_takasu_workspace_floats(n, m, &required);
+    if (status != KFCORE_KALMAN_OK) return status;
+    if (!x || !P || !dz || !R || !Ht) return KFCORE_KALMAN_INVALID_ARGUMENT;
+    if ((status = kfcore_kalman_require_workspace(workspace, workspace_floats, required)) != KFCORE_KALMAN_OK)
+        return status;
+    (void)kfcore_kalman_checked_mul(n, m, &nm);
+    (void)kfcore_kalman_checked_mul(m, m, &mm);
+    float* D = workspace;
+    float* L = D + nm;
+    float* y = L + mm;
 
-    if (x) //  if prediction of state vector is requested: x = Phi*x;
+    if (matmulsym(P, Ht, (int)n, (int)m, D) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
+    memcpy(L, R, sizeof(float) * mm);
+    if (matmul("T", "N", (int)m, (int)m, (int)n, 1.0f, Ht, D, 1.0f, L) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
+    if (cholesky(L, (int)m, 1) != 0) return KFCORE_KALMAN_NUMERICAL_FAILURE;
+
+    if (chi2 || chi2_threshold > 0.0f)
     {
-        float tmp[KALMAN_MAX_STATE_SIZE];
-        memcpy(tmp, x, sizeof(x[0]) * n);
-        matmul("N", "N", n, 1, n, 1.0f, Phi, tmp, 0.0f, x);
+        memcpy(y, dz, sizeof(float) * m);
+        if (trisolve(L, y, (int)m, 1, "N") != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
+        float chi2sum = 0.0f;
+        for (size_t i = 0; i < m; ++i) chi2sum += y[i] * y[i];
+        chi2sum /= (float)m;
+        if (chi2) *chi2 = chi2sum;
+        if (chi2_threshold > 0.0f && chi2sum > chi2_threshold) return KFCORE_KALMAN_REJECTED;
     }
 
-    if (P && Phi)
+    if (trisolveright(L, D, (int)m, (int)n, "T") != 0 ||
+        symmetricrankupdate(P, D, (int)n, (int)m) != 0 ||
+        trisolveright(L, D, (int)m, (int)n, "N") != 0 ||
+        matmul("N", "N", (int)n, 1, (int)m, 1.0f, D, dz, 1.0f, x) != 0)
+        return KFCORE_KALMAN_NUMERICAL_FAILURE;
+    for (size_t i = 0U; i < n; ++i)
     {
-        // (1) Phi*P (n x n)
-        float Phi_x_P[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-        alpha = 1.0f;
-        beta  = 0.0f;
-        ssymm_("R" /* calculate  C = B*A = Phi_x_P = Phi*P */,
-               "U" /* reference upper triangular part of A */, &n, /* rows of B/C */
-               &n,                                                 /* cols of B / C */
-               &alpha, P, &n, (float*)Phi, &n, &beta, Phi_x_P, &n);
-
-        if (G && Q) // P = Phi*P*Phi' + G*Q*G';
+        if (!isfinite(x[i]))
         {
-            // (2) GQ = G*Q (n x r)
-            float GQ[KALMAN_MAX_STATE_SIZE * KALMAN_MAX_STATE_SIZE];
-            for (int j = 0; j < r; j++) // for each  column in G
-            {
-                for (int i = 0; i < n; i++) // scale the rows with Q(j)
-                {
-                    MAT_ELEM(GQ, i, j, n, r) = Q[j] * MAT_ELEM(G, i, j, n, r);
-                }
-            }
-
-            // (3) save GQ*G' in P(n x n)
-            matmul("N", "T", n, n, r, 1.0f, GQ, G, 0.0f, P);
-
-            // (4) P += Phi*P*Phi'
-            matmul("N", "T", n, n, n, 1.0f, Phi_x_P, Phi, 1.0f, P);
-        }
-        else // P = Phi*P*Phi'
-        {
-            matmul("N", "T", n, n, n, 1.0f, Phi_x_P, Phi, 0.0f, P);
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
         }
     }
+    return KFCORE_KALMAN_OK;
+}
+
+kfcore_kalman_status kalman_predict_workspace_floats(size_t n, size_t r, size_t* required)
+{
+    size_t nn, nr, total;
+    kfcore_kalman_status status;
+    if ((status = kfcore_kalman_check_dim(n, 0)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_check_dim(r, 1)) != KFCORE_KALMAN_OK || !required)
+        return status == KFCORE_KALMAN_OK ? KFCORE_KALMAN_INVALID_ARGUMENT : status;
+    if ((status = kfcore_kalman_checked_mul(n, n, &nn)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_mul(n, r, &nr)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(n, nn, &total)) != KFCORE_KALMAN_OK ||
+        (status = kfcore_kalman_checked_add(total, nr, required)) != KFCORE_KALMAN_OK)
+        return status;
+    return KFCORE_KALMAN_OK;
+}
+
+kfcore_kalman_status kalman_predict(float* x, float* P, const float* Phi, const float* G,
+                                    const float* Q, size_t n, size_t r,
+                                    float* workspace, size_t workspace_floats)
+{
+    size_t required, nn;
+    kfcore_kalman_status status = kalman_predict_workspace_floats(n, r, &required);
+    if (status != KFCORE_KALMAN_OK) return status;
+    if ((!x && !P) || !Phi || (r > 0U && P && (!G || !Q))) return KFCORE_KALMAN_INVALID_ARGUMENT;
+    if ((status = kfcore_kalman_require_workspace(workspace, workspace_floats, required)) != KFCORE_KALMAN_OK)
+        return status;
+    (void)kfcore_kalman_checked_mul(n, n, &nn);
+    float* tmp = workspace;
+    float* Phi_x_P = tmp + n;
+    float* GQ = Phi_x_P + nn;
+
+    if (x)
+    {
+        memcpy(tmp, x, sizeof(float) * n);
+        if (matmul("N", "N", (int)n, 1, (int)n, 1.0f, Phi, tmp, 0.0f, x) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
+    }
+    if (P)
+    {
+        int ni=(int)n;
+        float alpha=1.0f, beta=0.0f;
+        if (ssymm_("R","U",&ni,&ni,&alpha,P,&ni,(float*)Phi,&ni,&beta,Phi_x_P,&ni) != 0)
+            return KFCORE_KALMAN_NUMERICAL_FAILURE;
+        if (r > 0U)
+        {
+            for (size_t j=0;j<r;++j)
+                for (size_t i=0;i<n;++i)
+                    MAT_ELEM(GQ,i,j,n,r)=Q[j]*MAT_ELEM(G,i,j,n,r);
+            if (matmul("N","T",(int)n,(int)n,(int)r,1.0f,GQ,G,0.0f,P) != 0 ||
+                matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,1.0f,P) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
+        }
+        else
+            if (matmul("N","T",(int)n,(int)n,(int)n,1.0f,Phi_x_P,Phi,0.0f,P) != 0)
+                return KFCORE_KALMAN_NUMERICAL_FAILURE;
+    }
+    return KFCORE_KALMAN_OK;
 }
 
 /* @} */

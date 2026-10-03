@@ -437,6 +437,772 @@ The train manifest alone determines the weights. `training.json` records:
 K=48 and whitened CLIP prototypes. The final compare job rejects any
 dataset/prototype/parameter-count drift before reporting metric deltas.
 
+## Consolidated relation qualification report
+
+Release evidence for #102 must bind quality and latency to the same immutable
+runtime context. KFCore uses a separate context sidecar rather than changing the
+existing detector-ceiling schema.
+
+Context schema:
+
+```json
+{
+  "schema": "kfcore.relation-qualification-context/1",
+  "relation_model_sha256": "...",
+  "vocabulary_sha256": "...",
+  "relation_config_sha256": "...",
+  "detector_model_sha256": "...",
+  "detector_config_sha256": "...",
+  "backend": "onnxruntime-cpu",
+  "device": "cpu",
+  "relation_model_type": "relation.open-vocabulary",
+  "detector_id": "...",
+  "max_boxes": 32,
+  "vocabulary_size": 19103
+}
+```
+
+The stable, sorted JSON form is SHA-256 hashed. The latency artifact must carry
+that exact `context_sha256`.
+
+Latency schema:
+
+```text
+kfcore.scene-behavior-latency/1
+
+samples
+context_sha256
+stages_ms:
+  detector
+  tracker
+  region_prepare
+  relation
+  assembly
+  temporal
+  total
+
+each stage:
+  p50 / p90 / p95 / p99 / mean
+
+cardinality:
+  detections_mean
+  tracked_objects_mean
+  relation_edges_mean
+  events_mean
+  pair_states_mean
+```
+
+Collect production timing samples from the typed pipeline:
+
+```cpp
+auto timed = pipeline->process_timed(image, seconds);
+timing_log
+    << kfcore::scene_interaction::scene_behavior_timing_json(
+           timed.timing)
+    << '\n';
+```
+
+Each line uses:
+
+```text
+kfcore.scene-behavior-timing-sample/1
+```
+
+and carries the exact stage timings/cardinalities from
+`SceneBehaviorTiming`.
+
+Aggregate the JSONL samples under the same qualification context:
+
+```bash
+python tools/relation_training/summarize_scene_behavior_latency.py \
+  --context qualification-context.json \
+  --samples-jsonl timing.jsonl \
+  --out scene-behavior-latency.json
+```
+
+Percentiles use the deterministic nearest-rank definition. The summary validates
+finite/non-negative stage values, count fields, and that scene-graph/temporal
+timings do not exceed total frame timing.
+
+Create the final JSON + Markdown report with:
+
+```bash
+python tools/relation_training/make_relation_qualification_report.py \
+  --context qualification-context.json \
+  --quality detector-relation-ceiling.json \
+  --latency scene-behavior-latency.json \
+  --out-json qualification.json \
+  --out-md qualification.md
+```
+
+The combiner rejects:
+- latency collected under a different context hash;
+- detector id/model/config drift between quality evidence and context;
+- invalid/non-monotonic latency percentiles;
+- malformed detector failure decomposition.
+
+This prevents a fast latency run from one backend/model/vocabulary from being
+published beside quality numbers from another configuration.
+
+## Relation backend parity and latency matrix
+
+`relation_backend_matrix.py` is the cross-backend qualification layer for the
+same exported Apache-reference checkpoint. It binds:
+
+```text
+#142 detector-box quality report
+        +
+dynamic-vocabulary ONNX export metadata
+        +
+encoder/query ONNX export metadata
+        +
+ORT CPU backend-scoring evidence
+        +
+host query/scorer reference evidence
+        +
+optional GPU/TensorRT evidence
+        ↓
+kfcore.relation-backend-matrix/1
+```
+
+The dynamic-logit and encoder/query ONNX exports must carry the same checkpoint,
+backbone, image size, box/pair limits, query dimension, logit scale/bias and
+score contract. The matrix rejects any lineage drift before comparing latency.
+
+The ORT CPU qualification now runs both execution modes on the same inputs and
+vocabularies:
+
+```text
+V=1 -> small(V=3) -> default(V=4) -> large(V=64) -> V=1 repeat
+```
+
+For every case it records image size, box count, selected directed-pair count,
+pair keys, preprocess time, backend time, predicate-scoring time when separately
+observable, host decode time and total relation latency. Backend-scoring and
+host-scoring decoded outputs are compared by `(subject_idx, object_idx)`; row
+ordering is not used as identity.
+
+The score/decode policy is explicit and shared:
+
+```text
+logit_scale / logit_bias
+pair_weight
+calibration_a / calibration_b
+threshold
+top_k
+detector-score ranking policy
+```
+
+Hardware and software provenance are emitted separately from the execution host
+and included in the matrix rather than inferred later.
+
+Build the matrix with:
+
+```bash
+python tools/relation_training/relation_backend_matrix.py \
+  --quality detector-relation-qualification.json \
+  --dynamic-export relation-dynamic.onnx.json \
+  --encoder-export relation-encoder.onnx.json \
+  --ort-cpu relation-ort-cpu-report.json \
+  --ort-cpu-provenance relation-ort-cpu-provenance.json \
+  --out relation-backend-matrix.json
+```
+
+A TensorRT hardware qualification can additionally be attached with
+`--tensorrt`. The current TensorRT artifact proves one-engine dynamic-V reuse,
+profile coverage and pair-keyed numeric parity, but it is intentionally marked
+`engine-only` until a full relation-stage timing run is available on GPU. The
+matrix therefore never presents engine-only timing as preprocess/backbone/
+predicate/decode end-to-end latency.
+
+ORT CUDA and full TensorRT relation rows are availability-dependent. Absence of
+GPU hardware is recorded as unavailable rather than replaced with synthetic
+numbers.
+
+## Detector-box recoverability ceiling
+
+GT-box relation metrics do not reveal whether a failure came from the detector,
+the pair sampler, or predicate scoring.  KFCore therefore evaluates detector
+boxes with a separate recoverability layer before relation metrics.
+
+Detector input is class-agnostic:
+
+```json
+{
+  "schema": "kfcore.detector-boxes/1",
+  "image": "relative/path.jpg",
+  "width": 1280,
+  "height": 720,
+  "boxes_xyxy": [[10, 20, 110, 220]],
+  "scores": [0.93]
+}
+```
+
+Object class labels are intentionally absent and are never fed to the relation
+model.
+
+For each GT object, the evaluator builds the set of detector boxes whose IoU is
+at least the configured threshold.  A directed GT pair is recoverable when
+there exists at least one subject candidate and one object candidate using two
+distinct detector boxes.
+
+This is an **existence ceiling**, not a greedy or Hungarian one-to-one matching
+policy.  In particular, one detector box that overlaps both GT endpoints cannot
+make a subject/object relation recoverable by itself.
+
+The report separates:
+
+```text
+GT object recoverability
+directed GT pair recoverability ceiling
+sampler recall | recoverable pairs
+sampler pair recall | all GT pairs
+predicate R@K / mR@K | recoverable triplets
+end-to-end R@K / mR@K | all GT triplets
+```
+
+At the largest requested K, every GT triplet is assigned to exactly one failure
+bucket:
+
+```text
+detector miss
+sampler miss
+predicate miss
+recovered
+```
+
+and those buckets must sum back to the total GT triplet count.
+
+Detector predictions are score-capped to the model's `max_boxes` using stable
+descending score order.  Reports record both the pre-cap and used box counts,
+the detector prediction-file SHA-256, detector/model/config provenance strings,
+and the IoU threshold.
+
+Use `evaluate_detector_boxes()` to run the actual relation model on detector
+boxes.  The evaluator loads the image from the GT manifest, but the relation
+box tensor comes only from the detector manifest.
+
+### Executable detector-box relation qualification
+
+`run_detector_relation_qualification.py` turns the detector ceiling into one
+reproducible CPU qualification path.  It restores the checkpoint's exact timm
+DINOv3 backbone, requires all four Apache relation contracts, requires the
+checkpoint predicate order to match the supplied vocabulary exactly, and then
+runs the relation model on the class-agnostic `kfcore.detector-boxes/1`
+manifest.
+
+```bash
+python tools/relation_training/run_detector_relation_qualification.py \
+  --checkpoint out/relation-v1.pt \
+  --vocabulary data/relation-vocab.json \
+  --annotations data/validation.jsonl \
+  --image-root data/images \
+  --detector-predictions out/detector-boxes.jsonl \
+  --detector-id fixed-detector \
+  --detector-model-sha256 <64-lowercase-hex> \
+  --detector-config-sha256 <64-lowercase-hex> \
+  --iou-threshold 0.5 \
+  --top-k 20 --top-k 50 --top-k 100 \
+  --pair-weight 1.0 \
+  --out out/detector-relation-qualification.json
+```
+
+The output uses `kfcore.detector-box-relation-qualification/1` and contains,
+in one deterministic JSON document:
+
+- relation checkpoint, backbone, config and vocabulary SHA-256 provenance;
+- GT annotation plus referenced image-corpus SHA-256 provenance;
+- detector prediction/model/config provenance;
+- object and directed-pair recoverability ceilings;
+- sampler conditional and end-to-end recall;
+- predicate conditional/end-to-end R@K and mR@K;
+- the detector/sampler/predicate/recovered failure decomposition.
+
+No detector object category field is accepted by this executable path.  Backend
+and CUDA parity stay in the separate backend qualification work; this report is
+intentionally CPU-only so its scope remains detector-box quality qualification.
+
+## Open-world predicate objective v2
+
+The historical relation baseline uses exhaustive multi-label BCE. That remains
+the default control, but it assumes that every unannotated predicate column on
+an annotated positive pair is false. The explicit zero-support and holdout
+experiments showed that assumption can suppress semantic transfer.
+
+The first objective-v2 step is a batch-local multi-positive InfoNCE:
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-temperature 0.07
+```
+
+For each training batch:
+
+1. keep sampled positive relation pairs;
+2. apply the explicit predicate supervision/holdout mask;
+3. build the contrast set from the union of predicate directions that remain
+   positive somewhere in that batch;
+4. align each visual relation query against all of its known positive text
+   directions;
+5. do not place vocabulary columns that were unobserved in the batch into the
+   denominator.
+
+This is deliberately narrower than the final #97 objective. Source-aware safe
+negatives, synonym soft positives and explicit inverse negatives are separate
+follow-up steps. The important first contract is that the model no longer
+receives an exhaustive negative gradient from every vocabulary column.
+
+Multi-label pairs keep every supervised positive. An explicit-holdout-only pair
+naturally has no visible predicate positive under InfoNCE and is therefore
+skipped for predicate loss while retaining pair-existence and sampler
+supervision.
+
+Training evidence reports:
+
+```text
+predicate_contrast_set_size
+predicate_positive_cosine
+predicate_hard_negative_margin
+predicate_query_raw_norm
+predicate_unobserved_column_fraction
+predicate_rows_skipped
+```
+
+BCE-only negative reweighting (`--zero-support-negative-weight != 1`) cannot be
+combined with batch-local InfoNCE.
+
+`.github/workflows/openimages-predicate-objective-v2.yml` runs a four-arm
+controlled ladder on the canonical 256/64 Open Images slice:
+
+```text
+bce-baseline
+bce-holdout
+infonce-baseline
+infonce-holdout
+```
+
+All arms share the same whitened CLIP bank, frozen DINOv3 ViT-S/16, K=48,
+sqrt-balanced positive weighting, architecture, optimizer, seed and three-epoch
+schedule. The comparison separates the objective's in-distribution effect from
+its robustness to the explicit `contain / holds / ride` predicate holdout.
+
+## Bounded hard negatives for predicate InfoNCE
+
+The first predicate-objective-v2 experiment showed that positive-only
+batch-local InfoNCE produces a very small contrast set and collapses strict
+explicit-holdout transfer even though pair AP improves.
+
+The next controlled step keeps the same multi-positive InfoNCE objective but
+adds a bounded set of hard predicate negatives:
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-hard-negative-count N
+```
+
+The candidate pool is intentionally conservative:
+
+```text
+train support > 0
+AND predicate remains inside the current supervision mask
+```
+
+Therefore:
+
+- explicit holdouts cannot become hard negatives;
+- natural train-zero-support predicates cannot become hard negatives;
+- candidates already positive somewhere in the batch are not duplicated;
+- the loss re-applies the supervision mask internally even if a caller passes
+  an overly broad candidate mask.
+
+For each batch, candidate hardness is the maximum current visual-query cosine
+against that predicate direction. The top `N` candidates are added to the
+contrast set. Mining uses detached scores; gradients flow only through the
+subsequent selected contrastive logits.
+
+Training evidence records:
+
+```text
+predicate_hard_negative_count
+predicate_contrast_set_size
+predicate_unobserved_column_fraction
+contrastive_negative_candidate_indices
+```
+
+`.github/workflows/openimages-predicate-hard-negatives.yml` compares four
+arms on the same canonical Open Images 256/64, whitened-CLIP, frozen-DINOv3,
+K=48 contract:
+
+```text
+positive-only-baseline
+positive-only-holdout
+hard8-baseline
+hard8-holdout
+```
+
+The experiment answers one narrow question: whether broadening the contrast set
+with bounded train-supported negatives restores global text-space ranking and
+strict held-out predicate transfer before adding ontology/source-aware
+negative weighting.
+
+## Apache relation context stack
+
+Issue #119 ports the three post-pair context stages from
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`.
+
+Enable the complete context slice with:
+
+```text
+--pair-evidence-contract apache
+--pair-sampler-contract apache
+--relation-context-contract apache
+```
+
+The execution order is fixed:
+
+```text
+pair projection
+  -> RelationTransformer
+       2 pair self-attention layers
+       2 scene/box-token cross-attention layers
+  -> DeformableRelRead
+       4 anchors: subject/object/union/contact
+       8 heads x 4 sampled points
+       2 learned null slots
+       zero-initialized residual gate
+  -> RelationInteractionBlock
+       2 pair-dependency self-attention layers
+       1 joint pair+scene grounding layer
+```
+
+The RelationTransformer cross-attention memory concatenates projected scene
+patches with the four subject/object TL/BR Fourier box tokens produced by #98.
+Pair-padding masks also mask those box tokens. During training,
+`apache_box_token_dropout=0.3` can hide an image's box tokens while keeping
+scene patches visible.
+
+Deformable offsets are expressed in units of each anchor's half extent and the
+sampled positions are clamped to the image. The residual gate starts at zero,
+so adding this module begins as the exact RelationTransformer result.
+
+The final interaction block first models relation dependencies across pairs,
+then concatenates pair queries and scene tokens into one self-attention
+sequence and reads back only the pair positions.
+
+The legacy pair-only Transformer stays as a checkpoint-compatible control and
+is frozen when the Apache context stack is active.
+
+## Apache two-stage relatedness pair sampler
+
+Issue #118 ports the pair-selection contract from the same last Apache-2.0
+RelateAnything snapshot used by #98.
+
+Enable it with:
+
+```text
+--pair-evidence-contract apache
+--pair-sampler-contract apache
+```
+
+The sampler has two stages:
+
+```text
+all ordered non-self pairs
+  -> exact 19-D geometry MLP
+  -> top 400
+  -> asymmetric visual relatedness
+       dot(f_sub(v_i), f_obj(v_j)) / sqrt(d)
+  -> top K (default 128)
+```
+
+The stage-2 relatedness logit is the runtime `pair_logit` consumed by the
+relation score contract. The historical post-transformer `pair_head` is not
+used in this mode.
+
+Training passes the dense pair target matrix into the model only through
+`forward_training`. Annotated directed pairs and their swapped copies are
+forced through both TopK stages so later direction supervision can address the
+same pair slots.
+
+Reference sampler losses are computed inside the sampler:
+
+```text
+geometry pre-scorer:
+  BCE over every valid ordered pair
+
+relatedness:
+  focal BCE over stage-1 survivors
+  positive weight = 1
+  unlabelled floor = 0.3
+```
+
+The outer training loss directly consumes these two values in Apache sampler
+mode. The older generic dense sampler / selected-pair BCE remains the legacy
+control.
+
+The current slice implements the reference PU floor. Category-pair statistical
+negative-rate overrides remain a follow-up in #118; they are training-only and
+must never become inference inputs.
+
+## Apache RelateAnything pair-evidence reference path
+
+Issue #98 is now anchored to the last Apache-2.0 RelateAnything snapshot,
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`.
+
+Use:
+
+```text
+--pair-evidence-contract apache
+```
+
+to select the reference pair-evidence construction. This path is intentionally
+separate from the earlier KFCore `pair_visual_evidence` /
+`pair_geometry_evidence` ablations.
+
+The Apache contract adds:
+
+```text
+DINO fused scene map
+  -> box-conditioned global SoftSpatialPool
+  -> v_sub / v_obj / v_union / v_contact
+  -> exact 19-D RelGeomEncoder
+  -> concat [sub,obj,union,contact,geometry]
+  -> pair projection
+```
+
+`SoftSpatialPool` is global cross-attention over every scene patch. A box
+provides a query through top-left / bottom-right Fourier prompt tokens; it does
+not restrict the receptive field to patches inside the box.
+
+The reference contact zone is the box intersection when endpoints overlap and
+the rectangle between their facing edges when they do not.
+
+The 19-D geometry path implements the Apache feature order and
+`10*tanh(x/10)` normalization exactly, including box-only fallbacks for
+mask-fill / region-IoU / region-contact fields.
+
+### Transitional boundary
+
+This #98 path deliberately does **not** claim the whole Apache architecture:
+
+- pair selection still uses the existing KFCore sampler until #118 lands;
+- BoxPromptEncoder outputs are produced/frozen but are not consumed until #119
+  ports the relation context stack;
+- predicate scoring remains the current KFCore head until #99;
+- the current legacy path remains the default for checkpoint compatibility.
+
+The Apache pair-evidence modules are initialized after existing common modules,
+so enabling the contract does not perturb common parameter initialization under
+the same seed. Legacy representation modules that leave the forward path are
+frozen rather than left as dead trainable parameters.
+
+## Contact-only visual evidence attribution
+
+The first endpoint/union/union-contact A/B showed that union pooling alone was
+nearly neutral, while adding contact evidence produced the large gain in pair
+AP and predicate top-1.
+
+KFCore therefore exposes a fourth research mode:
+
+```text
+--pair-visual-evidence contact
+```
+
+The mode adds only the zero-initialized contact residual projection. It does
+not allocate or apply the union projection.
+
+All visual-evidence modes share identical common parameter initialization:
+
+```text
+endpoint
+union
+contact
+union-contact
+```
+
+A zero-initialized optional residual makes every mode start from the exact
+endpoint behavior. Union-only and contact-only add the same number of trainable
+parameters; union-contact adds exactly twice that projection delta.
+
+`.github/workflows/openimages-pair-visual-evidence.yml` now compares all four
+modes under the same hard8 InfoNCE + calibration=0.10 contract. This isolates
+whether the previous union-contact gain is primarily attributable to contact
+evidence or to the combination.
+
+## Rich pair geometry evidence
+
+After contact-only pooling was selected as the lean open-vocabulary visual
+baseline, the next #98 attribution keeps that visual evidence fixed and adds a
+zero-initialized rich geometry residual.
+
+Historical geometry remains unchanged:
+
+```text
+dx, dy, distance,
+log(width ratio), log(height ratio),
+subject area, object area, IoU
+```
+
+Rich mode adds ten normalized features through separate residual branches:
+
+```text
+dx / subject width
+dy / subject height
+dx / object width
+dy / object height
+intersection / subject area
+intersection / object area
+horizontal box gap
+vertical box gap
+cos(relative direction)
+sin(relative direction)
+```
+
+Relative offsets are clipped to [-8,8]; overlap fractions stay in [0,1].
+Box gaps remain in normalized image coordinates and direction terms in [-1,1].
+
+The existing 8-D geometry encoder and sampler are not widened. Instead rich
+mode adds:
+
+```text
+10-D rich geometry
+   -> zero-init residual -> geometry embedding
+   -> zero-init residual -> pair sampler logit
+```
+
+All historical/common parameters are initialized identically under the same
+seed and rich mode starts with bitwise-identical outputs. On the canonical
+experiment configuration (`geometry_dim=32`) rich mode adds exactly 330
+trainable parameters:
+
+```text
+10 * 32 representation residual
++ 10 * 1 sampler residual
+```
+
+`.github/workflows/openimages-pair-geometry-evidence.yml` compares
+`basic` vs `rich` while fixing:
+
+- contact-only visual evidence;
+- hard8 batch-local InfoNCE;
+- calibration weight 0.10;
+- frozen DINOv3 ViT-S/16;
+- canonical Open Images 256/64;
+- K=48, shared whitened CLIP prototypes, optimizer and seed.
+
+Sampler recall is deliberately reported rather than forced equal because rich
+geometry is also allowed to improve pair selection.
+
+## Source-aware predicate calibration auxiliary
+
+Bounded hard negatives broaden the InfoNCE contrast set and improve retained
+seen ranking, but strict held-out predicate transfer remains weak. The next
+objective-v2 component separates semantic ranking from absolute/cross-pair
+calibration.
+
+```text
+--predicate-objective batch-local-infonce
+--predicate-contrastive-hard-negative-count 8
+--predicate-calibration-loss-weight 0.25
+```
+
+The predicate objective becomes:
+
+```text
+predicate_loss =
+    contrastive_loss
+  + lambda_calibration * sigmoid_calibration_loss
+```
+
+The calibration auxiliary is source/holdout aware:
+
+- a relation row participates only when it retains at least one visible
+  positive predicate;
+- visible positives receive target 1;
+- negative columns come only from the train-supported predicate candidate mask
+  inside the active supervision mask;
+- explicit holdouts are excluded;
+- natural train-zero-support predicates are excluded;
+- holdout-only rows are skipped entirely rather than becoming all-negative
+  seen rows.
+
+This intentionally uses the same runtime predicate logits that KFCore exports,
+so the auxiliary also trains their absolute scale while InfoNCE continues to
+shape relative text-space ranking.
+
+Training evidence records:
+
+```text
+predicate_contrastive_loss
+predicate_calibration_loss
+predicate_calibration_rows
+predicate_calibration_rows_skipped
+predicate_calibration_column_fraction
+```
+
+The controlled experiment keeps hard-negative count fixed at 8 and compares
+`lambda_calibration=0` against `0.25` for both normal and explicit
+`contain / holds / ride` holdout arms. No pair/sampler, prototype, visual
+encoder, optimizer or dataset variable changes in that attribution.
+
+## Pair visual evidence: endpoint / union / contact
+
+RelationModelConfig now exposes:
+
+```text
+pair_visual_evidence =
+    endpoint
+    union
+    union-contact
+```
+
+The historical endpoint representation remains unchanged:
+
+```text
+subject
+object
+subject - object
+subject * object
+geometry
+    -> pair projection
+```
+
+Union/contact evidence is injected as a residual after the historical pair
+projection and before the relation transformer:
+
+```text
+base_pair_token
+    + union_projection(union_pool)
+    + contact_projection(contact_pool)
+```
+
+Both optional projections are created only after all common stochastic modules
+and are zero-initialized. Therefore:
+
+- endpoint keeps the exact historical architecture;
+- common parameters are bitwise-identical across evidence modes under one seed;
+- union/union-contact start from the exact endpoint output;
+- training must demonstrate value before the residual can affect predictions.
+
+The tight union rectangle covers both selected subject/object boxes. Contact is
+their positive-area intersection. Non-overlap and edge-touching pairs use an
+invalid contact mask and a stable zero contact feature.
+
+The public runtime/ONNX tensor ABI is unchanged. The evidence mode is an
+internal model configuration persisted in the training checkpoint.
+
+The first controlled A/B fixes the predicate objective at hard8 batch-local
+InfoNCE plus source-aware calibration weight 0.10 and compares:
+
+```text
+endpoint
+union
+union-contact
+```
+
+No holdout, sampler, dataset, prototype, optimizer, backbone or training
+schedule variable changes in this attribution.
+
 ## Train-zero-support negative supervision sweep
 
 The canonical 256-image training split has three predicates with no positive
@@ -906,6 +1672,537 @@ benchmark.json
 `training.json` records the split/vocabulary hashes, frozen backbone ID,
 training configuration, epoch losses and checkpoint SHA-256.
 `benchmark.json` is the canonical GT-box validation report.
+
+## Apache released-corpus qualification
+
+The Apache sampling implementation is not enough to claim that a checkpoint
+used the released training corpus. A full-reference run must first bind its
+three training sources to an explicit corpus manifest:
+
+```text
+kfcore.apache-released-corpus/1
+
+megasg_clean
+vg_raw
+hicodet
+```
+
+Every resolved source records an immutable origin/revision, the canonical
+training-annotation SHA-256 and its post-exclusion image count. A source may be
+recorded as `unresolved`, but unresolved provenance deliberately blocks
+full-reference qualification.
+
+This distinction matters for the public artifacts: the released model metadata
+names `megasg_clean + vg_raw + hicodet`, while the current public RA-4M
+dataset tree exposes the MegaSG pack but does not by itself establish the exact
+released `vg_raw` and `hicodet` pack identities. Do not substitute a source
+name for an artifact identity.
+
+After a real training run finishes:
+
+```bash
+python tools/relation_training/apache_release_qualification.py \
+  --corpus released-corpus.json \
+  --training build/full-reference/training.json \
+  --out build/full-reference/released-qualification.json
+```
+
+The command fails unless the run has all of the following:
+
+- the released `img_size=448` square model input;
+- the released `max_objects=40` / `max_boxes=40` model shape;
+- the released `geo_budget=400 -> final_budget=128` pair sampler;
+- the released `d_model=512` relation-head width;
+- the released `text_dim=512` predicate/query space;
+- CUDA BF16 AMP execution (`amp=true`, `amp_dtype=bf16`, no GradScaler);
+- exact released scalar hyperparameter and hard-coded structure contracts;
+- the last Apache-2.0 source reference
+  `4a07de9d06f2e3f14309753b7907cf1d3a263b08`;
+- all three source identities resolved;
+- exact source annotation hashes and post-exclusion counts;
+- deterministic IndoorVG val/test exclusion derivation and exact exclusion hash;
+- matching exclusion, source-column, ontology and pair-opportunity hashes;
+- deterministic source-column derivation from the same released pack metadata;
+- deterministic pair-opportunity rebuild evidence from the same MegaSG pack;
+- matching vocabulary, named predicate/object banks and derived spatial-routing hashes;
+- deterministic predicate/object bank derivation from the released text student + tokenizer bundle;
+- the released 503,754-draw sampling stream;
+- full Apache pair-evidence/sampler/context/vocab-head contracts;
+- 12 complete epochs;
+- effective batch 128;
+- released EMA decay 0.9998;
+- benchmark/checkpoint weights sourced from the EMA model rather than raw weights;
+- a concrete checkpoint SHA-256.
+
+The resulting qualification artifact binds the corpus manifest, training report
+and checkpoint. Cross-dataset/open-vocabulary quality and final TensorRT
+qualification remain separate model-evidence gates.
+
+### Released external shape and pair budget
+
+The Apache released graph uses a 448 × 448 square input, 40 padded object slots,
+a stage-1 geometric budget of 400 ordered pairs, and a final relation budget of
+128. For `apache-reference`, KFCore requires exactly:
+
+```text
+image        [1,3,448,448]
+boxes        [1,40,4]
+geo_budget   400
+final_budget 128
+pred_logits  [1,128,V]
+```
+
+The 400/128 evidence is read from the constructed
+`ApacheRelatednessPairSampler`, not inferred from CLI defaults. A focused
+synthetic ONNX/ORT gate uses a tiny large-patch backbone to exercise the exact
+external shape without making a real DINOv3 448 export part of every CI run.
+Legacy and diagnostic runs may still choose smaller shapes.
+
+### Released scalar hyperparameter contract
+
+`apache-reference` treats the released scalar values as a contract, not merely
+defaults. Training fails before the expensive run starts if any mutable
+optimizer, regularization, model, or objective scalar drifts.
+
+Pinned values include head/backbone LR, weight decay, warmup/cosine floor,
+gradient clipping, multi-scale range/rungs, CFA, context/box-token dropout,
+pair-negative floor, InfoNCE temperature/negative sampling, all released
+`lambda_*` terms, background top-k, and swap margin.
+
+The same canonical validator is run again by released-run qualification.
+Training evidence stores both the resolved scalar report and a hard-coded
+structure report. The structure report covers the 2+2 relation context, 2+1
+interaction stack, 8-head attention, 2× FFN width, deformable 4/8/2 contract,
+16/7 positional encoding, two-layer vocabulary projection, and initial logit
+scale 5. Legacy and focused diagnostic fixtures remain free to use alternate
+values; they simply cannot claim the Apache released contract.
+
+### Released precision contract
+
+The released Apache training recipe uses CUDA automatic mixed precision with
+BF16:
+
+```text
+amp = true
+amp_dtype = bf16
+GradScaler = disabled
+```
+
+KFCore wraps the relation-model forward and the Apache objective computation in
+the same BF16 autocast context. Backward, gradient clipping, optimizer update,
+scheduler update, and EMA update then follow without FP16 loss scaling.
+
+CPU tests may exercise the BF16 autocast software path, but a released-run
+qualification is accepted only when the recorded training device is CUDA and
+CUDA BF16 autocast actually executed. A CPU/FP32/FP16 run is therefore useful
+for development but cannot be labeled a released training reproduction.
+
+### Deterministic released COCO-SGG pack rebuild
+
+The released training sources are consumed as Apache memmap packs. KFCore now
+has both directions of that boundary:
+
+```text
+COCO-SGG JSON
+  -> apache_pack_builder.py
+  -> meta.json / file_names.json / img_meta.npy / boxes.npy / box_cats.npy / rels.npy
+  -> apache_pack_materializer.py
+  -> canonical relation JSONL
+```
+
+The builder pins the released train semantics: file-order predicate/category
+vocabularies, `max_objects=40`, `min_rels=1`, relation-window/self-loop
+drops, spatial/geometric/round flag bits, insertion-order raw predicate
+vocabulary, and the exact normalized-cxcywh clamp rules. Output component
+SHA-256 values are recorded in rebuild evidence.
+
+Upstream pack metadata embeds machine-local `ann_source` and `img_dir`
+paths, while the dataset release rewrites those paths. A deterministic rebuild
+therefore requires explicit **logical provenance labels** for those fields
+rather than hashing local absolute paths. With the same logical input JSON,
+labels and exclusion set, every emitted component is byte-identical across
+output directories.
+
+This shared pack builder is the final common primitive used by deterministic
+`vg_raw` and HICO-train source rebuild qualification.
+
+### Released VG raw deterministic rebuild
+
+The released `vg_raw` source is rebuilt from the raw Visual Genome relation
+metadata rather than accepted by source name alone:
+
+```bash
+python tools/relation_training/apache_vg_raw_rebuild.py \
+  --relationships /data/VG_metadata/relationships.json \
+  --image-data /data/VG_metadata/image_data.json \
+  --image-root /data/VG150_coco_format/train \
+  --registry /runs/datamix/registry.json \
+  --vg2coco /runs/datamix/vg2coco.json \
+  --psg2coco /runs/datamix/psg2coco.json \
+  --expected-input-hashes vg_raw_expected_inputs.json \
+  --vocabulary released-vocabulary.json \
+  --canonical-out build/vg_raw-canonical.jsonl \
+  --coco-out build/vg_raw_train_coco.json \
+  --pack-out build/vg_raw/train \
+  --evidence build/vg_raw-rebuild.json
+```
+
+The converter reproduces the Apache boundary at
+`Maelic/RelateAnything@4a07de9d06f2e3f14309753b7907cf1d3a263b08`:
+case-sensitive `.jpg` disk membership, registry-based VG/COCO leakage
+filtering, `image_data.json` dimensions, whitespace/lowercase normalization,
+the five-word filter, first-seen `object_id` box order, subject `name` /
+object `names[0]`, one-pixel minimum box extents, writer relation
+deduplication and insertion-order category/predicate vocabularies.
+
+A development rebuild may omit `--expected-input-hashes`, but its evidence
+then records `input_hashes_pinned=false` and cannot establish released source
+identity. Qualification requires all five semantic input hashes
+(`relationships.json`, `image_data.json`, `registry.json`,
+`vg2coco.json`, and the `psg2coco.json` parsed by the upstream registry
+loader) to be supplied and matched exactly. Any drift fails closed.
+
+The emitted COCO-SGG file is immediately passed through the shared released
+pack builder with logical provenance labels, so the evidence binds both the
+raw-source conversion and every memmap component SHA-256. When the released
+union vocabulary is supplied, the same command materializes the pack through
+KFCore's canonical JSONL boundary and records the canonical annotation
+SHA-256/image/relation counts used by the released-corpus manifest.
+
+### Released HICO train deterministic rebuild
+
+The released `hicodet/train` source is rebuilt from the exact train parquet
+snapshot and `list_action.csv` contract:
+
+```bash
+python tools/relation_training/apache_hico_train_rebuild.py \
+  --list-action /data/HICO_DET/list_action.csv \
+  --parquet-dir /data/HICO_DET/train_dl/data \
+  --image-out-dir /data/HICO_DET/train_images \
+  --expected-input hico_train_expected_inputs.json \
+  --source-revision <immutable-hf-or-source-revision> \
+  --vocabulary released-vocabulary.json \
+  --canonical-out build/hicodet-canonical.jsonl \
+  --coco-out build/hicodet_train_coco.json \
+  --negatives-out build/hicodet_negatives_train.json \
+  --pack-out build/hicodet/train \
+  --evidence build/hicodet-rebuild.json
+```
+
+The traversal order is part of provenance: lexicographically sorted
+`train-*.parquet` shards, then row-group order, then row order. Evidence
+records every shard filename/SHA-256/row-group/row count and the
+`list_action.csv` SHA-256.
+
+The converter reproduces the released `iou_merge=0.5` rule: exact rounded
+box-coordinate reuse first, then same-category union-find at IoU >= 0.5 with
+the merged box equal to the member mean. Positive pairs are remapped,
+self-loops and duplicate positives are dropped, `no_interaction` remains a
+negative source rather than a positive predicate, and only the first 40 merged
+boxes enter the train pack.
+
+A development rebuild may omit `--expected-input` / `--source-revision`.
+Such evidence cannot emit a corpus source candidate. Released qualification
+requires the exact action-table hash, the ordered complete parquet hash list,
+an immutable source revision, and canonical pack materialization. Any shard
+addition/removal/reorder or file hash drift fails closed.
+
+### Released IndoorVG exclusion derivation
+
+IndoorVG evaluation images originate from Visual Genome and can leak into
+VG-derived training packs under two different filename identities. The released
+training run therefore excludes both spellings:
+
+```text
+IndoorVG val + test .jpg filenames
+    -> literal VG filename stems
+vg2coco.json
+    -> mapped COCO ids formatted as exactly 12 digits
+
+exclude stems = VG stems UNION zero-padded COCO stems
+```
+
+The released rule is intentionally filename-identity only: image bytes are not
+read, the protected splits are exactly `val` then `test`, and only a
+case-sensitive `.jpg` suffix is accepted. Unmapped VG ids remain protected by
+their VG stem; multiple VG ids that map to one COCO id collapse naturally in
+the final set.
+
+`apache_indoorvg_holdout.py` rebuilds the current `exclude_ids` JSON
+deterministically and records:
+- exact split order plus every sorted split VG-id list/count/hash;
+- sorted val/test VG union;
+- `vg2coco.json` SHA-256;
+- sorted VG->12-digit-COCO mapped pairs and unmapped VG ids;
+- deduplicated COCO stems and final stem union/count/hashes;
+- emitted holdout artifact SHA-256.
+
+Released qualification reconstructs the holdout JSON bytes from this derivation
+and requires the resulting SHA-256 to equal the exact `exclude_ids_sha256`
+used by the training mixture. A hand-authored or differently split holdout
+cannot qualify as the released leakage-exclusion input.
+
+### Released pair-opportunity rebuild
+
+The released relatedness/background PU weighting consumes
+`pair_opportunity.npz`. Artifact SHA-256 alone proves which table was used,
+but not that a rebuilt table followed the Apache denominator/numerator
+contract. KFCore can deterministically rebuild and audit the table from
+`megasg_clean/train`:
+
+```text
+scan_box_cap = 400
+min_support  = 50
+
+opportunities(cs,co)
+  = sum over images of ordered instance pairs
+  = n_cs * n_co
+  - self pairs on the diagonal
+
+relations(cs,co)
+  = relation rows from the SAME pack
+  - rows whose endpoint falls outside the 400-box scan window
+
+rate = min(1, relations / opportunities)
+```
+
+The pack's `meta.categories` order must exactly equal the relation
+vocabulary's object-label order. The rebuild writes the runtime-compatible NPZ
+with deterministic ZIP metadata and records SHA-256 for `meta.json`,
+`img_meta.npy`, `box_cats.npy`, `rels.npy`, the object-order hash,
+algorithm constants, summary counts and the output NPZ hash.
+
+Released qualification requires the rebuild output hash to equal the
+`neg_rate_table_sha256` actually consumed by training. It also cross-checks
+the MegaSG `meta.json` and `rels.npy` hashes against the spatial-routing
+derivation, proving both derived assets came from the same released/rebuilt
+MegaSG pack. Sampled/extrapolated rebuilds cannot qualify.
+
+### Released spatial routing derivation
+
+The Apache dual-vocabulary routing gate is warm-started from a data-derived
+spatial/semantic flag for every predicate. The released rule is computed from
+the original relation packs, not guessed from predicate strings:
+
+```text
+spatial_bit = rels[:,3] & 1
+per source + predicate:
+  spatial = spatial_count >= 0.5 * relation_count
+union:
+  spatial if ANY supported source marks the predicate spatial
+```
+
+KFCore materializes the existing `kfcore.predicate-spatial-flags/1` sidecar
+with `apache_spatial_flags.py`. Derivation evidence records every source
+pack's `meta.json` and `rels.npy` SHA-256, the exact `>= 0.5` rule, local
+support counts and the emitted sidecar SHA-256. Local predicate order is mapped
+by name into the union vocabulary; predicates with no support remain semantic.
+
+Full-reference qualification binds the training warm-start's
+`spatial_flags_sha256` to this derivation and cross-checks the derived
+spatial/semantic counts against the predicate-bank row count. An arbitrary
+hand-authored sidecar cannot qualify as the released routing input.
+
+### Released source-column negative mask
+
+The released recipe restricts negative predicate columns for **HICO only**:
+
+```text
+source order:
+  megasg_clean
+  vg_raw
+  hicodet
+
+restrict_neg_sources:
+  hicodet
+```
+
+The runtime table starts with every source allowed to contrast against every
+union predicate. The HICO row is then replaced by the exact intersection of
+`hicodet/train/meta.json::predicates` with the union predicate vocabulary.
+Unknown HICO-local predicates are ignored, matching upstream; local predicate
+order does not affect union-column positions.
+
+`apache_source_columns.py` materializes the existing
+`kfcore.predicate-source-allow/1` sidecar deterministically and records:
+- source order and exact restricted-source set;
+- union predicate order/count/hash;
+- every source `meta.json` SHA-256;
+- each local predicate order/count/hash;
+- ignored local predicates;
+- allowed predicate order/count/hash;
+- emitted sidecar SHA-256.
+
+Released qualification reconstructs the sidecar from this evidence and requires
+its SHA-256 to equal the exact asset consumed by training. It also requires each
+source `meta.json` hash to match the same pack metadata used by the spatial
+routing derivation, and the union predicate-order hash to match the named
+predicate bank from the text-bank derivation.
+
+### Released text-bank derivation
+
+The released predicate and object text banks share one distilled text student,
+but they do **not** share the same prompt ensemble. Released model metadata pins
+the student checkpoint to:
+
+```text
+runs/packed/text_student_v2_512/student.pt
+sha256 =
+e0317830b68ea51e6711fc90d4a35954d0528e5bd78a8d5afd966601ce4ed119
+```
+
+The student architecture is fixed at vocab 49,408, token width 128, model width
+256, six blocks, four heads, FFN 1,024, output width 512 and max length 32. A
+released rebuild uses the colocated local CLIP tokenizer bundle corresponding
+to `openai/clip-vit-base-patch32`; the released environment records
+`transformers==5.14.1`.
+
+Predicate bank prompts:
+
+```text
+"{p}"
+"one object is {p} another object"
+"a photo of something {p} something"
+```
+
+Object bank prompts:
+
+```text
+"{p}"
+"a photo of a {p}"
+```
+
+For each bank, each template is encoded separately, the already-normalized
+template vectors are **summed**, and one final L2 normalization is applied.
+KFCore's `apache_text_bank.py` reproduces this rule and writes deterministic
+named NPZ artifacts plus `kfcore.apache-text-bank-derivation/1` evidence.
+
+```bash
+python tools/relation_training/apache_text_bank.py \
+  --student-checkpoint /release/text_student.pt \
+  --tokenizer-dir /release/tokenizer \
+  --vocabulary released-vocab.json \
+  --predicate-out pred_embeds_student_photo.npz \
+  --object-out obj_embeds.npz \
+  --evidence text-bank-derivation.json
+```
+
+For `apache-reference`, `--predicate-embeddings` must be the named predicate
+NPZ (`predicates + embeddings + templates`), not a bare tensor. Qualification
+binds the student SHA, exact student config, tokenizer file hashes, transformers
+version, both template sets, label-order hashes, tensor hashes and the final
+predicate/object artifact hashes. Legacy training continues to accept the
+historical bare predicate tensor.
+
+### Released object text bank
+
+The released objective uses `lambda_obj=0.10`, so object-category text
+embeddings are part of the training input identity. For `apache-reference`,
+KFCore accepts the Apache-style `obj_embeds.npz` contract:
+
+```text
+names       [O]      exact object-label order
+embeddings  [O,512]  object text directions
+```
+
+The `names` array must exactly equal the object order in the relation
+vocabulary. A bare tensor is not sufficient for released qualification because
+its row semantics cannot be proven. Training evidence records the NPZ
+SHA-256, shape, source dtype and object-label order; the released corpus
+manifest carries the same object-bank SHA-256, and qualification requires the
+two artifacts to match exactly.
+
+### Released text-space width
+
+The Apache released recipe pins `text_dim=512`. For `apache-reference`,
+KFCore therefore requires predicate/text embeddings shaped `[V,512]`; the
+semantic and spatial encoder outputs are `[B,K,512]`, and the dynamic
+open-vocabulary graph accepts `W[V,512]`.
+
+Legacy/diagnostic experiments may still use smaller text dimensions, but they
+cannot pass released-run qualification. The real-DINO full Apache smoke runs
+the dynamic-vocabulary ONNX/ORT contract in the 512-D text space.
+
+### Released photometric augmentation contract
+
+The Apache released recipe uses training-only photometric jitter with strength
+`0.3`. KFCore reproduces the same transform order and math after square resize:
+
+```text
+brightness factor ~ U(0.7, 1.3)
+contrast factor   ~ U(0.7, 1.3)
+saturation factor ~ U(0.7, 1.3)
+clamp [0,1]
+```
+
+Contrast is around each channel's spatial mean; saturation is around luma
+weights `[0.299, 0.587, 0.114]`. No horizontal flip or geometry transform is
+permitted because directional predicates would be falsified. Validation and
+qualification evaluation remain unaugmented.
+
+The reference implementation draws factors from ambient `torch.rand` inside
+real DDP DataLoader workers. KFCore preserves that stochastic distribution and
+records it explicitly, but the single-process logical-DDP runner does **not**
+claim bitwise identity with the upstream 4-rank × 16-worker random-call
+trajectory.
+
+### Released EMA weight contract
+
+The Apache released model is the EMA model, not the final raw optimizer state.
+For `apache-reference`, KFCore reproduces the upstream update rule after each
+optimizer step:
+
+```text
+d = 0.9998 * (1 - exp(-updates / 2000))
+ema = d * ema + (1 - d) * raw
+```
+
+Buffers are copied exactly. The final benchmark and saved relation checkpoint
+use EMA weights. Training evidence retains both raw and EMA state SHA-256 values
+so qualification fails if a raw checkpoint is accidentally substituted.
+
+### TensorRT dynamic-vocabulary hardware qualification
+
+The `relation.open-vocabulary` ONNX graph and dynamic-V TensorRT builder are
+already repository contracts. Final TensorRT acceptance requires a real NVIDIA
+run against a **prebuilt** engine:
+
+```bash
+python tools/relation_training/tensorrt_dynamic_vocab_qualification.py \
+  --onnx relation-open-vocabulary.onnx \
+  --engine relation-open-vocabulary.engine \
+  --engine-metadata relation-open-vocabulary.json \
+  --out tensorrt-dynamic-vocab-qualification.json
+```
+
+The qualification command never builds or rewrites the engine. It deserializes
+the supplied engine once, creates one execution context once, and runs the same
+context at:
+
+```text
+V=1
+V=3
+profile opt V
+profile max V
+```
+
+The ORT reference and TensorRT outputs are compared by valid directed pair key
+`(subject_idx, object_idx)`, so backend TopK tie ordering may differ while
+the valid pair set and logits must remain equivalent. The report records pair
+set equality, pair-logit and predicate-logit max absolute/relative error,
+explicit tolerances, per-V ORT/TensorRT latency, source ONNX/engine/sidecar
+hashes, TensorRT/ORT/CUDA/GPU provenance and the exact optimization profile.
+
+The engine SHA-256 is checked before and after all vocabulary swaps. A passing
+report also requires `engine_load_count=1` and `context_create_count=1`.
+This is the evidence that dynamic vocabulary changes do not rebuild the
+TensorRT engine.
+
+Repository CPU CI validates case selection, deterministic W/alpha inputs,
+pair-key comparison, tolerance logic and the fail-closed report schema. It
+does **not** set `hardware_executed=true` and cannot complete the TensorRT
+qualification issue. #228 remains open until a real NVIDIA run publishes a
+passing hardware report.
 
 ## Checkpoint
 

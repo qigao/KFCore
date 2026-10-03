@@ -1,0 +1,49 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "runtime-ort-cpu",
+      "hidden": true,
+      "cacheVariables": {
+        "KFCORE_ENABLE_CUDA": "OFF",
+        "KFCORE_ENABLE_TENSORRT": "OFF",
+        "KFCORE_ENABLE_ONNXRUNTIME": "ON",
+        "KFCORE_ONNXRUNTIME_ENABLE_CUDA": "OFF",
+        "KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES": "OFF"
+      }
+    },
+    {
+      "name": "runtime-ort-cuda",
+      "hidden": true,
+      "cacheVariables": {
+        "KFCORE_ENABLE_CUDA": "OFF",
+        "KFCORE_ENABLE_TENSORRT": "OFF",
+        "KFCORE_ENABLE_ONNXRUNTIME": "ON",
+        "KFCORE_ONNXRUNTIME_ENABLE_CUDA": "ON",
+        "KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES": "ON"
+      }
+    },
+    {
+      "name": "runtime-tensorrt-ort-cpu",
+      "hidden": true,
+      "cacheVariables": {
+        "KFCORE_ENABLE_CUDA": "ON",
+        "KFCORE_ENABLE_TENSORRT": "ON",
+        "KFCORE_ENABLE_ONNXRUNTIME": "ON",
+        "KFCORE_ONNXRUNTIME_ENABLE_CUDA": "OFF",
+        "KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES": "OFF"
+      }
+    },
+    {
+      "name": "runtime-tensorrt-only",
+      "hidden": true,
+      "cacheVariables": {
+        "KFCORE_ENABLE_CUDA": "ON",
+        "KFCORE_ENABLE_TENSORRT": "ON",
+        "KFCORE_ENABLE_ONNXRUNTIME": "OFF",
+        "KFCORE_ONNXRUNTIME_ENABLE_CUDA": "OFF",
+        "KFCORE_ONNXRUNTIME_ALLOW_CPU_NODES": "OFF"
+      }
+    }
+  ]
+}

@@ -10,6 +10,7 @@
  ******************************************************************************/
 
 #include <math.h>
+#include <stddef.h>
 #include <assert.h>
 
 /******************************************************************************
@@ -362,7 +363,7 @@ int nav_quat_rotate_body_to_nav(const float q_body2nav[4], const float v_body[3]
     {
         return -1;
     }
-    matvec("N", 3, 3, 1.0f, R, v_body, 0.0f, v_nav);
+    if (matvec("N", 3, 3, 1.0f, R, v_body, 0.0f, v_nav) != 0) return -1;
 
     return 0;
 }
@@ -380,7 +381,7 @@ int nav_quat_rotate_nav_to_body(const float q_body2nav[4], const float v_nav[3],
     {
         return -1;
     }
-    matvec("T", 3, 3, 1.0f, R, v_nav, 0.0f, v_body);
+    if (matvec("T", 3, 3, 1.0f, R, v_nav, 0.0f, v_body) != 0) return -1;
 
     return 0;
 }

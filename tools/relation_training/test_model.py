@@ -8,6 +8,10 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 
+from apache_pair_sampler import (
+    RELEASED_FINAL_BUDGET,
+    RELEASED_GEO_BUDGET,
+)
 from checkpoint import config_from_payload, load_payload, save_checkpoint
 from export_onnx import (
     ENCODER_OUTPUT_NAMES,
@@ -25,7 +29,9 @@ from model import (
     MetaDinoV3Backbone,
     OfficialDinoV3Backbone,
     RelationModelConfig,
+    RelationTrainingOutputs,
     TimmDinoV3Backbone,
+    _pair_union_contact_boxes,
 )
 
 
@@ -40,6 +46,32 @@ class ToyBackbone(BackboneAdapter):
     def forward_taps(self, image: torch.Tensor, taps) -> list[torch.Tensor]:
         base = self.conv(image)
         return [base + float(index) * 0.1 for index, _ in enumerate(taps)]
+
+
+class ReferenceShapeBackbone(BackboneAdapter):
+    hidden_size = 8
+    patch_size = 112
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(
+            3,
+            self.hidden_size,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+            bias=False,
+        )
+
+    def forward_taps(
+        self,
+        image: torch.Tensor,
+        taps,
+    ) -> list[torch.Tensor]:
+        base = self.conv(image)
+        return [
+            base + float(index) * 0.1
+            for index, _ in enumerate(taps)
+        ]
 
 
 class FakeOfficialModel(nn.Module):
@@ -141,6 +173,37 @@ def config() -> RelationModelConfig:
     )
 
 
+def visual_config(mode: str) -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+        pair_visual_evidence=mode,
+    )
+
+
+def geometry_config(mode: str) -> RelationModelConfig:
+    return RelationModelConfig(
+        image_size=8,
+        max_boxes=4,
+        pair_budget=6,
+        hidden_dim=16,
+        geometry_dim=8,
+        num_heads=4,
+        num_layers=1,
+        dropout=0.0,
+        tap_indices=(-3, -2, -1),
+        pair_visual_evidence="contact",
+        pair_geometry_evidence=mode,
+    )
+
+
 def adapter_config() -> RelationModelConfig:
     return RelationModelConfig(
         image_size=8,
@@ -178,6 +241,246 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_rich_pair_geometry_has_bounded_normalized_features(self):
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            geometry_config("rich"),
+        )
+        box_tensor = torch.tensor(
+            [
+                [
+                    [0.25, 0.25, 0.20, 0.20],
+                    [0.35, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        rich = model._rich_pair_geometry(box_tensor)
+        expected = torch.tensor(
+            [
+                0.5, 0.0,
+                0.5, 0.0,
+                0.5, 0.5,
+                0.0, 0.0,
+                1.0, 0.0,
+            ],
+            dtype=torch.float32,
+        )
+        self.assertTrue(
+            torch.allclose(
+                rich[0, 0, 1],
+                expected,
+                atol=1.0e-5,
+            )
+        )
+
+        separated = torch.tensor(
+            [
+                [
+                    [0.20, 0.20, 0.20, 0.20],
+                    [0.80, 0.20, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        rich_separated = model._rich_pair_geometry(separated)
+        self.assertAlmostEqual(
+            float(rich_separated[0, 0, 1, 6]),
+            0.4,
+            places=5,
+        )
+        self.assertEqual(
+            float(rich_separated[0, 0, 1, 4]),
+            0.0,
+        )
+        self.assertAlmostEqual(
+            float(rich_separated[0, 0, 1, 8]),
+            1.0,
+            places=5,
+        )
+
+    def test_rich_geometry_keeps_common_initialization_and_output_identical(self):
+        def build(mode: str) -> KFRelationModel:
+            torch.manual_seed(66)
+            backbone = ToyBackbone()
+            embeddings = torch.randn(3, 6)
+            return KFRelationModel(
+                backbone,
+                embeddings,
+                geometry_config(mode),
+            )
+
+        basic = build("basic")
+        rich = build("rich")
+
+        basic_state = basic.state_dict()
+        rich_state = rich.state_dict()
+        for name, value in basic_state.items():
+            self.assertIn(name, rich_state)
+            self.assertTrue(
+                torch.equal(value, rich_state[name]),
+                msg=f"common parameter drift: {name}",
+            )
+
+        self.assertIsNone(basic.rich_geometry_projection)
+        self.assertIsNone(basic.rich_geometry_sampler)
+        self.assertIsNotNone(rich.rich_geometry_projection)
+        self.assertIsNotNone(rich.rich_geometry_sampler)
+        self.assertEqual(
+            float(rich.rich_geometry_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(rich.rich_geometry_sampler.weight.abs().sum()),
+            0.0,
+        )
+
+        box_tensor, box_counts = boxes()
+        torch.manual_seed(67)
+        image = torch.rand(1, 3, 8, 8)
+        with torch.inference_mode():
+            basic_output = basic(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            rich_output = rich(
+                image, box_tensor[:1], box_counts[:1]
+            )
+        for left, right in zip(basic_output, rich_output):
+            self.assertTrue(torch.equal(left, right))
+
+    def test_union_and_contact_box_geometry(self):
+        subject = torch.tensor(
+            [
+                [
+                    [0.25, 0.25, 0.20, 0.20],
+                    [0.20, 0.20, 0.20, 0.20],
+                    [0.25, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        object_ = torch.tensor(
+            [
+                [
+                    [0.35, 0.25, 0.20, 0.20],
+                    [0.80, 0.80, 0.20, 0.20],
+                    [0.45, 0.25, 0.20, 0.20],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        valid = torch.tensor([[True, True, True]])
+
+        union, contact, contact_valid = _pair_union_contact_boxes(
+            subject, object_, valid
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                union[0, 0],
+                torch.tensor([0.30, 0.25, 0.30, 0.20]),
+                atol=1.0e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                contact[0, 0],
+                torch.tensor([0.30, 0.25, 0.10, 0.20]),
+                atol=1.0e-6,
+            )
+        )
+        self.assertTrue(bool(contact_valid[0, 0]))
+
+        self.assertFalse(bool(contact_valid[0, 1]))
+        self.assertTrue(torch.equal(
+            contact[0, 1], torch.zeros(4)
+        ))
+
+        # Pair 2 touches exactly at one vertical edge. Zero-area contact is
+        # deliberately represented as invalid/zero rather than a thin ROI.
+        self.assertFalse(bool(contact_valid[0, 2]))
+        self.assertTrue(torch.equal(
+            contact[0, 2], torch.zeros(4)
+        ))
+
+    def test_visual_evidence_modes_keep_common_initialization_identical(self):
+        def build(mode: str) -> KFRelationModel:
+            torch.manual_seed(61)
+            backbone = ToyBackbone()
+            embeddings = torch.randn(3, 6)
+            return KFRelationModel(
+                backbone,
+                embeddings,
+                visual_config(mode),
+            )
+
+        endpoint = build("endpoint")
+        union = build("union")
+        contact = build("contact")
+        union_contact = build("union-contact")
+
+        endpoint_state = endpoint.state_dict()
+        for candidate in (union, contact, union_contact):
+            state = candidate.state_dict()
+            for name, value in endpoint_state.items():
+                self.assertIn(name, state)
+                self.assertTrue(
+                    torch.equal(value, state[name]),
+                    msg=f"common parameter drift: {name}",
+                )
+
+        self.assertIsNone(endpoint.union_projection)
+        self.assertIsNone(endpoint.contact_projection)
+        self.assertIsNotNone(union.union_projection)
+        self.assertIsNone(union.contact_projection)
+        self.assertIsNone(contact.union_projection)
+        self.assertIsNotNone(contact.contact_projection)
+        self.assertIsNotNone(union_contact.union_projection)
+        self.assertIsNotNone(union_contact.contact_projection)
+        self.assertEqual(
+            float(union.union_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(contact.contact_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(union_contact.union_projection.weight.abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(union_contact.contact_projection.weight.abs().sum()),
+            0.0,
+        )
+
+        box_tensor, box_counts = boxes()
+        torch.manual_seed(62)
+        image = torch.rand(1, 3, 8, 8)
+        with torch.inference_mode():
+            expected = endpoint(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            union_output = union(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            contact_output = contact(
+                image, box_tensor[:1], box_counts[:1]
+            )
+            union_contact_output = union_contact(
+                image, box_tensor[:1], box_counts[:1]
+            )
+        for left, union_value, contact_value, final in zip(
+            expected,
+            union_output,
+            contact_output,
+            union_contact_output,
+        ):
+            self.assertTrue(torch.equal(left, union_value))
+            self.assertTrue(torch.equal(left, contact_value))
+            self.assertTrue(torch.equal(left, final))
+
     def test_open_vocabulary_encoder_is_independent_of_predicate_count(self):
         torch.manual_seed(31)
         model = KFRelationModel(
@@ -389,6 +692,250 @@ class RelationModelTest(unittest.TestCase):
                 ToyBackbone(),
                 torch.randn(3, 3),
                 adapter_config(),
+            )
+
+    def test_released_apache_graph_uses_512_width_and_40_boxes(self):
+        cfg = RelationModelConfig(
+            image_size=8,
+            max_boxes=40,
+            pair_budget=6,
+            hidden_dim=512,
+            geometry_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+            pair_evidence_contract="apache",
+            pair_sampler_contract="apache",
+            relation_context_contract="apache",
+            predicate_head_contract="apache",
+        )
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            cfg,
+        )
+        image = torch.randn(1, 3, 8, 8)
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        box_tensor[0, :4] = torch.tensor(
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            dtype=torch.float32,
+        )
+        with torch.no_grad():
+            output = model(
+                image,
+                box_tensor,
+                torch.tensor([4], dtype=torch.int64),
+            )
+
+        self.assertEqual(model.config.hidden_dim, 512)
+        self.assertEqual(model.config.max_boxes, 40)
+        self.assertEqual(model.apache_pair_projection.out_features, 512)
+        self.assertEqual(
+            model.apache_relation_transformer.scene_proj.out_features,
+            512,
+        )
+        self.assertEqual(
+            tuple(model.apache_deformable_read.norm.normalized_shape),
+            (512,),
+        )
+        self.assertEqual(
+            model.apache_relation_interaction.scene_proj.out_features,
+            512,
+        )
+        self.assertEqual(
+            model.apache_vocab_head.d_model,
+            512,
+        )
+        self.assertEqual(
+            tuple(output[0].shape),
+            (1, 6, 3),
+        )
+
+    def test_released_reference_448_40_128_512_onnx_contract(self):
+        torch.manual_seed(2026)
+        cfg = RelationModelConfig(
+            image_size=448,
+            max_boxes=40,
+            pair_budget=128,
+            hidden_dim=512,
+            geometry_dim=64,
+            num_heads=4,
+            num_layers=2,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+            pair_evidence_contract="apache",
+            pair_sampler_contract="apache",
+            relation_context_contract="apache",
+            predicate_head_contract="apache",
+        )
+        model = KFRelationModel(
+            ReferenceShapeBackbone(),
+            torch.randn(3, 512),
+            cfg,
+        )
+        self.assertIsNotNone(
+            model.apache_pair_sampler
+        )
+        assert model.apache_pair_sampler is not None
+        self.assertEqual(
+            model.apache_pair_sampler.geo_budget,
+            RELEASED_GEO_BUDGET,
+        )
+        self.assertEqual(
+            model.apache_pair_sampler.final_budget,
+            RELEASED_FINAL_BUDGET,
+        )
+
+        image = torch.rand(
+            1,
+            3,
+            448,
+            448,
+        )
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        for index in range(12):
+            column = index % 4
+            row = index // 4
+            box_tensor[0, index] = torch.tensor(
+                [
+                    (column + 0.5) / 4.0,
+                    (row + 0.5) / 3.0,
+                    0.16,
+                    0.20,
+                ],
+                dtype=torch.float32,
+            )
+        counts = torch.tensor(
+            [12],
+            dtype=torch.int64,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "released-reference.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor,
+                counts,
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor,
+                counts,
+                reference,
+            )
+            self.assertLessEqual(
+                delta,
+                1.0e-3,
+            )
+
+            import onnxruntime as ort
+
+            session = ort.InferenceSession(
+                str(path),
+                providers=["CPUExecutionProvider"],
+            )
+            input_shapes = {
+                item.name: item.shape
+                for item in session.get_inputs()
+            }
+            output_shapes = {
+                item.name: item.shape
+                for item in session.get_outputs()
+            }
+
+        self.assertEqual(
+            input_shapes["image"],
+            [1, 3, 448, 448],
+        )
+        self.assertEqual(
+            input_shapes["boxes"],
+            [1, 40, 4],
+        )
+        self.assertEqual(
+            tuple(reference[0].shape),
+            (1, 128, 3),
+        )
+        self.assertEqual(
+            tuple(reference[1].shape),
+            (1, 128),
+        )
+        self.assertEqual(
+            int(reference[4].sum().item()),
+            128,
+        )
+        self.assertEqual(
+            output_shapes["pred_logits"],
+            [1, 128, 3],
+        )
+
+    def test_reference_40_box_tensor_contract(self):
+        cfg = RelationModelConfig(
+            image_size=8,
+            max_boxes=40,
+            pair_budget=6,
+            hidden_dim=16,
+            geometry_dim=8,
+            num_heads=4,
+            num_layers=1,
+            dropout=0.0,
+            tap_indices=(-3, -2, -1),
+        )
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            cfg,
+        )
+        image = torch.randn(1, 3, 8, 8)
+        box_tensor = torch.zeros(
+            (1, 40, 4),
+            dtype=torch.float32,
+        )
+        box_tensor[0, :4] = torch.tensor(
+            [
+                [0.20, 0.20, 0.20, 0.20],
+                [0.50, 0.20, 0.20, 0.20],
+                [0.20, 0.60, 0.20, 0.20],
+                [0.70, 0.70, 0.20, 0.20],
+            ],
+            dtype=torch.float32,
+        )
+        output = model(
+            image,
+            box_tensor,
+            torch.tensor([4], dtype=torch.int64),
+        )
+        self.assertEqual(
+            tuple(output[0].shape),
+            (1, 6, 3),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "max_boxes",
+        ):
+            model(
+                image,
+                torch.zeros(
+                    (1, 41, 4),
+                    dtype=torch.float32,
+                ),
+                torch.tensor([4], dtype=torch.int64),
             )
 
     def test_runtime_shapes_and_valid_pair_indices(self):
@@ -1016,6 +1563,523 @@ class RelationModelTest(unittest.TestCase):
                 explicit_holdout_row_policy="unsupported",
             )
 
+    def test_batch_local_infonce_uses_only_observed_predicate_columns(self):
+        pred_logits = torch.zeros(1, 2, 3, requires_grad=True)
+        pair_logits = torch.zeros(1, 2, requires_grad=True)
+        sub_idx = torch.tensor([[0, 1]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1, 0]], dtype=torch.int64)
+        valid = torch.tensor([[True, True]])
+        query = torch.tensor(
+            [[[1.0, 0.0], [0.0, 1.0]]],
+            requires_grad=True,
+        )
+        raw_query = query.clone()
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ],
+            requires_grad=True,
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=raw_query,
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 1, 0] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 1, 0, 1] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+        )
+        expected = torch.logsumexp(
+            torch.tensor([1.0, 0.0]), dim=0
+        ) - 1.0
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_unobserved_column_fraction"]),
+            1.0 / 3.0,
+            places=6,
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(query.grad)
+        self.assertGreater(float(query.grad.abs().sum()), 0.0)
+
+    def test_batch_local_infonce_adds_bounded_hard_negatives(self):
+        pred_logits = torch.zeros(1, 1, 4)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor(
+                [[[1.0, 0.0]]], requires_grad=True
+            ),
+            predicate_query_raw=torch.tensor(
+                [[[1.0, 0.0]]], requires_grad=True
+            ),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.8, 0.6],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 4)
+        predicate_targets[0, 0, 1, 0] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_contrastive_hard_negative_count=1,
+            ),
+            predicate_contrastive_negative_mask=torch.tensor(
+                [False, True, True, False]
+            ),
+        )
+        expected = torch.logsumexp(
+            torch.tensor([1.0, 0.8]), dim=0
+        ) - 1.0
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_hard_negative_count"]),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_unobserved_column_fraction"]),
+            0.5,
+            places=6,
+        )
+
+    def test_batch_local_infonce_hard_negatives_respect_supervision_mask(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor([[[1.0, 0.0]]]),
+            predicate_query_raw=torch.tensor([[[1.0, 0.0]]]),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.9, 0.1],
+                    [0.0, 1.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, False, True])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_contrastive_hard_negative_count=1,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [False, True, False]
+            ),
+        )
+        self.assertEqual(
+            float(losses["predicate_hard_negative_count"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            1.0,
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+
+    def test_batch_local_infonce_preserves_multilabel_positives(self):
+        pred_logits = torch.zeros(1, 1, 3)
+        pair_logits = torch.zeros(1, 1)
+        sub_idx = torch.tensor([[0]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1]], dtype=torch.int64)
+        valid = torch.tensor([[True]])
+        query = torch.tensor([[[1.0, 0.0]]], requires_grad=True)
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ]
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 0, 1, 1] = 1.0
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+        )
+        denominator = torch.logsumexp(
+            torch.tensor([1.0, 0.0]), dim=0
+        )
+        expected = (
+            (denominator - 1.0)
+            + (denominator - 0.0)
+        ) * 0.5
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            2.0,
+        )
+
+    def test_batch_local_infonce_skips_explicit_holdout_only_rows(self):
+        pred_logits = torch.zeros(1, 2, 3)
+        pair_logits = torch.zeros(1, 2)
+        sub_idx = torch.tensor([[0, 1]], dtype=torch.int64)
+        obj_idx = torch.tensor([[1, 0]], dtype=torch.int64)
+        valid = torch.tensor([[True, True]])
+        query = torch.tensor(
+            [[[1.0, 0.0], [0.0, 1.0]]],
+            requires_grad=True,
+        )
+        bank = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [-1.0, 0.0],
+            ]
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                sub_idx,
+                obj_idx,
+                valid,
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=bank,
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        pair_targets[0, 1, 0] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        predicate_targets[0, 1, 0, 1] = 1.0
+        supervision = torch.tensor([True, False, True])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+        )
+        self.assertEqual(
+            float(losses["predicate_rows_skipped"]),
+            1.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_contrast_set_size"]),
+            1.0,
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+
+    def test_batch_local_infonce_rejects_bce_negative_reweighting(self):
+        pred_logits = torch.zeros(1, 1, 2)
+        pair_logits = torch.zeros(1, 1)
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=torch.tensor([[[1.0, 0.0]]]),
+            predicate_query_raw=torch.tensor([[[1.0, 0.0]]]),
+            predicate_bank=torch.eye(2),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 2)
+        predicate_targets[0, 0, 1, 0] = 1.0
+
+        with self.assertRaises(ValueError):
+            supervised_relation_loss(
+                outputs,
+                pair_targets,
+                predicate_targets,
+                RelationLossConfig(
+                    sampler_loss_weight=0.0,
+                    pair_loss_weight=0.0,
+                    predicate_loss_weight=1.0,
+                    predicate_objective="batch-local-infonce",
+                ),
+                predicate_negative_weights=torch.tensor([1.0, 0.1]),
+            )
+
+    def test_infonce_calibration_uses_safe_seen_columns_only(self):
+        pred_logits = torch.tensor(
+            [[[2.0, -2.0, 10.0]]],
+            requires_grad=True,
+        )
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]], requires_grad=True
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 0] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_calibration_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [True, True, True]
+            ),
+        )
+
+        expected = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred_logits[0, 0, :2],
+            torch.tensor([1.0, 0.0]),
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_calibration_loss"], expected)
+        )
+        self.assertTrue(
+            torch.allclose(losses["predicate_loss"], expected)
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows"]),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            float(losses["predicate_calibration_column_fraction"]),
+            2.0 / 3.0,
+            places=6,
+        )
+
+        losses["loss"].backward()
+        self.assertIsNotNone(pred_logits.grad)
+        self.assertGreater(
+            float(pred_logits.grad[0, 0, :2].abs().sum()),
+            0.0,
+        )
+        self.assertEqual(
+            float(pred_logits.grad[0, 0, 2].abs()),
+            0.0,
+        )
+
+    def test_infonce_calibration_skips_holdout_only_rows(self):
+        pred_logits = torch.tensor(
+            [[[0.0, 0.0, 2.0]]],
+            requires_grad=True,
+        )
+        pair_logits = torch.zeros(1, 1)
+        query = torch.tensor(
+            [[[1.0, 0.0]]], requires_grad=True
+        )
+        outputs = RelationTrainingOutputs(
+            runtime=(
+                pred_logits,
+                pair_logits,
+                torch.tensor([[0]], dtype=torch.int64),
+                torch.tensor([[1]], dtype=torch.int64),
+                torch.tensor([[True]]),
+            ),
+            sampler_logits=torch.zeros(1, 4),
+            sampler_valid=torch.ones(1, 4, dtype=torch.bool),
+            predicate_query=query,
+            predicate_query_raw=query.clone(),
+            predicate_bank=torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [-1.0, 0.0],
+                ]
+            ),
+        )
+        pair_targets = torch.zeros(1, 2, 2)
+        pair_targets[0, 0, 1] = 1.0
+        predicate_targets = torch.zeros(1, 2, 2, 3)
+        predicate_targets[0, 0, 1, 2] = 1.0
+        supervision = torch.tensor([True, True, False])
+
+        losses = supervised_relation_loss(
+            outputs,
+            pair_targets,
+            predicate_targets,
+            RelationLossConfig(
+                sampler_loss_weight=0.0,
+                pair_loss_weight=0.0,
+                predicate_loss_weight=1.0,
+                predicate_objective="batch-local-infonce",
+                predicate_contrastive_temperature=1.0,
+                predicate_calibration_loss_weight=1.0,
+            ),
+            predicate_supervision_mask=supervision,
+            explicit_holdout_mask=~supervision,
+            predicate_contrastive_negative_mask=torch.tensor(
+                [True, True, False]
+            ),
+        )
+        self.assertEqual(float(losses["predicate_loss"]), 0.0)
+        self.assertEqual(
+            float(losses["predicate_calibration_loss"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows"]),
+            0.0,
+        )
+        self.assertEqual(
+            float(losses["predicate_calibration_rows_skipped"]),
+            1.0,
+        )
+
+    def test_predicate_calibration_requires_infonce(self):
+        with self.assertRaises(ValueError):
+            RelationLossConfig(
+                predicate_objective="bce",
+                predicate_calibration_loss_weight=0.25,
+            )
+
     def test_predicate_targets_fail_fast_on_inconsistent_supervision(self):
         model = KFRelationModel(
             ToyBackbone(), torch.randn(3, 6), config()
@@ -1091,6 +2155,133 @@ class RelationModelTest(unittest.TestCase):
                 [item.name for item in session.get_outputs()],
                 OUTPUT_NAMES,
             )
+
+    def test_union_contact_onnx_matches_native_runtime_contract(self):
+        torch.manual_seed(63)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        # Exercise a non-zero learned residual rather than allowing the
+        # zero-initialized branch to become an export no-op.
+        with torch.no_grad():
+            model.union_projection.weight.normal_(0.0, 0.01)
+            model.contact_projection.weight.normal_(0.0, 0.01)
+
+        box_tensor, box_counts = boxes()
+        image = torch.rand(1, 3, 8, 8)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "relation-union-contact.onnx"
+            reference = export_graph(
+                model,
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                opset=18,
+            )
+            delta = check_onnx_parity(
+                path,
+                image,
+                box_tensor[:1].contiguous(),
+                box_counts[:1].contiguous(),
+                reference,
+            )
+        self.assertLessEqual(delta, 1.0e-3)
+
+    def test_rich_geometry_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(68)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            geometry_config("rich"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rich-geometry.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_geometry_evidence,
+            "rich",
+        )
+        self.assertIn(
+            "rich_geometry_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "rich_geometry_sampler.weight",
+            payload["state_dict"],
+        )
+
+    def test_contact_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(63)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("contact"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "contact.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_visual_evidence,
+            "contact",
+        )
+        self.assertNotIn(
+            "union_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "contact_projection.weight",
+            payload["state_dict"],
+        )
+
+    def test_union_contact_checkpoint_round_trip_preserves_mode(self):
+        torch.manual_seed(64)
+        model = KFRelationModel(
+            ToyBackbone(),
+            torch.randn(3, 6),
+            visual_config("union-contact"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "union-contact.pt"
+            save_checkpoint(
+                path,
+                model,
+                backbone_model="synthetic/test-backbone",
+                predicates=["beside", "holding", "riding"],
+            )
+            payload = load_payload(path)
+            restored = config_from_payload(payload)
+
+        self.assertEqual(
+            restored.pair_visual_evidence,
+            "union-contact",
+        )
+        self.assertIn(
+            "union_projection.weight",
+            payload["state_dict"],
+        )
+        self.assertIn(
+            "contact_projection.weight",
+            payload["state_dict"],
+        )
 
     def test_adapter_enabled_onnx_matches_native_runtime_contract(self):
         torch.manual_seed(37)

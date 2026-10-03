@@ -8,6 +8,14 @@
 #ifndef KALMAN_EKF_H
 #define KALMAN_EKF_H
 
+#include "kalman_status.h"
+
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /******************************************************************************
  * TYPEDEFS
  ******************************************************************************/
@@ -43,68 +51,61 @@ typedef int (*kalman_ekf_measurement_fn)(float* z_pred, float* Ht, const float* 
  * FUNCTION PROTOTYPES
  ******************************************************************************/
 
-/** @brief EKF prediction using the Takasu covariance representation.
- *
- * Calls the nonlinear transition callback to compute x^- = f(x) and the
- * Jacobian Phi, then updates P with the existing linear prediction routine.
- *
- * @param[in,out] x State vector (n x 1).
- * @param[in,out] P Covariance matrix (n x n).
- * @param[in] transition Nonlinear transition callback.
- * @param[in] G Process noise distribution matrix (n x r), can be NULL if Q is NULL.
- * @param[in] Q Diagonal process noise covariance vector (r x 1), can be NULL.
- * @param[in] n Number of state variables.
- * @param[in] r Number of process noise variables.
- * @param[in,out] user Caller supplied callback context pointer.
- *
- * @return 0 on success, -1 on invalid input or callback failure.
- */
-int kalman_ekf_takasu_predict(float* x, float* P, kalman_ekf_transition_fn transition,
-                              const float* G, const float* Q, int n, int r, void* user);
+/** Return caller-owned float scratch required by kalman_ekf_takasu_predict(). */
+kfcore_kalman_status kalman_ekf_takasu_predict_workspace_floats(size_t n, size_t r,
+                                                                size_t* required);
 
-/** @brief EKF correction using the Takasu update.
+/** EKF prediction using the Takasu covariance representation.
  *
- * Calls the nonlinear measurement callback to compute z_pred = h(x) and H,
- * forms dz = z - z_pred, and reuses kalman_takasu().
- *
- * @param[in,out] x State vector (n x 1).
- * @param[in,out] P Covariance matrix (n x n).
- * @param[in] z Measurement vector (m x 1).
- * @param[in] R Measurement covariance matrix (m x m).
- * @param[in] measurement Nonlinear measurement callback.
- * @param[in] n Number of state variables.
- * @param[in] m Number of measurements.
- * @param[in] chi2_threshold Scalar threshold for chi2 outlier removal. Set to 0.0f to disable.
- * @param[out] chi2 Optional chi2 statistic output.
- * @param[in,out] user Caller supplied callback context pointer.
- *
- * @return 0 on success, -1 on error, -2 if measurement is rejected as outlier.
+ * The callback writes its predicted state/Jacobian into workspace. P is updated
+ * only after callback success; x is copied from the predicted state only after
+ * the linear covariance prediction succeeds.
  */
-int kalman_ekf_takasu_update(float* x, float* P, const float* z, const float* R,
-                             kalman_ekf_measurement_fn measurement, int n, int m,
-                             float chi2_threshold, float* chi2, void* user);
+kfcore_kalman_status kalman_ekf_takasu_predict(
+    float* x, float* P, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, size_t n, size_t r, void* user,
+    float* workspace, size_t workspace_floats);
 
-/** @brief EKF prediction using UDU covariance factors.
- *
- * Calls the nonlinear transition callback to compute x^- = f(x) and Phi, then
- * updates U and d with the existing UDU prediction routine.
- *
- * @return 0 on success, -1 on invalid input or callback failure.
- */
-int kalman_ekf_udu_predict(float* x, float* U, float* d, kalman_ekf_transition_fn transition,
-                           const float* G, const float* Q, int n, int r, void* user);
+/** Return caller-owned float scratch required by kalman_ekf_takasu_update(). */
+kfcore_kalman_status kalman_ekf_takasu_update_workspace_floats(size_t n, size_t m,
+                                                               size_t* required);
 
-/** @brief EKF correction using UDU covariance factors.
+/** EKF correction using the Takasu update and caller-owned scratch. */
+kfcore_kalman_status kalman_ekf_takasu_update(
+    float* x, float* P, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, size_t n, size_t m,
+    float chi2_threshold, float* chi2, void* user,
+    float* workspace, size_t workspace_floats);
+
+/** Return caller-owned float scratch required by kalman_ekf_udu_predict(). */
+kfcore_kalman_status kalman_ekf_udu_predict_workspace_floats(size_t n, size_t r,
+                                                             size_t* required);
+
+/** EKF prediction using UDU covariance factors and caller-owned scratch. */
+kfcore_kalman_status kalman_ekf_udu_predict(
+    float* x, float* U, float* d, kalman_ekf_transition_fn transition,
+    const float* G, const float* Q, size_t n, size_t r, void* user,
+    float* workspace, size_t workspace_floats);
+
+/** Return caller-owned float scratch required by kalman_ekf_udu_update(). */
+kfcore_kalman_status kalman_ekf_udu_update_workspace_floats(size_t n, size_t m,
+                                                            size_t* required);
+
+/** EKF correction using UDU covariance factors and caller-owned scratch.
  *
- * Calls the nonlinear measurement callback to compute z_pred = h(x) and H,
- * forms dz = z - z_pred, decorrelates the residual/Jacobian with R, and applies
- * scalar UDU updates.
- *
- * @return 0 on success, -1 on error.
+ * A callback/validation/workspace failure occurs before filter-state mutation.
+ * A later numerical failure may follow earlier successful scalar measurements;
+ * in that case the caller must discard x/U/d.
  */
-int kalman_ekf_udu_update(float* x, float* U, float* d, const float* z, const float* R,
-                          kalman_ekf_measurement_fn measurement, int n, int m, float chi2_threshold,
-                          int downweight_outlier, void* user);
+kfcore_kalman_status kalman_ekf_udu_update(
+    float* x, float* U, float* d, const float* z, const float* R,
+    kalman_ekf_measurement_fn measurement, size_t n, size_t m,
+    float chi2_threshold, int downweight_outlier, void* user,
+    float* workspace, size_t workspace_floats);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* KALMAN_EKF_H */
 

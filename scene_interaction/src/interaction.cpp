@@ -227,6 +227,7 @@ struct SceneInteraction::Impl
     SceneInteractionOptions options;
     std::shared_ptr<const SceneBehaviorModel> model;
     std::map<PairKey, PairState> pairs;
+    std::optional<std::uint64_t> tracking_epoch;
     std::optional<double> clock;
     std::optional<double> last_frame;
 
@@ -420,6 +421,37 @@ struct SceneInteraction::Impl
                 "scene interaction model is not configured");
         }
 
+        if (frame.objects.tracking_epoch == 0U)
+        {
+            throw std::invalid_argument(
+                "scene interaction frame must carry a positive tracking epoch");
+        }
+
+        if (model->vocabulary_version != 0U &&
+            frame.relations.vocabulary_version !=
+                model->vocabulary_version)
+        {
+            cancel_all(events,
+                       SceneBehaviorEventReason::VocabularyChanged,
+                       seconds);
+            tracking_epoch = frame.objects.tracking_epoch;
+            last_frame = seconds;
+            return;
+        }
+
+        if (!tracking_epoch)
+        {
+            tracking_epoch = frame.objects.tracking_epoch;
+        }
+        else if (*tracking_epoch != frame.objects.tracking_epoch)
+        {
+            cancel_all(events,
+                       SceneBehaviorEventReason::TrackingReset,
+                       seconds);
+            tracking_epoch = frame.objects.tracking_epoch;
+            last_frame.reset();
+        }
+
         if (last_frame &&
             seconds - *last_frame > options.maximum_gap_seconds)
         {
@@ -537,6 +569,31 @@ SceneInteraction::reset(double seconds)
     return events;
 }
 
+std::vector<SceneBehaviorEvent>
+SceneInteraction::reset_tracking_epoch(
+    std::uint64_t tracking_epoch,
+    double seconds)
+{
+    impl_->validate_time(seconds);
+    if (tracking_epoch == 0U)
+    {
+        throw std::invalid_argument(
+            "tracking epoch must be positive");
+    }
+
+    auto next = std::make_unique<Impl>(*impl_);
+    std::vector<SceneBehaviorEvent> events;
+    events.reserve(next->pairs.size());
+    next->cancel_all(events,
+                     SceneBehaviorEventReason::TrackingReset,
+                     seconds);
+    next->tracking_epoch = tracking_epoch;
+    next->last_frame.reset();
+    next->clock = seconds;
+    impl_.swap(next);
+    return events;
+}
+
 bool SceneInteraction::configured() const noexcept
 {
     return impl_ && static_cast<bool>(impl_->model);
@@ -575,8 +632,12 @@ const char* event_reason_name(SceneBehaviorEventReason reason)
         return "frame gap";
     case SceneBehaviorEventReason::Reset:
         return "reset";
+    case SceneBehaviorEventReason::TrackingReset:
+        return "tracking reset";
     case SceneBehaviorEventReason::ModelChanged:
         return "model changed";
+    case SceneBehaviorEventReason::VocabularyChanged:
+        return "vocabulary changed";
     }
     throw std::invalid_argument("invalid scene behavior event reason");
 }

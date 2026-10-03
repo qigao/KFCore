@@ -22,7 +22,7 @@ inline constexpr std::string_view kRelateAnythingModelType =
 struct RelateAnythingOptions
 {
     std::int32_t input_size = 0;
-    std::size_t max_boxes = 32U;
+    std::size_t max_boxes = kLegacyRelationMaxBoxes;
     std::size_t max_pairs = 128U;
     std::vector<std::string> predicates;
     float threshold = 0.40F;
@@ -35,6 +35,14 @@ struct RelateAnythingOptions
     std::size_t max_tensor_bytes = 64U * 1024U * 1024U;
     std::size_t max_output_bytes = 64U * 1024U * 1024U;
 };
+
+[[nodiscard]] inline RelateAnythingOptions
+apache_released_relate_anything_options()
+{
+    RelateAnythingOptions options;
+    options.max_boxes = kApacheReleasedMaxBoxes;
+    return options;
+}
 
 class RelateAnything final
 {
