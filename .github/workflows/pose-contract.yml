@@ -78,17 +78,3 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
-
-
-  discover-rtmw-reference:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Download released RTMW-l 384x288 ONNX SDK
-        shell: bash
-        run: |
-          set -euxo pipefail
-          url='https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip'
-          curl --fail --location --retry 3 --output "$RUNNER_TEMP/rtmw.zip" "$url"
-          sha256sum "$RUNNER_TEMP/rtmw.zip"
-          unzip -l "$RUNNER_TEMP/rtmw.zip"
