@@ -37,9 +37,9 @@ def sha256_file(path: Path) -> str:
 
 def synthetic_bgr() -> np.ndarray:
     y, x = np.indices((SOURCE_H, SOURCE_W), dtype=np.int32)
-    b = (x * 3 + y * 5 + 17) & 0xFF
-    g = (x * 7 + y * 11 + 29) & 0xFF
-    r = (x * 13 + y * 17 + 43) & 0xFF
+    b = 16 + (x * 96) // (SOURCE_W - 1) + (y * 48) // (SOURCE_H - 1)
+    g = 24 + (x * 48) // (SOURCE_W - 1) + (y * 96) // (SOURCE_H - 1)
+    r = 32 + (x * 80) // (SOURCE_W - 1) + (y * 80) // (SOURCE_H - 1)
     return np.stack([b, g, r], axis=-1).astype(np.uint8)
 
 
