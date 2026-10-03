@@ -20,6 +20,33 @@ kfcore.model/1
 The package requires non-empty `id`, `version`, `model_type`, and a
 non-empty `artifacts` list. `variant` is optional.
 
+## Semantic contract identity
+
+Typed models may bind backend-invariant output semantics through the optional
+paired fields:
+
+```text
+semantic_contract
+semantic_version
+```
+
+The fields must either both be absent or both be non-empty. The runtime package
+layer preserves the identity but does not interpret model-specific semantics.
+Typed model loaders validate the contract before execution.
+
+For example, RTMW WholeBody133 packages use:
+
+```json
+{
+  "semantic_contract": "pose.coco-wholebody-133",
+  "semantic_version": "1"
+}
+```
+
+`variant` is not a substitute for semantic identity. Backends must not infer a
+semantic contract from tensor dimensions, provider names, artifact format, or
+other execution details.
+
 For `model_type="relation.relate-anything"`, the manifest must also set
 `predicate_order_sha256` to the digest emitted by the fixed-vocabulary relation
 ONNX exporter. The relation loader rejects a missing digest or a different
