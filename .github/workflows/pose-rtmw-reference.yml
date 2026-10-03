@@ -14,15 +14,20 @@ permissions:
 jobs:
   inspect-reference:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
       RTMW_SDK_SHA256: a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd
+      RTMW_ONNX_SHA256: bd033156e5104c4f5d2edfe0453e02661e30a2f3da453ec93c8764d561b83054
 
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Verify released RTMW-l 384x288 ONNX SDK provenance
         shell: bash
@@ -32,7 +37,55 @@ jobs:
           echo "$RTMW_SDK_SHA256  $RUNNER_TEMP/rtmw.zip" | sha256sum --check -
           mkdir -p "$RUNNER_TEMP/rtmw"
           unzip -q "$RUNNER_TEMP/rtmw.zip" end2end.onnx deploy.json detail.json pipeline.json -d "$RUNNER_TEMP/rtmw"
-          sha256sum "$RUNNER_TEMP/rtmw/end2end.onnx"
-          cat "$RUNNER_TEMP/rtmw/deploy.json"
-          cat "$RUNNER_TEMP/rtmw/detail.json"
-          cat "$RUNNER_TEMP/rtmw/pipeline.json"
+          echo "$RTMW_ONNX_SHA256  $RUNNER_TEMP/rtmw/end2end.onnx" | sha256sum --check -
+
+      - name: Inspect ONNX graph contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check --no-cache-dir onnx==1.18.0
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import onnx
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "rtmw"
+          model = onnx.load(root / "end2end.onnx", load_external_data=False)
+          onnx.checker.check_model(model)
+
+          def dims(value):
+              result = []
+              for d in value.type.tensor_type.shape.dim:
+                  if d.HasField("dim_value"):
+                      result.append(d.dim_value)
+                  elif d.HasField("dim_param"):
+                      result.append(d.dim_param)
+                  else:
+                      result.append(None)
+              return result
+
+          payload = {
+              "ir_version": model.ir_version,
+              "opsets": [
+                  {"domain": o.domain, "version": o.version}
+                  for o in model.opset_import
+              ],
+              "inputs": [
+                  {"name": v.name, "shape": dims(v)}
+                  for v in model.graph.input
+              ],
+              "outputs": [
+                  {"name": v.name, "shape": dims(v)}
+                  for v in model.graph.output
+              ],
+          }
+          print(json.dumps(payload, indent=2, sort_keys=True))
+
+          detail = json.loads((root / "detail.json").read_text())
+          pipeline = json.loads((root / "pipeline.json").read_text())
+          print("detail.onnx_config.input_shape=", detail["onnx_config"]["input_shape"])
+          post = pipeline["pipeline"]["tasks"][-1]["params"]
+          print("pipeline.postprocess.input_size=", post["input_size"])
+          print("pipeline.postprocess.simcc_split_ratio=", post["simcc_split_ratio"])
+          PY
