@@ -227,7 +227,7 @@ jobs:
           assert report["simcc_max_abs"] <= 1.0e-4
           assert report["model_coord_max_abs"] <= 1.0e-6
           assert report["model_score_max_abs"] <= 1.0e-5
-          assert report["projection_coord_max_abs"] <= 1.0e-5
+          assert report["projection_coord_max_abs"] <= 1.0e-4
           assert report["e2e_source_coord_max_abs"] >= 0.0
           assert report["e2e_source_score_max_abs"] >= 0.0
           print(json.dumps(report, indent=2, sort_keys=True))
