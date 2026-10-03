@@ -57,6 +57,8 @@ jobs:
           python -m json.tool CMakeUserPresets.json.example >/dev/null
           python -m json.tool presets/RuntimeCapabilities.json >/dev/null
           cmake --list-presets=configure
+          cmake --list-presets=build
+          ctest --list-presets
 
       - name: Reject shared-preset machine paths
         shell: bash
