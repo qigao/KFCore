@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
