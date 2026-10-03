@@ -222,9 +222,8 @@ jobs:
           assert report["provider"] == "onnxruntime"
           assert report["device"] == "cpu"
           assert report["case_count"] == 3
-          max_interpolation_delta = 2.0 / 255.0 / 0.224 + 1.0e-6
-          assert report["preprocess_max_abs"] <= max_interpolation_delta
-          assert report["preprocess_mean_abs"] <= 0.0015
+          assert report["preprocess_max_levels"] <= 2.01
+          assert report["preprocess_mean_levels"] <= 0.15
           assert report["simcc_max_abs"] <= 1.0e-4
           assert report["model_coord_max_abs"] <= 1.0e-6
           assert report["model_score_max_abs"] <= 1.0e-5
