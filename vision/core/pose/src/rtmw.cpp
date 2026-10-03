@@ -551,6 +551,38 @@ struct Rtmw::Impl final
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
 
+WholeBodyPose to_whole_body_pose(const PoseResult& pose,
+                                 const PoseSchema& schema)
+{
+    if (schema.id != kCocoWholeBody133SchemaId ||
+        schema.version != 1U ||
+        pose.schema_id != schema.id ||
+        pose.keypoints.size() != kWholeBodyKeypointCount)
+    {
+        throw_contract(
+            "WholeBodyPose adapter requires the COCO WholeBody133 schema");
+    }
+
+    WholeBodyPose result;
+    result.source_box = pose.source_box;
+    std::array<bool, kWholeBodyKeypointCount> seen {};
+    for (const PoseKeypoint& point : pose.keypoints)
+    {
+        if (point.id >= kWholeBodyKeypointCount || seen[point.id])
+        {
+            throw_contract(
+                "WholeBody133 pose result contains an invalid or duplicate keypoint id");
+        }
+        seen[point.id] = true;
+        result.keypoints[point.id] = {point.x, point.y, point.confidence};
+    }
+    if (std::find(seen.begin(), seen.end(), false) != seen.end())
+    {
+        throw_contract("WholeBody133 pose result is missing a semantic keypoint id");
+    }
+    return result;
+}
+
 Rtmw::Rtmw(std::unique_ptr<Impl> impl)
     : impl_(std::move(impl))
 {
@@ -599,7 +631,8 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
     }
 }
 
-WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box)
+PoseResult Rtmw::infer_pose(const image::ImageView& image,
+                                  const RectF& person_box)
 {
     if (!impl_)
     {
@@ -610,7 +643,7 @@ WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box
     {
         const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
             image, impl_->options.max_source_bytes);
-        return impl_->infer_one(source, person_box);
+        return impl_->infer_pose_one(source, person_box);
     }
     catch (const PoseError&)
     {
@@ -634,8 +667,9 @@ WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box
     }
 }
 
-std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
-                                       const std::vector<RectF>& person_boxes)
+std::vector<PoseResult>
+Rtmw::infer_pose(const image::ImageView& image,
+                 const std::vector<RectF>& person_boxes)
 {
     if (!impl_)
     {
@@ -646,11 +680,11 @@ std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
     {
         const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
             image, impl_->options.max_source_bytes);
-        std::vector<WholeBodyPose> result;
+        std::vector<PoseResult> result;
         result.reserve(person_boxes.size());
         for (const RectF& box : person_boxes)
         {
-            result.push_back(impl_->infer_one(source, box));
+            result.push_back(impl_->infer_pose_one(source, box));
         }
         return result;
     }
@@ -674,6 +708,94 @@ std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
     {
         throw_resource("batch inference allocation failed");
     }
+}
+
+WholeBodyPose Rtmw::infer(const image::ImageView& image,
+                          const RectF& person_box)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
+        return to_whole_body_pose(
+            impl_->infer_pose_one(source, person_box), *impl_->pose_schema);
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("inference allocation failed");
+    }
+}
+
+std::vector<WholeBodyPose> Rtmw::infer(
+    const image::ImageView& image,
+    const std::vector<RectF>& person_boxes)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
+        std::vector<WholeBodyPose> result;
+        result.reserve(person_boxes.size());
+        for (const RectF& box : person_boxes)
+        {
+            result.push_back(to_whole_body_pose(
+                impl_->infer_pose_one(source, box), *impl_->pose_schema));
+        }
+        return result;
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("batch inference allocation failed");
+    }
+}
+
+const PoseSchema& Rtmw::schema() const noexcept
+{
+    return impl_ && impl_->pose_schema
+               ? *impl_->pose_schema
+               : coco_wholebody_133_schema();
 }
 
 std::int32_t Rtmw::input_width() const noexcept
