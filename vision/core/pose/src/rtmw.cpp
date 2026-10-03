@@ -1,10 +1,13 @@
 #include "kfcore/pose/rtmw.hpp"
 
+#include "simcc_decode.hpp"
+
 #include "kfcore/image_processor/cpu.hpp"
 #include "kfcore/image_processor/error.hpp"
 #include "kfcore/runtime/error.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -102,44 +105,17 @@ std::uint16_t float_to_half(float value) noexcept
         (rounded >> 13U));
 }
 
-float half_to_float(std::uint16_t bits) noexcept
+detail::SimccElementType simcc_element_type(runtime::DataType type)
 {
-    const bool negative = (bits & UINT16_C(0x8000)) != 0U;
-    const std::uint16_t exponent = static_cast<std::uint16_t>((bits >> 10U) & 0x1fU);
-    const std::uint16_t fraction = static_cast<std::uint16_t>(bits & 0x03ffU);
-    float value = 0.0F;
-    if (exponent == 0U)
+    switch (type)
     {
-        value = std::ldexp(static_cast<float>(fraction), -24);
+    case runtime::DataType::Float32:
+        return detail::SimccElementType::Float32;
+    case runtime::DataType::Float16:
+        return detail::SimccElementType::Float16;
+    default:
+        throw_contract("SimCC output must use FP32 or FP16");
     }
-    else if (exponent == 0x1fU)
-    {
-        value = fraction == 0U ? (std::numeric_limits<float>::infinity)()
-                               : (std::numeric_limits<float>::quiet_NaN)();
-    }
-    else
-    {
-        value = std::ldexp(static_cast<float>(UINT16_C(0x0400) + fraction),
-                           static_cast<int>(exponent) - 25);
-    }
-    return negative ? -value : value;
-}
-
-float tensor_value(const void* data, runtime::DataType type, std::size_t index)
-{
-    if (data == nullptr)
-    {
-        throw_contract("SimCC output storage is null");
-    }
-    if (type == runtime::DataType::Float32)
-    {
-        return static_cast<const float*>(data)[index];
-    }
-    if (type == runtime::DataType::Float16)
-    {
-        return half_to_float(static_cast<const std::uint16_t*>(data)[index]);
-    }
-    throw_contract("SimCC output must use FP32 or FP16");
 }
 
 void validate_options(const RtmwOptions& options)
@@ -573,55 +549,27 @@ struct Rtmw::Impl final
         };
         context->run({input_view}, outputs);
 
+        std::array<detail::DecodedSimccKeypoint, kWholeBodyKeypointCount> decoded {};
+        detail::decode_simcc(
+            {simcc_x.data(), simcc_element_type(simcc_x.descriptor.data_type),
+             kWholeBodyKeypointCount, simcc_x_extent},
+            {simcc_y.data(), simcc_element_type(simcc_y.descriptor.data_type),
+             kWholeBodyKeypointCount, simcc_y_extent},
+            options.simcc_split_ratio, decoded.data(), decoded.size());
+
         WholeBodyPose result;
         result.source_box = box;
         for (std::size_t keypoint = 0U; keypoint < kWholeBodyKeypointCount; ++keypoint)
         {
-            const std::size_t x_base = keypoint * simcc_x_extent;
-            const std::size_t y_base = keypoint * simcc_y_extent;
-            float max_x = -(std::numeric_limits<float>::infinity)();
-            float max_y = -(std::numeric_limits<float>::infinity)();
-            std::size_t x_index = 0U;
-            std::size_t y_index = 0U;
-            for (std::size_t index = 0U; index < simcc_x_extent; ++index)
-            {
-                const float value = tensor_value(simcc_x.data(),
-                                                 simcc_x.descriptor.data_type,
-                                                 x_base + index);
-                if (value > max_x)
-                {
-                    max_x = value;
-                    x_index = index;
-                }
-            }
-            for (std::size_t index = 0U; index < simcc_y_extent; ++index)
-            {
-                const float value = tensor_value(simcc_y.data(),
-                                                 simcc_y.descriptor.data_type,
-                                                 y_base + index);
-                if (value > max_y)
-                {
-                    max_y = value;
-                    y_index = index;
-                }
-            }
-            if (!std::isfinite(max_x) || !std::isfinite(max_y))
-            {
-                throw_contract("SimCC output contains non-finite maximum response");
-            }
-
+            const detail::DecodedSimccKeypoint& decoded_point = decoded[keypoint];
             Keypoint point;
-            point.score = (std::min)(max_x, max_y);
+            point.score = decoded_point.confidence;
             if (point.score > 0.0F)
             {
-                const float model_x = static_cast<float>(x_index) /
-                                      options.simcc_split_ratio;
-                const float model_y = static_cast<float>(y_index) /
-                                      options.simcc_split_ratio;
-                point.x = model_x / static_cast<float>(input_width_value) *
+                point.x = decoded_point.x / static_cast<float>(input_width_value) *
                               geometry.scale_width +
                           geometry.center_x - geometry.scale_width * 0.5F;
-                point.y = model_y / static_cast<float>(input_height_value) *
+                point.y = decoded_point.y / static_cast<float>(input_height_value) *
                               geometry.scale_height +
                           geometry.center_y - geometry.scale_height * 0.5F;
             }
