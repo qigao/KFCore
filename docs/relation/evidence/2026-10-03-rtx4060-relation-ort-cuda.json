@@ -1,0 +1,12 @@
+{
+  "schema": "kfcore.released-relsgg-runtime-qualification/1",
+  "passed": true,
+  "provider": "onnxruntime",
+  "device": "cuda:0",
+  "backend_scoring": true,
+  "object_labels_enter_relation_inference": false,
+  "vocabulary_versions": [1, 2],
+  "vocabulary_sizes": [1, 3],
+  "v1_total_ms": 639.956,
+  "v3_total_ms": 40.7351
+}

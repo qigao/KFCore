@@ -22,6 +22,7 @@ EXPECTED_OUTPUTS = (
     "valid_mask",
 )
 DEFAULT_SEED = 20260929
+BOX_JITTER = 0.02
 DEFAULT_ABS_TOL = 1.0e-4
 DEFAULT_REL_TOL = 1.0e-4
 
@@ -110,7 +111,7 @@ def qualification_cases(
     ]
 
 
-def _dummy_boxes(max_boxes: int) -> np.ndarray:
+def _dummy_boxes(max_boxes: int, *, seed: int) -> np.ndarray:
     boxes = np.zeros((1, max_boxes, 4), dtype=np.float32)
     columns = max(1, int(max_boxes**0.5))
     rows = max(1, (max_boxes + columns - 1) // columns)
@@ -118,7 +119,14 @@ def _dummy_boxes(max_boxes: int) -> np.ndarray:
         x = (index % columns + 0.5) / columns
         y = (index // columns + 0.5) / rows
         boxes[0, index] = (x, y, 0.2, 0.2)
-    return np.clip(boxes, 0.01, 0.99).astype(np.float32, copy=False)
+    # A perfectly regular grid creates near ties at the model's TopK
+    # shortlist boundary; asymmetric boxes exercise ranking more reliably.
+    jitter = np.random.default_rng(seed).uniform(
+        -BOX_JITTER, BOX_JITTER, boxes.shape
+    ).astype(np.float32)
+    return np.clip(boxes + jitter, 0.01, 0.99).astype(
+        np.float32, copy=False
+    )
 
 
 def deterministic_inputs(
@@ -134,7 +142,7 @@ def deterministic_inputs(
 
     rng = np.random.default_rng(seed + v * 104729)
     image = rng.random((1, 3, image_size, image_size), dtype=np.float32)
-    boxes = _dummy_boxes(max_boxes)
+    boxes = _dummy_boxes(max_boxes, seed=seed)
     box_counts = np.asarray([max_boxes], dtype=np.int64)
 
     bank = rng.standard_normal((v, query_dim), dtype=np.float32)
@@ -381,6 +389,7 @@ class _TensorRTRunner:
         if self.context is None:
             raise RuntimeError("TensorRT could not create an execution context")
         self.stream = torch.cuda.Stream()
+        self.device_inputs: dict[str, object] = {}
         self.engine_load_count = 1
         self.context_create_count = 1
         self._validate_engine_contract(engine_metadata)
@@ -498,6 +507,9 @@ class _TensorRTRunner:
                 raise RuntimeError(f"TensorRT rejected output address for {name}")
 
         torch.cuda.synchronize()
+        # TensorRT retains raw addresses; keep their owners alive until the
+        # next shape is prepared on this execution context.
+        self.device_inputs = device_inputs
 
         def execute() -> None:
             if not self.context.execute_async_v3(int(self.stream.cuda_stream)):

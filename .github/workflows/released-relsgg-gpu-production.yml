@@ -27,6 +27,11 @@ on:
         required: true
         default: '4'
         type: string
+      scene_samples:
+        description: 'Independent repeated demo frames per C++ route'
+        required: true
+        default: '30'
+        type: string
 
 permissions:
   contents: read
@@ -51,6 +56,7 @@ jobs:
       SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
       SALTS_UTILS_VERSION: 4.1.13
       SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
+      SCENE_SAMPLES: ${{ inputs.scene_samples }}
 
     steps:
       - uses: actions/checkout@v4
@@ -210,7 +216,8 @@ jobs:
               bgr.tobytes(order="C")
           )
           (fixture / "frames.tsv").write_text(
-              f"frames/demo.bgr\t{width}\t{height}\tdemo.png\n",
+              f"frames/demo.bgr\t{width}\t{height}\tdemo.png\n"
+              * int(os.environ["SCENE_SAMPLES"]),
               encoding="utf-8",
           )
 
@@ -332,6 +339,11 @@ jobs:
           trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
 
+          nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu \
+            --format=csv,noheader,nounits -lms 100 \
+            > "$RUNNER_TEMP/scene-ort-cuda-gpu-memory.csv" &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true' EXIT
           "$exe" \
             "$ort" "$ort" \
             "$RUNNER_TEMP/yolox-gpu-package" \
@@ -341,6 +353,10 @@ jobs:
             "$RUNNER_TEMP/scene-ort-cuda.jsonl" \
             onnxruntime "${{ inputs.device_id }}" \
             onnxruntime "${{ inputs.device_id }}"
+          kill "$sampler" 2>/dev/null || true
+          wait "$sampler" 2>/dev/null || true
+          trap - EXIT
+          test -s "$RUNNER_TEMP/scene-ort-cuda-gpu-memory.csv"
 
       - name: Run full C++ SceneBehavior with TensorRT relation
         shell: bash
@@ -352,6 +368,11 @@ jobs:
           trt_libs="$TENSORRT_ROOT/lib:$TENSORRT_ROOT/lib64:$TENSORRT_ROOT/targets/x86_64-linux-gnu/lib"
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:$ONNXRUNTIME_ROOT/lib64:$trt_libs:${LD_LIBRARY_PATH:-}"
 
+          nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu \
+            --format=csv,noheader,nounits -lms 100 \
+            > "$RUNNER_TEMP/scene-tensorrt-gpu-memory.csv" &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true; wait "$sampler" 2>/dev/null || true' EXIT
           "$exe" \
             "$ort" "$trt" \
             "$RUNNER_TEMP/yolox-gpu-package" \
@@ -361,12 +382,17 @@ jobs:
             "$RUNNER_TEMP/scene-tensorrt.jsonl" \
             onnxruntime "${{ inputs.device_id }}" \
             tensorrt "${{ inputs.device_id }}"
+          kill "$sampler" 2>/dev/null || true
+          wait "$sampler" 2>/dev/null || true
+          trap - EXIT
+          test -s "$RUNNER_TEMP/scene-tensorrt-gpu-memory.csv"
 
       - name: Verify production routes
         shell: bash
         run: |
           set -euxo pipefail
           python3 - <<'PY'
+          import csv
           import json
           import os
           from pathlib import Path
@@ -410,15 +436,24 @@ jobs:
                   for line in (root / name).read_text().splitlines()
                   if line.strip()
               ]
-              assert len(rows) == 1
-              sample = rows[0]
-              assert sample["schema"] == "kfcore.scene-behavior-timing-sample/1"
-              assert sample["detection_count"] > 0
-              assert sample["tracked_object_count"] > 0
-              assert sample["detector_ms"] >= 0.0
-              assert sample["relation_ms"] >= 0.0
-              assert sample["temporal_ms"] >= 0.0
-              assert sample["total_ms"] >= 0.0
+              assert len(rows) == int(os.environ["SCENE_SAMPLES"])
+              for sample in rows:
+                  assert sample["schema"] == "kfcore.scene-behavior-timing-sample/1"
+                  assert sample["detection_count"] > 0
+                  assert sample["tracked_object_count"] > 0
+                  assert sample["detector_ms"] >= 0.0
+                  assert sample["relation_ms"] >= 0.0
+                  assert sample["temporal_ms"] >= 0.0
+                  assert sample["total_ms"] >= 0.0
+          for name in (
+              "scene-ort-cuda-gpu-memory.csv",
+              "scene-tensorrt-gpu-memory.csv",
+          ):
+              with (root / name).open(newline="") as stream:
+                  rows = list(csv.reader(stream))
+              used_mib = [int(row[1]) for row in rows if len(row) == 3]
+              assert used_mib and all(value >= 0 for value in used_mib)
+              print(f"{name}: device memory peak={max(used_mib)} MiB")
           PY
 
       - uses: actions/upload-artifact@v4
@@ -435,6 +470,8 @@ jobs:
             ${{ runner.temp }}/released-tensorrt-runtime.json
             ${{ runner.temp }}/scene-ort-cuda.jsonl
             ${{ runner.temp }}/scene-tensorrt.jsonl
+            ${{ runner.temp }}/scene-ort-cuda-gpu-memory.csv
+            ${{ runner.temp }}/scene-tensorrt-gpu-memory.csv
             ${{ runner.temp }}/yolox-gpu-package/model.json
             ${{ runner.temp }}/yolox-gpu-package/evidence.json
 

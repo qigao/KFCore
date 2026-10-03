@@ -343,6 +343,7 @@ def prepare(
     package_path.write_text(
         json.dumps(package, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     report = {
@@ -371,6 +372,7 @@ def prepare(
     evidence_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return report
 

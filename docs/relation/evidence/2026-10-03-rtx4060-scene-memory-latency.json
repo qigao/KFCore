@@ -1,0 +1,124 @@
+{
+  "frame_count": 300,
+  "frame_source": "YOLOX demo.png repeated as independent still images",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_memory_scope": "device-wide WDDM, includes desktop and other processes",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "routes": {
+    "ort_cuda": {
+      "elapsed_wall_s": 28.803464099997655,
+      "gpu_used_baseline_mib": 2009.28125,
+      "gpu_used_peak_delta_mib": 792.6171875,
+      "gpu_used_peak_mib": 2801.8984375,
+      "gpu_used_steady_first_median_mib": 2801.8984375,
+      "gpu_used_steady_last_median_mib": 2801.8984375,
+      "host_rss_peak_mib": 908.6171875,
+      "host_rss_steady_first_median_mib": 908.0390625,
+      "host_rss_steady_last_median_mib": 908.6171875,
+      "latency": {
+        "assembly_ms": {
+          "max_ms": 0.0024,
+          "median_ms": 0.0006,
+          "p95_ms": 0.0014
+        },
+        "detector_ms": {
+          "max_ms": 10.285,
+          "median_ms": 7.008100000000001,
+          "p95_ms": 7.8854
+        },
+        "region_prepare_ms": {
+          "max_ms": 0.0033,
+          "median_ms": 0.0007,
+          "p95_ms": 0.0016
+        },
+        "relation_ms": {
+          "max_ms": 45.4951,
+          "median_ms": 35.1616,
+          "p95_ms": 38.5823
+        },
+        "scene_graph_total_ms": {
+          "max_ms": 53.7557,
+          "median_ms": 42.23905,
+          "p95_ms": 46.4373
+        },
+        "temporal_ms": {
+          "max_ms": 0.0134,
+          "median_ms": 0.0025,
+          "p95_ms": 0.005
+        },
+        "total_ms": {
+          "max_ms": 53.7604,
+          "median_ms": 42.24255,
+          "p95_ms": 46.4404
+        },
+        "tracker_ms": {
+          "max_ms": 0.0598,
+          "median_ms": 0.020249999999999997,
+          "p95_ms": 0.0384
+        }
+      },
+      "memory_sample_count": 571,
+      "process_exit_code": 0,
+      "sample_count": 300,
+      "steady_memory_sample_count": 425
+    },
+    "tensorrt": {
+      "elapsed_wall_s": 27.312239599996246,
+      "gpu_used_baseline_mib": 2009.28125,
+      "gpu_used_peak_delta_mib": 546.7421875,
+      "gpu_used_peak_mib": 2556.0234375,
+      "gpu_used_steady_first_median_mib": 2517.8984375,
+      "gpu_used_steady_last_median_mib": 2544.7734375,
+      "host_rss_peak_mib": 991.54296875,
+      "host_rss_steady_first_median_mib": 991.54296875,
+      "host_rss_steady_last_median_mib": 989.2421875,
+      "latency": {
+        "assembly_ms": {
+          "max_ms": 0.003,
+          "median_ms": 0.0006,
+          "p95_ms": 0.0015
+        },
+        "detector_ms": {
+          "max_ms": 47.2679,
+          "median_ms": 8.4711,
+          "p95_ms": 22.9629
+        },
+        "region_prepare_ms": {
+          "max_ms": 0.004,
+          "median_ms": 0.0008,
+          "p95_ms": 0.0022
+        },
+        "relation_ms": {
+          "max_ms": 72.5838,
+          "median_ms": 23.983449999999998,
+          "p95_ms": 42.4424
+        },
+        "scene_graph_total_ms": {
+          "max_ms": 116.9337,
+          "median_ms": 32.61565,
+          "p95_ms": 64.6556
+        },
+        "temporal_ms": {
+          "max_ms": 0.0268,
+          "median_ms": 0.0034,
+          "p95_ms": 0.0087
+        },
+        "total_ms": {
+          "max_ms": 116.9599,
+          "median_ms": 32.61935,
+          "p95_ms": 64.6636
+        },
+        "tracker_ms": {
+          "max_ms": 0.1411,
+          "median_ms": 0.0236,
+          "p95_ms": 0.0657
+        }
+      },
+      "memory_sample_count": 540,
+      "process_exit_code": 0,
+      "sample_count": 300,
+      "steady_memory_sample_count": 401
+    }
+  },
+  "schema": "kfcore.local-gpu-scene-measurement/1"
+}

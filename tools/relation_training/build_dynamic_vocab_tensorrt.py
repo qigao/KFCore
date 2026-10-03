@@ -174,18 +174,24 @@ def build_engine(
             # dynamic, matching the Apache deployment contract.
             if shapes[0] == shapes[2]:
                 tensor.shape = shapes[0]
-            if not profile.set_shape(
+            profile.set_shape(
                 name,
                 shapes[0],
                 shapes[1],
                 shapes[2],
-            ):
+            )
+            assigned = tuple(
+                tuple(int(value) for value in shape)
+                for shape in profile.get_shape(name)
+            )
+            if assigned != shapes:
                 raise RuntimeError(
-                    f"TensorRT rejected optimization profile for {name}"
+                    f"TensorRT profile for {name} differs from requested shapes: "
+                    f"{assigned} != {shapes}"
                 )
             actual_profiles[name] = shapes
 
-        if not config.add_optimization_profile(profile):
+        if config.add_optimization_profile(profile) != 0:
             raise RuntimeError(
                 "TensorRT rejected the dynamic-vocabulary optimization profile"
             )

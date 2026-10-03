@@ -2200,9 +2200,13 @@ TensorRT engine.
 
 Repository CPU CI validates case selection, deterministic W/alpha inputs,
 pair-key comparison, tolerance logic and the fail-closed report schema. It
-does **not** set `hardware_executed=true` and cannot complete the TensorRT
-qualification issue. #228 remains open until a real NVIDIA run publishes a
-passing hardware report.
+does **not** set `hardware_executed=true`. A local RTX 4060 run and its passing
+hardware report are recorded in
+[`docs/relation/evidence/README.md`](../../docs/relation/evidence/README.md).
+The Linux self-hosted hardware workflow still needs a runner to provide
+CI-backed acceptance. The qualification fixture uses deterministic asymmetric
+boxes because a regular grid caused near-tied TopK candidates to cross the
+shortlist boundary between ORT CPU and TensorRT.
 
 ## Checkpoint
 

@@ -1,0 +1,249 @@
+{
+  "abs_tolerance": 0.0001,
+  "cases": [
+    {
+      "actual_valid_pairs": 128,
+      "extra_pairs": [],
+      "label": "v1",
+      "missing_pairs": [],
+      "ort_latency": {
+        "max_ms": 289.0223999856971,
+        "mean_ms": 272.89491997798905,
+        "median_ms": 270.8423999720253,
+        "min_ms": 265.43729996774346,
+        "p95_ms": 289.0223999856971
+      },
+      "pair_logits": {
+        "max_abs_error": 1.7285346984863281e-06,
+        "max_rel_error": 2.4002950542003175e-06,
+        "passed": true
+      },
+      "pair_set_equal": true,
+      "passed": true,
+      "pred_logits": {
+        "max_abs_error": 2.384185791015625e-06,
+        "max_rel_error": 5.356081970335447e-07,
+        "passed": true
+      },
+      "reference_valid_pairs": 128,
+      "tensorrt_latency": {
+        "max_ms": 18.239700002595782,
+        "mean_ms": 17.86461998708546,
+        "median_ms": 17.893999989610165,
+        "min_ms": 17.564699985086918,
+        "p95_ms": 18.239700002595782
+      },
+      "vocabulary_size": 1
+    },
+    {
+      "actual_valid_pairs": 128,
+      "extra_pairs": [],
+      "label": "v3",
+      "missing_pairs": [],
+      "ort_latency": {
+        "max_ms": 344.90560000995174,
+        "mean_ms": 299.3833199958317,
+        "median_ms": 302.6157999993302,
+        "min_ms": 261.825299996417,
+        "p95_ms": 344.90560000995174
+      },
+      "pair_logits": {
+        "max_abs_error": 4.172325134277344e-06,
+        "max_rel_error": 5.550409533002815e-06,
+        "passed": true
+      },
+      "pair_set_equal": true,
+      "passed": true,
+      "pred_logits": {
+        "max_abs_error": 1.0013580322265625e-05,
+        "max_rel_error": 2.2833701499587037e-06,
+        "passed": true
+      },
+      "reference_valid_pairs": 128,
+      "tensorrt_latency": {
+        "max_ms": 19.04449996072799,
+        "mean_ms": 18.57725998852402,
+        "median_ms": 18.59880000120029,
+        "min_ms": 17.846599977929145,
+        "p95_ms": 19.04449996072799
+      },
+      "vocabulary_size": 3
+    },
+    {
+      "actual_valid_pairs": 128,
+      "extra_pairs": [],
+      "label": "opt",
+      "missing_pairs": [],
+      "ort_latency": {
+        "max_ms": 335.3757999720983,
+        "mean_ms": 315.19381997641176,
+        "median_ms": 328.80829996429384,
+        "min_ms": 285.7205999898724,
+        "p95_ms": 335.3757999720983
+      },
+      "pair_logits": {
+        "max_abs_error": 2.562999725341797e-06,
+        "max_rel_error": 4.2523835104039016e-06,
+        "passed": true
+      },
+      "pair_set_equal": true,
+      "passed": true,
+      "pred_logits": {
+        "max_abs_error": 7.62939453125e-06,
+        "max_rel_error": 1.8222246721020592e-06,
+        "passed": true
+      },
+      "reference_valid_pairs": 128,
+      "tensorrt_latency": {
+        "max_ms": 61.779199982993305,
+        "mean_ms": 36.73495999537408,
+        "median_ms": 25.238599977456033,
+        "min_ms": 18.88879999751225,
+        "p95_ms": 61.779199982993305
+      },
+      "vocabulary_size": 64
+    },
+    {
+      "actual_valid_pairs": 128,
+      "extra_pairs": [],
+      "label": "max",
+      "missing_pairs": [],
+      "ort_latency": {
+        "max_ms": 331.0920999501832,
+        "mean_ms": 309.37982000177726,
+        "median_ms": 318.48190003074706,
+        "min_ms": 267.44399999734014,
+        "p95_ms": 331.0920999501832
+      },
+      "pair_logits": {
+        "max_abs_error": 2.86102294921875e-06,
+        "max_rel_error": 4.226570972403662e-06,
+        "passed": true
+      },
+      "pair_set_equal": true,
+      "passed": true,
+      "pred_logits": {
+        "max_abs_error": 2.2411346435546875e-05,
+        "max_rel_error": 4.064298235783258e-06,
+        "passed": true
+      },
+      "reference_valid_pairs": 128,
+      "tensorrt_latency": {
+        "max_ms": 53.926799970213324,
+        "mean_ms": 38.59932000050321,
+        "median_ms": 51.347300002817065,
+        "min_ms": 16.849600011482835,
+        "p95_ms": 53.926799970213324
+      },
+      "vocabulary_size": 243
+    }
+  ],
+  "engine": "relation.engine",
+  "engine_sha256_after": "98251889a5c529b1b05e0130ac2f7a473ffdf0415fd12cf08ed4be0d752c2601",
+  "engine_sha256_before": "98251889a5c529b1b05e0130ac2f7a473ffdf0415fd12cf08ed4be0d752c2601",
+  "engine_sidecar": "relation.json",
+  "engine_sidecar_sha256": "f40d31bf80987a014ff384eff613ea6f22e698f89556f3c4bc225e28261d1c12",
+  "hardware": {
+    "compute_capability": [
+      8,
+      9
+    ],
+    "context_create_count": 1,
+    "cuda_version": "12.8",
+    "engine_load_count": 1,
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "tensorrt_version": "11.2.1.2",
+    "torch_version": "2.11.0+cu128"
+  },
+  "hardware_executed": true,
+  "iterations": 5,
+  "ort": {
+    "provider": "CPUExecutionProvider",
+    "session_load_count": 1,
+    "version": "1.26.0"
+  },
+  "passed": true,
+  "profile": {
+    "W": {
+      "max": [
+        243,
+        512
+      ],
+      "min": [
+        1,
+        512
+      ],
+      "opt": [
+        64,
+        512
+      ]
+    },
+    "alpha": {
+      "max": [
+        243
+      ],
+      "min": [
+        1
+      ],
+      "opt": [
+        64
+      ]
+    },
+    "box_counts": {
+      "max": [
+        1
+      ],
+      "min": [
+        1
+      ],
+      "opt": [
+        1
+      ]
+    },
+    "boxes": {
+      "max": [
+        1,
+        32,
+        4
+      ],
+      "min": [
+        1,
+        32,
+        4
+      ],
+      "opt": [
+        1,
+        32,
+        4
+      ]
+    },
+    "image": {
+      "max": [
+        1,
+        3,
+        448,
+        448
+      ],
+      "min": [
+        1,
+        3,
+        448,
+        448
+      ],
+      "opt": [
+        1,
+        3,
+        448,
+        448
+      ]
+    }
+  },
+  "rel_tolerance": 0.0001,
+  "same_context_reused": true,
+  "same_engine_reused": true,
+  "schema": "kfcore.tensorrt-dynamic-vocab-qualification/1",
+  "seed": 20260929,
+  "source_onnx": "relateanything.onnx",
+  "source_onnx_sha256": "b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a",
+  "warmup": 2
+}

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import gc
 import unittest
+import weakref
+from types import SimpleNamespace
 
 import numpy as np
 
 from tensorrt_dynamic_vocab_qualification import (
+    EXPECTED_INPUTS,
     SCHEMA,
+    _TensorRTRunner,
     compare_pair_keyed_outputs,
     deterministic_inputs,
     qualification_cases,
@@ -81,6 +86,68 @@ def outputs(order: list[int], *, vocabulary_size: int = 3) -> dict[str, np.ndarr
 
 
 class TensorRtDynamicVocabularyQualificationTest(unittest.TestCase):
+    def test_runner_keeps_input_buffers_alive_for_raw_tensor_addresses(self) -> None:
+        class Tensor:
+            def __init__(self, array: np.ndarray) -> None:
+                self.array = array
+
+            def to(self, *, device: str) -> "Tensor":
+                if device != "cuda":
+                    raise ValueError(device)
+                return self
+
+            def data_ptr(self) -> int:
+                return id(self)
+
+        class Context:
+            def __init__(self) -> None:
+                self.addresses: dict[str, int] = {}
+
+            def set_input_shape(self, name: str, shape: tuple[int, ...]) -> bool:
+                return True
+
+            def set_tensor_address(self, name: str, address: int) -> bool:
+                self.addresses[name] = address
+                return True
+
+            def infer_shapes(self) -> list[str]:
+                return []
+
+            def get_tensor_shape(self, name: str) -> tuple[int, ...]:
+                return (1,)
+
+        owners: list[weakref.ReferenceType[Tensor]] = []
+
+        def from_numpy(array: np.ndarray) -> Tensor:
+            tensor = Tensor(array)
+            owners.append(weakref.ref(tensor))
+            return tensor
+
+        runner = object.__new__(_TensorRTRunner)
+        runner.context = Context()
+        runner.engine = SimpleNamespace(get_tensor_dtype=lambda name: np.float32)
+        runner.trt = SimpleNamespace(nptype=lambda dtype: dtype)
+        runner.torch = SimpleNamespace(
+            from_numpy=from_numpy,
+            empty=lambda shape, **kwargs: Tensor(np.empty(shape, dtype=np.float32)),
+            cuda=SimpleNamespace(synchronize=lambda: None),
+            float32=np.float32,
+            float16=np.float16,
+            int64=np.int64,
+            int32=np.int32,
+            bool=np.bool_,
+        )
+        runner.stream = SimpleNamespace(cuda_stream=1)
+
+        runner.prepare({name: np.zeros(1, dtype=np.float32) for name in EXPECTED_INPUTS})
+        gc.collect()
+
+        self.assertEqual(len(owners), len(EXPECTED_INPUTS))
+        self.assertTrue(all(owner() is not None for owner in owners))
+        self.assertEqual(
+            {runner.context.addresses[name] for name in EXPECTED_INPUTS},
+            {owner().data_ptr() for owner in owners},
+        )
     def test_cases_cover_v1_v3_opt_max(self) -> None:
         self.assertEqual(
             qualification_cases(metadata()),
@@ -107,6 +174,8 @@ class TensorRtDynamicVocabularyQualificationTest(unittest.TestCase):
 
         self.assertEqual(a["image"].shape, (1, 3, 448, 448))
         self.assertEqual(a["boxes"].shape, (1, 40, 4))
+        self.assertGreater(np.ptp(a["boxes"][0, :, 2]), 0.0)
+        self.assertTrue(np.all((a["boxes"] >= 0.01) & (a["boxes"] <= 0.99)))
         self.assertEqual(a["box_counts"].tolist(), [40])
         self.assertEqual(a["W"].shape, (3, 512))
         self.assertTrue(

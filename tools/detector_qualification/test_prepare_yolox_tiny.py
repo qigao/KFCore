@@ -136,6 +136,8 @@ class PrepareYoloXTinyTest(unittest.TestCase):
                 root / "second",
                 expected_source_sha256=source_sha,
             )
+            self.assertNotIn(b"\r\n", (root / "first" / "model.json").read_bytes())
+            self.assertNotIn(b"\r\n", (root / "first" / "evidence.json").read_bytes())
 
             self.assertEqual(first["schema"], EVIDENCE_SCHEMA)
             self.assertEqual(

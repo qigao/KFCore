@@ -1,0 +1,16 @@
+{
+  "matmul_executions_by_provider": {
+    "CPUExecutionProvider": 0,
+    "CUDAExecutionProvider": 173
+  },
+  "node_executions_by_provider": {
+    "CPUExecutionProvider": 798,
+    "CUDAExecutionProvider": 2103
+  },
+  "onnxruntime_version": "1.26.0",
+  "profile_bytes": 3456265,
+  "profile_sha256": "32b580ce19efcb623245419df37ee5f916c6638223b990a137607b05997300cc",
+  "schema": "kfcore.ort-cuda-node-assignment/1",
+  "source_onnx_sha256": "b8b6a047c5e0771a897a5015c2ffb09d8fe5e3ffa0651e1e61af0e8436a3617a",
+  "vocabulary_size": 3
+}
