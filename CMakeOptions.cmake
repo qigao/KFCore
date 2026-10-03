@@ -31,9 +31,6 @@ option(KFCORE_ENABLE_HF_TOKENIZER_PROVIDER
 option(KFCORE_BUILD_RELATION_ORT_CPU_QUALIFICATION
        "Build the focused C++ ORT CPU open-vocabulary qualification executable"
        OFF)
-option(KFCORE_BUILD_POSE_RTMW_ORT_CPU_QUALIFICATION
-       "Build the focused C++ RTMW ORT CPU golden qualification executable"
-       OFF)
 option(KFCORE_BUILD_RELEASED_SCENE_BEHAVIOR_QUALIFICATION
        "Build the released detector/relation SceneBehavior latency qualification"
        OFF)
