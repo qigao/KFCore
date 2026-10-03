@@ -71,6 +71,7 @@ jobs:
         run: |
           set -euxo pipefail
           "$RUNNER_TEMP/pose-contract/test_pose_schema"
+          "$RUNNER_TEMP/pose-contract/test_pose_simcc_decode"
 
       - name: Verify unchanged tracked sources
         if: always()
