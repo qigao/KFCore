@@ -42,10 +42,6 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_VERSION: 1.8.9
-      SALTS_SHA256: dd88fac95bbd8f63f4411ebcde94358b9041046166a84a1d6903d7443cf3b959
-      SALTS_UTILS_VERSION: 4.1.13
-      SALTS_UTILS_SHA256: b5f41e8a403557a3a0a9594fcd2325bf169656173e2614cf4379d123a78ab7f5
       ORT_VERSION: 1.22.0
       ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
       RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
@@ -75,6 +71,44 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Discover latest KFCore native SDK releases
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          releases = [
+              ("SALTS", "qigao/salts", "Salts.Native."),
+              ("SALTS_UTILS", "qigao/salts-utils", "SaltsUtils.Native."),
+          ]
+          env_path = os.environ["GITHUB_ENV"]
+          with open(env_path, "a", encoding="utf-8") as output:
+              for prefix, repo, asset_prefix in releases:
+                  request = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/releases/latest",
+                      headers={"Accept": "application/vnd.github+json", "User-Agent": "KFCore-CI"},
+                  )
+                  with urllib.request.urlopen(request) as response:
+                      release = json.load(response)
+                  tag = release["tag_name"]
+                  version = tag[1:] if tag.startswith("v") else tag
+                  expected_name = f"{asset_prefix}{version}.nupkg"
+                  matches = [a for a in release["assets"] if a["name"] == expected_name]
+                  if len(matches) != 1:
+                      raise RuntimeError(f"{repo}: expected exactly one {expected_name}")
+                  asset = matches[0]
+                  digest = asset.get("digest") or ""
+                  if not digest.startswith("sha256:"):
+                      raise RuntimeError(f"{repo}: release asset lacks sha256 digest")
+                  print(f"{prefix}_VERSION={version}", file=output)
+                  print(f"{prefix}_URL={asset['browser_download_url']}", file=output)
+                  print(f"{prefix}_SHA256={digest.split(':', 1)[1]}", file=output)
+                  print(repo, tag, expected_name, digest)
+          PY
+
       - name: Install independent Python reference dependencies
         shell: bash
         run: |
@@ -85,7 +119,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/kfcore-pose-rtmw-ort-cpu
-          key: pose-rtmw-ort-cpu-sdk-v1-salts-${{ env.SALTS_VERSION }}-saltsutils-${{ env.SALTS_UTILS_VERSION }}-ort-${{ env.ORT_VERSION }}
+          key: pose-rtmw-ort-cpu-sdk-v2-${{ runner.os }}-ort-${{ env.ORT_VERSION }}
 
       - name: Restore pinned native SDKs
         shell: bash
@@ -94,10 +128,10 @@ jobs:
           cache="$HOME/.cache/kfcore-pose-rtmw-ort-cpu"
           mkdir -p "$cache"
           salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
-          if [ ! -f "$salts_pkg" ]; then curl -fL --retry 3 "https://github.com/qigao/salts/releases/download/v$SALTS_VERSION/Salts.Native.$SALTS_VERSION.nupkg" -o "$salts_pkg"; fi
+          if [ ! -f "$salts_pkg" ]; then curl -fL --retry 3 "$SALTS_URL" -o "$salts_pkg"; fi
           echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
           salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
-          if [ ! -f "$salts_utils_pkg" ]; then curl -fL --retry 3 "https://github.com/qigao/salts-utils/releases/download/v$SALTS_UTILS_VERSION/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg" -o "$salts_utils_pkg"; fi
+          if [ ! -f "$salts_utils_pkg" ]; then curl -fL --retry 3 "$SALTS_UTILS_URL" -o "$salts_utils_pkg"; fi
           echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
           ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
           if [ ! -f "$ort_pkg" ]; then curl -fL --retry 3 "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" -o "$ort_pkg"; fi
