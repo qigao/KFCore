@@ -464,7 +464,7 @@ struct Rtmw::Impl final
         simcc_y.allocate(keypoint_count, simcc_y_extent, options.max_output_bytes);
     }
 
-    WholeBodyPose infer_one(const image::BgrImage& source, const RectF& box)
+    PoseResult infer_pose_one(const image::BgrImage& source, const RectF& box)
     {
         detail::RtmwPreprocessResult preprocess = detail::preprocess_rtmw(
             source, box, options, input_width_value, input_height_value);
@@ -501,30 +501,36 @@ struct Rtmw::Impl final
         };
         context->run({input_view}, outputs);
 
-        std::array<detail::DecodedSimccKeypoint, kWholeBodyKeypointCount> decoded {};
+        std::vector<detail::DecodedSimccKeypoint> decoded(keypoint_count);
         detail::decode_simcc(
             {simcc_x.data(), simcc_element_type(simcc_x.descriptor.data_type),
-             kWholeBodyKeypointCount, simcc_x_extent},
+             keypoint_count, simcc_x_extent},
             {simcc_y.data(), simcc_element_type(simcc_y.descriptor.data_type),
-             kWholeBodyKeypointCount, simcc_y_extent},
+             keypoint_count, simcc_y_extent},
             options.simcc_split_ratio, decoded.data(), decoded.size());
 
-        WholeBodyPose result;
+        PoseResult result;
         result.source_box = box;
-        for (std::size_t keypoint = 0U; keypoint < kWholeBodyKeypointCount; ++keypoint)
+        result.schema_id = pose_schema->id;
+        result.capabilities = kPoseCapabilityConfidence;
+        result.keypoints.reserve(keypoint_count);
+
+        for (std::size_t channel = 0U; channel < keypoint_count; ++channel)
         {
-            const detail::DecodedSimccKeypoint& decoded_point = decoded[keypoint];
-            Keypoint point;
-            point.score = decoded_point.confidence;
-            if (point.score > 0.0F)
+            const detail::DecodedSimccKeypoint& decoded_point = decoded[channel];
+            PoseKeypoint point;
+            point.id = pose_schema->output_map[channel];
+            point.confidence = decoded_point.confidence;
+            if (point.confidence > 0.0F)
             {
                 const auto source_point = detail::rtmw_model_to_source(
                     preprocess.geometry, decoded_point.x, decoded_point.y,
                     input_width_value, input_height_value);
                 point.x = source_point.first;
                 point.y = source_point.second;
+                point.flags |= kPoseKeypointFlagValid;
             }
-            result.keypoints[keypoint] = point;
+            result.keypoints.push_back(point);
         }
         return result;
     }
