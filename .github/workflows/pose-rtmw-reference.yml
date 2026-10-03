@@ -1,0 +1,251 @@
+name: RTMW ORT CPU golden qualification
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/pose/**'
+      - 'tools/pose_qualification/**'
+      - 'cmake/tests/pose_rtmw_ort_cpu_qualification/**'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/pose-rtmw-reference.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'runtime/**'
+      - 'backends/onnxruntime/**'
+      - 'vision/core/image_processor/**'
+      - 'vision/image/cpu/**'
+      - 'vision/core/pose/**'
+      - 'tools/pose_qualification/**'
+      - 'cmake/tests/pose_rtmw_ort_cpu_qualification/**'
+      - 'CMakeOptions.cmake'
+      - 'cmake/FindONNXRuntime.cmake'
+      - '.github/workflows/pose-rtmw-reference.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pose-rtmw-ort-cpu-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ort-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      ORT_VERSION: 1.22.0
+      ORT_SHA512: c49d927a39dc27fcdf3b41436806af74c24c79ead09289d986c359fc1380ea363cf83d4085212b8972cb752a0fa8b9b1a06b82ad19e2d4dd6e22e44c79050386
+      RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
+      RTMW_SDK_SHA256: a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd
+      RTMW_ONNX_SHA256: bd033156e5104c4f5d2edfe0453e02661e30a2f3da453ec93c8764d561b83054
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record exact source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install focused host tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build unzip curl libsimde-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Discover latest KFCore native SDK releases
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          releases = [
+              ("SALTS", "qigao/salts", "Salts.Native."),
+              ("SALTS_UTILS", "qigao/salts-utils", "SaltsUtils.Native."),
+          ]
+          env_path = os.environ["GITHUB_ENV"]
+          with open(env_path, "a", encoding="utf-8") as output:
+              for prefix, repo, asset_prefix in releases:
+                  request = urllib.request.Request(
+                      f"https://api.github.com/repos/{repo}/releases/latest",
+                      headers={"Accept": "application/vnd.github+json", "User-Agent": "KFCore-CI"},
+                  )
+                  with urllib.request.urlopen(request) as response:
+                      release = json.load(response)
+                  tag = release["tag_name"]
+                  version = tag[1:] if tag.startswith("v") else tag
+                  expected_name = f"{asset_prefix}{version}.nupkg"
+                  matches = [a for a in release["assets"] if a["name"] == expected_name]
+                  if len(matches) != 1:
+                      raise RuntimeError(f"{repo}: expected exactly one {expected_name}")
+                  asset = matches[0]
+                  digest = asset.get("digest") or ""
+                  if not digest.startswith("sha256:"):
+                      raise RuntimeError(f"{repo}: release asset lacks sha256 digest")
+                  print(f"{prefix}_VERSION={version}", file=output)
+                  print(f"{prefix}_URL={asset['browser_download_url']}", file=output)
+                  print(f"{prefix}_SHA256={digest.split(':', 1)[1]}", file=output)
+                  print(repo, tag, expected_name, digest)
+          PY
+
+      - name: Install independent Python reference dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check numpy==2.2.6 onnx==1.18.0 onnxruntime==1.22.0 opencv-python-headless==4.12.0.88
+
+      - name: Restore native SDK download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kfcore-pose-rtmw-ort-cpu
+          key: pose-rtmw-ort-cpu-sdk-v2-${{ runner.os }}-ort-${{ env.ORT_VERSION }}
+
+      - name: Restore pinned native SDKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cache="$HOME/.cache/kfcore-pose-rtmw-ort-cpu"
+          mkdir -p "$cache"
+          salts_pkg="$cache/Salts.Native.$SALTS_VERSION.nupkg"
+          if [ ! -f "$salts_pkg" ]; then curl -fL --retry 3 "$SALTS_URL" -o "$salts_pkg"; fi
+          echo "$SALTS_SHA256  $salts_pkg" | sha256sum -c -
+          salts_utils_pkg="$cache/SaltsUtils.Native.$SALTS_UTILS_VERSION.nupkg"
+          if [ ! -f "$salts_utils_pkg" ]; then curl -fL --retry 3 "$SALTS_UTILS_URL" -o "$salts_utils_pkg"; fi
+          echo "$SALTS_UTILS_SHA256  $salts_utils_pkg" | sha256sum -c -
+          ort_pkg="$cache/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          if [ ! -f "$ort_pkg" ]; then curl -fL --retry 3 "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" -o "$ort_pkg"; fi
+          echo "$ORT_SHA512  $ort_pkg" | sha512sum -c -
+          sdk="$RUNNER_TEMP/pose-rtmw-ort-cpu-sdk"
+          rm -rf "$sdk"
+          mkdir -p "$sdk/salts" "$sdk/salts-utils" "$sdk/ort"
+          unzip -q "$salts_pkg" -d "$sdk/salts"
+          unzip -q "$salts_utils_pkg" -d "$sdk/salts-utils"
+          tar -xzf "$ort_pkg" -C "$sdk/ort"
+          echo "SALTS_ROOT=$sdk/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$sdk/salts-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "ONNXRUNTIME_ROOT=$sdk/ort/onnxruntime-linux-x64-$ORT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Restore released RTMW-l 384x288 ONNX
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ref="$RUNNER_TEMP/rtmw-reference"
+          mkdir -p "$ref"
+          curl --fail --location --retry 3 --output "$ref/sdk.zip" "$RTMW_SDK_URL"
+          echo "$RTMW_SDK_SHA256  $ref/sdk.zip" | sha256sum --check -
+          unzip -q "$ref/sdk.zip" end2end.onnx -d "$ref"
+          echo "$RTMW_ONNX_SHA256  $ref/end2end.onnx" | sha256sum --check -
+
+      - name: Generate independent Python ORT golden fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python tools/pose_qualification/make_rtmw_ort_cpu_qualification_fixture.py --onnx "$RUNNER_TEMP/rtmw-reference/end2end.onnx" --out-dir "$RUNNER_TEMP/rtmw-fixture"
+          test -f "$RUNNER_TEMP/rtmw-fixture/model.json"
+          test -f "$RUNNER_TEMP/rtmw-fixture/reference.tsv"
+          test -f "$RUNNER_TEMP/rtmw-fixture/fixture-evidence.json"
+
+      - name: Configure focused C++ RTMW ORT CPU qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S cmake/tests/pose_rtmw_ort_cpu_qualification -B build/pose-rtmw-ort-cpu -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT"
+
+      - name: Build ORT plugin and RTMW qualification executable
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/pose-rtmw-ort-cpu --target kfcore_backend_onnxruntime kfcore_pose_rtmw_ort_cpu_qualification --parallel 2
+
+      - name: Run layered C++ qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          plugin="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/libkfcore_backend_onnxruntime.so"
+          executable="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/kfcore_pose_rtmw_ort_cpu_qualification"
+          report="$RUNNER_TEMP/rtmw-report.json"
+          test -f "$plugin"
+          test -x "$executable"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          set +e
+          "$executable" "$plugin" "$RUNNER_TEMP/rtmw-fixture" "$report"
+          status=$?
+          set -e
+          test -f "$report"
+          if [ "$status" -eq 1 ]; then
+            exit 1
+          fi
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
+            exit "$status"
+          fi
+
+      - name: Validate qualification evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = json.loads((root / "rtmw-fixture" / "fixture-evidence.json").read_text())
+          report = json.loads((root / "rtmw-report.json").read_text())
+          assert evidence["schema"] == "kfcore.rtmw-ort-cpu-fixture/1"
+          assert evidence["model_sha256"] == os.environ["RTMW_ONNX_SHA256"]
+          assert evidence["input_size"] == [288, 384]
+          assert evidence["keypoint_count"] == 133
+          assert evidence["simcc_split_ratio"] == 2.0
+          assert report["schema"] == "kfcore.rtmw-ort-cpu-cpp-qualification/1"
+          assert report["passed"] is True
+          assert report["provider"] == "onnxruntime"
+          assert report["device"] == "cpu"
+          assert report["case_count"] == 3
+          assert report["preprocess_max_levels"] <= 2.01
+          assert report["preprocess_mean_levels"] <= 0.15
+          assert report["simcc_max_abs"] <= 1.0e-4
+          assert report["model_coord_max_abs"] <= 1.0e-6
+          assert report["model_score_max_abs"] <= 1.0e-5
+          assert report["projection_coord_max_abs"] <= 1.0e-4
+          assert report["e2e_source_coord_max_abs"] >= 0.0
+          assert report["e2e_source_score_max_abs"] >= 0.0
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pose-rtmw-ort-cpu-qualification
+          path: |
+            ${{ runner.temp }}/rtmw-report.json
+            ${{ runner.temp }}/rtmw-fixture/fixture-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify unchanged tracked sources
+        if: always()
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code

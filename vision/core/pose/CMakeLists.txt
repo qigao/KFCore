@@ -1,7 +1,8 @@
 add_library(kfcore_pose_core STATIC
   src/rtmw.cpp
   src/schema.cpp
-  src/simcc_decode.cpp)
+  src/simcc_decode.cpp
+  src/rtmw_preprocess.cpp)
 target_include_directories(kfcore_pose_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -26,4 +27,6 @@ cmake_install_headers(
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERNS "*.hpp")
 
-add_subdirectory(tests)
+if(BUILD_TESTS OR KFCORE_BUILD_POSE_RTMW_ORT_CPU_QUALIFICATION)
+  add_subdirectory(tests)
+endif()
