@@ -1,6 +1,7 @@
 #include "kfcore/pose/rtmw.hpp"
 
 #include "simcc_decode.hpp"
+#include "rtmw_preprocess.hpp"
 
 #include "kfcore/image_processor/cpu.hpp"
 #include "kfcore/image_processor/error.hpp"
@@ -148,59 +149,6 @@ void validate_options(const RtmwOptions& options)
     {
         throw_resource("configured byte limits must be positive");
     }
-}
-
-struct CropGeometry
-{
-    float center_x = 0.0F;
-    float center_y = 0.0F;
-    float scale_width = 0.0F;
-    float scale_height = 0.0F;
-};
-
-CropGeometry crop_geometry(const RectF& box, const RtmwOptions& options,
-                           std::int32_t input_width, std::int32_t input_height)
-{
-    if (!std::isfinite(box.x) || !std::isfinite(box.y) ||
-        !std::isfinite(box.width) || !std::isfinite(box.height) ||
-        box.width <= 0.0F || box.height <= 0.0F)
-    {
-        throw_invalid("person bbox must be finite with positive width and height");
-    }
-
-    CropGeometry geometry;
-    geometry.center_x = box.x + box.width * 0.5F;
-    geometry.center_y = box.y + box.height * 0.5F;
-    geometry.scale_width = box.width * options.bbox_padding;
-    geometry.scale_height = box.height * options.bbox_padding;
-
-    const float aspect = static_cast<float>(input_width) /
-                         static_cast<float>(input_height);
-    if (geometry.scale_width > geometry.scale_height * aspect)
-    {
-        geometry.scale_height = geometry.scale_width / aspect;
-    }
-    else
-    {
-        geometry.scale_width = geometry.scale_height * aspect;
-    }
-    return geometry;
-}
-
-image::AffineTransform destination_to_source(const CropGeometry& geometry,
-                                             std::int32_t input_width,
-                                             std::int32_t input_height)
-{
-    const float scale_x = geometry.scale_width / static_cast<float>(input_width);
-    const float scale_y = geometry.scale_height / static_cast<float>(input_height);
-    return {{
-        scale_x,
-        0.0F,
-        geometry.center_x - geometry.scale_width * 0.5F,
-        0.0F,
-        scale_y,
-        geometry.center_y - geometry.scale_height * 0.5F,
-    }};
 }
 
 std::int32_t resolve_spatial(std::int64_t declared, std::int32_t requested,
@@ -503,20 +451,9 @@ struct Rtmw::Impl final
 
     WholeBodyPose infer_one(const image::BgrImage& source, const RectF& box)
     {
-        const CropGeometry geometry = crop_geometry(
-            box, options, input_width_value, input_height_value);
-        const image::BgrImage crop = image::CpuImageProcessor::warp_affine_bgr(
-            source, input_width_value, input_height_value,
-            destination_to_source(geometry, input_width_value, input_height_value),
-            options.border_value, options.max_source_bytes);
-
-        image::PreprocessOptions preprocess;
-        preprocess.output_format = image::PixelFormat::Rgb8;
-        preprocess.mean = options.mean;
-        preprocess.stddev = options.stddev;
-        preprocess.border_value = options.border_value;
-        const std::vector<float> input_float = image::CpuImageProcessor::to_nchw(
-            crop, preprocess, options.max_tensor_bytes);
+        detail::RtmwPreprocessResult preprocess = detail::preprocess_rtmw(
+            source, box, options, input_width_value, input_height_value);
+        const std::vector<float>& input_float = preprocess.nchw;
 
         const std::size_t input_bytes = checked_multiply(
             input_float.size(), element_size(input_descriptor.data_type), "input tensor");
@@ -566,12 +503,11 @@ struct Rtmw::Impl final
             point.score = decoded_point.confidence;
             if (point.score > 0.0F)
             {
-                point.x = decoded_point.x / static_cast<float>(input_width_value) *
-                              geometry.scale_width +
-                          geometry.center_x - geometry.scale_width * 0.5F;
-                point.y = decoded_point.y / static_cast<float>(input_height_value) *
-                              geometry.scale_height +
-                          geometry.center_y - geometry.scale_height * 0.5F;
+                const auto source_point = detail::rtmw_model_to_source(
+                    preprocess.geometry, decoded_point.x, decoded_point.y,
+                    input_width_value, input_height_value);
+                point.x = source_point.first;
+                point.y = source_point.second;
             }
             result.keypoints[keypoint] = point;
         }
