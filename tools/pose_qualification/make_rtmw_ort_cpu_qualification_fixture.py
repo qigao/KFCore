@@ -124,6 +124,8 @@ def main() -> None:
         "id": "rtmw-l-384x288-released-qualification",
         "version": "20231122",
         "model_type": "pose.rtmw",
+        "semantic_contract": "pose.coco-wholebody-133",
+        "semantic_version": "1",
         "artifacts": [
             {
                 "id": "ort-cpu",
