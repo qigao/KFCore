@@ -35,9 +35,9 @@ Tracked reusable capability presets live in
 - `runtime-tensorrt-ort-cpu`;
 - `runtime-tensorrt-only`.
 
-Machine-specific SDK locations belong in the ignored
-`CMakeUserPresets.json`. Copy `CMakeUserPresets.json.example` as a starting
-point rather than committing host paths into the repository.
+The tracked `CMakeUserPresets.json` defines the project's configure, build,
+test, and install entry presets, including local SDK locations.
+`CMakeUserPresets.json.example` shows smaller profiles for other environments.
 
 Equivalent command-line switches can also be used directly. For example,
 TensorRT requires both:

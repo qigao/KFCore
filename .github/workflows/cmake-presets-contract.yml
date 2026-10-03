@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'CMakePresets.json'
+      - 'CMakeUserPresets.json'
       - 'CMakeUserPresets.json.example'
       - 'presets/**'
       - '.gitignore'
@@ -13,6 +14,7 @@ on:
     branches: [master, fix/backend-neutral-package]
     paths:
       - 'CMakePresets.json'
+      - 'CMakeUserPresets.json'
       - 'CMakeUserPresets.json.example'
       - 'presets/**'
       - '.gitignore'
@@ -49,27 +51,19 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          test ! -e CMakeUserPresets.json
-          git check-ignore -q CMakeUserPresets.json
+          git ls-files --error-unmatch CMakeUserPresets.json
           python -m json.tool CMakePresets.json >/dev/null
+          python -m json.tool CMakeUserPresets.json >/dev/null
           python -m json.tool CMakeUserPresets.json.example >/dev/null
           python -m json.tool presets/RuntimeCapabilities.json >/dev/null
           cmake --list-presets=configure
 
-      - name: Validate user-preset example
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cp CMakeUserPresets.json.example CMakeUserPresets.json
-          cmake --list-presets=configure
-          rm CMakeUserPresets.json
-
-      - name: Reject repository-local machine paths
+      - name: Reject shared-preset machine paths
         shell: bash
         run: |
           set -euxo pipefail
           if grep -REn             'C:/projects|C:/tools|Program Files/NVIDIA|(^|[":[:space:]])/opt/'             CMakePresets.json CMakeUserPresets.json.example presets; then
-            echo "tracked CMake presets contain machine-specific absolute paths" >&2
+            echo "shared CMake presets contain machine-specific absolute paths" >&2
             exit 1
           fi
 
