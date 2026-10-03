@@ -7,4 +7,12 @@ cmake_add_test(
   LIBS KFCore::pose_core Salts::TinyTest
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_pose_test_folder}")
+
+cmake_add_test(
+  NAME test_pose_simcc_decode
+  SOURCES test_simcc_decode.cpp
+  LIBS KFCore::pose_core Salts::TinyTest
+  INCLUDES ../src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_pose_test_folder}")
 endif()
