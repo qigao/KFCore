@@ -57,8 +57,9 @@ struct Metrics
     double simcc_max_abs = 0.0;
     double model_coord_max_abs = 0.0;
     double model_score_max_abs = 0.0;
-    double source_coord_max_abs = 0.0;
-    double source_score_max_abs = 0.0;
+    double projection_coord_max_abs = 0.0;
+    double e2e_source_coord_max_abs = 0.0;
+    double e2e_source_score_max_abs = 0.0;
 };
 
 void require(bool condition, const std::string& message)
@@ -269,8 +270,9 @@ void write_report(const std::filesystem::path& path,
            << "  \"simcc_max_abs\": " << metrics.simcc_max_abs << ",\n"
            << "  \"model_coord_max_abs\": " << metrics.model_coord_max_abs << ",\n"
            << "  \"model_score_max_abs\": " << metrics.model_score_max_abs << ",\n"
-           << "  \"source_coord_max_abs\": " << metrics.source_coord_max_abs << ",\n"
-           << "  \"source_score_max_abs\": " << metrics.source_score_max_abs << "\n"
+           << "  \"projection_coord_max_abs\": " << metrics.projection_coord_max_abs << ",\n"
+           << "  \"e2e_source_coord_max_abs\": " << metrics.e2e_source_coord_max_abs << ",\n"
+           << "  \"e2e_source_score_max_abs\": " << metrics.e2e_source_score_max_abs << "\n"
            << "}\n";
 }
 
@@ -443,19 +445,40 @@ int main(int argc, char** argv)
                         std::fabs(actual.confidence - expected.confidence)));
             }
 
+            for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
+            {
+                const ReferencePoint& expected =
+                    reference[item.index][keypoint];
+                if (expected.confidence <= 0.0F)
+                {
+                    continue;
+                }
+                const auto projected = kfcore::pose::detail::rtmw_model_to_source(
+                    actual_preprocess.geometry,
+                    expected.model_x,
+                    expected.model_y,
+                    static_cast<std::int32_t>(kInputWidth),
+                    static_cast<std::int32_t>(kInputHeight));
+                metrics.projection_coord_max_abs = (std::max)(
+                    metrics.projection_coord_max_abs,
+                    static_cast<double>((std::max)(
+                        std::fabs(projected.first - expected.source_x),
+                        std::fabs(projected.second - expected.source_y))));
+            }
+
             const auto pose = rtmw->infer(image.view(), item.box);
             for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
             {
                 const ReferencePoint& expected =
                     reference[item.index][keypoint];
                 const auto& actual = pose.keypoints[keypoint];
-                metrics.source_coord_max_abs = (std::max)(
-                    metrics.source_coord_max_abs,
+                metrics.e2e_source_coord_max_abs = (std::max)(
+                    metrics.e2e_source_coord_max_abs,
                     static_cast<double>((std::max)(
                         std::fabs(actual.x - expected.source_x),
                         std::fabs(actual.y - expected.source_y))));
-                metrics.source_score_max_abs = (std::max)(
-                    metrics.source_score_max_abs,
+                metrics.e2e_source_score_max_abs = (std::max)(
+                    metrics.e2e_source_score_max_abs,
                     static_cast<double>(
                         std::fabs(actual.score - expected.confidence)));
             }
@@ -476,8 +499,8 @@ int main(int argc, char** argv)
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
-            metrics.source_coord_max_abs <= 0.25 &&
-            metrics.source_score_max_abs <= 0.01;
+            metrics.e2e_source_coord_max_abs <= 0.25 &&
+            metrics.e2e_source_score_max_abs <= 0.01;
 
         write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
@@ -488,8 +511,10 @@ int main(int argc, char** argv)
                   << "G2 simcc max=" << metrics.simcc_max_abs << '\n'
                   << "G3 model coord max=" << metrics.model_coord_max_abs
                   << " score=" << metrics.model_score_max_abs << '\n'
-                  << "G4 source coord max=" << metrics.source_coord_max_abs
-                  << " score=" << metrics.source_score_max_abs << '\n';
+                  << "G4 projection coord max=" << metrics.projection_coord_max_abs << '\n'
+                  << "E2E synthetic sensitivity coord/score="
+                  << metrics.e2e_source_coord_max_abs << "/"
+                  << metrics.e2e_source_score_max_abs << '\n';
         return passed ? 0 : 2;
     }
     catch (const std::exception& error)
