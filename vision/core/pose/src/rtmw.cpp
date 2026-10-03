@@ -223,12 +223,13 @@ std::size_t expected_simcc_extent(std::int32_t input_extent, float split_ratio,
 }
 
 bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
+                            std::size_t expected_keypoints,
                             std::size_t expected_extent)
 {
     if (tensor.shape.size() == 2U)
     {
         return (tensor.shape[0] == -1 ||
-                tensor.shape[0] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+                tensor.shape[0] == static_cast<std::int64_t>(expected_keypoints)) &&
                (tensor.shape[1] == -1 ||
                 tensor.shape[1] == static_cast<std::int64_t>(expected_extent));
     }
@@ -236,7 +237,7 @@ bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
     {
         return (tensor.shape[0] == -1 || tensor.shape[0] == 1) &&
                (tensor.shape[1] == -1 ||
-                tensor.shape[1] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+                tensor.shape[1] == static_cast<std::int64_t>(expected_keypoints)) &&
                (tensor.shape[2] == -1 ||
                 tensor.shape[2] == static_cast<std::int64_t>(expected_extent));
     }
@@ -246,6 +247,7 @@ bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
 const runtime::TensorDescriptor& choose_simcc_output(
     const std::vector<runtime::TensorDescriptor>& outputs,
     const std::string& requested_name,
+    std::size_t expected_keypoints,
     std::size_t expected_extent,
     const char* axis)
 {
@@ -257,7 +259,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
             });
         if (named != outputs.end())
         {
-            if (!compatible_simcc_shape(*named, expected_extent))
+            if (!compatible_simcc_shape(*named, expected_keypoints, expected_extent))
             {
                 throw_contract(std::string("named SimCC ") + axis +
                                " tensor has an incompatible shape");
@@ -269,7 +271,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
     const runtime::TensorDescriptor* match = nullptr;
     for (const auto& tensor : outputs)
     {
-        if (!compatible_simcc_shape(tensor, expected_extent))
+        if (!compatible_simcc_shape(tensor, expected_keypoints, expected_extent))
         {
             continue;
         }
@@ -288,6 +290,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
 }
 
 runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tensor,
+                                          std::size_t keypoint_count,
                                           std::size_t extent)
 {
     runtime::TensorShape shape = tensor.shape;
@@ -295,7 +298,7 @@ runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tenso
     {
         if (shape[0] == -1)
         {
-            shape[0] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+            shape[0] = static_cast<std::int64_t>(keypoint_count);
         }
         if (shape[1] == -1)
         {
@@ -311,7 +314,7 @@ runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tenso
         }
         if (shape[1] == -1)
         {
-            shape[1] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+            shape[1] = static_cast<std::int64_t>(keypoint_count);
         }
         if (shape[2] == -1)
         {
@@ -350,11 +353,13 @@ struct HostTensorBuffer
     std::vector<std::max_align_t> storage;
     std::size_t bytes = 0U;
 
-    void allocate(std::size_t extent, std::size_t max_output_bytes)
+    void allocate(std::size_t keypoint_count,
+                  std::size_t extent,
+                  std::size_t max_output_bytes)
     {
-        shape = resolved_simcc_shape(descriptor, extent);
+        shape = resolved_simcc_shape(descriptor, keypoint_count, extent);
         const std::size_t elements = checked_multiply(
-            kWholeBodyKeypointCount, extent, descriptor.name.c_str());
+            keypoint_count, extent, descriptor.name.c_str());
         bytes = checked_multiply(elements, element_size(descriptor.data_type),
                                  descriptor.name.c_str());
         if (bytes > max_output_bytes)
