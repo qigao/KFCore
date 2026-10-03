@@ -392,11 +392,19 @@ struct HostTensorBuffer
 
 struct Rtmw::Impl final
 {
-    Impl(runtime::ResolvedModel resolved_value, RtmwOptions options_value)
+    Impl(runtime::ResolvedModel resolved_value,
+         RtmwOptions options_value,
+         const PoseSchema& schema_value)
         : resolved(std::move(resolved_value))
         , options(std::move(options_value))
+        , pose_schema(&schema_value)
+        , keypoint_count(schema_value.output_map.size())
         , context(resolved.model->create_context())
     {
+        if (keypoint_count == 0U)
+        {
+            throw_contract("selected PoseSchema has an empty output map");
+        }
         validate_contract();
     }
 
@@ -435,10 +443,12 @@ struct Rtmw::Impl final
                                                options.simcc_split_ratio, "X");
         simcc_y_extent = expected_simcc_extent(input_height_value,
                                                options.simcc_split_ratio, "Y");
-        simcc_x.descriptor = choose_simcc_output(outputs, options.simcc_x_name,
-                                                  simcc_x_extent, "X");
-        simcc_y.descriptor = choose_simcc_output(outputs, options.simcc_y_name,
-                                                  simcc_y_extent, "Y");
+        simcc_x.descriptor = choose_simcc_output(
+            outputs, options.simcc_x_name,
+            keypoint_count, simcc_x_extent, "X");
+        simcc_y.descriptor = choose_simcc_output(
+            outputs, options.simcc_y_name,
+            keypoint_count, simcc_y_extent, "Y");
         if (simcc_x.descriptor.name == simcc_y.descriptor.name)
         {
             throw_contract("SimCC X and Y must be distinct output tensors");
@@ -450,8 +460,8 @@ struct Rtmw::Impl final
         {
             throw_contract("SimCC outputs must use FP32 or FP16");
         }
-        simcc_x.allocate(simcc_x_extent, options.max_output_bytes);
-        simcc_y.allocate(simcc_y_extent, options.max_output_bytes);
+        simcc_x.allocate(keypoint_count, simcc_x_extent, options.max_output_bytes);
+        simcc_y.allocate(keypoint_count, simcc_y_extent, options.max_output_bytes);
     }
 
     WholeBodyPose infer_one(const image::BgrImage& source, const RectF& box)
@@ -521,6 +531,8 @@ struct Rtmw::Impl final
 
     runtime::ResolvedModel resolved;
     RtmwOptions options;
+    const PoseSchema* pose_schema = nullptr;
+    std::size_t keypoint_count = 0U;
     std::unique_ptr<runtime::ExecutionContext> context;
     runtime::TensorDescriptor input_descriptor;
     runtime::TensorShape input_shape;
