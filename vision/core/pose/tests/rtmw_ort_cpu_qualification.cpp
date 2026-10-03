@@ -206,7 +206,6 @@ kfcore::image::BgrImage synthetic_image()
 
 double compare_vectors(const std::vector<float>& actual,
                        const std::vector<float>& expected,
-                       double tolerance,
                        const std::string& subject)
 {
     require(actual.size() == expected.size(), subject + " size differs");
@@ -218,10 +217,6 @@ double compare_vectors(const std::vector<float>& actual,
             static_cast<double>(expected[i]));
         max_abs = (std::max)(max_abs, delta);
     }
-    require(
-        max_abs <= tolerance,
-        subject + " max abs delta " + std::to_string(max_abs) +
-            " exceeds " + std::to_string(tolerance));
     return max_abs;
 }
 
@@ -258,14 +253,15 @@ find_tensor(const std::vector<kfcore::runtime::TensorDescriptor>& tensors,
 
 void write_report(const std::filesystem::path& path,
                   const Metrics& metrics,
-                  std::size_t cases)
+                  std::size_t cases,
+                  bool passed)
 {
     std::ofstream stream(path);
     require(static_cast<bool>(stream), "cannot create qualification report");
     stream << std::setprecision(10)
            << "{\n"
            << "  \"schema\": \"kfcore.rtmw-ort-cpu-cpp-qualification/1\",\n"
-           << "  \"passed\": true,\n"
+           << "  \"passed\": " << (passed ? "true" : "false") << ",\n"
            << "  \"provider\": \"onnxruntime\",\n"
            << "  \"device\": \"cpu\",\n"
            << "  \"case_count\": " << cases << ",\n"
@@ -350,7 +346,6 @@ int main(int argc, char** argv)
             const double preprocess_max = compare_vectors(
                 actual_preprocess.nchw,
                 expected_preprocess,
-                kPreprocessMaxAbsTolerance,
                 "G1 preprocess/" + item.label);
             metrics.preprocess_max_abs =
                 (std::max)(metrics.preprocess_max_abs, preprocess_max);
@@ -401,12 +396,12 @@ int main(int argc, char** argv)
             metrics.simcc_max_abs = (std::max)(
                 metrics.simcc_max_abs,
                 compare_vectors(
-                    actual_x, expected_x, 1.0e-4,
+                    actual_x, expected_x,
                     "G2 simcc_x/" + item.label));
             metrics.simcc_max_abs = (std::max)(
                 metrics.simcc_max_abs,
                 compare_vectors(
-                    actual_y, expected_y, 1.0e-4,
+                    actual_y, expected_y,
                     "G2 simcc_y/" + item.label));
 
             std::vector<kfcore::pose::detail::DecodedSimccKeypoint>
@@ -435,10 +430,6 @@ int main(int argc, char** argv)
                     static_cast<double>(
                         std::fabs(actual.confidence - expected.confidence)));
             }
-            require(metrics.model_coord_max_abs <= 1.0e-6,
-                    "G3 decoded model coordinate differs from Python reference");
-            require(metrics.model_score_max_abs <= 1.0e-5,
-                    "G3 decoded score differs from Python reference");
 
             const auto pose = rtmw->infer(image.view(), item.box);
             for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
@@ -463,14 +454,16 @@ int main(int argc, char** argv)
                 ? 0.0
                 : preprocess_sum / static_cast<double>(preprocess_values);
 
-        require(metrics.preprocess_mean_abs <= kPreprocessMeanAbsTolerance,
-                "G1 preprocess mean abs delta exceeds interpolation budget");
-        require(metrics.source_coord_max_abs <= 0.25,
-                "G4 source coordinate max delta exceeds 0.25 px");
-        require(metrics.source_score_max_abs <= 0.01,
-                "G4 source confidence max delta exceeds 0.01");
+        const bool passed =
+            metrics.preprocess_max_abs <= kPreprocessMaxAbsTolerance &&
+            metrics.preprocess_mean_abs <= kPreprocessMeanAbsTolerance &&
+            metrics.simcc_max_abs <= 1.0e-4 &&
+            metrics.model_coord_max_abs <= 1.0e-6 &&
+            metrics.model_score_max_abs <= 1.0e-5 &&
+            metrics.source_coord_max_abs <= 0.25 &&
+            metrics.source_score_max_abs <= 0.01;
 
-        write_report(report, metrics, cases.size());
+        write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
                   << "G1 preprocess max=" << metrics.preprocess_max_abs
                   << " mean=" << metrics.preprocess_mean_abs << '\n'
@@ -479,7 +472,7 @@ int main(int argc, char** argv)
                   << " score=" << metrics.model_score_max_abs << '\n'
                   << "G4 source coord max=" << metrics.source_coord_max_abs
                   << " score=" << metrics.source_score_max_abs << '\n';
-        return 0;
+        return passed ? 0 : 2;
     }
     catch (const std::exception& error)
     {
