@@ -153,7 +153,7 @@ PoseSchema make_coco_wholebody_133_schema()
         {60U, 64U},
         {61U, 63U},
         {65U, 67U},
-    }};
+    };
     for (const auto& pair : kFaceMirrorPairs)
     {
         mirror_pair(23U + pair.first, 23U + pair.second);
@@ -190,7 +190,7 @@ PoseSchema make_coco_wholebody_133_schema()
         {16U, 20U},
         {16U, 21U},
         {16U, 22U},
-    }};
+    };
     schema.edges.insert(schema.edges.end(), std::begin(kBodyEdges), std::end(kBodyEdges));
 
     const auto append_hand_edges = [&](std::uint32_t root)
