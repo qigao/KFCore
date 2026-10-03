@@ -2235,6 +2235,11 @@ The exporter writes raw logits with the exact output names expected by the
 native relation runtime, plus `relation-v1.json` metadata recording model
 budgets, predicates, DINOv3 provenance and SHA-256 hashes.
 
+For a fixed-vocabulary `relation.relate-anything` package, copy the exported
+`predicate_order_sha256` into `model.json` and preserve the exported predicate
+order in `RelateAnythingOptions::predicates`. Before packaging, check that the
+metadata's `onnx_sha256` matches the packaged ONNX artifact's `sha256`.
+
 The score fusion remains host-side:
 
 ```text

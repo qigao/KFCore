@@ -17,7 +17,8 @@ target_link_libraries(kfcore_relation_core
     KFCore::runtime_core
     KFCore::image_processor_core
   PRIVATE
-    KFCore::image_processor_cpu)
+    KFCore::image_processor_cpu
+    Salts::Crypto)
 set_target_properties(kfcore_relation_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON

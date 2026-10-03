@@ -470,11 +470,6 @@ struct OpenVocabularyRelation::Impl final
                 input_size_value);
         }
 
-        pair_logits.resize(options.max_pairs);
-        subject_indices.resize(options.max_pairs);
-        object_indices.resize(options.max_pairs);
-        valid_mask.resize(options.max_pairs);
-
         std::size_t bytes = checked_multiply(
             options.max_pairs,
             sizeof(float),
@@ -494,15 +489,11 @@ struct OpenVocabularyRelation::Impl final
                 "valid mask"),
             "relation fixed outputs");
 
+        std::size_t query_values = 0U;
         if (mode == ScoringMode::HostQueries)
         {
-            const std::size_t query_values =
-                checked_multiply(
-                    options.max_pairs,
-                    options.query_dim,
-                    "relation query");
-            semantic_query.resize(query_values);
-            spatial_query.resize(query_values);
+            query_values = checked_multiply(
+                options.max_pairs, options.query_dim, "relation query");
             bytes = checked_add(
                 bytes,
                 checked_multiply(
@@ -517,6 +508,16 @@ struct OpenVocabularyRelation::Impl final
         {
             throw_resource(
                 "relation fixed outputs exceed configured byte limit");
+        }
+
+        pair_logits.resize(options.max_pairs);
+        subject_indices.resize(options.max_pairs);
+        object_indices.resize(options.max_pairs);
+        valid_mask.resize(options.max_pairs);
+        if (mode == ScoringMode::HostQueries)
+        {
+            semantic_query.resize(query_values);
+            spatial_query.resize(query_values);
         }
     }
 

@@ -9,6 +9,12 @@ cmake_add_test(
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_relation_test_folder}")
 
+cmake_add_test(
+  NAME test_relation_baked_vocabulary
+  SOURCES test_baked_vocabulary.cpp
+  LIBS KFCore::relation_core Salts::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_relation_test_folder}")
 
 cmake_add_test(
   NAME test_relation_vocabulary_score

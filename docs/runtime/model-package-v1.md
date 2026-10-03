@@ -20,6 +20,18 @@ kfcore.model/1
 The package requires non-empty `id`, `version`, `model_type`, and a
 non-empty `artifacts` list. `variant` is optional.
 
+For `model_type="relation.relate-anything"`, the manifest must also set
+`predicate_order_sha256` to the digest emitted by the fixed-vocabulary relation
+ONNX exporter. The relation loader rejects a missing digest or a different
+ordered list of predicate names before loading the backend. Existing fixed
+relation manifests need this field when upgraded; other model types do not.
+
+The digest follows the repository's ordered-name convention: SHA-256 over each
+UTF-8 predicate name followed by a NUL byte, in order. Names must be non-empty
+and cannot contain NUL bytes. Package creation must use the digest from the
+metadata generated with the selected ONNX artifact and verify that metadata's
+`onnx_sha256` equals the artifact's `sha256`.
+
 ## Artifact contract
 
 Every artifact requires:

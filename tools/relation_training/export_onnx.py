@@ -117,6 +117,16 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def predicate_order_sha256(predicates: Sequence[str]) -> str:
+    digest = hashlib.sha256()
+    for predicate in predicates:
+        if not predicate or "\0" in predicate:
+            raise ValueError("predicate names must be non-empty without NUL bytes")
+        digest.update(predicate.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def dummy_boxes(max_boxes: int) -> torch.Tensor:
     boxes = torch.zeros((1, max_boxes, 4), dtype=torch.float32)
     columns = max(1, int(max_boxes**0.5))
@@ -628,6 +638,7 @@ def main() -> None:
             "score_contract": "sigmoid(a * (pred + w * pair) + b)",
             "predicates": predicates,
             "predicate_count": len(predicates),
+            "predicate_order_sha256": predicate_order_sha256(predicates),
         })
 
     if args.check:

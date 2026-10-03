@@ -47,6 +47,7 @@ public:
     [[nodiscard]] const std::string& version() const noexcept;
     [[nodiscard]] const std::string& model_type() const noexcept;
     [[nodiscard]] const std::string& variant() const noexcept;
+    [[nodiscard]] const std::string& predicate_order_sha256() const noexcept;
     [[nodiscard]] const std::vector<ModelArtifact>& artifacts() const noexcept;
     [[nodiscard]] const ModelArtifact& artifact(std::string_view artifact_id) const;
     [[nodiscard]] std::filesystem::path artifact_path(const ModelArtifact& artifact) const;
@@ -57,6 +58,7 @@ private:
     std::string version_;
     std::string model_type_;
     std::string variant_;
+    std::string predicate_order_sha256_;
     std::vector<ModelArtifact> artifacts_;
 };
 

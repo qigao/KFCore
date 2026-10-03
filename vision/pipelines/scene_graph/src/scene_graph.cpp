@@ -158,28 +158,13 @@ public:
     std::uint64_t
     vocabulary_version() const noexcept override
     {
-        if constexpr (
-            std::is_same_v<
-                Model,
-                relation::OpenVocabularyRelation>)
-        {
-            return model_->vocabulary_version();
-        }
-        return 0U;
+        return model_->vocabulary_version();
     }
 
     const std::vector<std::string>&
     predicates() const noexcept override
     {
-        if constexpr (
-            std::is_same_v<
-                Model,
-                relation::OpenVocabularyRelation>)
-        {
-            return model_->predicates();
-        }
-        static const std::vector<std::string> empty;
-        return empty;
+        return model_->predicates();
     }
 
     relation::RelationFrame

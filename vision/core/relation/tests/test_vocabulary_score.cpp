@@ -133,6 +133,21 @@ spec("open vocabulary relation scoring")
             RelationError);
     }
 
+    it("counts default spatial weights against the vocabulary byte limit")
+    {
+        PredicateVocabulary vocabulary;
+        vocabulary.predicates = {"x"};
+        vocabulary.embedding_dim = 1U;
+        vocabulary.embeddings = {1.0F};
+
+        check_throws_as(
+            normalize_predicate_vocabulary(vocabulary, 1U, 8U),
+            RelationError);
+        const auto normalized =
+            normalize_predicate_vocabulary(std::move(vocabulary), 1U, 9U);
+        check(normalized.spatial_weights.size() == std::size_t{1U});
+    }
+
     it("zeros invalid pair logits before decoding")
     {
         const float semantic[] = {1.0F, 0.0F};

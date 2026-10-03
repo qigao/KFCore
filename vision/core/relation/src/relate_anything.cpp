@@ -5,8 +5,10 @@
 #include "kfcore/image_processor/error.hpp"
 #include "kfcore/relation/error.hpp"
 #include "kfcore/runtime/error.hpp"
+#include <salts/crypto.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -22,6 +24,8 @@ namespace kfcore::relation
 {
 namespace
 {
+
+constexpr std::uint64_t kFixedVocabularyVersion = 1U;
 
 [[noreturn]] void throw_invalid(const std::string& detail)
 {
@@ -88,6 +92,10 @@ void validate_options(const RelateAnythingOptions& options)
         {
             throw_invalid("predicate names must not be empty");
         }
+        if (predicate.find('\0') != std::string::npos)
+        {
+            throw_invalid("predicate names must not contain NUL bytes");
+        }
     }
     if (!std::isfinite(options.threshold) || options.threshold < 0.0F ||
         options.threshold > 1.0F)
@@ -110,6 +118,41 @@ void validate_options(const RelateAnythingOptions& options)
     {
         throw_resource("configured byte limits must be positive");
     }
+}
+
+std::string predicate_order_sha256(const std::vector<std::string>& predicates)
+{
+    salts_crypto_sha256_ctx_t context{};
+    if (salts_crypto_sha256_init(&context) != SALTS_CRYPTO_OK)
+    {
+        throw_runtime("predicate-order SHA-256 initialization failed");
+    }
+
+    static constexpr char kSeparator = '\0';
+    for (const std::string& predicate : predicates)
+    {
+        if (salts_crypto_sha256_update(
+                &context, predicate.data(), predicate.size()) != SALTS_CRYPTO_OK ||
+            salts_crypto_sha256_update(
+                &context, &kSeparator, sizeof(kSeparator)) != SALTS_CRYPTO_OK)
+        {
+            throw_runtime("predicate-order SHA-256 update failed");
+        }
+    }
+
+    std::array<std::uint8_t, SALTS_CRYPTO_SHA256_DIGEST_SIZE> digest{};
+    if (salts_crypto_sha256_final(&context, digest.data()) != SALTS_CRYPTO_OK)
+    {
+        throw_runtime("predicate-order SHA-256 finalization failed");
+    }
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string result(digest.size() * 2U, '0');
+    for (std::size_t index = 0U; index < digest.size(); ++index)
+    {
+        result[index * 2U] = kHex[digest[index] >> 4U];
+        result[index * 2U + 1U] = kHex[digest[index] & 0x0fU];
+    }
+    return result;
 }
 
 const runtime::TensorDescriptor& require_tensor(
@@ -390,6 +433,12 @@ RelateAnything::load(runtime::Runtime& runtime,
     {
         throw_contract("ModelPackage model_type must be 'relation.relate-anything'");
     }
+    if (package.predicate_order_sha256().empty() ||
+        predicate_order_sha256(options.predicates) !=
+            package.predicate_order_sha256())
+    {
+        throw_contract("ordered predicate names do not match model package");
+    }
 
     try
     {
@@ -552,7 +601,7 @@ RelationFrame RelateAnything::infer(const image::ImageView& image,
         RelationFrame result;
         result.image_width = source.width;
         result.image_height = source.height;
-        result.vocabulary_version = 1U;
+        result.vocabulary_version = vocabulary_version();
         result.edges =
             detail::decode_relation_outputs(raw, regions, impl_->options);
         return result;
@@ -593,6 +642,11 @@ std::size_t RelateAnything::max_boxes() const noexcept
 std::size_t RelateAnything::max_pairs() const noexcept
 {
     return impl_ ? impl_->options.max_pairs : 0U;
+}
+
+std::uint64_t RelateAnything::vocabulary_version() const noexcept
+{
+    return impl_ ? kFixedVocabularyVersion : 0U;
 }
 
 const std::vector<std::string>& RelateAnything::predicates() const noexcept

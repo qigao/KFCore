@@ -20,6 +20,7 @@ from export_onnx import (
     check_onnx_parity,
     export_encoder_graph,
     export_graph,
+    predicate_order_sha256,
 )
 from losses import RelationLossConfig, supervised_relation_loss
 from model import (
@@ -241,6 +242,16 @@ def boxes() -> tuple[torch.Tensor, torch.Tensor]:
 
 
 class RelationModelTest(unittest.TestCase):
+    def test_fixed_vocabulary_hash_preserves_predicate_order(self):
+        self.assertEqual(
+            predicate_order_sha256(["on", "beside"]),
+            "132cf909c75fd7c994666eeb63109cea4cfdea9f4be050a4ef182b56b1dbec39",
+        )
+        self.assertNotEqual(
+            predicate_order_sha256(["beside", "on"]),
+            predicate_order_sha256(["on", "beside"]),
+        )
+
     def test_rich_pair_geometry_has_bounded_normalized_features(self):
         model = KFRelationModel(
             ToyBackbone(),

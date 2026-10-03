@@ -228,7 +228,10 @@ PredicateVocabulary normalize_predicate_vocabulary(
     bytes = checked_vocabulary_add(
         bytes,
         checked_vocabulary_multiply(
-            vocabulary.spatial_weights.size(), sizeof(float)));
+            vocabulary.spatial_weights.empty()
+                ? vocabulary.predicates.size()
+                : vocabulary.spatial_weights.size(),
+            sizeof(float)));
     for (const auto& name : vocabulary.predicates)
     {
         bytes = checked_vocabulary_add(bytes, name.size());

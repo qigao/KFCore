@@ -64,6 +64,7 @@ public:
     [[nodiscard]] std::int32_t input_size() const noexcept;
     [[nodiscard]] std::size_t max_boxes() const noexcept;
     [[nodiscard]] std::size_t max_pairs() const noexcept;
+    [[nodiscard]] std::uint64_t vocabulary_version() const noexcept;
     [[nodiscard]] const std::vector<std::string>& predicates() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
 
