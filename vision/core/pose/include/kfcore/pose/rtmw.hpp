@@ -66,7 +66,7 @@ public:
     infer(const image::ImageView& image,
           const std::vector<RectF>& person_boxes);
 
-    [[nodiscard]] const PoseSchema& schema() const noexcept;
+    [[nodiscard]] const PoseSchema& schema() const;
     [[nodiscard]] std::int32_t input_width() const noexcept;
     [[nodiscard]] std::int32_t input_height() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
