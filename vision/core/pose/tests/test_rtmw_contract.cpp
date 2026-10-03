@@ -37,10 +37,10 @@ struct TempPackage final
     char* directory = nullptr;
 };
 
-runtime::ModelPackage write_package(const std::string& semantic_contract,
+runtime::ModelPackage write_package(TempPackage& package,
+                                    const std::string& semantic_contract,
                                     const std::string& semantic_version)
 {
-    TempPackage package;
     const std::filesystem::path root(package.directory);
     const std::filesystem::path artifact = root / "rtmw.onnx";
     const std::filesystem::path manifest = root / "model.json";
@@ -93,21 +93,25 @@ spec("RTMW semantic model contract")
 {
     it("rejects a missing semantic contract before backend resolution")
     {
-        const auto package = write_package("", "");
+        TempPackage temp;
+        const auto package = write_package(temp, "", "");
         check(load_error_code(package) ==
               pose::PoseErrorCode::ModelContractMismatch);
     }
 
     it("rejects an unknown semantic contract before backend resolution")
     {
-        const auto package = write_package("pose.unknown", "1");
+        TempPackage temp;
+        const auto package = write_package(temp, "pose.unknown", "1");
         check(load_error_code(package) ==
               pose::PoseErrorCode::ModelContractMismatch);
     }
 
     it("accepts WholeBody133 semantics and then reaches backend resolution")
     {
+        TempPackage temp;
         const auto package = write_package(
+            temp,
             std::string(pose::kCocoWholeBody133SemanticContract),
             std::string(pose::kCocoWholeBody133SemanticVersion));
         check(load_error_code(package) ==
