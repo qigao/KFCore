@@ -564,15 +564,18 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
                                  const RtmwOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != "pose.rtmw")
+    if (package.model_type() != kRtmwModelType)
     {
         throw_contract("ModelPackage model_type must be 'pose.rtmw'");
     }
+    const PoseSchema& selected_schema = pose_schema_for_semantic_contract(
+        package.semantic_contract(), package.semantic_version());
     try
     {
         runtime::ResolvedModel resolved = runtime.load_model(package, policy);
         return std::unique_ptr<Rtmw>(
-            new Rtmw(std::make_unique<Impl>(std::move(resolved), options)));
+            new Rtmw(std::make_unique<Impl>(
+                std::move(resolved), options, selected_schema)));
     }
     catch (const PoseError&)
     {
