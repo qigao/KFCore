@@ -27,6 +27,7 @@ constexpr char kManifestSchema[] =
     "optional string compute_capability; optional string precision; optional string profile; } "
     "message Package { group<Artifact> artifacts; [name(\"schema\")] string schema_id; "
     "string id; string version; string model_type; optional string variant; "
+    "optional string semantic_contract; optional string semantic_version; "
     "optional string predicate_order_sha256; }";
 
 struct DataBindDeleter
@@ -438,6 +439,13 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
     result.version_ = required_string(record.get(), "version");
     result.model_type_ = required_string(record.get(), "model_type");
     result.variant_ = optional_string(record.get(), "variant");
+    result.semantic_contract_ = optional_string(record.get(), "semantic_contract");
+    result.semantic_version_ = optional_string(record.get(), "semantic_version");
+    if (result.semantic_contract_.empty() != result.semantic_version_.empty())
+    {
+        invalid_package(
+            "semantic_contract and semantic_version must be declared together");
+    }
     result.predicate_order_sha256_ =
         optional_string(record.get(), "predicate_order_sha256");
     if (!result.predicate_order_sha256_.empty() &&
@@ -530,6 +538,14 @@ const std::string& ModelPackage::id() const noexcept { return id_; }
 const std::string& ModelPackage::version() const noexcept { return version_; }
 const std::string& ModelPackage::model_type() const noexcept { return model_type_; }
 const std::string& ModelPackage::variant() const noexcept { return variant_; }
+const std::string& ModelPackage::semantic_contract() const noexcept
+{
+    return semantic_contract_;
+}
+const std::string& ModelPackage::semantic_version() const noexcept
+{
+    return semantic_version_;
+}
 const std::string& ModelPackage::predicate_order_sha256() const noexcept
 {
     return predicate_order_sha256_;
