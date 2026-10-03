@@ -31,6 +31,11 @@ constexpr std::size_t kInputWidth = 288U;
 constexpr std::size_t kInputHeight = 384U;
 constexpr std::size_t kXbins = 576U;
 constexpr std::size_t kYbins = 768U;
+constexpr double kMinNormalizationStd = 0.224;
+constexpr double kMaxReferenceInterpolationLevels = 2.0;
+constexpr double kPreprocessMaxAbsTolerance =
+    kMaxReferenceInterpolationLevels / 255.0 / kMinNormalizationStd + 1.0e-6;
+constexpr double kPreprocessMeanAbsTolerance = 0.0015;
 
 struct Case
 {
@@ -343,7 +348,9 @@ int main(int argc, char** argv)
                     static_cast<std::int32_t>(kInputHeight));
 
             const double preprocess_max = compare_vectors(
-                actual_preprocess.nchw, expected_preprocess, 0.020F,
+                actual_preprocess.nchw,
+                expected_preprocess,
+                kPreprocessMaxAbsTolerance,
                 "G1 preprocess/" + item.label);
             metrics.preprocess_max_abs =
                 (std::max)(metrics.preprocess_max_abs, preprocess_max);
@@ -456,8 +463,8 @@ int main(int argc, char** argv)
                 ? 0.0
                 : preprocess_sum / static_cast<double>(preprocess_values);
 
-        require(metrics.preprocess_mean_abs <= 0.0015,
-                "G1 preprocess mean abs delta exceeds 0.0015");
+        require(metrics.preprocess_mean_abs <= kPreprocessMeanAbsTolerance,
+                "G1 preprocess mean abs delta exceeds interpolation budget");
         require(metrics.source_coord_max_abs <= 0.25,
                 "G4 source coordinate max delta exceeds 0.25 px");
         require(metrics.source_score_max_abs <= 0.01,
