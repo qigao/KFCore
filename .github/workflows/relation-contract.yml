@@ -49,11 +49,19 @@ jobs:
           path: salts
           persist-credentials: false
 
+      - name: Checkout pinned Salts Utils crypto header
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: c25819116c62d84030a345658f3b6cc318a402bb
+          path: salts-utils
+          persist-credentials: false
+
       - name: Compile typed runtime contract
         shell: bash
         run: |
           set -euxo pipefail
-          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             vision/core/relation/src/relate_anything.cpp             vision/core/relation/src/open_vocabulary_relation.cpp             vision/core/relation/src/vocabulary_score.cpp             vision/core/relation/src/predicate_text_encoder.cpp             vision/core/relation/src/predicate_routing_gate.cpp
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -fsyntax-only             -Ivision/core/relation/include             -Ivision/core/relation/src             -Ivision/core/image_processor/include             -Ivision/image/cpu/include             -Iruntime/core/include             -Isalts-utils/crypto/include             vision/core/relation/src/relate_anything.cpp             vision/core/relation/src/open_vocabulary_relation.cpp             vision/core/relation/src/vocabulary_score.cpp             vision/core/relation/src/predicate_text_encoder.cpp             vision/core/relation/src/predicate_routing_gate.cpp
 
       - name: Build decoder tests
         shell: bash
