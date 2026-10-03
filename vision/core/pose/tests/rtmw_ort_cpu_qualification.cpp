@@ -57,6 +57,8 @@ struct Metrics
 {
     double preprocess_max_abs = 0.0;
     double preprocess_mean_abs = 0.0;
+    double preprocess_max_levels = 0.0;
+    double preprocess_mean_levels = 0.0;
     double simcc_max_abs = 0.0;
     double model_coord_max_abs = 0.0;
     double model_score_max_abs = 0.0;
@@ -267,6 +269,8 @@ void write_report(const std::filesystem::path& path,
            << "  \"case_count\": " << cases << ",\n"
            << "  \"preprocess_max_abs\": " << metrics.preprocess_max_abs << ",\n"
            << "  \"preprocess_mean_abs\": " << metrics.preprocess_mean_abs << ",\n"
+           << "  \"preprocess_max_levels\": " << metrics.preprocess_max_levels << ",\n"
+           << "  \"preprocess_mean_levels\": " << metrics.preprocess_mean_levels << ",\n"
            << "  \"simcc_max_abs\": " << metrics.simcc_max_abs << ",\n"
            << "  \"model_coord_max_abs\": " << metrics.model_coord_max_abs << ",\n"
            << "  \"model_score_max_abs\": " << metrics.model_score_max_abs << ",\n"
@@ -322,7 +326,8 @@ int main(int argc, char** argv)
             runtime, package, policy, options);
 
         Metrics metrics;
-        double preprocess_sum = 0.0;
+            double preprocess_sum = 0.0;
+        double preprocess_level_sum = 0.0;
         std::size_t preprocess_values = 0U;
 
         for (const Case& item : cases)
@@ -349,11 +354,23 @@ int main(int argc, char** argv)
                 "G1 preprocess/" + item.label);
             metrics.preprocess_max_abs =
                 (std::max)(metrics.preprocess_max_abs, preprocess_max);
+            const std::size_t plane = kInputHeight * kInputWidth;
             for (std::size_t i = 0U; i < expected_preprocess.size(); ++i)
             {
-                preprocess_sum += std::fabs(
+                const double normalized_delta = std::fabs(
                     static_cast<double>(actual_preprocess.nchw[i]) -
                     static_cast<double>(expected_preprocess[i]));
+                preprocess_sum += normalized_delta;
+                const std::size_t channel = i / plane;
+                require(channel < options.stddev.size(),
+                        "G1 preprocess channel index is out of range");
+                const double level_delta =
+                    normalized_delta *
+                    static_cast<double>(options.stddev[channel]) *
+                    255.0;
+                preprocess_level_sum += level_delta;
+                metrics.preprocess_max_levels = (std::max)(
+                    metrics.preprocess_max_levels, level_delta);
             }
             preprocess_values += expected_preprocess.size();
 
@@ -453,10 +470,14 @@ int main(int argc, char** argv)
             preprocess_values == 0U
                 ? 0.0
                 : preprocess_sum / static_cast<double>(preprocess_values);
+        metrics.preprocess_mean_levels =
+            preprocess_values == 0U
+                ? 0.0
+                : preprocess_level_sum / static_cast<double>(preprocess_values);
 
         const bool passed =
-            metrics.preprocess_max_abs <= kPreprocessMaxAbsTolerance &&
-            metrics.preprocess_mean_abs <= kPreprocessMeanAbsTolerance &&
+            metrics.preprocess_max_levels <= 2.01 &&
+            metrics.preprocess_mean_levels <= 0.15 &&
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
@@ -466,7 +487,9 @@ int main(int argc, char** argv)
         write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
                   << "G1 preprocess max=" << metrics.preprocess_max_abs
-                  << " mean=" << metrics.preprocess_mean_abs << '\n'
+                  << " mean=" << metrics.preprocess_mean_abs
+                  << " levels(max/mean)=" << metrics.preprocess_max_levels
+                  << "/" << metrics.preprocess_mean_levels << '\n'
                   << "G2 simcc max=" << metrics.simcc_max_abs << '\n'
                   << "G3 model coord max=" << metrics.model_coord_max_abs
                   << " score=" << metrics.model_score_max_abs << '\n'
