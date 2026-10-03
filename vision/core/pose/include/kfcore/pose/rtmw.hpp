@@ -2,6 +2,7 @@
 
 #include "kfcore/image_processor/types.hpp"
 #include "kfcore/pose/error.hpp"
+#include "kfcore/pose/schema.hpp"
 #include "kfcore/pose/types.hpp"
 #include "kfcore/runtime/model_package.hpp"
 #include "kfcore/runtime/resolver.hpp"
@@ -51,6 +52,13 @@ public:
          const runtime::ExecutionPolicy& policy,
          const RtmwOptions& options = {});
 
+    [[nodiscard]] PoseResult infer_pose(const image::ImageView& image,
+                                       const RectF& person_box);
+
+    [[nodiscard]] std::vector<PoseResult>
+    infer_pose(const image::ImageView& image,
+               const std::vector<RectF>& person_boxes);
+
     [[nodiscard]] WholeBodyPose infer(const image::ImageView& image,
                                       const RectF& person_box);
 
@@ -58,6 +66,7 @@ public:
     infer(const image::ImageView& image,
           const std::vector<RectF>& person_boxes);
 
+    [[nodiscard]] const PoseSchema& schema() const noexcept;
     [[nodiscard]] std::int32_t input_width() const noexcept;
     [[nodiscard]] std::int32_t input_height() const noexcept;
     [[nodiscard]] const runtime::ExecutionRoute& execution_route() const noexcept;
