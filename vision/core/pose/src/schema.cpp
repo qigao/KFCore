@@ -20,6 +20,12 @@ namespace
     throw PoseError(PoseErrorCode::InvalidArgument, "Pose schema: " + detail);
 }
 
+[[noreturn]] void throw_contract(const std::string& detail)
+{
+    throw PoseError(PoseErrorCode::ModelContractMismatch,
+                    "Pose semantic contract: " + detail);
+}
+
 PoseSchema make_coco_wholebody_133_schema()
 {
     PoseSchema schema;
@@ -365,6 +371,20 @@ const PoseSchema& coco_wholebody_133_schema()
 {
     static const PoseSchema schema = make_coco_wholebody_133_schema();
     return schema;
+}
+
+const PoseSchema&
+pose_schema_for_semantic_contract(std::string_view semantic_contract,
+                                  std::string_view semantic_version)
+{
+    if (semantic_contract == kCocoWholeBody133SemanticContract &&
+        semantic_version == kCocoWholeBody133SemanticVersion)
+    {
+        return coco_wholebody_133_schema();
+    }
+    throw_contract(
+        "unsupported semantic identity '" + std::string(semantic_contract) +
+        "' version '" + std::string(semantic_version) + "'");
 }
 
 } // namespace kfcore::pose
