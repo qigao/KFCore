@@ -100,6 +100,13 @@ std::string optional_string(const DataBindRecord* record, const char* name)
     return value.data == nullptr ? std::string{} : std::string(value.data, value.length);
 }
 
+bool has_field(const DataBindRecord* record, const char* name)
+{
+    DataBindRecordField field = DATA_BIND_RECORD_FIELD_INIT;
+    DataBindError error = DATA_BIND_ERROR_INIT;
+    return data_bind_record_find_field(record, name, &field, &error) == DATA_BIND_OK;
+}
+
 std::string required_string(const DataBindRecordView& view, const char* name,
                             DataBindError& error)
 {
@@ -439,12 +446,18 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
     result.version_ = required_string(record.get(), "version");
     result.model_type_ = required_string(record.get(), "model_type");
     result.variant_ = optional_string(record.get(), "variant");
+    const bool has_semantic_contract =
+        has_field(record.get(), "semantic_contract");
+    const bool has_semantic_version =
+        has_field(record.get(), "semantic_version");
     result.semantic_contract_ = optional_string(record.get(), "semantic_contract");
     result.semantic_version_ = optional_string(record.get(), "semantic_version");
-    if (result.semantic_contract_.empty() != result.semantic_version_.empty())
+    if (has_semantic_contract != has_semantic_version ||
+        (has_semantic_contract &&
+         (result.semantic_contract_.empty() || result.semantic_version_.empty())))
     {
         invalid_package(
-            "semantic_contract and semantic_version must be declared together");
+            "semantic_contract and semantic_version must be non-empty and declared together");
     }
     result.predicate_order_sha256_ =
         optional_string(record.get(), "predicate_order_sha256");
