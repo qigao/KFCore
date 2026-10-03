@@ -31,11 +31,6 @@ constexpr std::size_t kInputWidth = 288U;
 constexpr std::size_t kInputHeight = 384U;
 constexpr std::size_t kXbins = 576U;
 constexpr std::size_t kYbins = 768U;
-constexpr double kMinNormalizationStd = 0.224;
-constexpr double kMaxReferenceInterpolationLevels = 2.0;
-constexpr double kPreprocessMaxAbsTolerance =
-    kMaxReferenceInterpolationLevels / 255.0 / kMinNormalizationStd + 1.0e-6;
-constexpr double kPreprocessMeanAbsTolerance = 0.0015;
 
 struct Case
 {
@@ -326,7 +321,7 @@ int main(int argc, char** argv)
             runtime, package, policy, options);
 
         Metrics metrics;
-            double preprocess_sum = 0.0;
+        double preprocess_sum = 0.0;
         double preprocess_level_sum = 0.0;
         std::size_t preprocess_values = 0U;
 
