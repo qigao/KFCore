@@ -1,5 +1,6 @@
 add_library(kfcore_pose_core STATIC
-  src/rtmw.cpp)
+  src/rtmw.cpp
+  src/schema.cpp)
 target_include_directories(kfcore_pose_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -23,3 +24,5 @@ cmake_install_headers(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERNS "*.hpp")
+
+add_subdirectory(tests)
