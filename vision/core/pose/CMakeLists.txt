@@ -1,6 +1,7 @@
 add_library(kfcore_pose_core STATIC
   src/rtmw.cpp
-  src/schema.cpp)
+  src/schema.cpp
+  src/simcc_decode.cpp)
 target_include_directories(kfcore_pose_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
