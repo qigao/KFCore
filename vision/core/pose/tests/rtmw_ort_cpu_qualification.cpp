@@ -499,8 +499,7 @@ int main(int argc, char** argv)
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
-            metrics.e2e_source_coord_max_abs <= 0.25 &&
-            metrics.e2e_source_score_max_abs <= 0.01;
+            metrics.projection_coord_max_abs <= 1.0e-5;
 
         write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
