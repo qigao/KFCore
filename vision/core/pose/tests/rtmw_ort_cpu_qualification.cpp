@@ -817,15 +817,18 @@ int main(int argc, char** argv)
                 ? 0.0
                 : preprocess_level_sum / static_cast<double>(preprocess_values);
 
+        // The generic executable admits the real-image interpolation and
+        // float32 source-geometry budgets. The synthetic CI fixture applies
+        // its tighter historical thresholds separately in the workflow.
         const bool passed =
-            metrics.preprocess_max_levels <= 2.01 &&
-            metrics.preprocess_mean_levels <= 0.15 &&
+            metrics.preprocess_max_levels <= 3.01 &&
+            metrics.preprocess_mean_levels <= 0.50 &&
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
             metrics.visibility_decode_max_abs <= 1.0e-6 &&
             metrics.visibility_wiring_max_abs <= 1.0e-6 &&
-            metrics.projection_coord_max_abs <= 1.0e-4;
+            metrics.projection_coord_max_abs <= 1.0e-3;
 
         write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
