@@ -17,6 +17,14 @@ cmake_add_test(
   FOLDER "${_pose_test_folder}")
 
 cmake_add_test(
+  NAME test_pose_heatmap_decode
+  SOURCES test_heatmap_decode.cpp
+  LIBS KFCore::pose_core Salts::TinyTest
+  INCLUDES ../src
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_pose_test_folder}")
+
+cmake_add_test(
   NAME test_pose_rtmw_contract
   SOURCES test_rtmw_contract.cpp
   LIBS KFCore::pose_core Salts::TinyTest

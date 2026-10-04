@@ -65,10 +65,13 @@ jobs:
           cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Isalts/tinytest/include -c salts/tinytest/src/tinytest.c -o "$out/tinytest.o"
           c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -c vision/core/pose/src/schema.cpp -o "$out/schema.o"
           c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -Ivision/core/pose/src -c vision/core/pose/src/simcc_decode.cpp -o "$out/simcc_decode.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -Ivision/core/pose/src -c vision/core/pose/src/heatmap_decode.cpp -o "$out/heatmap_decode.o"
           c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -Isalts/tinytest/include -c vision/core/pose/tests/test_schema.cpp -o "$out/test_schema.o"
           c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -Ivision/core/pose/src -Isalts/tinytest/include -c vision/core/pose/tests/test_simcc_decode.cpp -o "$out/test_simcc_decode.o"
+          c++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Ivision/core/pose/include -Ivision/core/pose/src -Isalts/tinytest/include -c vision/core/pose/tests/test_heatmap_decode.cpp -o "$out/test_heatmap_decode.o"
           c++ -fsanitize=address,undefined "$out/tinytest.o" "$out/schema.o" "$out/test_schema.o" -o "$out/test_pose_schema"
           c++ -fsanitize=address,undefined "$out/tinytest.o" "$out/simcc_decode.o" "$out/test_simcc_decode.o" -o "$out/test_pose_simcc_decode"
+          c++ -fsanitize=address,undefined "$out/tinytest.o" "$out/heatmap_decode.o" "$out/test_heatmap_decode.o" -o "$out/test_pose_heatmap_decode"
 
       - name: Run focused sanitizer tests
         shell: bash
@@ -79,6 +82,7 @@ jobs:
           set -euxo pipefail
           "$RUNNER_TEMP/pose-contract/test_pose_schema"
           "$RUNNER_TEMP/pose-contract/test_pose_simcc_decode"
+          "$RUNNER_TEMP/pose-contract/test_pose_heatmap_decode"
 
       - name: Verify unchanged tracked sources
         if: always()
