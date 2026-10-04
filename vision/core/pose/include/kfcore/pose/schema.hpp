@@ -43,6 +43,8 @@ struct PoseSchema
     std::vector<PoseKeypointDescriptor> keypoints;
     std::vector<PoseEdge> edges;
     std::vector<PoseGroup> groups;
+
+    // Model output channel -> stable PoseKeypointDescriptor::id.
     std::vector<std::uint32_t> output_map;
 };
 
