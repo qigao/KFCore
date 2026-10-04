@@ -1,0 +1,74 @@
+#pragma once
+
+#include "kfcore/image_processor/types.hpp"
+#include "kfcore/pose/error.hpp"
+#include "kfcore/pose/schema.hpp"
+#include "kfcore/pose/types.hpp"
+#include "kfcore/runtime/model_package.hpp"
+#include "kfcore/runtime/resolver.hpp"
+#include "kfcore/runtime/runtime.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace kfcore::pose
+{
+
+inline constexpr std::string_view kVitPoseModelType = "pose.vitpose";
+
+struct VitPoseOptions
+{
+    // Zero means resolve from a static artifact shape.
+    std::int32_t input_width = 0;
+    std::int32_t input_height = 0;
+
+    // Empty means accept the single input/output exposed by the artifact.
+    std::string input_name;
+    std::string heatmap_name;
+
+    std::size_t max_source_bytes = 64U * 1024U * 1024U;
+    std::size_t max_tensor_bytes = 32U * 1024U * 1024U;
+    std::size_t max_output_bytes = 32U * 1024U * 1024U;
+};
+
+class VitPose final
+{
+public:
+    ~VitPose();
+
+    VitPose(const VitPose&) = delete;
+    VitPose& operator=(const VitPose&) = delete;
+
+    [[nodiscard]] static std::unique_ptr<VitPose>
+    load(runtime::Runtime& runtime,
+         const runtime::ModelPackage& package,
+         const runtime::ExecutionPolicy& policy,
+         const VitPoseOptions& options = {});
+
+    [[nodiscard]] PoseResult
+    infer_pose(const image::ImageView& image,
+               const RectF& person_box);
+
+    [[nodiscard]] std::vector<PoseResult>
+    infer_pose(const image::ImageView& image,
+               const std::vector<RectF>& person_boxes);
+
+    [[nodiscard]] const PoseSchema& schema() const;
+    [[nodiscard]] std::int32_t input_width() const noexcept;
+    [[nodiscard]] std::int32_t input_height() const noexcept;
+    [[nodiscard]] std::size_t heatmap_width() const noexcept;
+    [[nodiscard]] std::size_t heatmap_height() const noexcept;
+    [[nodiscard]] const runtime::ExecutionRoute&
+    execution_route() const noexcept;
+
+private:
+    struct Impl;
+    explicit VitPose(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+} // namespace kfcore::pose
