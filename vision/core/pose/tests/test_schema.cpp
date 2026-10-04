@@ -30,6 +30,39 @@ PoseSchema minimal_schema()
 
 spec("pose schema")
 {
+    it("exposes the canonical COCO17 semantic schema")
+    {
+        const PoseSchema& schema = coco_17_schema();
+
+        check(schema.id == kCoco17SchemaId);
+        check(schema.version == std::uint32_t{1U});
+        check(schema.name == std::string{"coco-17"});
+        check(schema.keypoints.size() == std::size_t{17U});
+        check(schema.output_map.size() == std::size_t{17U});
+        check(schema.edges.size() == std::size_t{19U});
+        check(schema.groups.size() == std::size_t{1U});
+        check(schema.groups[0].name == std::string{"body"});
+        check(schema.groups[0].keypoint_ids.size() == std::size_t{17U});
+
+        check(schema.keypoints[0].name == std::string{"nose"});
+        check(schema.keypoints[5].name == std::string{"left_shoulder"});
+        check(schema.keypoints[10].name == std::string{"right_wrist"});
+        check(schema.keypoints[15].name == std::string{"left_ankle"});
+        check(schema.keypoints[16].name == std::string{"right_ankle"});
+
+        check(schema.keypoints[1].mirror_id == std::uint32_t{2U});
+        check(schema.keypoints[2].mirror_id == std::uint32_t{1U});
+        check(schema.keypoints[15].mirror_id == std::uint32_t{16U});
+        check(schema.keypoints[16].mirror_id == std::uint32_t{15U});
+
+        for (std::uint32_t id = 0U; id < 17U; ++id)
+        {
+            check(schema.keypoints[id].id == id);
+            check(schema.output_map[id] == id);
+            check(schema.groups[0].keypoint_ids[id] == id);
+        }
+    }
+
     it("exposes the canonical COCO WholeBody 133 ordering")
     {
         const PoseSchema& schema = coco_wholebody_133_schema();
@@ -63,11 +96,15 @@ spec("pose schema")
 
     it("resolves the built-in schema from explicit model semantics")
     {
-        const PoseSchema& schema = pose_schema_for_semantic_contract(
+        const PoseSchema& coco17 = pose_schema_for_semantic_contract(
+            kCoco17SemanticContract,
+            kCoco17SemanticVersion);
+        const PoseSchema& wholebody = pose_schema_for_semantic_contract(
             kCocoWholeBody133SemanticContract,
             kCocoWholeBody133SemanticVersion);
 
-        check(&schema == &coco_wholebody_133_schema());
+        check(&coco17 == &coco_17_schema());
+        check(&wholebody == &coco_wholebody_133_schema());
         check_throws_as(
             pose_schema_for_semantic_contract(
                 "pose.unknown",
@@ -76,6 +113,11 @@ spec("pose schema")
         check_throws_as(
             pose_schema_for_semantic_contract(
                 kCocoWholeBody133SemanticContract,
+                "2"),
+            PoseError);
+        check_throws_as(
+            pose_schema_for_semantic_contract(
+                kCoco17SemanticContract,
                 "2"),
             PoseError);
     }
