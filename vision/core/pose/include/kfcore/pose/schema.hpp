@@ -10,6 +10,12 @@
 namespace kfcore::pose
 {
 
+inline constexpr std::uint64_t kCoco17SchemaId =
+    UINT64_C(0x434f434f31370001);
+inline constexpr std::string_view kCoco17SemanticContract =
+    "pose.coco-17";
+inline constexpr std::string_view kCoco17SemanticVersion = "1";
+
 inline constexpr std::uint64_t kCocoWholeBody133SchemaId =
     UINT64_C(0x434f434f57423133);
 inline constexpr std::string_view kCocoWholeBody133SemanticContract =
@@ -50,6 +56,7 @@ struct PoseSchema
 
 void validate_pose_schema(const PoseSchema& schema);
 
+[[nodiscard]] const PoseSchema& coco_17_schema();
 [[nodiscard]] const PoseSchema& coco_wholebody_133_schema();
 [[nodiscard]] const PoseSchema&
 pose_schema_for_semantic_contract(std::string_view semantic_contract,
