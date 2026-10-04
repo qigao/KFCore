@@ -3,6 +3,7 @@ add_library(kfcore_pose_core STATIC
   src/schema.cpp
   src/simcc_decode.cpp
   src/heatmap_decode.cpp
+  src/topdown_udp_preprocess.cpp
   src/rtmw_preprocess.cpp
   src/pose_semantic_config.cpp)
 target_include_directories(kfcore_pose_core
