@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import os
+import shutil
 from pathlib import Path
 
 import cv2
@@ -87,7 +89,10 @@ def main() -> None:
     )
 
     target_model = out / "end2end.onnx"
-    target_model.write_bytes(model_path.read_bytes())
+    try:
+        os.link(model_path, target_model)
+    except OSError:
+        shutil.copy2(model_path, target_model)
     model_sha = sha256_file(target_model)
 
     semantic_config = {
