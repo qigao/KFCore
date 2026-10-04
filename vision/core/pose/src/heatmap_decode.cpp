@@ -138,6 +138,42 @@ std::vector<double> gaussian_kernel(std::size_t kernel)
     {
         return {1.0};
     }
+    if (kernel == 3U)
+    {
+        return {0.25, 0.5, 0.25};
+    }
+    if (kernel == 5U)
+    {
+        return {
+            0.0625, 0.25, 0.375, 0.25, 0.0625
+        };
+    }
+    if (kernel == 7U)
+    {
+        return {
+            0.03125,
+            0.109375,
+            0.21875,
+            0.28125,
+            0.21875,
+            0.109375,
+            0.03125,
+        };
+    }
+    if (kernel == 9U)
+    {
+        return {
+            0.015625,
+            0.05078125,
+            0.1171875,
+            0.19921875,
+            0.234375,
+            0.19921875,
+            0.1171875,
+            0.05078125,
+            0.015625,
+        };
+    }
 
     const double radius =
         static_cast<double>(kernel - 1U) * 0.5;
