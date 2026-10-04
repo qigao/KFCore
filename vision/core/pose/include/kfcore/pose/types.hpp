@@ -66,6 +66,10 @@ struct PoseResult
     RectF source_box;
     std::uint64_t schema_id = 0U;
     std::uint64_t capabilities = 0U;
+
+    // Results follow model output-channel order. Semantic identity is carried
+    // by PoseKeypoint::id; consumers must not treat the vector index as a
+    // stable keypoint id.
     std::vector<PoseKeypoint> keypoints;
 };
 
