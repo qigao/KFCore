@@ -7,6 +7,7 @@
 #include "kfcore/runtime/runtime.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -51,6 +52,48 @@ struct ReferencePoint
     float visibility = 0.0F;
 };
 
+struct RegionMetrics
+{
+    std::size_t total = 0U;
+    std::size_t valid_coordinate_count = 0U;
+    std::size_t same_simcc_bin_count = 0U;
+    double coordinate_max_abs = 0.0;
+    double coordinate_sum_abs = 0.0;
+    double confidence_max_abs = 0.0;
+    double confidence_sum_abs = 0.0;
+    double visibility_max_abs = 0.0;
+    double visibility_sum_abs = 0.0;
+};
+
+inline constexpr std::array<const char*, 5> kRegionNames {{
+    "body", "foot", "face", "left_hand", "right_hand"
+}};
+
+std::size_t region_index(std::uint32_t keypoint_id)
+{
+    if (keypoint_id <= 16U)
+    {
+        return 0U;
+    }
+    if (keypoint_id <= 22U)
+    {
+        return 1U;
+    }
+    if (keypoint_id <= 90U)
+    {
+        return 2U;
+    }
+    if (keypoint_id <= 111U)
+    {
+        return 3U;
+    }
+    if (keypoint_id <= 132U)
+    {
+        return 4U;
+    }
+    throw std::runtime_error("WholeBody133 keypoint id is outside region map");
+}
+
 struct Metrics
 {
     double preprocess_max_abs = 0.0;
@@ -65,6 +108,8 @@ struct Metrics
     double projection_coord_max_abs = 0.0;
     double e2e_source_coord_max_abs = 0.0;
     double e2e_source_score_max_abs = 0.0;
+    double e2e_source_visibility_max_abs = 0.0;
+    std::array<RegionMetrics, kRegionNames.size()> regions {};
 };
 
 void require(bool condition, const std::string& message)
@@ -208,6 +253,61 @@ kfcore::image::BgrImage synthetic_image()
     return image;
 }
 
+kfcore::image::BgrImage
+load_source_image(const std::filesystem::path& fixture)
+{
+    const std::filesystem::path raw_path = fixture / "source.bgr";
+    if (!std::filesystem::exists(raw_path))
+    {
+        return synthetic_image();
+    }
+
+    std::ifstream metadata(fixture / "source.tsv");
+    require(static_cast<bool>(metadata),
+            "source.bgr requires source.tsv dimensions");
+
+    std::int64_t width = 0;
+    std::int64_t height = 0;
+    metadata >> width >> height;
+    require(static_cast<bool>(metadata),
+            "source.tsv must contain width and height");
+    require(width > 0 && height > 0 &&
+                width <= 16384 && height <= 16384,
+            "source dimensions are outside qualification bounds");
+
+    const std::uint64_t pixels =
+        static_cast<std::uint64_t>(width) *
+        static_cast<std::uint64_t>(height);
+    require(pixels <=
+                static_cast<std::uint64_t>(
+                    (std::numeric_limits<std::size_t>::max)() / 3U),
+            "source image byte count overflows size_t");
+    const std::size_t expected_bytes =
+        static_cast<std::size_t>(pixels) * 3U;
+
+    std::ifstream stream(
+        raw_path, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(stream),
+            "cannot open source.bgr");
+    const std::streamsize bytes = stream.tellg();
+    require(bytes >= 0 &&
+                static_cast<std::uint64_t>(bytes) ==
+                    static_cast<std::uint64_t>(expected_bytes),
+            "source.bgr size does not match source.tsv");
+    stream.seekg(0);
+
+    kfcore::image::BgrImage image;
+    image.width = static_cast<std::int32_t>(width);
+    image.height = static_cast<std::int32_t>(height);
+    image.pixels.resize(expected_bytes);
+    stream.read(
+        reinterpret_cast<char*>(image.pixels.data()),
+        static_cast<std::streamsize>(expected_bytes));
+    require(static_cast<bool>(stream),
+            "cannot read complete source.bgr");
+    return image;
+}
+
 double compare_vectors(const std::vector<float>& actual,
                        const std::vector<float>& expected,
                        const std::string& subject)
@@ -280,7 +380,52 @@ void write_report(const std::filesystem::path& path,
            << "  \"visibility_wiring_max_abs\": " << metrics.visibility_wiring_max_abs << ",\n"
            << "  \"projection_coord_max_abs\": " << metrics.projection_coord_max_abs << ",\n"
            << "  \"e2e_source_coord_max_abs\": " << metrics.e2e_source_coord_max_abs << ",\n"
-           << "  \"e2e_source_score_max_abs\": " << metrics.e2e_source_score_max_abs << "\n"
+           << "  \"e2e_source_score_max_abs\": " << metrics.e2e_source_score_max_abs << ",\n"
+           << "  \"e2e_source_visibility_max_abs\": "
+           << metrics.e2e_source_visibility_max_abs << ",\n"
+           << "  \"regions\": {\n";
+
+    for (std::size_t index = 0U; index < metrics.regions.size(); ++index)
+    {
+        const RegionMetrics& region = metrics.regions[index];
+        const double coordinate_mean =
+            region.valid_coordinate_count == 0U
+                ? 0.0
+                : region.coordinate_sum_abs /
+                      static_cast<double>(region.valid_coordinate_count);
+        const double confidence_mean =
+            region.total == 0U
+                ? 0.0
+                : region.confidence_sum_abs /
+                      static_cast<double>(region.total);
+        const double visibility_mean =
+            region.total == 0U
+                ? 0.0
+                : region.visibility_sum_abs /
+                      static_cast<double>(region.total);
+
+        stream << "    \"" << kRegionNames[index] << "\": {"
+               << "\"total\":" << region.total << ","
+               << "\"valid_coordinate_count\":"
+               << region.valid_coordinate_count << ","
+               << "\"same_simcc_bin_count\":"
+               << region.same_simcc_bin_count << ","
+               << "\"coordinate_max_abs\":"
+               << region.coordinate_max_abs << ","
+               << "\"coordinate_mean_abs\":"
+               << coordinate_mean << ","
+               << "\"confidence_max_abs\":"
+               << region.confidence_max_abs << ","
+               << "\"confidence_mean_abs\":"
+               << confidence_mean << ","
+               << "\"visibility_max_abs\":"
+               << region.visibility_max_abs << ","
+               << "\"visibility_mean_abs\":"
+               << visibility_mean << "}"
+               << (index + 1U == metrics.regions.size() ? "\n" : ",\n");
+    }
+
+    stream << "  }\n"
            << "}\n";
 }
 
@@ -299,7 +444,7 @@ int main(int argc, char** argv)
         const auto cases = load_cases(fixture / "cases.tsv");
         const auto reference =
             load_reference(fixture / "reference.tsv", cases.size());
-        const auto image = synthetic_image();
+        const auto image = load_source_image(fixture);
 
         kfcore::runtime::Runtime runtime;
         const auto backend = runtime.load_backend(plugin_path);
@@ -594,15 +739,72 @@ int main(int argc, char** argv)
                             std::fabs(generic.confidence - legacy.score) <= 1.0e-6F,
                         "WholeBodyPose adapter differs from generic PoseResult");
 
-                metrics.e2e_source_coord_max_abs = (std::max)(
-                    metrics.e2e_source_coord_max_abs,
-                    static_cast<double>((std::max)(
-                        std::fabs(generic.x - expected.source_x),
-                        std::fabs(generic.y - expected.source_y))));
+                const double confidence_delta = std::fabs(
+                    static_cast<double>(generic.confidence) -
+                    static_cast<double>(expected.confidence));
+                const double visibility_delta = std::fabs(
+                    static_cast<double>(generic.visibility) -
+                    static_cast<double>(expected.visibility));
                 metrics.e2e_source_score_max_abs = (std::max)(
                     metrics.e2e_source_score_max_abs,
-                    static_cast<double>(
-                        std::fabs(generic.confidence - expected.confidence)));
+                    confidence_delta);
+                metrics.e2e_source_visibility_max_abs = (std::max)(
+                    metrics.e2e_source_visibility_max_abs,
+                    visibility_delta);
+
+                RegionMetrics& region =
+                    metrics.regions[region_index(generic.id)];
+                ++region.total;
+                region.confidence_max_abs = (std::max)(
+                    region.confidence_max_abs, confidence_delta);
+                region.confidence_sum_abs += confidence_delta;
+                region.visibility_max_abs = (std::max)(
+                    region.visibility_max_abs, visibility_delta);
+                region.visibility_sum_abs += visibility_delta;
+
+                const bool expected_valid =
+                    expected.confidence > 0.0F;
+                const bool generic_valid =
+                    generic.confidence > 0.0F;
+                if (expected_valid && generic_valid)
+                {
+                    const double coordinate_delta = (std::max)(
+                        std::fabs(
+                            static_cast<double>(generic.x) -
+                            static_cast<double>(expected.source_x)),
+                        std::fabs(
+                            static_cast<double>(generic.y) -
+                            static_cast<double>(expected.source_y)));
+                    metrics.e2e_source_coord_max_abs = (std::max)(
+                        metrics.e2e_source_coord_max_abs,
+                        coordinate_delta);
+                    ++region.valid_coordinate_count;
+                    region.coordinate_max_abs = (std::max)(
+                        region.coordinate_max_abs, coordinate_delta);
+                    region.coordinate_sum_abs += coordinate_delta;
+
+                    const double actual_model_x =
+                        (static_cast<double>(generic.x) -
+                         static_cast<double>(actual_preprocess.geometry.center_x) +
+                         static_cast<double>(actual_preprocess.geometry.scale_width) * 0.5) *
+                        static_cast<double>(kInputWidth) /
+                        static_cast<double>(actual_preprocess.geometry.scale_width);
+                    const double actual_model_y =
+                        (static_cast<double>(generic.y) -
+                         static_cast<double>(actual_preprocess.geometry.center_y) +
+                         static_cast<double>(actual_preprocess.geometry.scale_height) * 0.5) *
+                        static_cast<double>(kInputHeight) /
+                        static_cast<double>(actual_preprocess.geometry.scale_height);
+                    if (std::fabs(
+                            actual_model_x -
+                            static_cast<double>(expected.model_x)) < 0.25 &&
+                        std::fabs(
+                            actual_model_y -
+                            static_cast<double>(expected.model_y)) < 0.25)
+                    {
+                        ++region.same_simcc_bin_count;
+                    }
+                }
             }
         }
 
@@ -615,15 +817,18 @@ int main(int argc, char** argv)
                 ? 0.0
                 : preprocess_level_sum / static_cast<double>(preprocess_values);
 
+        // The generic executable admits the real-image interpolation and
+        // float32 source-geometry budgets. The synthetic CI fixture applies
+        // its tighter historical thresholds separately in the workflow.
         const bool passed =
-            metrics.preprocess_max_levels <= 2.01 &&
-            metrics.preprocess_mean_levels <= 0.15 &&
+            metrics.preprocess_max_levels <= 3.01 &&
+            metrics.preprocess_mean_levels <= 0.50 &&
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
             metrics.visibility_decode_max_abs <= 1.0e-6 &&
             metrics.visibility_wiring_max_abs <= 1.0e-6 &&
-            metrics.projection_coord_max_abs <= 1.0e-4;
+            metrics.projection_coord_max_abs <= 1.0e-3;
 
         write_report(report, metrics, cases.size(), passed);
         std::cout << std::fixed << std::setprecision(8)
@@ -638,9 +843,10 @@ int main(int argc, char** argv)
                   << metrics.visibility_decode_max_abs << "/"
                   << metrics.visibility_wiring_max_abs << '\n'
                   << "G4 projection coord max=" << metrics.projection_coord_max_abs << '\n'
-                  << "E2E synthetic sensitivity coord/score="
+                  << "E2E sensitivity coord/score/visibility="
                   << metrics.e2e_source_coord_max_abs << "/"
-                  << metrics.e2e_source_score_max_abs << '\n';
+                  << metrics.e2e_source_score_max_abs << "/"
+                  << metrics.e2e_source_visibility_max_abs << '\n';
         return passed ? 0 : 2;
     }
     catch (const std::exception& error)

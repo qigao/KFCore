@@ -47,6 +47,8 @@ jobs:
       RTMW_SDK_URL: https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-x-l_simcc-cocktail14_270e-384x288_20231122.zip
       RTMW_SDK_SHA256: a87e1af41a0a067776dba7d46e1c21c8f6e9f18e247e0e606718dd1f31e96ffd
       RTMW_ONNX_SHA256: bd033156e5104c4f5d2edfe0453e02661e30a2f3da453ec93c8764d561b83054
+      REAL_IMAGE_URL: https://upload.wikimedia.org/wikipedia/commons/d/de/Full-length_portrait_of_a_man%2C_standing%2C_facing_front_LCCN2005692477.jpg
+      REAL_IMAGE_SHA256: 8d515fc2125c1db2d66b0cc16745bdda70b181be12c1fbd8e72ab61859a9ebbe
 
     steps:
       - uses: actions/checkout@v4
@@ -257,6 +259,173 @@ jobs:
           print(json.dumps(report, indent=2, sort_keys=True))
           PY
 
+      - name: Download public-domain real-image fixture
+        shell: bash
+        run: |
+          set -euxo pipefail
+          image="$RUNNER_TEMP/rtmw-real-source.jpg"
+          curl --fail --location --retry 3 \
+            --user-agent 'KFCore-CI/1.0 (real-image qualification)' \
+            --output "$image" "$REAL_IMAGE_URL"
+          echo "$REAL_IMAGE_SHA256  $image" | sha256sum --check -
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import cv2
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "rtmw-real-source.jpg"
+          image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+          if image is None:
+              raise RuntimeError("cannot decode public-domain RTMW source image")
+          print("real-image shape:", image.shape)
+          assert image.shape[:2] == (4096, 3281)
+          PY
+
+      - name: Generate independent real-image RTMW fixtures
+        shell: bash
+        run: |
+          set -euxo pipefail
+          common=(
+            --onnx "$RUNNER_TEMP/rtmw-reference/end2end.onnx"
+            --image "$RUNNER_TEMP/rtmw-real-source.jpg"
+            --source-url "$REAL_IMAGE_URL"
+          )
+          python tools/pose_qualification/make_rtmw_real_image_qualification_fixture.py \
+            "${common[@]}" \
+            --out-dir "$RUNNER_TEMP/rtmw-real-normal"
+          python tools/pose_qualification/make_rtmw_real_image_qualification_fixture.py \
+            "${common[@]}" \
+            --occluded \
+            --out-dir "$RUNNER_TEMP/rtmw-real-occluded"
+
+      - name: Run real-image C++ qualification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          plugin="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/libkfcore_backend_onnxruntime.so"
+          executable="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/kfcore_pose_rtmw_ort_cpu_qualification"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          for mode in normal occluded; do
+            fixture="$RUNNER_TEMP/rtmw-real-$mode"
+            report="$RUNNER_TEMP/rtmw-real-$mode-report.json"
+            set +e
+            "$executable" "$plugin" "$fixture" "$report"
+            status=$?
+            set -e
+            test -f "$report"
+            if [ "$status" -eq 1 ]; then
+              exit 1
+            fi
+            if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
+              exit "$status"
+            fi
+          done
+
+      - name: Validate and record real-image baseline evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          evidence = {}
+          reports = {}
+          for mode in ("normal", "occluded"):
+              fixture = root / f"rtmw-real-{mode}"
+              evidence[mode] = json.loads(
+                  (fixture / "fixture-evidence.json").read_text()
+              )
+              reports[mode] = json.loads(
+                  (root / f"rtmw-real-{mode}-report.json").read_text()
+              )
+
+              assert evidence[mode]["schema"] == "kfcore.rtmw-real-image-fixture/1"
+              assert evidence[mode]["model_sha256"] == os.environ["RTMW_ONNX_SHA256"]
+              assert evidence[mode]["source_url"] == os.environ["REAL_IMAGE_URL"]
+              assert evidence[mode]["source_image_sha256"] == os.environ["REAL_IMAGE_SHA256"]
+              assert evidence[mode]["source_size"] == [3281, 4096]
+              assert evidence[mode]["keypoint_count"] == 133
+              assert reports[mode]["passed"] is True
+
+              # Contract gates remain strict. E2E coordinate/score deltas are
+              # deliberately recorded but not thresholded in this discovery run.
+              assert reports[mode]["preprocess_max_levels"] <= 3.01
+              assert reports[mode]["preprocess_mean_levels"] <= 0.50
+              assert reports[mode]["simcc_max_abs"] <= 1.0e-4
+              assert reports[mode]["model_coord_max_abs"] <= 1.0e-6
+              assert reports[mode]["model_score_max_abs"] <= 1.0e-5
+              assert reports[mode]["visibility_decode_max_abs"] <= 1.0e-6
+              assert reports[mode]["visibility_wiring_max_abs"] <= 1.0e-6
+              assert reports[mode]["projection_coord_max_abs"] <= 1.0e-3
+
+              expected_totals = {
+                  "normal": {
+                      "body": 68,
+                      "foot": 24,
+                      "face": 272,
+                      "left_hand": 84,
+                      "right_hand": 84,
+                  },
+                  "occluded": {
+                      "body": 17,
+                      "foot": 6,
+                      "face": 68,
+                      "left_hand": 21,
+                      "right_hand": 21,
+                  },
+              }
+              assert set(reports[mode]["regions"]) == set(expected_totals[mode])
+              for region, expected_total in expected_totals[mode].items():
+                  metrics = reports[mode]["regions"][region]
+                  assert metrics["total"] == expected_total
+                  assert 0 <= metrics["valid_coordinate_count"] <= expected_total
+                  assert (
+                      0
+                      <= metrics["same_simcc_bin_count"]
+                      <= metrics["valid_coordinate_count"]
+                  )
+                  for key in (
+                      "coordinate_max_abs",
+                      "coordinate_mean_abs",
+                      "confidence_max_abs",
+                      "confidence_mean_abs",
+                      "visibility_max_abs",
+                      "visibility_mean_abs",
+                  ):
+                      assert metrics[key] >= 0.0
+                  if metrics["valid_coordinate_count"]:
+                      assert (
+                          metrics["same_simcc_bin_count"]
+                          / metrics["valid_coordinate_count"]
+                          >= 0.70
+                      )
+
+              valid = sum(
+                  value["valid_coordinate_count"]
+                  for value in reports[mode]["regions"].values()
+              )
+              same_bin = sum(
+                  value["same_simcc_bin_count"]
+                  for value in reports[mode]["regions"].values()
+              )
+              assert valid > 0
+              assert same_bin / valid >= 0.90
+
+          assert reports["normal"]["e2e_source_coord_max_abs"] <= 5.5
+          assert reports["occluded"]["e2e_source_coord_max_abs"] <= 4.8
+
+          assert evidence["normal"]["source_image_sha256"] == evidence["occluded"]["source_image_sha256"]
+          assert evidence["normal"]["occluded"] is False
+          assert evidence["occluded"]["occluded"] is True
+
+          print("REAL_IMAGE_SHA256=", evidence["normal"]["source_image_sha256"])
+          print("normal report:", json.dumps(reports["normal"], indent=2, sort_keys=True))
+          print("occluded report:", json.dumps(reports["occluded"], indent=2, sort_keys=True))
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -265,6 +434,10 @@ jobs:
             ${{ runner.temp }}/rtmw-report.json
             ${{ runner.temp }}/rtmw-fixture/fixture-evidence.json
             ${{ runner.temp }}/rtmw-fixture/pose.json
+            ${{ runner.temp }}/rtmw-real-normal-report.json
+            ${{ runner.temp }}/rtmw-real-normal/fixture-evidence.json
+            ${{ runner.temp }}/rtmw-real-occluded-report.json
+            ${{ runner.temp }}/rtmw-real-occluded/fixture-evidence.json
           if-no-files-found: error
           retention-days: 7
 
