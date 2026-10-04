@@ -97,6 +97,42 @@ spec("Gaussian heatmap UDP decoder")
         check(output.confidence == 1.0F);
     }
 
+    it("matches the UDP decoder for FP16 heatmap input")
+    {
+        constexpr std::size_t kWidth = 6U;
+        constexpr std::size_t kHeight = 6U;
+        std::array<std::uint16_t, kWidth * kHeight> values {};
+
+        const auto set = [&](std::size_t x,
+                             std::size_t y,
+                             std::uint16_t value)
+        {
+            values[y * kWidth + x] = value;
+        };
+
+        set(3U, 3U, UINT16_C(0x3c00)); // 1.0
+        set(2U, 3U, UINT16_C(0x3800)); // 0.5
+        set(4U, 3U, UINT16_C(0x3a00)); // 0.75
+        set(3U, 2U, UINT16_C(0x3400)); // 0.25
+        set(3U, 4U, UINT16_C(0x3800)); // 0.5
+        set(2U, 2U, UINT16_C(0x3000)); // 0.125
+        set(4U, 2U, UINT16_C(0x3400)); // 0.25
+        set(2U, 4U, UINT16_C(0x3400)); // 0.25
+        set(4U, 4U, UINT16_C(0x3600)); // 0.375
+
+        DecodedHeatmapKeypoint output;
+        decode_gaussian_heatmap_udp(
+            {values.data(), HeatmapElementType::Float16,
+             1U, kHeight, kWidth},
+            {3U},
+            &output,
+            1U);
+
+        check(std::fabs(output.x - 3.15932857F) < 3.0e-5F);
+        check(std::fabs(output.y - 3.14108496F) < 3.0e-5F);
+        check(output.confidence == 1.0F);
+    }
+
     it("keeps invalid coordinates when the raw heatmap peak is non-positive")
     {
         std::array<float, 16> values {};
