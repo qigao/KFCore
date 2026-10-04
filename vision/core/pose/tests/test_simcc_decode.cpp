@@ -96,6 +96,21 @@ spec("SimCC decode")
         check(std::fabs(visibility - 0.57611686F) < 1.0e-6F);
     }
 
+    it("matches the released RTMW visibility scaling parameters")
+    {
+        const std::array<float, 3> x {{0.0F, 0.001F, 0.002F}};
+        const std::array<float, 3> y {{0.0F, 0.0015F, 0.0025F}};
+        float visibility = 0.0F;
+
+        decode_simcc_visibility(
+            {x.data(), SimccElementType::Float32, 1U, 3U},
+            {y.data(), SimccElementType::Float32, 1U, 3U},
+            {150.0F, 6.0F, 6.93F},
+            &visibility, 1U);
+
+        check(std::fabs(visibility - 0.6361855F) < 1.0e-5F);
+    }
+
     it("keeps visibility numerically separate from raw confidence")
     {
         const std::array<float, 3> x {{0.0F, 1.0F, 2.0F}};
