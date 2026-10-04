@@ -2,6 +2,7 @@ add_library(kfcore_pose_core STATIC
   src/rtmw.cpp
   src/schema.cpp
   src/simcc_decode.cpp
+  src/heatmap_decode.cpp
   src/rtmw_preprocess.cpp
   src/pose_semantic_config.cpp)
 target_include_directories(kfcore_pose_core
