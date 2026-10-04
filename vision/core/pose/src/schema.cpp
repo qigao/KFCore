@@ -26,6 +26,95 @@ namespace
                     "Pose semantic contract: " + detail);
 }
 
+PoseSchema make_coco_17_schema()
+{
+    PoseSchema schema;
+    schema.id = kCoco17SchemaId;
+    schema.version = 1U;
+    schema.name = "coco-17";
+    schema.keypoints.reserve(17U);
+    schema.output_map.reserve(17U);
+
+    static constexpr std::array<const char*, 17> kNames {{
+        "nose",
+        "left_eye",
+        "right_eye",
+        "left_ear",
+        "right_ear",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+    }};
+
+    for (std::uint32_t id = 0U; id < kNames.size(); ++id)
+    {
+        schema.keypoints.push_back(
+            {id, kNames[id], kInvalidPoseKeypointId});
+        schema.output_map.push_back(id);
+    }
+
+    const auto mirror_pair = [&](std::uint32_t left, std::uint32_t right)
+    {
+        schema.keypoints[left].mirror_id = right;
+        schema.keypoints[right].mirror_id = left;
+    };
+    mirror_pair(1U, 2U);
+    mirror_pair(3U, 4U);
+    mirror_pair(5U, 6U);
+    mirror_pair(7U, 8U);
+    mirror_pair(9U, 10U);
+    mirror_pair(11U, 12U);
+    mirror_pair(13U, 14U);
+    mirror_pair(15U, 16U);
+
+    static constexpr PoseEdge kEdges[] {
+        {15U, 13U},
+        {13U, 11U},
+        {16U, 14U},
+        {14U, 12U},
+        {11U, 12U},
+        {5U, 11U},
+        {6U, 12U},
+        {5U, 6U},
+        {5U, 7U},
+        {6U, 8U},
+        {7U, 9U},
+        {8U, 10U},
+        {1U, 2U},
+        {0U, 1U},
+        {0U, 2U},
+        {1U, 3U},
+        {2U, 4U},
+        {3U, 5U},
+        {4U, 6U},
+    };
+    schema.edges.insert(
+        schema.edges.end(),
+        std::begin(kEdges),
+        std::end(kEdges));
+
+    PoseGroup body;
+    body.name = "body";
+    body.keypoint_ids.reserve(17U);
+    for (std::uint32_t id = 0U; id < 17U; ++id)
+    {
+        body.keypoint_ids.push_back(id);
+    }
+    schema.groups.push_back(std::move(body));
+
+    validate_pose_schema(schema);
+    return schema;
+}
+
 PoseSchema make_coco_wholebody_133_schema()
 {
     PoseSchema schema;
@@ -367,6 +456,12 @@ void validate_pose_schema(const PoseSchema& schema)
     }
 }
 
+const PoseSchema& coco_17_schema()
+{
+    static const PoseSchema schema = make_coco_17_schema();
+    return schema;
+}
+
 const PoseSchema& coco_wholebody_133_schema()
 {
     static const PoseSchema schema = make_coco_wholebody_133_schema();
@@ -377,6 +472,11 @@ const PoseSchema&
 pose_schema_for_semantic_contract(std::string_view semantic_contract,
                                   std::string_view semantic_version)
 {
+    if (semantic_contract == kCoco17SemanticContract &&
+        semantic_version == kCoco17SemanticVersion)
+    {
+        return coco_17_schema();
+    }
     if (semantic_contract == kCocoWholeBody133SemanticContract &&
         semantic_version == kCocoWholeBody133SemanticVersion)
     {
