@@ -23,12 +23,12 @@ constexpr std::size_t kMaxSemanticConfigBytes = 64U * 1024U;
 
 constexpr char kPoseSemanticSchema[] =
     "message PoseSemantic { "
-    "[name(\"schema\")] string schema_id; "
-    "string codec; "
     "bool decode_visibility; "
     "optional double visibility_beta; "
     "optional double visibility_sigma_x; "
     "optional double visibility_sigma_y; "
+    "[name(\"schema\")] string schema_id; "
+    "string codec; "
     "}";
 
 struct DataBindDeleter
