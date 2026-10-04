@@ -2,7 +2,8 @@ add_library(kfcore_pose_core STATIC
   src/rtmw.cpp
   src/schema.cpp
   src/simcc_decode.cpp
-  src/rtmw_preprocess.cpp)
+  src/rtmw_preprocess.cpp
+  src/pose_semantic_config.cpp)
 target_include_directories(kfcore_pose_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -10,7 +11,7 @@ target_include_directories(kfcore_pose_core
 target_compile_features(kfcore_pose_core PUBLIC cxx_std_17)
 target_link_libraries(kfcore_pose_core
   PUBLIC KFCore::runtime_core KFCore::image_processor_core
-  PRIVATE KFCore::image_processor_cpu)
+  PRIVATE KFCore::image_processor_cpu Salts::DataBind)
 set_target_properties(kfcore_pose_core PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON

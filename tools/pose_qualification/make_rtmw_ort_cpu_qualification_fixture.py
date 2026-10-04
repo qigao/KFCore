@@ -19,6 +19,9 @@ SOURCE_H = 480
 BBOX_PADDING = 1.25
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
+VISIBILITY_BETA = 150.0
+VISIBILITY_SIGMA_X = 6.0
+VISIBILITY_SIGMA_Y = 6.93
 
 CASES = [
     ("normal", 123.25, 66.75, 190.5, 280.25),
@@ -81,6 +84,19 @@ def preprocess(image: np.ndarray, box):
     return nchw, (center_x, center_y, scale_width, scale_height)
 
 
+def visibility(simcc_x: np.ndarray, simcc_y: np.ndarray) -> np.ndarray:
+    def peak(axis: np.ndarray, scale: float) -> np.ndarray:
+        scaled = axis.astype(np.float64) * np.float64(scale)
+        scaled -= np.max(scaled, axis=1, keepdims=True)
+        exp = np.exp(scaled)
+        probability = exp / np.sum(exp, axis=1, keepdims=True)
+        return np.max(probability, axis=1)
+
+    peak_x = peak(simcc_x, VISIBILITY_BETA * VISIBILITY_SIGMA_X)
+    peak_y = peak(simcc_y, VISIBILITY_BETA * VISIBILITY_SIGMA_Y)
+    return np.minimum(peak_x, peak_y).astype(np.float32)
+
+
 def decode(simcc_x: np.ndarray, simcc_y: np.ndarray, geom):
     x_index = np.argmax(simcc_x, axis=1)
     y_index = np.argmax(simcc_y, axis=1)
@@ -119,6 +135,21 @@ def main() -> None:
     target_model.write_bytes(model_path.read_bytes())
     model_sha = sha256_file(target_model)
 
+    semantic_config = {
+        "schema": "kfcore.pose-semantic/1",
+        "codec": "simcc",
+        "decode_visibility": True,
+        "visibility_beta": VISIBILITY_BETA,
+        "visibility_sigma_x": VISIBILITY_SIGMA_X,
+        "visibility_sigma_y": VISIBILITY_SIGMA_Y,
+    }
+    semantic_path = out / "pose.json"
+    semantic_path.write_text(
+        json.dumps(semantic_config, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    semantic_sha = sha256_file(semantic_path)
+
     package = {
         "schema": "kfcore.model/1",
         "id": "rtmw-l-384x288-released-qualification",
@@ -126,6 +157,8 @@ def main() -> None:
         "model_type": "pose.rtmw",
         "semantic_contract": "pose.coco-wholebody-133",
         "semantic_version": "1",
+        "semantic_config": semantic_path.name,
+        "semantic_config_sha256": semantic_sha,
         "artifacts": [
             {
                 "id": "ort-cpu",
@@ -163,10 +196,16 @@ def main() -> None:
         "schema": "kfcore.rtmw-ort-cpu-fixture/1",
         "model_sha256": model_sha,
         "package_sha256": sha256_file(package_path),
+        "semantic_config_sha256": semantic_sha,
         "onnxruntime_version": ort.__version__,
         "opencv_version": cv2.__version__,
         "input_size": [INPUT_W, INPUT_H],
         "simcc_split_ratio": SPLIT_RATIO,
+        "visibility": {
+            "beta": VISIBILITY_BETA,
+            "sigma_x": VISIBILITY_SIGMA_X,
+            "sigma_y": VISIBILITY_SIGMA_Y,
+        },
         "keypoint_count": KEYPOINTS,
         "source_size": [SOURCE_W, SOURCE_H],
         "cases": [],
@@ -201,6 +240,7 @@ def main() -> None:
         model_x, model_y, source_x, source_y, score = decode(
             pred_x, pred_y, geom
         )
+        decoded_visibility = visibility(pred_x, pred_y)
 
         preprocess_path = out / f"preprocess-{case_index}.f32"
         simcc_x_path = out / f"simcc-x-{case_index}.f32"
@@ -220,6 +260,7 @@ def main() -> None:
                         format(float(source_x[keypoint]), ".9g"),
                         format(float(source_y[keypoint]), ".9g"),
                         format(float(score[keypoint]), ".9g"),
+                        format(float(decoded_visibility[keypoint]), ".9g"),
                     ]
                 )
             )

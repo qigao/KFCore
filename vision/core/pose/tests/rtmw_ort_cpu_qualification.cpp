@@ -31,6 +31,8 @@ constexpr std::size_t kInputWidth = 288U;
 constexpr std::size_t kInputHeight = 384U;
 constexpr std::size_t kXbins = 576U;
 constexpr std::size_t kYbins = 768U;
+constexpr kfcore::pose::detail::SimccVisibilityDecodeDesc
+    kVisibilityDecode {150.0F, 6.0F, 6.93F};
 
 struct Case
 {
@@ -46,6 +48,7 @@ struct ReferencePoint
     float source_x = -1.0F;
     float source_y = -1.0F;
     float confidence = 0.0F;
+    float visibility = 0.0F;
 };
 
 struct Metrics
@@ -57,6 +60,8 @@ struct Metrics
     double simcc_max_abs = 0.0;
     double model_coord_max_abs = 0.0;
     double model_score_max_abs = 0.0;
+    double visibility_decode_max_abs = 0.0;
+    double visibility_wiring_max_abs = 0.0;
     double projection_coord_max_abs = 0.0;
     double e2e_source_coord_max_abs = 0.0;
     double e2e_source_score_max_abs = 0.0;
@@ -133,7 +138,7 @@ load_reference(const std::filesystem::path& path, std::size_t case_count)
             continue;
         }
         const auto fields = split_tabs(line);
-        require(fields.size() == 7U, "reference row must have seven fields");
+        require(fields.size() == 8U, "reference row must have eight fields");
         const std::size_t case_index =
             static_cast<std::size_t>(std::stoull(fields[0]));
         const std::size_t keypoint =
@@ -146,6 +151,7 @@ load_reference(const std::filesystem::path& path, std::size_t case_count)
         point.source_x = std::stof(fields[4]);
         point.source_y = std::stof(fields[5]);
         point.confidence = std::stof(fields[6]);
+        point.visibility = std::stof(fields[7]);
         result[case_index][keypoint] = point;
         ++seen[case_index];
     }
@@ -270,6 +276,8 @@ void write_report(const std::filesystem::path& path,
            << "  \"simcc_max_abs\": " << metrics.simcc_max_abs << ",\n"
            << "  \"model_coord_max_abs\": " << metrics.model_coord_max_abs << ",\n"
            << "  \"model_score_max_abs\": " << metrics.model_score_max_abs << ",\n"
+           << "  \"visibility_decode_max_abs\": " << metrics.visibility_decode_max_abs << ",\n"
+           << "  \"visibility_wiring_max_abs\": " << metrics.visibility_wiring_max_abs << ",\n"
            << "  \"projection_coord_max_abs\": " << metrics.projection_coord_max_abs << ",\n"
            << "  \"e2e_source_coord_max_abs\": " << metrics.e2e_source_coord_max_abs << ",\n"
            << "  \"e2e_source_score_max_abs\": " << metrics.e2e_source_score_max_abs << "\n"
@@ -441,6 +449,18 @@ int main(int argc, char** argv)
                  kKeypoints, kYbins},
                 2.0F, decoded.data(), decoded.size());
 
+            std::vector<float> decoded_visibility(kKeypoints);
+            kfcore::pose::detail::decode_simcc_visibility(
+                {expected_x.data(),
+                 kfcore::pose::detail::SimccElementType::Float32,
+                 kKeypoints, kXbins},
+                {expected_y.data(),
+                 kfcore::pose::detail::SimccElementType::Float32,
+                 kKeypoints, kYbins},
+                kVisibilityDecode,
+                decoded_visibility.data(),
+                decoded_visibility.size());
+
             for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
             {
                 const ReferencePoint& expected =
@@ -455,6 +475,12 @@ int main(int argc, char** argv)
                     metrics.model_score_max_abs,
                     static_cast<double>(
                         std::fabs(actual.confidence - expected.confidence)));
+                metrics.visibility_decode_max_abs = (std::max)(
+                    metrics.visibility_decode_max_abs,
+                    static_cast<double>(
+                        std::fabs(
+                            decoded_visibility[keypoint] -
+                            expected.visibility)));
             }
 
             for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
@@ -478,6 +504,53 @@ int main(int argc, char** argv)
                         std::fabs(projected.second - expected.source_y))));
             }
 
+            std::vector<float> runtime_x(kKeypoints * kXbins);
+            std::vector<float> runtime_y(kKeypoints * kYbins);
+            kfcore::runtime::TensorView runtime_input {
+                input_desc.name,
+                kfcore::runtime::DataType::Float32,
+                {1, 3, static_cast<std::int64_t>(kInputHeight),
+                 static_cast<std::int64_t>(kInputWidth)},
+                actual_preprocess.nchw.data(),
+                actual_preprocess.nchw.size() * sizeof(float),
+                kfcore::runtime::MemoryKind::Host,
+                {},
+            };
+            std::vector<kfcore::runtime::MutableTensorView> runtime_outputs {
+                {
+                    x_desc.name,
+                    kfcore::runtime::DataType::Float32,
+                    {1, static_cast<std::int64_t>(kKeypoints),
+                     static_cast<std::int64_t>(kXbins)},
+                    runtime_x.data(),
+                    runtime_x.size() * sizeof(float),
+                    kfcore::runtime::MemoryKind::Host,
+                    {},
+                },
+                {
+                    y_desc.name,
+                    kfcore::runtime::DataType::Float32,
+                    {1, static_cast<std::int64_t>(kKeypoints),
+                     static_cast<std::int64_t>(kYbins)},
+                    runtime_y.data(),
+                    runtime_y.size() * sizeof(float),
+                    kfcore::runtime::MemoryKind::Host,
+                    {},
+                },
+            };
+            context->run({runtime_input}, runtime_outputs);
+            std::vector<float> runtime_visibility(kKeypoints);
+            kfcore::pose::detail::decode_simcc_visibility(
+                {runtime_x.data(),
+                 kfcore::pose::detail::SimccElementType::Float32,
+                 kKeypoints, kXbins},
+                {runtime_y.data(),
+                 kfcore::pose::detail::SimccElementType::Float32,
+                 kKeypoints, kYbins},
+                kVisibilityDecode,
+                runtime_visibility.data(),
+                runtime_visibility.size());
+
             const auto generic_pose =
                 rtmw->infer_pose(image.view(), item.box);
             const auto legacy_pose =
@@ -485,9 +558,11 @@ int main(int argc, char** argv)
 
             require(generic_pose.schema_id == pose_schema.id,
                     "generic RTMW result lost PoseSchema identity");
-            require(generic_pose.capabilities ==
-                        kfcore::pose::kPoseCapabilityConfidence,
-                    "generic RTMW result exposes unexpected capabilities");
+            require(
+                generic_pose.capabilities ==
+                    (kfcore::pose::kPoseCapabilityConfidence |
+                     kfcore::pose::kPoseCapabilityVisibility),
+                "generic RTMW result exposes unexpected capabilities");
             require(generic_pose.keypoints.size() == kKeypoints,
                     "generic RTMW result has unexpected keypoint count");
 
@@ -500,9 +575,20 @@ int main(int argc, char** argv)
 
                 require(generic.id == pose_schema.output_map[keypoint],
                         "generic RTMW result does not preserve output-map identity");
-                require(std::isnan(generic.presence) &&
-                            std::isnan(generic.visibility),
-                        "unsupported RTMW presence/visibility must remain unavailable");
+                require(
+                    std::isnan(generic.presence),
+                    "unsupported RTMW presence must remain unavailable");
+                require(
+                    std::isfinite(generic.visibility) &&
+                        generic.visibility >= 0.0F &&
+                        generic.visibility <= 1.0F,
+                    "RTMW visibility must be a finite probability");
+                metrics.visibility_wiring_max_abs = (std::max)(
+                    metrics.visibility_wiring_max_abs,
+                    static_cast<double>(
+                        std::fabs(
+                            generic.visibility -
+                            runtime_visibility[keypoint])));
                 require(std::fabs(generic.x - legacy.x) <= 1.0e-6F &&
                             std::fabs(generic.y - legacy.y) <= 1.0e-6F &&
                             std::fabs(generic.confidence - legacy.score) <= 1.0e-6F,
@@ -535,6 +621,8 @@ int main(int argc, char** argv)
             metrics.simcc_max_abs <= 1.0e-4 &&
             metrics.model_coord_max_abs <= 1.0e-6 &&
             metrics.model_score_max_abs <= 1.0e-5 &&
+            metrics.visibility_decode_max_abs <= 1.0e-6 &&
+            metrics.visibility_wiring_max_abs <= 1.0e-6 &&
             metrics.projection_coord_max_abs <= 1.0e-4;
 
         write_report(report, metrics, cases.size(), passed);
@@ -546,6 +634,9 @@ int main(int argc, char** argv)
                   << "G2 simcc max=" << metrics.simcc_max_abs << '\n'
                   << "G3 model coord max=" << metrics.model_coord_max_abs
                   << " score=" << metrics.model_score_max_abs << '\n'
+                  << "Visibility decode/wiring max="
+                  << metrics.visibility_decode_max_abs << "/"
+                  << metrics.visibility_wiring_max_abs << '\n'
                   << "G4 projection coord max=" << metrics.projection_coord_max_abs << '\n'
                   << "E2E synthetic sensitivity coord/score="
                   << metrics.e2e_source_coord_max_abs << "/"

@@ -163,6 +163,7 @@ jobs:
           set -euxo pipefail
           python tools/pose_qualification/make_rtmw_ort_cpu_qualification_fixture.py --onnx "$RUNNER_TEMP/rtmw-reference/end2end.onnx" --out-dir "$RUNNER_TEMP/rtmw-fixture"
           test -f "$RUNNER_TEMP/rtmw-fixture/model.json"
+          test -f "$RUNNER_TEMP/rtmw-fixture/pose.json"
           test -f "$RUNNER_TEMP/rtmw-fixture/reference.tsv"
           test -f "$RUNNER_TEMP/rtmw-fixture/fixture-evidence.json"
 
@@ -229,6 +230,15 @@ jobs:
           assert evidence["input_size"] == [288, 384]
           assert evidence["keypoint_count"] == 133
           assert evidence["simcc_split_ratio"] == 2.0
+          assert evidence["visibility"] == {
+              "beta": 150.0,
+              "sigma_x": 6.0,
+              "sigma_y": 6.93,
+          }
+          semantic = root / "rtmw-fixture" / "pose.json"
+          assert semantic.is_file()
+          import hashlib
+          assert hashlib.sha256(semantic.read_bytes()).hexdigest() == evidence["semantic_config_sha256"]
           assert report["schema"] == "kfcore.rtmw-ort-cpu-cpp-qualification/1"
           assert report["passed"] is True
           assert report["provider"] == "onnxruntime"
@@ -239,6 +249,8 @@ jobs:
           assert report["simcc_max_abs"] <= 1.0e-4
           assert report["model_coord_max_abs"] <= 1.0e-6
           assert report["model_score_max_abs"] <= 1.0e-5
+          assert report["visibility_decode_max_abs"] <= 1.0e-6
+          assert report["visibility_wiring_max_abs"] <= 1.0e-6
           assert report["projection_coord_max_abs"] <= 1.0e-4
           assert report["e2e_source_coord_max_abs"] >= 0.0
           assert report["e2e_source_score_max_abs"] >= 0.0
@@ -252,6 +264,7 @@ jobs:
           path: |
             ${{ runner.temp }}/rtmw-report.json
             ${{ runner.temp }}/rtmw-fixture/fixture-evidence.json
+            ${{ runner.temp }}/rtmw-fixture/pose.json
           if-no-files-found: error
           retention-days: 7
 

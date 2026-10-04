@@ -5,6 +5,7 @@
 #include "kfcore/runtime/runtime.hpp"
 #include "tinytest.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -37,13 +38,27 @@ struct TempPackage final
     char* directory = nullptr;
 };
 
-runtime::ModelPackage write_package(TempPackage& package,
-                                    const std::string& semantic_contract,
-                                    const std::string& semantic_version)
+runtime::ModelPackage write_package(
+    TempPackage& package,
+    const std::string& semantic_contract,
+    const std::string& semantic_version,
+    const std::string& semantic_config_json = {})
 {
     const std::filesystem::path root(package.directory);
     const std::filesystem::path artifact = root / "rtmw.onnx";
     const std::filesystem::path manifest = root / "model.json";
+    const std::filesystem::path semantic_config = root / "pose.json";
+
+    std::string semantic_config_sha;
+    if (!semantic_config_json.empty())
+    {
+        check_true(tt_write_file(
+                       semantic_config.string().c_str(),
+                       semantic_config_json.data(),
+                       semantic_config_json.size()) == 0);
+        semantic_config_sha =
+            runtime::compute_model_artifact_sha256(semantic_config);
+    }
 
     std::string json =
         "{\"schema\":\"kfcore.model/1\",\"id\":\"rtmw\","
@@ -55,6 +70,13 @@ runtime::ModelPackage write_package(TempPackage& package,
     if (!semantic_version.empty())
     {
         json += ",\"semantic_version\":\"" + semantic_version + "\"";
+    }
+    if (!semantic_config_json.empty())
+    {
+        json +=
+            ",\"semantic_config\":\"pose.json\","
+            "\"semantic_config_sha256\":\"" +
+            semantic_config_sha + "\"";
     }
     json +=
         ",\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
@@ -69,7 +91,13 @@ runtime::ModelPackage write_package(TempPackage& package,
     return runtime::ModelPackage::load(root);
 }
 
-pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
+struct LoadError
+{
+    pose::PoseErrorCode code = pose::PoseErrorCode::InvalidArgument;
+    std::string message;
+};
+
+LoadError load_error(const runtime::ModelPackage& package)
 {
     runtime::Runtime runtime;
     try
@@ -81,10 +109,15 @@ pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
     }
     catch (const pose::PoseError& error)
     {
-        return error.code();
+        return {error.code(), error.what()};
     }
     check(false);
-    return pose::PoseErrorCode::InvalidArgument;
+    return {};
+}
+
+pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
+{
+    return load_error(package).code;
 }
 
 } // namespace
@@ -116,5 +149,97 @@ spec("RTMW semantic model contract")
             std::string(pose::kCocoWholeBody133SemanticVersion));
         check(load_error_code(package) ==
               pose::PoseErrorCode::RuntimeFailure);
+    }
+
+    it("accepts an explicit confidence-only SimCC semantic config")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":false}");
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::RuntimeFailure);
+    }
+
+    it("accepts an explicit SimCC visibility config before backend resolution")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":true,"
+            "\"visibility_beta\":150.0,"
+            "\"visibility_sigma_x\":6.0,"
+            "\"visibility_sigma_y\":6.93}");
+        const auto error = load_error(package);
+        if (error.code != pose::PoseErrorCode::RuntimeFailure)
+        {
+            std::fprintf(stderr,
+                         "unexpected visibility RTMW load error: %s\n",
+                         error.message.c_str());
+        }
+        check(error.code == pose::PoseErrorCode::RuntimeFailure);
+    }
+
+    it("rejects incomplete visibility semantics before backend resolution")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":true,"
+            "\"visibility_beta\":150.0}");
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::ModelContractMismatch);
+    }
+
+    it("rejects visibility parameters when decoding is disabled")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":false,"
+            "\"visibility_beta\":150.0,"
+            "\"visibility_sigma_x\":6.0,"
+            "\"visibility_sigma_y\":6.93}");
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::ModelContractMismatch);
+    }
+
+    it("rejects a tampered semantic config before backend resolution")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":false}");
+
+        const std::filesystem::path config =
+            std::filesystem::path(temp.directory) / "pose.json";
+        static constexpr char kTampered[] = "{}";
+        check_true(tt_write_file(
+                       config.string().c_str(),
+                       kTampered,
+                       sizeof(kTampered) - 1U) == 0);
+
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::ModelContractMismatch);
     }
 }
