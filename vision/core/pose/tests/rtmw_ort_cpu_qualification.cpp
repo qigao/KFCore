@@ -763,13 +763,9 @@ int main(int argc, char** argv)
                 region.visibility_sum_abs += visibility_delta;
 
                 const bool expected_valid =
-                    expected.confidence > 0.0F &&
-                    expected.source_x >= 0.0F &&
-                    expected.source_y >= 0.0F;
+                    expected.confidence > 0.0F;
                 const bool generic_valid =
-                    generic.confidence > 0.0F &&
-                    generic.x >= 0.0F &&
-                    generic.y >= 0.0F;
+                    generic.confidence > 0.0F;
                 if (expected_valid && generic_valid)
                 {
                     const double coordinate_delta = (std::max)(
