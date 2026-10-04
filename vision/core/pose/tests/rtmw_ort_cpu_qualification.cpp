@@ -31,6 +31,8 @@ constexpr std::size_t kInputWidth = 288U;
 constexpr std::size_t kInputHeight = 384U;
 constexpr std::size_t kXbins = 576U;
 constexpr std::size_t kYbins = 768U;
+constexpr kfcore::pose::detail::SimccVisibilityDecodeDesc
+    kVisibilityDecode {150.0F, 6.0F, 6.93F};
 
 struct Case
 {
@@ -46,6 +48,7 @@ struct ReferencePoint
     float source_x = -1.0F;
     float source_y = -1.0F;
     float confidence = 0.0F;
+    float visibility = 0.0F;
 };
 
 struct Metrics
@@ -57,6 +60,8 @@ struct Metrics
     double simcc_max_abs = 0.0;
     double model_coord_max_abs = 0.0;
     double model_score_max_abs = 0.0;
+    double visibility_decode_max_abs = 0.0;
+    double visibility_wiring_max_abs = 0.0;
     double projection_coord_max_abs = 0.0;
     double e2e_source_coord_max_abs = 0.0;
     double e2e_source_score_max_abs = 0.0;
@@ -133,7 +138,7 @@ load_reference(const std::filesystem::path& path, std::size_t case_count)
             continue;
         }
         const auto fields = split_tabs(line);
-        require(fields.size() == 7U, "reference row must have seven fields");
+        require(fields.size() == 8U, "reference row must have eight fields");
         const std::size_t case_index =
             static_cast<std::size_t>(std::stoull(fields[0]));
         const std::size_t keypoint =
@@ -146,6 +151,7 @@ load_reference(const std::filesystem::path& path, std::size_t case_count)
         point.source_x = std::stof(fields[4]);
         point.source_y = std::stof(fields[5]);
         point.confidence = std::stof(fields[6]);
+        point.visibility = std::stof(fields[7]);
         result[case_index][keypoint] = point;
         ++seen[case_index];
     }
@@ -270,6 +276,8 @@ void write_report(const std::filesystem::path& path,
            << "  \"simcc_max_abs\": " << metrics.simcc_max_abs << ",\n"
            << "  \"model_coord_max_abs\": " << metrics.model_coord_max_abs << ",\n"
            << "  \"model_score_max_abs\": " << metrics.model_score_max_abs << ",\n"
+           << "  \"visibility_decode_max_abs\": " << metrics.visibility_decode_max_abs << ",\n"
+           << "  \"visibility_wiring_max_abs\": " << metrics.visibility_wiring_max_abs << ",\n"
            << "  \"projection_coord_max_abs\": " << metrics.projection_coord_max_abs << ",\n"
            << "  \"e2e_source_coord_max_abs\": " << metrics.e2e_source_coord_max_abs << ",\n"
            << "  \"e2e_source_score_max_abs\": " << metrics.e2e_source_score_max_abs << "\n"
