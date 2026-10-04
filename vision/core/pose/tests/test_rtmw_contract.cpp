@@ -5,6 +5,7 @@
 #include "kfcore/runtime/runtime.hpp"
 #include "tinytest.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -146,13 +147,8 @@ spec("RTMW semantic model contract")
             temp,
             std::string(pose::kCocoWholeBody133SemanticContract),
             std::string(pose::kCocoWholeBody133SemanticVersion));
-        const auto error = load_error(package);
-        if (error.code != pose::PoseErrorCode::RuntimeFailure)
-        {
-            std::fprintf(stderr, "unexpected RTMW load error: %s\n",
-                         error.message.c_str());
-        }
-        check(error.code == pose::PoseErrorCode::RuntimeFailure);
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::RuntimeFailure);
     }
 
     it("accepts an explicit SimCC visibility config before backend resolution")
@@ -168,8 +164,14 @@ spec("RTMW semantic model contract")
             "\"visibility_beta\":150.0,"
             "\"visibility_sigma_x\":6.0,"
             "\"visibility_sigma_y\":6.93}");
-        check(load_error_code(package) ==
-              pose::PoseErrorCode::RuntimeFailure);
+        const auto error = load_error(package);
+        if (error.code != pose::PoseErrorCode::RuntimeFailure)
+        {
+            std::fprintf(stderr,
+                         "unexpected visibility RTMW load error: %s\n",
+                         error.message.c_str());
+        }
+        check(error.code == pose::PoseErrorCode::RuntimeFailure);
     }
 
     it("rejects incomplete visibility semantics before backend resolution")
