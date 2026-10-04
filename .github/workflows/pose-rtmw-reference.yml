@@ -359,6 +359,42 @@ jobs:
               assert reports[mode]["visibility_wiring_max_abs"] <= 1.0e-6
               assert reports[mode]["projection_coord_max_abs"] <= 1.0e-4
 
+              expected_totals = {
+                  "normal": {
+                      "body": 68,
+                      "foot": 24,
+                      "face": 272,
+                      "left_hand": 84,
+                      "right_hand": 84,
+                  },
+                  "occluded": {
+                      "body": 17,
+                      "foot": 6,
+                      "face": 68,
+                      "left_hand": 21,
+                      "right_hand": 21,
+                  },
+              }
+              assert set(reports[mode]["regions"]) == set(expected_totals[mode])
+              for region, expected_total in expected_totals[mode].items():
+                  metrics = reports[mode]["regions"][region]
+                  assert metrics["total"] == expected_total
+                  assert 0 <= metrics["valid_coordinate_count"] <= expected_total
+                  assert (
+                      0
+                      <= metrics["same_simcc_bin_count"]
+                      <= metrics["valid_coordinate_count"]
+                  )
+                  for key in (
+                      "coordinate_max_abs",
+                      "coordinate_mean_abs",
+                      "confidence_max_abs",
+                      "confidence_mean_abs",
+                      "visibility_max_abs",
+                      "visibility_mean_abs",
+                  ):
+                      assert metrics[key] >= 0.0
+
           assert evidence["normal"]["source_image_sha256"] == evidence["occluded"]["source_image_sha256"]
           assert evidence["normal"]["occluded"] is False
           assert evidence["occluded"]["occluded"] is True
