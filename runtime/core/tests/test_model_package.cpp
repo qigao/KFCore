@@ -1,5 +1,6 @@
 #include "kfcore/runtime/model_package.hpp"
 
+#include "kfcore/runtime/error.hpp"
 #include "tinytest.hpp"
 
 #include <cstdlib>
