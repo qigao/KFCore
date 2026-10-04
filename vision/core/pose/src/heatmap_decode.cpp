@@ -15,6 +15,8 @@ namespace
 {
 
 constexpr std::size_t kMaxHeatmapExtent = 16384U;
+constexpr std::size_t kMaxHeatmapPlaneElements =
+    16U * 1024U * 1024U;
 constexpr std::size_t kMaxKeypoints = 4096U;
 constexpr std::size_t kMaxDarkKernel = 255U;
 
@@ -90,10 +92,12 @@ void validate_view(const HeatmapView& view)
 
     const std::size_t plane = view.width * view.height;
     if (plane / view.width != view.height ||
+        plane > kMaxHeatmapPlaneElements ||
         view.keypoints >
             (std::numeric_limits<std::size_t>::max)() / plane)
     {
-        throw_invalid("heatmap element count overflows size_t");
+        throw_invalid(
+            "heatmap plane is too large or element count overflows size_t");
     }
 }
 
