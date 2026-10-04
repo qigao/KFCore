@@ -208,6 +208,61 @@ kfcore::image::BgrImage synthetic_image()
     return image;
 }
 
+kfcore::image::BgrImage
+load_source_image(const std::filesystem::path& fixture)
+{
+    const std::filesystem::path raw_path = fixture / "source.bgr";
+    if (!std::filesystem::exists(raw_path))
+    {
+        return synthetic_image();
+    }
+
+    std::ifstream metadata(fixture / "source.tsv");
+    require(static_cast<bool>(metadata),
+            "source.bgr requires source.tsv dimensions");
+
+    std::int64_t width = 0;
+    std::int64_t height = 0;
+    metadata >> width >> height;
+    require(static_cast<bool>(metadata),
+            "source.tsv must contain width and height");
+    require(width > 0 && height > 0 &&
+                width <= 16384 && height <= 16384,
+            "source dimensions are outside qualification bounds");
+
+    const std::uint64_t pixels =
+        static_cast<std::uint64_t>(width) *
+        static_cast<std::uint64_t>(height);
+    require(pixels <=
+                static_cast<std::uint64_t>(
+                    (std::numeric_limits<std::size_t>::max)() / 3U),
+            "source image byte count overflows size_t");
+    const std::size_t expected_bytes =
+        static_cast<std::size_t>(pixels) * 3U;
+
+    std::ifstream stream(
+        raw_path, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(stream),
+            "cannot open source.bgr");
+    const std::streamsize bytes = stream.tellg();
+    require(bytes >= 0 &&
+                static_cast<std::uint64_t>(bytes) ==
+                    static_cast<std::uint64_t>(expected_bytes),
+            "source.bgr size does not match source.tsv");
+    stream.seekg(0);
+
+    kfcore::image::BgrImage image;
+    image.width = static_cast<std::int32_t>(width);
+    image.height = static_cast<std::int32_t>(height);
+    image.pixels.resize(expected_bytes);
+    stream.read(
+        reinterpret_cast<char*>(image.pixels.data()),
+        static_cast<std::streamsize>(expected_bytes));
+    require(static_cast<bool>(stream),
+            "cannot read complete source.bgr");
+    return image;
+}
+
 double compare_vectors(const std::vector<float>& actual,
                        const std::vector<float>& expected,
                        const std::string& subject)
@@ -299,7 +354,7 @@ int main(int argc, char** argv)
         const auto cases = load_cases(fixture / "cases.tsv");
         const auto reference =
             load_reference(fixture / "reference.tsv", cases.size());
-        const auto image = synthetic_image();
+        const auto image = load_source_image(fixture);
 
         kfcore::runtime::Runtime runtime;
         const auto backend = runtime.load_backend(plugin_path);
