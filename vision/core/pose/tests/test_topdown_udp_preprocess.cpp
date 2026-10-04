@@ -44,17 +44,17 @@ spec("top-down UDP preprocessing")
                 256);
 
         check(std::fabs(
-                  affine.values[0] -
+                  affine.destination_to_source[0] -
                   (46.875F / 191.0F)) < 1.0e-7F);
-        check(affine.values[1] == 0.0F);
+        check(affine.destination_to_source[1] == 0.0F);
         check(std::fabs(
-                  affine.values[2] - 1.5625F) < 1.0e-6F);
-        check(affine.values[3] == 0.0F);
+                  affine.destination_to_source[2] - 1.5625F) < 1.0e-6F);
+        check(affine.destination_to_source[3] == 0.0F);
         check(std::fabs(
-                  affine.values[4] -
+                  affine.destination_to_source[4] -
                   (62.5F / 255.0F)) < 1.0e-7F);
         check(std::fabs(
-                  affine.values[5] - 13.75F) < 1.0e-6F);
+                  affine.destination_to_source[5] - 13.75F) < 1.0e-6F);
     }
 
     it("shares exact source bounds with the UDP heatmap projection")
@@ -71,12 +71,12 @@ spec("top-down UDP preprocessing")
                 192,
                 256);
 
-        const float preprocess_left = affine.values[2];
-        const float preprocess_top = affine.values[5];
+        const float preprocess_left = affine.destination_to_source[2];
+        const float preprocess_top = affine.destination_to_source[5];
         const float preprocess_right =
-            affine.values[0] * 191.0F + affine.values[2];
+            affine.destination_to_source[0] * 191.0F + affine.destination_to_source[2];
         const float preprocess_bottom =
-            affine.values[4] * 255.0F + affine.values[5];
+            affine.destination_to_source[4] * 255.0F + affine.destination_to_source[5];
 
         const auto heatmap_top_left =
             heatmap_udp_to_source(
