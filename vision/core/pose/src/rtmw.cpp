@@ -2,6 +2,7 @@
 
 #include "simcc_decode.hpp"
 #include "rtmw_preprocess.hpp"
+#include "pose_semantic_config.hpp"
 
 #include "kfcore/image_processor/cpu.hpp"
 #include "kfcore/image_processor/error.hpp"
@@ -394,10 +395,12 @@ struct Rtmw::Impl final
 {
     Impl(runtime::ResolvedModel resolved_value,
          RtmwOptions options_value,
-         const PoseSchema& schema_value)
+         const PoseSchema& schema_value,
+         detail::PoseSemanticConfig semantic_config_value)
         : resolved(std::move(resolved_value))
         , options(std::move(options_value))
         , pose_schema(&schema_value)
+        , semantic_config(std::move(semantic_config_value))
         , keypoint_count(schema_value.output_map.size())
         , context(resolved.model->create_context())
     {
@@ -501,18 +504,42 @@ struct Rtmw::Impl final
         };
         context->run({input_view}, outputs);
 
+        const detail::SimccAxisView x_axis {
+            simcc_x.data(),
+            simcc_element_type(simcc_x.descriptor.data_type),
+            keypoint_count,
+            simcc_x_extent,
+        };
+        const detail::SimccAxisView y_axis {
+            simcc_y.data(),
+            simcc_element_type(simcc_y.descriptor.data_type),
+            keypoint_count,
+            simcc_y_extent,
+        };
+
         std::vector<detail::DecodedSimccKeypoint> decoded(keypoint_count);
         detail::decode_simcc(
-            {simcc_x.data(), simcc_element_type(simcc_x.descriptor.data_type),
-             keypoint_count, simcc_x_extent},
-            {simcc_y.data(), simcc_element_type(simcc_y.descriptor.data_type),
-             keypoint_count, simcc_y_extent},
+            x_axis, y_axis,
             options.simcc_split_ratio, decoded.data(), decoded.size());
+
+        std::vector<float> visibility;
+        if (semantic_config.decode_visibility)
+        {
+            visibility.resize(keypoint_count);
+            detail::decode_simcc_visibility(
+                x_axis, y_axis,
+                semantic_config.visibility,
+                visibility.data(), visibility.size());
+        }
 
         PoseResult result;
         result.source_box = box;
         result.schema_id = pose_schema->id;
         result.capabilities = kPoseCapabilityConfidence;
+        if (semantic_config.decode_visibility)
+        {
+            result.capabilities |= kPoseCapabilityVisibility;
+        }
         result.keypoints.reserve(keypoint_count);
 
         for (std::size_t channel = 0U; channel < keypoint_count; ++channel)
@@ -521,6 +548,10 @@ struct Rtmw::Impl final
             PoseKeypoint point;
             point.id = pose_schema->output_map[channel];
             point.confidence = decoded_point.confidence;
+            if (semantic_config.decode_visibility)
+            {
+                point.visibility = visibility[channel];
+            }
             if (point.confidence > 0.0F)
             {
                 const auto source_point = detail::rtmw_model_to_source(
@@ -538,6 +569,7 @@ struct Rtmw::Impl final
     runtime::ResolvedModel resolved;
     RtmwOptions options;
     const PoseSchema* pose_schema = nullptr;
+    detail::PoseSemanticConfig semantic_config;
     std::size_t keypoint_count = 0U;
     std::unique_ptr<runtime::ExecutionContext> context;
     runtime::TensorDescriptor input_descriptor;
@@ -602,12 +634,15 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
     }
     const PoseSchema& selected_schema = pose_schema_for_semantic_contract(
         package.semantic_contract(), package.semantic_version());
+    const detail::PoseSemanticConfig selected_semantics =
+        detail::load_pose_semantic_config(package);
     try
     {
         runtime::ResolvedModel resolved = runtime.load_model(package, policy);
         return std::unique_ptr<Rtmw>(
             new Rtmw(std::make_unique<Impl>(
-                std::move(resolved), options, selected_schema)));
+                std::move(resolved), options, selected_schema,
+                selected_semantics)));
     }
     catch (const PoseError&)
     {
