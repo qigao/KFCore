@@ -151,6 +151,20 @@ spec("RTMW semantic model contract")
               pose::PoseErrorCode::RuntimeFailure);
     }
 
+    it("accepts an explicit confidence-only SimCC semantic config")
+    {
+        TempPackage temp;
+        const auto package = write_package(
+            temp,
+            std::string(pose::kCocoWholeBody133SemanticContract),
+            std::string(pose::kCocoWholeBody133SemanticVersion),
+            "{\"schema\":\"kfcore.pose-semantic/1\","
+            "\"codec\":\"simcc\","
+            "\"decode_visibility\":false}");
+        check(load_error_code(package) ==
+              pose::PoseErrorCode::RuntimeFailure);
+    }
+
     it("accepts an explicit SimCC visibility config before backend resolution")
     {
         TempPackage temp;
