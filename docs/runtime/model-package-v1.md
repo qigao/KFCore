@@ -43,6 +43,21 @@ For example, RTMW WholeBody133 packages use:
 }
 ```
 
+A typed model may additionally pin a package-relative semantic sidecar:
+
+```json
+{
+  "semantic_config": "pose.json",
+  "semantic_config_sha256": "<lowercase sha256>"
+}
+```
+
+These fields must be declared together and require a semantic contract identity.
+The runtime verifies path containment and exposes
+`verify_model_semantic_config()` for content-integrity checking, but it does
+not interpret the sidecar. Typed model code owns the sidecar schema and
+semantics.
+
 `variant` is not a substitute for semantic identity. Backends must not infer a
 semantic contract from tensor dimensions, provider names, artifact format, or
 other execution details.
