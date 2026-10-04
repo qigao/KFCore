@@ -49,6 +49,10 @@ public:
     [[nodiscard]] const std::string& variant() const noexcept;
     [[nodiscard]] const std::string& semantic_contract() const noexcept;
     [[nodiscard]] const std::string& semantic_version() const noexcept;
+    [[nodiscard]] bool has_semantic_config() const noexcept;
+    [[nodiscard]] const std::filesystem::path& semantic_config() const noexcept;
+    [[nodiscard]] const std::string& semantic_config_sha256() const noexcept;
+    [[nodiscard]] std::filesystem::path semantic_config_path() const;
     [[nodiscard]] const std::string& predicate_order_sha256() const noexcept;
     [[nodiscard]] const std::vector<ModelArtifact>& artifacts() const noexcept;
     [[nodiscard]] const ModelArtifact& artifact(std::string_view artifact_id) const;
@@ -62,11 +66,14 @@ private:
     std::string variant_;
     std::string semantic_contract_;
     std::string semantic_version_;
+    std::filesystem::path semantic_config_;
+    std::string semantic_config_sha256_;
     std::string predicate_order_sha256_;
     std::vector<ModelArtifact> artifacts_;
 };
 
 void verify_model_artifact(const ModelPackage& package, const ModelArtifact& artifact);
+void verify_model_semantic_config(const ModelPackage& package);
 [[nodiscard]] std::string compute_model_artifact_sha256(
     const std::filesystem::path& artifact_path);
 

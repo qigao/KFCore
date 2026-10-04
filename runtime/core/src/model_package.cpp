@@ -28,6 +28,7 @@ constexpr char kManifestSchema[] =
     "message Package { group<Artifact> artifacts; [name(\"schema\")] string schema_id; "
     "string id; string version; string model_type; optional string variant; "
     "optional string semantic_contract; optional string semantic_version; "
+    "optional string semantic_config; optional string semantic_config_sha256; "
     "optional string predicate_order_sha256; }";
 
 struct DataBindDeleter
@@ -459,6 +460,39 @@ ModelPackage ModelPackage::load(const std::filesystem::path& package_directory)
         invalid_package(
             "semantic_contract and semantic_version must be non-empty and declared together");
     }
+
+    const bool has_semantic_config =
+        has_field(record.get(), "semantic_config");
+    const bool has_semantic_config_sha256 =
+        has_field(record.get(), "semantic_config_sha256");
+    const std::string semantic_config =
+        optional_string(record.get(), "semantic_config");
+    result.semantic_config_sha256_ =
+        optional_string(record.get(), "semantic_config_sha256");
+    if (has_semantic_config != has_semantic_config_sha256 ||
+        (has_semantic_config &&
+         (semantic_config.empty() || result.semantic_config_sha256_.empty())))
+    {
+        invalid_package(
+            "semantic_config and semantic_config_sha256 must be non-empty and declared together");
+    }
+    if (has_semantic_config && !has_semantic_contract)
+    {
+        invalid_package(
+            "semantic_config requires semantic_contract and semantic_version");
+    }
+    if (has_semantic_config &&
+        !valid_sha256(result.semantic_config_sha256_))
+    {
+        invalid_package(
+            "semantic_config_sha256 must be a lowercase SHA-256 digest");
+    }
+    if (has_semantic_config)
+    {
+        result.semantic_config_ = semantic_config;
+        (void)contained_path(result.root_, result.semantic_config_);
+    }
+
     result.predicate_order_sha256_ =
         optional_string(record.get(), "predicate_order_sha256");
     if (!result.predicate_order_sha256_.empty() &&
@@ -559,6 +593,26 @@ const std::string& ModelPackage::semantic_version() const noexcept
 {
     return semantic_version_;
 }
+bool ModelPackage::has_semantic_config() const noexcept
+{
+    return !semantic_config_.empty();
+}
+const std::filesystem::path& ModelPackage::semantic_config() const noexcept
+{
+    return semantic_config_;
+}
+const std::string& ModelPackage::semantic_config_sha256() const noexcept
+{
+    return semantic_config_sha256_;
+}
+std::filesystem::path ModelPackage::semantic_config_path() const
+{
+    if (semantic_config_.empty())
+    {
+        invalid_package("model package does not declare semantic_config");
+    }
+    return contained_path(root_, semantic_config_);
+}
 const std::string& ModelPackage::predicate_order_sha256() const noexcept
 {
     return predicate_order_sha256_;
@@ -581,6 +635,28 @@ const ModelArtifact& ModelPackage::artifact(std::string_view artifact_id) const
 std::filesystem::path ModelPackage::artifact_path(const ModelArtifact& artifact) const
 {
     return contained_path(root_, artifact.path);
+}
+
+void verify_model_semantic_config(const ModelPackage& package)
+{
+    if (!package.has_semantic_config())
+    {
+        invalid_package("model package does not declare semantic_config");
+    }
+    const auto path = package.semantic_config_path();
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error)
+    {
+        throw RuntimeError(
+            RuntimeErrorCode::FileIo,
+            "semantic config is not a regular file: " + path.u8string());
+    }
+    if (sha256_file(path) != package.semantic_config_sha256())
+    {
+        throw RuntimeError(
+            RuntimeErrorCode::ArtifactIntegrity,
+            "SHA-256 mismatch for semantic config");
+    }
 }
 
 void verify_model_artifact(const ModelPackage& package, const ModelArtifact& artifact)
