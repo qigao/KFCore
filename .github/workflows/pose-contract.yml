@@ -182,7 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --build build/pose-rtmw-contract --target test_runtime_model_package test_pose_rtmw_contract --parallel 2
+          cmake --build build/pose-rtmw-contract --target test_runtime_model_package test_pose_rtmw_contract test_pose_topdown_udp_preprocess --parallel 2
 
       - name: Run focused contract tests
         shell: bash
@@ -191,6 +191,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:${LD_LIBRARY_PATH:-}"
           build/pose-rtmw-contract/bin/test_runtime_model_package
           build/pose-rtmw-contract/bin/test_pose_rtmw_contract
+          build/pose-rtmw-contract/bin/test_pose_topdown_udp_preprocess
 
       - name: Verify unchanged tracked sources
         if: always()
