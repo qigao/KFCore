@@ -198,6 +198,70 @@ spec("runtime model package")
             kfcore::runtime::RuntimeError);
     }
 
+    it("loads and verifies a hash-pinned semantic config")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "rtmw.onnx";
+        const std::filesystem::path config = root / "pose.json";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"rtmw\","
+            "\"version\":\"1\",\"model_type\":\"pose.rtmw\","
+            "\"semantic_contract\":\"pose.coco-wholebody-133\","
+            "\"semantic_version\":\"1\","
+            "\"semantic_config\":\"pose.json\","
+            "\"semantic_config_sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"rtmw.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(config.string().c_str(), "abc", 3U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        const auto loaded = kfcore::runtime::ModelPackage::load(root);
+        check_true(loaded.has_semantic_config());
+        check_true(loaded.semantic_config() == std::filesystem::path("pose.json"));
+        check_true(loaded.semantic_config_path() ==
+                   std::filesystem::weakly_canonical(config));
+        check_nothrow(kfcore::runtime::verify_model_semantic_config(loaded));
+
+        check_true(tt_write_file(config.string().c_str(), "abd", 3U) == 0);
+        check_throws_as(
+            kfcore::runtime::verify_model_semantic_config(loaded),
+            kfcore::runtime::RuntimeError);
+    }
+
+    it("rejects semantic config without semantic identity")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "model.onnx";
+        const std::filesystem::path config = root / "pose.json";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"bad\","
+            "\"version\":\"1\",\"model_type\":\"pose.rtmw\","
+            "\"semantic_config\":\"pose.json\","
+            "\"semantic_config_sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"model.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(config.string().c_str(), "abc", 3U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        check_throws_as(
+            kfcore::runtime::ModelPackage::load(root),
+            kfcore::runtime::RuntimeError);
+    }
+
     it("rejects unpaired semantic contract metadata")
     {
         TempPackage package;
