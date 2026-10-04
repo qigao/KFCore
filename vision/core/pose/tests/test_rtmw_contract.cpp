@@ -90,7 +90,13 @@ runtime::ModelPackage write_package(
     return runtime::ModelPackage::load(root);
 }
 
-pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
+struct LoadError
+{
+    pose::PoseErrorCode code = pose::PoseErrorCode::InvalidArgument;
+    std::string message;
+};
+
+LoadError load_error(const runtime::ModelPackage& package)
 {
     runtime::Runtime runtime;
     try
@@ -102,10 +108,15 @@ pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
     }
     catch (const pose::PoseError& error)
     {
-        return error.code();
+        return {error.code(), error.what()};
     }
     check(false);
-    return pose::PoseErrorCode::InvalidArgument;
+    return {};
+}
+
+pose::PoseErrorCode load_error_code(const runtime::ModelPackage& package)
+{
+    return load_error(package).code;
 }
 
 } // namespace
@@ -135,8 +146,13 @@ spec("RTMW semantic model contract")
             temp,
             std::string(pose::kCocoWholeBody133SemanticContract),
             std::string(pose::kCocoWholeBody133SemanticVersion));
-        check(load_error_code(package) ==
-              pose::PoseErrorCode::RuntimeFailure);
+        const auto error = load_error(package);
+        if (error.code != pose::PoseErrorCode::RuntimeFailure)
+        {
+            std::fprintf(stderr, "unexpected RTMW load error: %s\n",
+                         error.message.c_str());
+        }
+        check(error.code == pose::PoseErrorCode::RuntimeFailure);
     }
 
     it("accepts an explicit SimCC visibility config before backend resolution")
