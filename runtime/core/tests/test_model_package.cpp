@@ -1,5 +1,6 @@
 #include "kfcore/runtime/model_package.hpp"
 
+#include "kfcore/runtime/error.hpp"
 #include "tinytest.hpp"
 
 #include <cstdlib>
@@ -123,5 +124,101 @@ spec("runtime model package")
         check_true(loaded.id() == "face68");
         check_true(loaded.model_type() == "face.face68");
         check_true(loaded.artifact_path(loaded.artifacts().front()) == artifact);
+    }
+
+    it("loads paired semantic contract metadata")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "rtmw.onnx";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"rtmw\","
+            "\"version\":\"1\",\"model_type\":\"pose.rtmw\","
+            "\"semantic_contract\":\"pose.coco-wholebody-133\","
+            "\"semantic_version\":\"1\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"rtmw.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        const auto loaded = kfcore::runtime::ModelPackage::load(root);
+        check_true(loaded.semantic_contract() == "pose.coco-wholebody-133");
+        check_true(loaded.semantic_version() == "1");
+    }
+
+    it("keeps semantic identity absent for legacy non-semantic packages")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "model.onnx";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"legacy\","
+            "\"version\":\"1\",\"model_type\":\"gesture.temporal-gru\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"model.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        const auto loaded = kfcore::runtime::ModelPackage::load(root);
+        check_true(loaded.semantic_contract().empty());
+        check_true(loaded.semantic_version().empty());
+    }
+
+    it("rejects explicitly empty semantic contract metadata")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "rtmw.onnx";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"rtmw\","
+            "\"version\":\"1\",\"model_type\":\"pose.rtmw\","
+            "\"semantic_contract\":\"\",\"semantic_version\":\"1\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"rtmw.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        check_throws_as(
+            kfcore::runtime::ModelPackage::load(root),
+            kfcore::runtime::RuntimeError);
+    }
+
+    it("rejects unpaired semantic contract metadata")
+    {
+        TempPackage package;
+        const std::filesystem::path root(package.directory);
+        const std::filesystem::path artifact = root / "rtmw.onnx";
+        const std::filesystem::path manifest = root / "model.json";
+        static constexpr char kManifest[] =
+            "{\"schema\":\"kfcore.model/1\",\"id\":\"rtmw\","
+            "\"version\":\"1\",\"model_type\":\"pose.rtmw\","
+            "\"semantic_contract\":\"pose.coco-wholebody-133\","
+            "\"artifacts\":[{\"id\":\"ort-cpu\",\"format\":\"onnx\","
+            "\"path\":\"rtmw.onnx\","
+            "\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\","
+            "\"backend\":\"onnxruntime\",\"device\":\"cpu\"}]}";
+
+        check_true(tt_write_file(artifact.string().c_str(), "", 0U) == 0);
+        check_true(tt_write_file(manifest.string().c_str(), kManifest,
+                                 sizeof(kManifest) - 1U) == 0);
+
+        check_throws_as(
+            kfcore::runtime::ModelPackage::load(root),
+            kfcore::runtime::RuntimeError);
     }
 }

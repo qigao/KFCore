@@ -15,6 +15,13 @@ cmake_add_test(
   INCLUDES ../src
   COMPILE_FEATURES cxx_std_17
   FOLDER "${_pose_test_folder}")
+
+cmake_add_test(
+  NAME test_pose_rtmw_contract
+  SOURCES test_rtmw_contract.cpp
+  LIBS KFCore::pose_core Salts::TinyTest
+  COMPILE_FEATURES cxx_std_17
+  FOLDER "${_pose_test_folder}")
 endif()
 
 if(KFCORE_BUILD_POSE_RTMW_ORT_CPU_QUALIFICATION)

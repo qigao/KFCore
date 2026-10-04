@@ -176,7 +176,19 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --build build/pose-rtmw-ort-cpu --target kfcore_backend_onnxruntime kfcore_pose_rtmw_ort_cpu_qualification --parallel 2
+          cmake --build build/pose-rtmw-ort-cpu --target kfcore_backend_onnxruntime kfcore_pose_rtmw_ort_cpu_qualification test_runtime_model_package test_pose_rtmw_contract --parallel 2
+
+      - name: Run model-package and RTMW semantic contracts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          package_test="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/test_runtime_model_package"
+          pose_test="$GITHUB_WORKSPACE/build/pose-rtmw-ort-cpu/bin/test_pose_rtmw_contract"
+          test -x "$package_test"
+          test -x "$pose_test"
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$ONNXRUNTIME_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          "$package_test"
+          "$pose_test"
 
       - name: Run layered C++ qualification
         shell: bash

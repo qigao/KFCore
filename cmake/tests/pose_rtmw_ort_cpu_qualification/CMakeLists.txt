@@ -24,7 +24,7 @@ list(APPEND CMAKE_MODULE_PATH "${_kfcore_root}/cmake")
 include(GNUInstallDirs)
 include("${_kfcore_root}/cmake/CmakeUtils.cmake")
 
-set(BUILD_TESTS OFF)
+set(BUILD_TESTS ON)
 set(KFCORE_BUILD_POSE_RTMW_ORT_CPU_QUALIFICATION ON)
 set(KFCORE_ENABLE_ONNXRUNTIME ON)
 set(KFCORE_ONNXRUNTIME_ENABLE_CUDA OFF)

@@ -319,8 +319,20 @@ int main(int argc, char** argv)
         kfcore::pose::RtmwOptions options;
         options.input_width = static_cast<std::int32_t>(kInputWidth);
         options.input_height = static_cast<std::int32_t>(kInputHeight);
+        require(
+            package.semantic_contract() ==
+                kfcore::pose::kCocoWholeBody133SemanticContract &&
+            package.semantic_version() ==
+                kfcore::pose::kCocoWholeBody133SemanticVersion,
+            "fixture semantic identity is not COCO WholeBody133");
+
         auto rtmw = kfcore::pose::Rtmw::load(
             runtime, package, policy, options);
+        const auto& pose_schema = rtmw->schema();
+        require(pose_schema.id == kfcore::pose::kCocoWholeBody133SchemaId,
+                "RTMW selected the wrong PoseSchema");
+        require(pose_schema.output_map.size() == kKeypoints,
+                "RTMW PoseSchema output map has unexpected keypoint count");
 
         Metrics metrics;
         double preprocess_sum = 0.0;
@@ -466,21 +478,45 @@ int main(int argc, char** argv)
                         std::fabs(projected.second - expected.source_y))));
             }
 
-            const auto pose = rtmw->infer(image.view(), item.box);
+            const auto generic_pose =
+                rtmw->infer_pose(image.view(), item.box);
+            const auto legacy_pose =
+                rtmw->infer(image.view(), item.box);
+
+            require(generic_pose.schema_id == pose_schema.id,
+                    "generic RTMW result lost PoseSchema identity");
+            require(generic_pose.capabilities ==
+                        kfcore::pose::kPoseCapabilityConfidence,
+                    "generic RTMW result exposes unexpected capabilities");
+            require(generic_pose.keypoints.size() == kKeypoints,
+                    "generic RTMW result has unexpected keypoint count");
+
             for (std::size_t keypoint = 0U; keypoint < kKeypoints; ++keypoint)
             {
                 const ReferencePoint& expected =
                     reference[item.index][keypoint];
-                const auto& actual = pose.keypoints[keypoint];
+                const auto& generic = generic_pose.keypoints[keypoint];
+                const auto& legacy = legacy_pose.keypoints[keypoint];
+
+                require(generic.id == pose_schema.output_map[keypoint],
+                        "generic RTMW result does not preserve output-map identity");
+                require(std::isnan(generic.presence) &&
+                            std::isnan(generic.visibility),
+                        "unsupported RTMW presence/visibility must remain unavailable");
+                require(std::fabs(generic.x - legacy.x) <= 1.0e-6F &&
+                            std::fabs(generic.y - legacy.y) <= 1.0e-6F &&
+                            std::fabs(generic.confidence - legacy.score) <= 1.0e-6F,
+                        "WholeBodyPose adapter differs from generic PoseResult");
+
                 metrics.e2e_source_coord_max_abs = (std::max)(
                     metrics.e2e_source_coord_max_abs,
                     static_cast<double>((std::max)(
-                        std::fabs(actual.x - expected.source_x),
-                        std::fabs(actual.y - expected.source_y))));
+                        std::fabs(generic.x - expected.source_x),
+                        std::fabs(generic.y - expected.source_y))));
                 metrics.e2e_source_score_max_abs = (std::max)(
                     metrics.e2e_source_score_max_abs,
                     static_cast<double>(
-                        std::fabs(actual.score - expected.confidence)));
+                        std::fabs(generic.confidence - expected.confidence)));
             }
         }
 

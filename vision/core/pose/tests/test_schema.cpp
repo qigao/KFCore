@@ -61,6 +61,25 @@ spec("pose schema")
         }
     }
 
+    it("resolves the built-in schema from explicit model semantics")
+    {
+        const PoseSchema& schema = pose_schema_for_semantic_contract(
+            kCocoWholeBody133SemanticContract,
+            kCocoWholeBody133SemanticVersion);
+
+        check(&schema == &coco_wholebody_133_schema());
+        check_throws_as(
+            pose_schema_for_semantic_contract(
+                "pose.unknown",
+                "1"),
+            PoseError);
+        check_throws_as(
+            pose_schema_for_semantic_contract(
+                kCocoWholeBody133SemanticContract,
+                "2"),
+            PoseError);
+    }
+
     it("accepts a valid custom schema")
     {
         PoseSchema schema = minimal_schema();

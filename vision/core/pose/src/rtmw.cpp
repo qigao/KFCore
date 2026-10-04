@@ -223,12 +223,13 @@ std::size_t expected_simcc_extent(std::int32_t input_extent, float split_ratio,
 }
 
 bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
+                            std::size_t expected_keypoints,
                             std::size_t expected_extent)
 {
     if (tensor.shape.size() == 2U)
     {
         return (tensor.shape[0] == -1 ||
-                tensor.shape[0] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+                tensor.shape[0] == static_cast<std::int64_t>(expected_keypoints)) &&
                (tensor.shape[1] == -1 ||
                 tensor.shape[1] == static_cast<std::int64_t>(expected_extent));
     }
@@ -236,7 +237,7 @@ bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
     {
         return (tensor.shape[0] == -1 || tensor.shape[0] == 1) &&
                (tensor.shape[1] == -1 ||
-                tensor.shape[1] == static_cast<std::int64_t>(kWholeBodyKeypointCount)) &&
+                tensor.shape[1] == static_cast<std::int64_t>(expected_keypoints)) &&
                (tensor.shape[2] == -1 ||
                 tensor.shape[2] == static_cast<std::int64_t>(expected_extent));
     }
@@ -246,6 +247,7 @@ bool compatible_simcc_shape(const runtime::TensorDescriptor& tensor,
 const runtime::TensorDescriptor& choose_simcc_output(
     const std::vector<runtime::TensorDescriptor>& outputs,
     const std::string& requested_name,
+    std::size_t expected_keypoints,
     std::size_t expected_extent,
     const char* axis)
 {
@@ -257,7 +259,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
             });
         if (named != outputs.end())
         {
-            if (!compatible_simcc_shape(*named, expected_extent))
+            if (!compatible_simcc_shape(*named, expected_keypoints, expected_extent))
             {
                 throw_contract(std::string("named SimCC ") + axis +
                                " tensor has an incompatible shape");
@@ -269,7 +271,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
     const runtime::TensorDescriptor* match = nullptr;
     for (const auto& tensor : outputs)
     {
-        if (!compatible_simcc_shape(tensor, expected_extent))
+        if (!compatible_simcc_shape(tensor, expected_keypoints, expected_extent))
         {
             continue;
         }
@@ -288,6 +290,7 @@ const runtime::TensorDescriptor& choose_simcc_output(
 }
 
 runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tensor,
+                                          std::size_t keypoint_count,
                                           std::size_t extent)
 {
     runtime::TensorShape shape = tensor.shape;
@@ -295,7 +298,7 @@ runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tenso
     {
         if (shape[0] == -1)
         {
-            shape[0] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+            shape[0] = static_cast<std::int64_t>(keypoint_count);
         }
         if (shape[1] == -1)
         {
@@ -311,7 +314,7 @@ runtime::TensorShape resolved_simcc_shape(const runtime::TensorDescriptor& tenso
         }
         if (shape[1] == -1)
         {
-            shape[1] = static_cast<std::int64_t>(kWholeBodyKeypointCount);
+            shape[1] = static_cast<std::int64_t>(keypoint_count);
         }
         if (shape[2] == -1)
         {
@@ -350,11 +353,13 @@ struct HostTensorBuffer
     std::vector<std::max_align_t> storage;
     std::size_t bytes = 0U;
 
-    void allocate(std::size_t extent, std::size_t max_output_bytes)
+    void allocate(std::size_t keypoint_count,
+                  std::size_t extent,
+                  std::size_t max_output_bytes)
     {
-        shape = resolved_simcc_shape(descriptor, extent);
+        shape = resolved_simcc_shape(descriptor, keypoint_count, extent);
         const std::size_t elements = checked_multiply(
-            kWholeBodyKeypointCount, extent, descriptor.name.c_str());
+            keypoint_count, extent, descriptor.name.c_str());
         bytes = checked_multiply(elements, element_size(descriptor.data_type),
                                  descriptor.name.c_str());
         if (bytes > max_output_bytes)
@@ -387,11 +392,19 @@ struct HostTensorBuffer
 
 struct Rtmw::Impl final
 {
-    Impl(runtime::ResolvedModel resolved_value, RtmwOptions options_value)
+    Impl(runtime::ResolvedModel resolved_value,
+         RtmwOptions options_value,
+         const PoseSchema& schema_value)
         : resolved(std::move(resolved_value))
         , options(std::move(options_value))
+        , pose_schema(&schema_value)
+        , keypoint_count(schema_value.output_map.size())
         , context(resolved.model->create_context())
     {
+        if (keypoint_count == 0U)
+        {
+            throw_contract("selected PoseSchema has an empty output map");
+        }
         validate_contract();
     }
 
@@ -430,10 +443,12 @@ struct Rtmw::Impl final
                                                options.simcc_split_ratio, "X");
         simcc_y_extent = expected_simcc_extent(input_height_value,
                                                options.simcc_split_ratio, "Y");
-        simcc_x.descriptor = choose_simcc_output(outputs, options.simcc_x_name,
-                                                  simcc_x_extent, "X");
-        simcc_y.descriptor = choose_simcc_output(outputs, options.simcc_y_name,
-                                                  simcc_y_extent, "Y");
+        simcc_x.descriptor = choose_simcc_output(
+            outputs, options.simcc_x_name,
+            keypoint_count, simcc_x_extent, "X");
+        simcc_y.descriptor = choose_simcc_output(
+            outputs, options.simcc_y_name,
+            keypoint_count, simcc_y_extent, "Y");
         if (simcc_x.descriptor.name == simcc_y.descriptor.name)
         {
             throw_contract("SimCC X and Y must be distinct output tensors");
@@ -445,11 +460,11 @@ struct Rtmw::Impl final
         {
             throw_contract("SimCC outputs must use FP32 or FP16");
         }
-        simcc_x.allocate(simcc_x_extent, options.max_output_bytes);
-        simcc_y.allocate(simcc_y_extent, options.max_output_bytes);
+        simcc_x.allocate(keypoint_count, simcc_x_extent, options.max_output_bytes);
+        simcc_y.allocate(keypoint_count, simcc_y_extent, options.max_output_bytes);
     }
 
-    WholeBodyPose infer_one(const image::BgrImage& source, const RectF& box)
+    PoseResult infer_pose_one(const image::BgrImage& source, const RectF& box)
     {
         detail::RtmwPreprocessResult preprocess = detail::preprocess_rtmw(
             source, box, options, input_width_value, input_height_value);
@@ -486,36 +501,44 @@ struct Rtmw::Impl final
         };
         context->run({input_view}, outputs);
 
-        std::array<detail::DecodedSimccKeypoint, kWholeBodyKeypointCount> decoded {};
+        std::vector<detail::DecodedSimccKeypoint> decoded(keypoint_count);
         detail::decode_simcc(
             {simcc_x.data(), simcc_element_type(simcc_x.descriptor.data_type),
-             kWholeBodyKeypointCount, simcc_x_extent},
+             keypoint_count, simcc_x_extent},
             {simcc_y.data(), simcc_element_type(simcc_y.descriptor.data_type),
-             kWholeBodyKeypointCount, simcc_y_extent},
+             keypoint_count, simcc_y_extent},
             options.simcc_split_ratio, decoded.data(), decoded.size());
 
-        WholeBodyPose result;
+        PoseResult result;
         result.source_box = box;
-        for (std::size_t keypoint = 0U; keypoint < kWholeBodyKeypointCount; ++keypoint)
+        result.schema_id = pose_schema->id;
+        result.capabilities = kPoseCapabilityConfidence;
+        result.keypoints.reserve(keypoint_count);
+
+        for (std::size_t channel = 0U; channel < keypoint_count; ++channel)
         {
-            const detail::DecodedSimccKeypoint& decoded_point = decoded[keypoint];
-            Keypoint point;
-            point.score = decoded_point.confidence;
-            if (point.score > 0.0F)
+            const detail::DecodedSimccKeypoint& decoded_point = decoded[channel];
+            PoseKeypoint point;
+            point.id = pose_schema->output_map[channel];
+            point.confidence = decoded_point.confidence;
+            if (point.confidence > 0.0F)
             {
                 const auto source_point = detail::rtmw_model_to_source(
                     preprocess.geometry, decoded_point.x, decoded_point.y,
                     input_width_value, input_height_value);
                 point.x = source_point.first;
                 point.y = source_point.second;
+                point.flags |= kPoseKeypointFlagValid;
             }
-            result.keypoints[keypoint] = point;
+            result.keypoints.push_back(point);
         }
         return result;
     }
 
     runtime::ResolvedModel resolved;
     RtmwOptions options;
+    const PoseSchema* pose_schema = nullptr;
+    std::size_t keypoint_count = 0U;
     std::unique_ptr<runtime::ExecutionContext> context;
     runtime::TensorDescriptor input_descriptor;
     runtime::TensorShape input_shape;
@@ -527,6 +550,38 @@ struct Rtmw::Impl final
     HostTensorBuffer simcc_y;
     std::atomic_flag in_use = ATOMIC_FLAG_INIT;
 };
+
+WholeBodyPose to_whole_body_pose(const PoseResult& pose,
+                                 const PoseSchema& schema)
+{
+    if (schema.id != kCocoWholeBody133SchemaId ||
+        schema.version != 1U ||
+        pose.schema_id != schema.id ||
+        pose.keypoints.size() != kWholeBodyKeypointCount)
+    {
+        throw_contract(
+            "WholeBodyPose adapter requires the COCO WholeBody133 schema");
+    }
+
+    WholeBodyPose result;
+    result.source_box = pose.source_box;
+    std::array<bool, kWholeBodyKeypointCount> seen {};
+    for (const PoseKeypoint& point : pose.keypoints)
+    {
+        if (point.id >= kWholeBodyKeypointCount || seen[point.id])
+        {
+            throw_contract(
+                "WholeBody133 pose result contains an invalid or duplicate keypoint id");
+        }
+        seen[point.id] = true;
+        result.keypoints[point.id] = {point.x, point.y, point.confidence};
+    }
+    if (std::find(seen.begin(), seen.end(), false) != seen.end())
+    {
+        throw_contract("WholeBody133 pose result is missing a semantic keypoint id");
+    }
+    return result;
+}
 
 Rtmw::Rtmw(std::unique_ptr<Impl> impl)
     : impl_(std::move(impl))
@@ -541,15 +596,18 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
                                  const RtmwOptions& options)
 {
     validate_options(options);
-    if (package.model_type() != "pose.rtmw")
+    if (package.model_type() != kRtmwModelType.data())
     {
         throw_contract("ModelPackage model_type must be 'pose.rtmw'");
     }
+    const PoseSchema& selected_schema = pose_schema_for_semantic_contract(
+        package.semantic_contract(), package.semantic_version());
     try
     {
         runtime::ResolvedModel resolved = runtime.load_model(package, policy);
         return std::unique_ptr<Rtmw>(
-            new Rtmw(std::make_unique<Impl>(std::move(resolved), options)));
+            new Rtmw(std::make_unique<Impl>(
+                std::move(resolved), options, selected_schema)));
     }
     catch (const PoseError&)
     {
@@ -573,7 +631,8 @@ std::unique_ptr<Rtmw> Rtmw::load(runtime::Runtime& runtime,
     }
 }
 
-WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box)
+PoseResult Rtmw::infer_pose(const image::ImageView& image,
+                                  const RectF& person_box)
 {
     if (!impl_)
     {
@@ -584,7 +643,7 @@ WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box
     {
         const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
             image, impl_->options.max_source_bytes);
-        return impl_->infer_one(source, person_box);
+        return impl_->infer_pose_one(source, person_box);
     }
     catch (const PoseError&)
     {
@@ -608,8 +667,9 @@ WholeBodyPose Rtmw::infer(const image::ImageView& image, const RectF& person_box
     }
 }
 
-std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
-                                       const std::vector<RectF>& person_boxes)
+std::vector<PoseResult>
+Rtmw::infer_pose(const image::ImageView& image,
+                 const std::vector<RectF>& person_boxes)
 {
     if (!impl_)
     {
@@ -620,11 +680,11 @@ std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
     {
         const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
             image, impl_->options.max_source_bytes);
-        std::vector<WholeBodyPose> result;
+        std::vector<PoseResult> result;
         result.reserve(person_boxes.size());
         for (const RectF& box : person_boxes)
         {
-            result.push_back(impl_->infer_one(source, box));
+            result.push_back(impl_->infer_pose_one(source, box));
         }
         return result;
     }
@@ -648,6 +708,96 @@ std::vector<WholeBodyPose> Rtmw::infer(const image::ImageView& image,
     {
         throw_resource("batch inference allocation failed");
     }
+}
+
+WholeBodyPose Rtmw::infer(const image::ImageView& image,
+                          const RectF& person_box)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
+        return to_whole_body_pose(
+            impl_->infer_pose_one(source, person_box), *impl_->pose_schema);
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("inference allocation failed");
+    }
+}
+
+std::vector<WholeBodyPose> Rtmw::infer(
+    const image::ImageView& image,
+    const std::vector<RectF>& person_boxes)
+{
+    if (!impl_)
+    {
+        throw_invalid("model state is unavailable");
+    }
+    UseGuard guard(impl_->in_use);
+    try
+    {
+        const image::BgrImage source = image::CpuImageProcessor::copy_bgr(
+            image, impl_->options.max_source_bytes);
+        std::vector<WholeBodyPose> result;
+        result.reserve(person_boxes.size());
+        for (const RectF& box : person_boxes)
+        {
+            result.push_back(to_whole_body_pose(
+                impl_->infer_pose_one(source, box), *impl_->pose_schema));
+        }
+        return result;
+    }
+    catch (const PoseError&)
+    {
+        throw;
+    }
+    catch (const runtime::RuntimeError& error)
+    {
+        throw_runtime(error.what());
+    }
+    catch (const image::ImageProcessorError& error)
+    {
+        if (error.code() == image::ImageProcessorErrorCode::ResourceLimitExceeded)
+        {
+            throw_resource(error.what());
+        }
+        throw_invalid(error.what());
+    }
+    catch (const std::bad_alloc&)
+    {
+        throw_resource("batch inference allocation failed");
+    }
+}
+
+const PoseSchema& Rtmw::schema() const
+{
+    if (!impl_ || impl_->pose_schema == nullptr)
+    {
+        throw_invalid("model schema is unavailable");
+    }
+    return *impl_->pose_schema;
 }
 
 std::int32_t Rtmw::input_width() const noexcept
