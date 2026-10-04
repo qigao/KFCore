@@ -26,10 +26,23 @@ struct DecodedSimccKeypoint
     float confidence = 0.0F;
 };
 
+struct SimccVisibilityDecodeDesc
+{
+    float beta = 0.0F;
+    float sigma_x = 0.0F;
+    float sigma_y = 0.0F;
+};
+
 void decode_simcc(const SimccAxisView& x_axis,
                   const SimccAxisView& y_axis,
                   float split_ratio,
                   DecodedSimccKeypoint* output,
                   std::size_t output_count);
+
+void decode_simcc_visibility(const SimccAxisView& x_axis,
+                             const SimccAxisView& y_axis,
+                             const SimccVisibilityDecodeDesc& desc,
+                             float* output,
+                             std::size_t output_count);
 
 } // namespace kfcore::pose::detail
